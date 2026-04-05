@@ -1,7 +1,26 @@
+"""FastAPI application for Arbitratarr."""
+
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
-from arbitratarr.routers import webhooks
+from app.arbitratarr.database import async_session_maker
+from app.arbitratarr.routers import webhooks
+from app.arbitratarr.services.scheduler_service import SchedulerService
+
+scheduler_service: SchedulerService | None = None
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Application lifespan manager for startup/shutdown events."""
+    global scheduler_service
+    scheduler_service = SchedulerService(async_session_maker)
+    scheduler_service.start()
+    yield
+    if scheduler_service:
+        scheduler_service.stop()
 
 
 def create_app() -> FastAPI:
