@@ -4,8 +4,8 @@ from fastapi import APIRouter, BackgroundTasks, Depends
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from arbitratarr.database import get_db
-from arbitratarr.models import MediaType, Request, RequestStatus
+from app.arbitratarr.database import get_db
+from app.arbitratarr.models import MediaType, Request, RequestStatus
 
 router = APIRouter(prefix="/webhook", tags=["webhooks"])
 

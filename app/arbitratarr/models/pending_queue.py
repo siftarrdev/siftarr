@@ -6,10 +6,10 @@ from typing import TYPE_CHECKING
 from sqlalchemy import DateTime, ForeignKey, Integer, String
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from arbitratarr.models import Base  # noqa: PLC0414
+from app.arbitratarr.models._base import Base  # noqa: PLC0414
 
 if TYPE_CHECKING:
-    from arbitratarr.models.request import Request
+    from app.arbitratarr.models.request import Request
 
 
 class PendingQueue(Base):

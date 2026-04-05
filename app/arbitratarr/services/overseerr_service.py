@@ -2,7 +2,7 @@
 
 import httpx
 
-from arbitratarr.config import get_settings
+from app.arbitratarr.config import get_settings
 
 
 class OverseerrService:

@@ -5,7 +5,7 @@ from datetime import datetime
 from sqlalchemy import BigInteger, DateTime, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
-from arbitratarr.models import Base
+from app.arbitratarr.models._base import Base
 
 
 class StagedTorrent(Base):

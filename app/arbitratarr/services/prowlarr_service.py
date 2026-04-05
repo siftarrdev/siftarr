@@ -33,7 +33,7 @@ class ProwlarrService:
     """Service for interacting with Prowlarr API."""
 
     def __init__(self) -> None:
-        from arbitratarr.config import get_settings
+        from app.arbitratarr.config import get_settings
 
         self.settings = get_settings()
         self.base_url = str(self.settings.prowlarr_url).rstrip("/")

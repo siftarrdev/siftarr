@@ -11,9 +11,9 @@ import httpx
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from arbitratarr.models.request import Request
-from arbitratarr.models.staged_torrent import StagedTorrent
-from arbitratarr.services.prowlarr_service import ProwlarrRelease
+from app.arbitratarr.models.request import Request
+from app.arbitratarr.models.staged_torrent import StagedTorrent
+from app.arbitratarr.services.prowlarr_service import ProwlarrRelease
 
 STAGING_DIR = Path("/data/staging")
 

@@ -1,20 +1,13 @@
 """Database models for Arbitratarr."""
 
-from sqlalchemy.orm import DeclarativeBase
+from app.arbitratarr.models._base import Base
 
-
-class Base(DeclarativeBase):
-    """Base class for all database models."""
-
-    pass
-
-
-from arbitratarr.models.pending_queue import PendingQueue  # noqa: E402
-from arbitratarr.models.release import Release  # noqa: E402
-from arbitratarr.models.request import Request  # noqa: E402
-from arbitratarr.models.rule import Rule, RuleType  # noqa: E402
-from arbitratarr.models.settings import Settings  # noqa: E402
-from arbitratarr.models.staged_torrent import StagedTorrent  # noqa: E402
+from app.arbitratarr.models.pending_queue import PendingQueue
+from app.arbitratarr.models.release import Release
+from app.arbitratarr.models.request import Request
+from app.arbitratarr.models.rule import Rule, RuleType
+from app.arbitratarr.models.settings import Settings
+from app.arbitratarr.models.staged_torrent import StagedTorrent
 
 __all__ = [
     "Base",

@@ -1,5 +1,3 @@
-version: "3.8"
-
 services:
   arbitratarr:
     build:
@@ -11,10 +9,9 @@ services:
       - "8000:8000"
     volumes:
       - ./data:/data
+    user: "568:568"
     environment:
       - TZ=${TZ:-UTC}
-      - PUID=${PUID:-568}
-      - PGID=${PGID:-568}
       - OVERSEERR_URL=${OVERSEERR_URL}
       - OVERSEERR_API_KEY=${OVERSEERR_API_KEY}
       - PROWLARR_URL=${PROWLARR_URL}
@@ -28,12 +25,7 @@ services:
       timeout: 10s
       retries: 3
       start_period: 10s
-    depends_on:
-      - qbittorrent
-      - overseerr
-      - prowlarr
 
-  # Example dependencies (comment out if you have these elsewhere)
   qbittorrent:
     image: lscr.io/linuxserver/qbittorrent:latest
     container_name: qbittorrent

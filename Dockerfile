@@ -6,9 +6,14 @@ COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
 # Set working directory
 WORKDIR /app
 
-# Install dependencies
+# Create non-root user
+RUN groupadd -g 568 appgroup && useradd -u 568 -g appgroup -m -s /bin/bash appuser
+
+# Copy project files
 COPY pyproject.toml uv.lock* ./
-RUN uv sync --frozen --no-install-project
+
+# Install dependencies
+RUN uv sync --frozen
 
 # Copy application code
 COPY app/ ./app/
@@ -19,17 +24,17 @@ COPY ty.toml ./
 
 # Create data directories
 RUN mkdir -p /data/db /data/staging && \
-    chown -R python:python /app /data
+    chown -R appuser:appgroup /app /data
 
 # Switch to non-root user
-USER python
+USER appuser
 
 # Expose port
 EXPOSE 8000
 
 # Health check
-HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-    CMD python -c "import httpx; httpx.get('http://localhost:8000/health')" || exit 1
+HEALTHCHECK --interval=30s --timeout=10s --start-period=10s --retries=3 \
+    CMD /app/.venv/bin/python -c "import httpx; httpx.get('http://localhost:8000/health')" || exit 1
 
 # Run the application
-CMD ["uv", "run", "uvicorn", "arbitratarr.main:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["/app/.venv/bin/python", "-m", "uvicorn", "app.arbitratarr.main:app", "--host", "0.0.0.0", "--port", "8000"]

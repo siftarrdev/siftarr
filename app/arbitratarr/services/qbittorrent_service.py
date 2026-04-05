@@ -17,7 +17,7 @@ class QbittorrentService:
 
     def __init__(self) -> None:
         """Initialize the qBittorrent service."""
-        from arbitratarr.config import get_settings
+        from app.arbitratarr.config import get_settings
 
         self.settings = get_settings()
         self._client: Optional[qbittorrentapi.Client] = None

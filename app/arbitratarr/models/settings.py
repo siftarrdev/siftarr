@@ -5,7 +5,7 @@ from datetime import datetime
 from sqlalchemy import DateTime, Integer, String
 from sqlalchemy.orm import Mapped, mapped_column
 
-from arbitratarr.models import Base  # noqa: PLC0414
+from app.arbitratarr.models._base import Base  # noqa: PLC0414
 
 
 class Settings(Base):

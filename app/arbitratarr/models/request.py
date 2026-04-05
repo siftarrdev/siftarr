@@ -8,11 +8,11 @@ from sqlalchemy import DateTime, Integer, String
 from sqlalchemy import Enum as SQLEnum
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from arbitratarr.models import Base  # noqa: PLC0414
+from app.arbitratarr.models._base import Base  # noqa: PLC0414
 
 if TYPE_CHECKING:
-    from arbitratarr.models.pending_queue import PendingQueue
-    from arbitratarr.models.release import Release
+    from app.arbitratarr.models.pending_queue import PendingQueue
+    from app.arbitratarr.models.release import Release
 
 
 class MediaType(enum.StrEnum):

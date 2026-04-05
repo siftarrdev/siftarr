@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import (
     create_async_engine,
 )
 
-from arbitratarr.config import get_settings
+from app.arbitratarr.config import get_settings
 
 settings = get_settings()
 
@@ -43,7 +43,7 @@ async def get_db() -> AsyncGenerator[AsyncSession, None]:
 
 async def init_db() -> None:
     """Initialize the database by creating all tables."""
-    from arbitratarr.models import Base
+    from app.arbitratarr.models import Base
 
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)

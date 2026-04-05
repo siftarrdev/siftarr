@@ -7,7 +7,7 @@ from sqlalchemy import Boolean, DateTime, Integer, String
 from sqlalchemy import Enum as SQLEnum
 from sqlalchemy.orm import Mapped, mapped_column
 
-from arbitratarr.models import Base  # noqa: PLC0414
+from app.arbitratarr.models._base import Base  # noqa: PLC0414
 
 
 class RuleType(enum.StrEnum):
