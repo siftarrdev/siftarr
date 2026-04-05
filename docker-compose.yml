@@ -1,0 +1,76 @@
+version: "3.8"
+
+services:
+  arbitratarr:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: arbitratarr
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./data:/data
+    environment:
+      - TZ=${TZ:-UTC}
+      - PUID=${PUID:-568}
+      - PGID=${PGID:-568}
+      - OVERSEERR_URL=${OVERSEERR_URL}
+      - OVERSEERR_API_KEY=${OVERSEERR_API_KEY}
+      - PROWLARR_URL=${PROWLARR_URL}
+      - PROWLARR_API_KEY=${PROWLARR_API_KEY}
+      - QBITTORRENT_URL=${QBITTORRENT_URL}
+      - QBITTORRENT_USERNAME=${QBITTORRENT_USERNAME}
+      - QBITTORRENT_PASSWORD=${QBITTORRENT_PASSWORD}
+    healthcheck:
+      test: ["CMD", "python", "-c", "import httpx; httpx.get('http://localhost:8000/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    depends_on:
+      - qbittorrent
+      - overseerr
+      - prowlarr
+
+  # Example dependencies (comment out if you have these elsewhere)
+  qbittorrent:
+    image: lscr.io/linuxserver/qbittorrent:latest
+    container_name: qbittorrent
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=UTC
+      - WEBUI_PORT=8080
+    volumes:
+      - ./data/qbittorrent:/config
+      - ./data/downloads:/downloads
+    ports:
+      - "8080:8080"
+    restart: unless-stopped
+
+  overseerr:
+    image: lscr.io/linuxserver/overseerr:latest
+    container_name: overseerr
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=UTC
+    volumes:
+      - ./data/overseerr:/config
+    ports:
+      - "5055:5055"
+    restart: unless-stopped
+
+  prowlarr:
+    image: lscr.io/linuxserver/prowlarr:latest
+    container_name: prowlarr
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=UTC
+    volumes:
+      - ./data/prowlarr:/config
+    ports:
+      - "9696:9696"
+    restart: unless-stopped
