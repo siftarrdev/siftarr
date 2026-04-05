@@ -1,0 +1,57 @@
+{% extends "base.html" %}
+
+{% block title %}{{ 'Edit' if rule else 'New' }} Rule - Arbitratarr{% endblock %}
+
+{% block content %}
+<div class="max-w-2xl">
+    <h1 class="text-2xl font-bold mb-6">{{ 'Edit' if rule else 'New' }} Rule</h1>
+    
+    <form action="{{ action }}" method="post" class="space-y-6 bg-gray-800 rounded-lg border border-gray-700 p-6">
+        <div>
+            <label class="block text-sm font-medium text-gray-300">Rule Name</label>
+            <input type="text" name="name" value="{{ rule.name if rule else '' }}" required
+                   class="mt-1 bg-gray-700 border border-gray-600 rounded-md px-4 py-2 text-white w-full">
+        </div>
+        
+        {% if not rule %}
+        <div>
+            <label class="block text-sm font-medium text-gray-300">Rule Type</label>
+            <select name="rule_type" required class="mt-1 bg-gray-700 border border-gray-600 rounded-md px-4 py-2 text-white w-full">
+                <option value="exclusion" {% if default_type == 'exclusion' %}selected{% endif %}>Exclusion (Auto-reject)</option>
+                <option value="requirement" {% if default_type == 'requirement' %}selected{% endif %}>Requirement (Must match)</option>
+                <option value="scorer" {% if default_type == 'scorer' %}selected{% endif %}>Scorer (Add points)</option>
+            </select>
+        </div>
+        {% endif %}
+        
+        <div>
+            <label class="block text-sm font-medium text-gray-300">Regex Pattern</label>
+            <input type="text" name="pattern" value="{{ rule.pattern if rule else '' }}" required
+                   placeholder="e.g., CAM|TS|HDCAM"
+                   class="mt-1 bg-gray-700 border border-gray-600 rounded-md px-4 py-2 text-white w-full font-mono">
+            <p class="mt-1 text-xs text-gray-400">Use | for OR, .* for wildcards</p>
+        </div>
+        
+        <div>
+            <label class="block text-sm font-medium text-gray-300">Score (for scorer rules)</label>
+            <input type="number" name="score" value="{{ rule.score if rule else 0 }}" min="0"
+                   class="mt-1 bg-gray-700 border border-gray-600 rounded-md px-4 py-2 text-white w-32">
+        </div>
+        
+        <div>
+            <label class="block text-sm font-medium text-gray-300">Description (optional)</label>
+            <textarea name="description" rows="2"
+                      class="mt-1 bg-gray-700 border border-gray-600 rounded-md px-4 py-2 text-white w-full">{{ rule.description if rule else '' }}</textarea>
+        </div>
+        
+        <div class="flex gap-4">
+            <button type="submit" class="bg-blue-600 hover:bg-blue-700 text-white px-6 py-2 rounded-md text-sm font-medium">
+                {{ 'Update' if rule else 'Create' }} Rule
+            </button>
+            <a href="/rules" class="bg-gray-700 hover:bg-gray-600 text-white px-6 py-2 rounded-md text-sm font-medium">
+                Cancel
+            </a>
+        </div>
+    </form>
+</div>
+{% endblock %}

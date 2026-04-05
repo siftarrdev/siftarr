@@ -3,10 +3,10 @@
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, RedirectResponse
 
 from app.arbitratarr.database import async_session_maker
-from app.arbitratarr.routers import webhooks
+from app.arbitratarr.routers import dashboard, rules, settings, webhooks
 from app.arbitratarr.services.scheduler_service import SchedulerService
 
 scheduler_service: SchedulerService | None = None
@@ -32,11 +32,19 @@ def create_app() -> FastAPI:
     )
 
     # Include routers
+    app.include_router(dashboard.router)
     app.include_router(webhooks.router)
+    app.include_router(rules.router)
+    app.include_router(settings.router)
 
     @app.get("/")
-    async def root() -> JSONResponse:
-        """Root endpoint returning service status."""
+    async def root() -> RedirectResponse:
+        """Root endpoint redirecting to dashboard."""
+        return RedirectResponse(url="/")
+
+    @app.get("/health")
+    async def health_check() -> JSONResponse:
+        """Health check endpoint."""
         return JSONResponse(content={"status": "ok"})
 
     @app.exception_handler(Exception)

@@ -1,0 +1,184 @@
+{% extends "base.html" %}
+
+{% block title %}Rules - Arbitratarr{% endblock %}
+
+{% block content %}
+<div class="space-y-6">
+    <div class="flex justify-between items-center">
+        <h1 class="text-2xl font-bold">Rules Configuration</h1>
+        <a href="/rules/new" class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-md text-sm font-medium">
+            Add Rule
+        </a>
+    </div>
+
+    <!-- Size Limits -->
+    <div class="bg-gray-800 rounded-lg border border-gray-700">
+        <div class="px-6 py-4 border-b border-gray-700">
+            <h2 class="text-lg font-medium">Size Limits</h2>
+        </div>
+        <div class="p-6">
+            <form action="/settings/size-limits" method="post" class="flex items-center gap-4">
+                <div>
+                    <label class="block text-sm text-gray-400">Minimum (GB)</label>
+                    <input type="number" name="min_size" value="{{ size_limits.min or '' }}" 
+                           step="0.1" min="0" class="mt-1 bg-gray-700 border border-gray-600 rounded-md px-3 py-2 text-white w-32">
+                </div>
+                <div>
+                    <label class="block text-sm text-gray-400">Maximum (GB)</label>
+                    <input type="number" name="max_size" value="{{ size_limits.max or '' }}" 
+                           step="0.1" min="0" class="mt-1 bg-gray-700 border border-gray-600 rounded-md px-3 py-2 text-white w-32">
+                </div>
+                <button type="submit" class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-md text-sm font-medium mt-6">
+                    Update
+                </button>
+            </form>
+        </div>
+    </div>
+
+    <!-- Exclusion Rules -->
+    <div class="bg-gray-800 rounded-lg border border-gray-700">
+        <div class="px-6 py-4 border-b border-gray-700">
+            <h2 class="text-lg font-medium text-red-400">Exclusion Patterns (Auto-reject)</h2>
+            <p class="text-sm text-gray-400 mt-1">Release titles matching these patterns will be rejected</p>
+        </div>
+        <div class="p-6">
+            <div class="space-y-2">
+                {% for rule in exclusion_rules %}
+                <div class="flex items-center justify-between bg-gray-700 rounded-md px-4 py-3">
+                    <div>
+                        <code class="text-red-300">{{ rule.pattern }}</code>
+                        {% if rule.description %}
+                        <p class="text-xs text-gray-400 mt-1">{{ rule.description }}</p>
+                        {% endif %}
+                    </div>
+                    <div class="flex items-center gap-2">
+                        <form action="/rules/{{ rule.id }}/toggle" method="post">
+                            <button type="submit" class="text-sm {% if rule.is_enabled %}text-green-400{% else %}text-gray-500{% endif %} hover:text-green-300">
+                                {{ 'Enabled' if rule.is_enabled else 'Disabled' }}
+                            </button>
+                        </form>
+                        <a href="/rules/{{ rule.id }}/edit" class="text-blue-400 hover:text-blue-300 text-sm">Edit</a>
+                        <form action="/rules/{{ rule.id }}/delete" method="post" onsubmit="return confirm('Delete this rule?')">
+                            <button type="submit" class="text-red-400 hover:text-red-300 text-sm">Delete</button>
+                        </form>
+                    </div>
+                </div>
+                {% endfor %}
+            </div>
+            <a href="/rules/new?type=exclusion" class="inline-block mt-4 text-blue-400 hover:text-blue-300 text-sm">
+                + Add Exclusion Rule
+            </a>
+        </div>
+    </div>
+
+    <!-- Requirement Rules -->
+    <div class="bg-gray-800 rounded-lg border border-gray-700">
+        <div class="px-6 py-4 border-b border-gray-700">
+            <h2 class="text-lg font-medium text-yellow-400">Requirement Patterns (Must match)</h2>
+            <p class="text-sm text-gray-400 mt-1">Release titles must match at least one of these patterns</p>
+        </div>
+        <div class="p-6">
+            <div class="space-y-2">
+                {% for rule in requirement_rules %}
+                <div class="flex items-center justify-between bg-gray-700 rounded-md px-4 py-3">
+                    <div>
+                        <code class="text-yellow-300">{{ rule.pattern }}</code>
+                        {% if rule.description %}
+                        <p class="text-xs text-gray-400 mt-1">{{ rule.description }}</p>
+                        {% endif %}
+                    </div>
+                    <div class="flex items-center gap-2">
+                        <form action="/rules/{{ rule.id }}/toggle" method="post">
+                            <button type="submit" class="text-sm {% if rule.is_enabled %}text-green-400{% else %}text-gray-500{% endif %} hover:text-green-300">
+                                {{ 'Enabled' if rule.is_enabled else 'Disabled' }}
+                            </button>
+                        </form>
+                        <a href="/rules/{{ rule.id }}/edit" class="text-blue-400 hover:text-blue-300 text-sm">Edit</a>
+                        <form action="/rules/{{ rule.id }}/delete" method="post" onsubmit="return confirm('Delete this rule?')">
+                            <button type="submit" class="text-red-400 hover:text-red-300 text-sm">Delete</button>
+                        </form>
+                    </div>
+                </div>
+                {% endfor %}
+            </div>
+            <a href="/rules/new?type=requirement" class="inline-block mt-4 text-blue-400 hover:text-blue-300 text-sm">
+                + Add Requirement Rule
+            </a>
+        </div>
+    </div>
+
+    <!-- Scorer Rules -->
+    <div class="bg-gray-800 rounded-lg border border-gray-700">
+        <div class="px-6 py-4 border-b border-gray-700">
+            <h2 class="text-lg font-medium text-green-400">Scoring Rules (Points for matching)</h2>
+            <p class="text-sm text-gray-400 mt-1">Matching these patterns adds points to the release score</p>
+        </div>
+        <div class="p-6">
+            <div class="space-y-2">
+                {% for rule in scorer_rules %}
+                <div class="flex items-center justify-between bg-gray-700 rounded-md px-4 py-3">
+                    <div class="flex items-center gap-4">
+                        <span class="text-2xl font-bold text-green-400">+{{ rule.score }}</span>
+                        <div>
+                            <code class="text-green-300">{{ rule.pattern }}</code>
+                            {% if rule.description %}
+                            <p class="text-xs text-gray-400 mt-1">{{ rule.description }}</p>
+                            {% endif %}
+                        </div>
+                    </div>
+                    <div class="flex items-center gap-2">
+                        <form action="/rules/{{ rule.id }}/toggle" method="post">
+                            <button type="submit" class="text-sm {% if rule.is_enabled %}text-green-400{% else %}text-gray-500{% endif %} hover:text-green-300">
+                                {{ 'Enabled' if rule.is_enabled else 'Disabled' }}
+                            </button>
+                        </form>
+                        <a href="/rules/{{ rule.id }}/edit" class="text-blue-400 hover:text-blue-300 text-sm">Edit</a>
+                        <form action="/rules/{{ rule.id }}/delete" method="post" onsubmit="return confirm('Delete this rule?')">
+                            <button type="submit" class="text-red-400 hover:text-red-300 text-sm">Delete</button>
+                        </form>
+                    </div>
+                </div>
+                {% endfor %}
+            </div>
+            <a href="/rules/new?type=scorer" class="inline-block mt-4 text-blue-400 hover:text-blue-300 text-sm">
+                + Add Scorer Rule
+            </a>
+        </div>
+    </div>
+
+    <!-- Test Rule Section -->
+    <div class="bg-gray-800 rounded-lg border border-gray-700">
+        <div class="px-6 py-4 border-b border-gray-700">
+            <h2 class="text-lg font-medium">Test Rule Matching</h2>
+        </div>
+        <div class="p-6">
+            <form action="/rules/test" method="post" class="flex gap-4">
+                <input type="text" name="title" placeholder="Enter release title to test..." 
+                       class="flex-1 bg-gray-700 border border-gray-600 rounded-md px-4 py-2 text-white">
+                <button type="submit" class="bg-blue-600 hover:bg-blue-700 text-white px-6 py-2 rounded-md text-sm font-medium">
+                    Test
+                </button>
+            </form>
+            {% if test_result %}
+            <div class="mt-4 p-4 rounded-md {% if test_result.passed %}bg-green-900 border border-green-700{% else %}bg-red-900 border border-red-700{% endif %}">
+                <p class="font-medium {% if test_result.passed %}text-green-200{% else %}text-red-200{% endif %}">
+                    {{ 'Would PASS' if test_result.passed else 'Would REJECT' }}
+                    {% if test_result.rejection_reason %} - {{ test_result.rejection_reason }}{% endif %}
+                </p>
+                {% if test_result.matched_rules %}
+                <p class="text-sm text-gray-300 mt-2">Matched rules:</p>
+                <ul class="text-sm text-gray-400 mt-1">
+                    {% for match in test_result.matched_rules %}
+                    <li>{{ match.rule_name }}: +{{ match.score_delta }}</li>
+                    {% endfor %}
+                </ul>
+                {% endif %}
+                {% if test_result.total_score > 0 %}
+                <p class="text-sm text-green-300 mt-2">Total score: +{{ test_result.total_score }}</p>
+                {% endif %}
+            </div>
+            {% endif %}
+        </div>
+    </div>
+</div>
+{% endblock %}

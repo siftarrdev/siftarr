@@ -1,0 +1,114 @@
+{% extends "base.html" %}
+
+{% block title %}Settings - Arbitratarr{% endblock %}
+
+{% block content %}
+<div class="space-y-6">
+    <h1 class="text-2xl font-bold">Settings</h1>
+
+    <!-- Staging Mode -->
+    <div class="bg-gray-800 rounded-lg border border-gray-700">
+        <div class="px-6 py-4 border-b border-gray-700">
+            <h2 class="text-lg font-medium">Staging Mode</h2>
+            <p class="text-sm text-gray-400 mt-1">When enabled, torrents are saved to staging instead of sending directly to qBittorrent</p>
+        </div>
+        <div class="p-6">
+            <form action="/settings/staging" method="post" class="flex items-center justify-between">
+                <div>
+                    <span class="text-lg {% if staging_enabled %}text-green-400{% else %}text-gray-400{% endif %}">
+                        {{ 'Enabled' if staging_enabled else 'Disabled' }}
+                    </span>
+                </div>
+                <button type="submit" 
+                        class="px-4 py-2 rounded-md text-sm font-medium {% if staging_enabled %}bg-red-600 hover:bg-red-700 text-white{% else %}bg-green-600 hover:bg-green-700 text-white{% endif %}">
+                    {{ 'Disable' if staging_enabled else 'Enable' }}
+                </button>
+            </form>
+        </div>
+    </div>
+
+    <!-- Manual Actions -->
+    <div class="bg-gray-800 rounded-lg border border-gray-700">
+        <div class="px-6 py-4 border-b border-gray-700">
+            <h2 class="text-lg font-medium">Manual Actions</h2>
+        </div>
+        <div class="p-6 space-y-4">
+            <form action="/settings/retry-pending" method="post">
+                <button type="submit" class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-md text-sm font-medium">
+                    Retry Pending Now
+                </button>
+                <span class="ml-4 text-sm text-gray-400">{{ pending_count }} items ready for retry</span>
+            </form>
+            
+            <form action="/settings/sync-overseerr" method="post">
+                <button type="submit" class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-md text-sm font-medium">
+                    Sync with Overseerr
+                </button>
+                <span class="ml-4 text-sm text-gray-400">Fetch new approved requests</span>
+            </form>
+            
+            <form action="/settings/reseed-rules" method="post">
+                <button type="submit" class="bg-yellow-600 hover:bg-yellow-700 text-white px-4 py-2 rounded-md text-sm font-medium">
+                    Reseed Default Rules
+                </button>
+                <span class="ml-4 text-sm text-gray-400">Restore default rules (does not remove custom rules)</span>
+            </form>
+        </div>
+    </div>
+
+    <!-- Database Stats -->
+    <div class="bg-gray-800 rounded-lg border border-gray-700">
+        <div class="px-6 py-4 border-b border-gray-700">
+            <h2 class="text-lg font-medium">Database Statistics</h2>
+        </div>
+        <div class="p-6">
+            <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
+                <div>
+                    <div class="text-2xl font-bold text-white">{{ stats.total_requests }}</div>
+                    <div class="text-sm text-gray-400">Total Requests</div>
+                </div>
+                <div>
+                    <div class="text-2xl font-bold text-green-400">{{ stats.completed }}</div>
+                    <div class="text-sm text-gray-400">Completed</div>
+                </div>
+                <div>
+                    <div class="text-2xl font-bold text-yellow-400">{{ stats.pending }}</div>
+                    <div class="text-sm text-gray-400">Pending</div>
+                </div>
+                <div>
+                    <div class="text-2xl font-bold text-red-400">{{ stats.failed }}</div>
+                    <div class="text-sm text-gray-400">Failed</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Environment Info (Read-only) -->
+    <div class="bg-gray-800 rounded-lg border border-gray-700">
+        <div class="px-6 py-4 border-b border-gray-700">
+            <h2 class="text-lg font-medium">Environment Configuration</h2>
+            <p class="text-sm text-gray-400 mt-1">Current environment variables (read-only)</p>
+        </div>
+        <div class="p-6">
+            <dl class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                    <dt class="text-sm font-medium text-gray-400">Overseerr URL</dt>
+                    <dd class="mt-1 text-sm text-white">{{ env.OVERSEERR_URL }}</dd>
+                </div>
+                <div>
+                    <dt class="text-sm font-medium text-gray-400">Prowlarr URL</dt>
+                    <dd class="mt-1 text-sm text-white">{{ env.PROWLARR_URL }}</dd>
+                </div>
+                <div>
+                    <dt class="text-sm font-medium text-gray-400">qBittorrent URL</dt>
+                    <dd class="mt-1 text-sm text-white">{{ env.QBITTORRENT_URL }}</dd>
+                </div>
+                <div>
+                    <dt class="text-sm font-medium text-gray-400">Timezone</dt>
+                    <dd class="mt-1 text-sm text-white">{{ env.TZ }}</dd>
+                </div>
+            </dl>
+        </div>
+    </div>
+</div>
+{% endblock %}

@@ -191,3 +191,7 @@ class LifecycleService:
     ) -> Optional[Request]:
         """Convenience method to mark a request as failed."""
         return await self.transition(request_id, RequestStatus.FAILED, reason)
+
+    async def mark_as_pending(self, request_id: int) -> Optional[Request]:
+        """Convenience method to mark a request as pending."""
+        return await self.transition(request_id, RequestStatus.PENDING)
