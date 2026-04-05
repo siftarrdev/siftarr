@@ -1,6 +1,8 @@
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
+from arbitratarr.routers import webhooks
+
 
 def create_app() -> FastAPI:
     """Create and configure the FastAPI application."""
@@ -9,6 +11,9 @@ def create_app() -> FastAPI:
         description="Media search and download decision middleware",
         version="0.1.0",
     )
+
+    # Include routers
+    app.include_router(webhooks.router)
 
     @app.get("/")
     async def root() -> JSONResponse:
