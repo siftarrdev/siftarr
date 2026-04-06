@@ -1,1 +1,5 @@
-strict = true
+# Ty type checker configuration
+# https://github.com/astral-sh/ty
+
+[environment]
+python-version = "3.12"
