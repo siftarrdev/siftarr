@@ -236,6 +236,159 @@ class TestOverseerrService:
                 mock_client.__aexit__.return_value = None
                 mock_client_class.return_value = mock_client
 
-                result = await service.get_media_details("movie", 999)
+            result = await service.get_media_details("movie", 999)
 
-                assert result is None
+            assert result is None
+
+    @pytest.mark.asyncio
+    async def test_approve_request_success(self):
+        """Test approving a request successfully."""
+        with patch("app.arbitratarr.services.overseerr_service.get_settings") as mock_get_settings:
+            mock_settings = MagicMock()
+            mock_settings.overseerr_url = "http://localhost:5055"
+            mock_settings.overseerr_api_key = "test"
+            mock_get_settings.return_value = mock_settings
+
+            service = OverseerrService()
+            mock_client = AsyncMock()
+            mock_response = MagicMock()
+            mock_response.status_code = 200
+            mock_client.post = AsyncMock(return_value=mock_response)
+            mock_client.is_closed = False
+            service._client = mock_client
+
+            result = await service.approve_request(123)
+
+            assert result is True
+            mock_client.post.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_approve_request_failure(self):
+        """Test approve returns False on failure."""
+        with patch("app.arbitratarr.services.overseerr_service.get_settings") as mock_get_settings:
+            mock_settings = MagicMock()
+            mock_settings.overseerr_url = "http://localhost:5055"
+            mock_settings.overseerr_api_key = "test"
+            mock_get_settings.return_value = mock_settings
+
+            service = OverseerrService()
+            mock_client = AsyncMock()
+            mock_response = MagicMock()
+            mock_response.status_code = 500
+            mock_client.post = AsyncMock(return_value=mock_response)
+            mock_client.is_closed = False
+            service._client = mock_client
+
+            result = await service.approve_request(123)
+
+            assert result is False
+
+    @pytest.mark.asyncio
+    async def test_decline_request_success(self):
+        """Test declining a request successfully."""
+        with patch("app.arbitratarr.services.overseerr_service.get_settings") as mock_get_settings:
+            mock_settings = MagicMock()
+            mock_settings.overseerr_url = "http://localhost:5055"
+            mock_settings.overseerr_api_key = "test"
+            mock_get_settings.return_value = mock_settings
+
+            service = OverseerrService()
+            mock_client = AsyncMock()
+            mock_response = MagicMock()
+            mock_response.status_code = 200
+            mock_client.post = AsyncMock(return_value=mock_response)
+            mock_client.is_closed = False
+            service._client = mock_client
+
+            result = await service.decline_request(123)
+
+            assert result is True
+            mock_client.post.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_decline_request_with_reason(self):
+        """Test decline with reason in body."""
+        with patch("app.arbitratarr.services.overseerr_service.get_settings") as mock_get_settings:
+            mock_settings = MagicMock()
+            mock_settings.overseerr_url = "http://localhost:5055"
+            mock_settings.overseerr_api_key = "test"
+            mock_get_settings.return_value = mock_settings
+
+            service = OverseerrService()
+            mock_client = AsyncMock()
+            mock_response = MagicMock()
+            mock_response.status_code = 200
+            mock_client.post = AsyncMock(return_value=mock_response)
+            mock_client.is_closed = False
+            service._client = mock_client
+
+            result = await service.decline_request(123, reason="Test reason")
+
+            assert result is True
+            mock_client.post.assert_called_once()
+            call_args = mock_client.post.call_args
+            assert call_args[1]["json"] == {"reason": "Test reason"}
+
+    @pytest.mark.asyncio
+    async def test_decline_request_failure(self):
+        """Test decline returns False on failure."""
+        with patch("app.arbitratarr.services.overseerr_service.get_settings") as mock_get_settings:
+            mock_settings = MagicMock()
+            mock_settings.overseerr_url = "http://localhost:5055"
+            mock_settings.overseerr_api_key = "test"
+            mock_get_settings.return_value = mock_settings
+
+            service = OverseerrService()
+            mock_client = AsyncMock()
+            mock_response = MagicMock()
+            mock_response.status_code = 400
+            mock_client.post = AsyncMock(return_value=mock_response)
+            mock_client.is_closed = False
+            service._client = mock_client
+
+            result = await service.decline_request(123)
+
+            assert result is False
+
+    @pytest.mark.asyncio
+    async def test_get_request_status_success(self):
+        """Test getting request status successfully."""
+        with patch("app.arbitratarr.services.overseerr_service.get_settings") as mock_get_settings:
+            mock_settings = MagicMock()
+            mock_settings.overseerr_url = "http://localhost:5055"
+            mock_settings.overseerr_api_key = "test"
+            mock_get_settings.return_value = mock_settings
+
+            service = OverseerrService()
+            mock_client = AsyncMock()
+            mock_response = MagicMock()
+            mock_response.status_code = 200
+            mock_response.json.return_value = {"id": 123, "status": "approved"}
+            mock_client.get = AsyncMock(return_value=mock_response)
+            mock_client.is_closed = False
+            service._client = mock_client
+
+            result = await service.get_request_status(123)
+
+            assert result == {"id": 123, "status": "approved"}
+
+    @pytest.mark.asyncio
+    async def test_get_request_status_failure(self):
+        """Test get_request_status returns None on failure."""
+        with patch("app.arbitratarr.services.overseerr_service.get_settings") as mock_get_settings:
+            mock_settings = MagicMock()
+            mock_settings.overseerr_url = "http://localhost:5055"
+            mock_settings.overseerr_api_key = "test"
+            mock_get_settings.return_value = mock_settings
+
+            service = OverseerrService()
+            mock_client = AsyncMock()
+            mock_response = MagicMock()
+            mock_response.status_code = 404
+            mock_client.get = AsyncMock(return_value=mock_response)
+            mock_client.is_closed = False
+            service._client = mock_client
+
+            result = await service.get_request_status(999)
+
+            assert result is None
