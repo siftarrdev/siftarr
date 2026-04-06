@@ -1,13 +1,12 @@
 """FastAPI application for Arbitratarr."""
 
-import os
 from contextlib import asynccontextmanager
 from pathlib import Path
 from urllib.parse import urlparse
 
 from fastapi import FastAPI, Request
-from fastapi.staticfiles import StaticFiles
 from fastapi.responses import JSONResponse, RedirectResponse
+from fastapi.staticfiles import StaticFiles
 
 from app.arbitratarr.config import get_settings
 from app.arbitratarr.database import async_session_maker, init_db

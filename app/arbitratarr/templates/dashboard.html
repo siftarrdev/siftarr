@@ -85,11 +85,18 @@
                             <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-400">{{ req.requester_username or 'Unknown' }}</td>
                             <td class="px-6 py-4 whitespace-nowrap text-sm">
                                 {% if req.overseerr_request_id %}
-                                <span class="text-gray-400">Overseerr #{{ req.overseerr_request_id }}</span>
+                                <span class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full 
+                                    {% if overseerr_statuses[req.id] == 'approved' %}bg-green-900 text-green-200
+                                    {% elif overseerr_statuses[req.id] == 'declined' %}bg-red-900 text-red-200
+                                    {% elif overseerr_statuses[req.id] == 'pending' %}bg-yellow-900 text-yellow-200
+                                    {% elif overseerr_statuses[req.id] == 'available' %}bg-blue-900 text-blue-200
+                                    {% else %}bg-gray-700 text-gray-300{% endif %}">
+                                    {{ overseerr_statuses[req.id] or 'unknown' }}
+                                </span>
                                 {% endif %}
                             </td>
                             <td class="px-6 py-4 whitespace-nowrap text-sm space-x-2">
-                                {% if req.overseerr_request_id and req.status.value in ['PENDING', 'RECEIVED'] %}
+                                {% if req.overseerr_request_id and overseerr_statuses[req.id] in ['pending', 'requested'] %}
                                 <form action="/requests/{{ req.id }}/approve" method="post" class="inline">
                                     <button type="submit" class="text-green-400 hover:text-green-300">Approve</button>
                                 </form>
@@ -111,7 +118,7 @@
 
     <!-- Pending Search Tab -->
     <div id="content-pending" class="tab-content hidden">
-        {% if pending_requests %}
+        {% if pending_items %}
         <div class="bg-gray-800 rounded-lg border border-gray-700 overflow-hidden">
             <table class="min-w-full divide-y divide-gray-700">
                 <thead class="bg-gray-700">

@@ -22,7 +22,7 @@ class OverseerrService:
         """Get or create an async HTTP client."""
         if self._client is None or self._client.is_closed:
             self._client = httpx.AsyncClient(
-                headers={"X-Api-Key": self.api_key},
+                headers={"X-Api-Key": self.api_key or ""},
                 timeout=30.0,
             )
         return self._client

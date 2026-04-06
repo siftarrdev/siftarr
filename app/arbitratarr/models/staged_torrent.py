@@ -1,6 +1,6 @@
 """Staged torrent metadata model."""
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from sqlalchemy import BigInteger, DateTime, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
@@ -10,7 +10,7 @@ from app.arbitratarr.models._base import Base
 
 def _utc_now() -> datetime:
     """Return current UTC time as timezone-aware datetime."""
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 class StagedTorrent(Base):

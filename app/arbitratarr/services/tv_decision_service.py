@@ -1,5 +1,5 @@
 import json
-from datetime import timezone
+from datetime import UTC
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -191,7 +191,7 @@ class TVDecisionService:
 
         pending_item = PendingQueue(
             request_id=request.id,
-            next_retry_at=datetime.now(timezone.utc) + timedelta(hours=24),
+            next_retry_at=datetime.now(UTC) + timedelta(hours=24),
             retry_count=0,
         )
         self.db.add(pending_item)

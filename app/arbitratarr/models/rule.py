@@ -1,7 +1,7 @@
 """Rule model for filtering and scoring releases."""
 
 import enum
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from sqlalchemy import Boolean, DateTime, Integer, String
 from sqlalchemy import Enum as SQLEnum
@@ -12,10 +12,10 @@ from app.arbitratarr.models._base import Base  # noqa: PLC0414
 
 def _utc_now() -> datetime:
     """Return current UTC time as timezone-aware datetime."""
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
-class RuleType(str, enum.Enum):
+class RuleType(enum.StrEnum):
     EXCLUSION = "exclusion"  # Reject if matches
     REQUIREMENT = "requirement"  # Must match at least one
     SCORER = "scorer"  # Add points if matches

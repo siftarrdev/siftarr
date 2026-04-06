@@ -1,12 +1,12 @@
 """Service for interacting with qBittorrent API."""
 
 import asyncio
-from enum import Enum
+from enum import StrEnum
 
 import qbittorrentapi
 
 
-class MediaCategory(str, Enum):
+class MediaCategory(StrEnum):
     """Media categories for torrent categorization."""
 
     MOVIES = "radarr"

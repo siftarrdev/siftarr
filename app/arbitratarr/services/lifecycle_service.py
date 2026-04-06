@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -83,7 +83,7 @@ class LifecycleService:
             raise ValueError(f"Invalid transition from {request.status} to {new_status}")
 
         request.status = new_status
-        request.updated_at = datetime.now(timezone.utc)
+        request.updated_at = datetime.now(UTC)
         await self.db.commit()
         await self.db.refresh(request)
 
@@ -165,7 +165,7 @@ class LifecycleService:
         if year is not None:
             request.year = year
 
-        request.updated_at = datetime.now(timezone.utc)
+        request.updated_at = datetime.now(UTC)
         await self.db.commit()
         await self.db.refresh(request)
 

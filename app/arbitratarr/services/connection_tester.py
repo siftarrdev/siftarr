@@ -50,7 +50,7 @@ class ConnectionTester:
                     version = data.get("version", "unknown")
                     return ConnectionTestResult(
                         success=True,
-                        message=f"Successfully connected to Overseerr",
+                        message="Successfully connected to Overseerr",
                         details=f"Version: {version}",
                     )
                 elif response.status_code == 401:
@@ -110,7 +110,7 @@ class ConnectionTester:
                     version = data.get("version", "unknown")
                     return ConnectionTestResult(
                         success=True,
-                        message=f"Successfully connected to Prowlarr",
+                        message="Successfully connected to Prowlarr",
                         details=f"Version: {version}",
                     )
                 elif response.status_code == 401:
@@ -166,8 +166,9 @@ class ConnectionTester:
             )
 
         try:
-            import qbittorrentapi
             import asyncio
+
+            import qbittorrentapi
 
             client = qbittorrentapi.Client(
                 host=str(settings.qbittorrent_url),

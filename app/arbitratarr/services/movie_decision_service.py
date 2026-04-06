@@ -1,4 +1,4 @@
-from datetime import datetime, timezone, timedelta
+from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -81,7 +81,7 @@ class MovieDecisionService:
 
             pending_item = PendingQueue(
                 request_id=request.id,
-                next_retry_at=datetime.now(timezone.utc) + timedelta(hours=24),
+                next_retry_at=datetime.now(UTC) + timedelta(hours=24),
                 retry_count=0,
             )
             self.db.add(pending_item)
@@ -126,7 +126,7 @@ class MovieDecisionService:
 
         pending_item = PendingQueue(
             request_id=request.id,
-            next_retry_at=datetime.now(timezone.utc) + timedelta(hours=24),
+            next_retry_at=datetime.now(UTC) + timedelta(hours=24),
             retry_count=0,
             last_error="; ".join(set(rejection_reasons))[:500]
             if rejection_reasons

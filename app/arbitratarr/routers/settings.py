@@ -1,6 +1,5 @@
 """Settings page router for viewing and editing application settings."""
 
-from typing import Annotated
 
 from fastapi import APIRouter, Depends, Form, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
@@ -11,7 +10,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.arbitratarr.config import Settings, get_settings
 from app.arbitratarr.database import get_db
-from app.arbitratarr.models.request import MediaType, Request as RequestModel, RequestStatus
+from app.arbitratarr.models.request import MediaType, RequestStatus
+from app.arbitratarr.models.request import Request as RequestModel
 from app.arbitratarr.models.settings import Settings as DBSettings
 from app.arbitratarr.services.connection_tester import ConnectionTester, ConnectionTestResult
 from app.arbitratarr.services.overseerr_service import OverseerrService
@@ -379,7 +379,7 @@ async def sync_overseerr(
             else:
                 # Get existing external_ids from database
                 result = await db.execute(select(RequestModel.external_id))
-                existing_external_ids = set(row[0] for row in result.fetchall())
+                existing_external_ids = {row[0] for row in result.fetchall()}
 
                 # Process each request
                 for ov_req in overseerr_requests:
@@ -440,11 +440,12 @@ async def sync_overseerr(
                             requester_username=username,
                             requester_email=email,
                             status=RequestStatus.PENDING,
+                            overseerr_request_id=ov_req.get("id"),
                         )
                         db.add(new_request)
                         existing_external_ids.add(external_id)  # Prevent duplicates in same sync
                         synced_count += 1
-                    except Exception as e:
+                    except Exception:
                         # Log individual request processing errors but continue
                         skipped_count += 1
                         continue

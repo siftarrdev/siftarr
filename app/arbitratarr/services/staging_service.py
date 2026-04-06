@@ -3,7 +3,7 @@
 import json
 import os
 import re
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 import httpx
@@ -128,7 +128,7 @@ class StagingService:
                 "download_url": release.download_url,
                 "magnet_url": release.magnet_url,
             },
-            "staged_at": datetime.now(timezone.utc).isoformat(),
+            "staged_at": datetime.now(UTC).isoformat(),
             "filename": filename,
         }
 

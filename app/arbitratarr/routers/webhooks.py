@@ -27,12 +27,19 @@ class OverseerrUser(BaseModel):
     email: str | None = None
 
 
+class OverseerrRequest(BaseModel):
+    """Request information from Overseerr webhook."""
+
+    id: int = Field(description="Overseerr request ID")
+
+
 class OverseerrWebhookPayload(BaseModel):
     """Full webhook payload from Overseerr."""
 
     event: str = Field(description="Event type: 'mediarequested', 'mediaapproved', etc.")
     media: OverseerrMedia
     requestedBy: OverseerrUser | None = None
+    request: OverseerrRequest | None = None
 
 
 @router.post("/overseerr")
@@ -77,6 +84,7 @@ async def receive_overseerr_webhook(
         requester_username=payload.requestedBy.username if payload.requestedBy else None,
         requester_email=payload.requestedBy.email if payload.requestedBy else None,
         status=RequestStatus.PENDING,
+        overseerr_request_id=payload.request.id if payload.request else None,
     )
     db.add(request)
     await db.commit()

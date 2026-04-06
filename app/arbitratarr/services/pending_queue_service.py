@@ -1,4 +1,4 @@
-from datetime import datetime, timezone, timedelta
+from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -35,7 +35,7 @@ class PendingQueueService:
         Returns:
             The created PendingQueue entry
         """
-        next_retry = datetime.now(timezone.utc) + timedelta(hours=retry_interval_hours)
+        next_retry = datetime.now(UTC) + timedelta(hours=retry_interval_hours)
 
         # Check if already in queue
         existing = await self.get_by_request_id(request_id)
@@ -71,7 +71,7 @@ class PendingQueueService:
 
         Returns items where next_retry_at <= now.
         """
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         result = await self.db.execute(
             select(PendingQueue)
             .where(PendingQueue.next_retry_at <= now)
@@ -130,7 +130,7 @@ class PendingQueueService:
             return True, True
 
         # Update next retry time
-        entry.next_retry_at = datetime.now(timezone.utc) + timedelta(hours=24)
+        entry.next_retry_at = datetime.now(UTC) + timedelta(hours=24)
         await self.db.commit()
         return True, False
 
@@ -148,7 +148,7 @@ class PendingQueueService:
         """Get statistics about the pending queue."""
         result = await self.db.execute(select(PendingQueue))
         all_items = list(result.scalars().all())
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
 
         ready = [i for i in all_items if i.next_retry_at <= now]
         waiting = [i for i in all_items if i.next_retry_at > now]

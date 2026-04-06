@@ -1,6 +1,6 @@
 """Pending queue model for items awaiting retry."""
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
 from sqlalchemy import DateTime, ForeignKey, Integer, String
@@ -14,7 +14,7 @@ if TYPE_CHECKING:
 
 def _utc_now() -> datetime:
     """Return current UTC time as timezone-aware datetime."""
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 class PendingQueue(Base):
