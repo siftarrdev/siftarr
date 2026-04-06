@@ -11,9 +11,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.arbitratarr.config import Settings, get_settings
 from app.arbitratarr.database import get_db
-from app.arbitratarr.models.request import Request as RequestModel, RequestStatus
+from app.arbitratarr.models.request import MediaType, Request as RequestModel, RequestStatus
 from app.arbitratarr.models.settings import Settings as DBSettings
 from app.arbitratarr.services.connection_tester import ConnectionTester, ConnectionTestResult
+from app.arbitratarr.services.overseerr_service import OverseerrService
 from app.arbitratarr.services.pending_queue_service import PendingQueueService
 from app.arbitratarr.services.rule_service import RuleService
 
@@ -321,16 +322,163 @@ async def retry_pending(
 
 
 @router.post("/sync-overseerr")
-async def sync_overseerr(request: Request) -> HTMLResponse:
+async def sync_overseerr(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+) -> HTMLResponse:
     """Sync with Overseerr for new requests."""
-    # TODO: Implement Overseerr sync
+    env_settings = get_settings()
+    eff_settings = await _build_effective_settings(db, env_settings)
+
+    # Get staging mode setting
+    result = await db.execute(
+        select(DBSettings).where(DBSettings.key == "staging_mode_enabled"),
+    )
+    staging_setting = result.scalar_one_or_none()
+    staging_enabled = staging_setting.value == "true" if staging_setting else False
+
+    # Get pending queue count
+    queue_service = PendingQueueService(db)
+    ready = await queue_service.get_ready_for_retry()
+    pending_count = len(ready)
+
+    # Get request stats
+    result = await db.execute(select(RequestModel))
+    all_requests = list(result.scalars().all())
+
+    total_requests = len(all_requests)
+    completed = sum(1 for r in all_requests if r.status == RequestStatus.COMPLETED)
+    pending = sum(1 for r in all_requests if r.status == RequestStatus.PENDING)
+    failed = sum(1 for r in all_requests if r.status == RequestStatus.FAILED)
+
+    # Sync logic
+    message = "Overseerr sync completed"
+    message_type = "success"
+    synced_count = 0
+    skipped_count = 0
+
+    # Check if Overseerr is configured
+    if not eff_settings.get("overseerr_url") or not eff_settings.get("overseerr_api_key"):
+        message = "Overseerr is not configured. Please set URL and API key."
+        message_type = "error"
+    else:
+        overseerr_service = OverseerrService()
+        try:
+            # Fetch approved requests from Overseerr
+            overseerr_requests = await overseerr_service.get_requests(status="approved", limit=100)
+
+            if not overseerr_requests:
+                # Try with different filter - maybe Overseerr uses different status values
+                overseerr_requests_all = await overseerr_service.get_requests(status="all", limit=100)
+                if overseerr_requests_all:
+                    message = f"No approved requests found. Overseerr returned {len(overseerr_requests_all)} total requests. Check if requests exist with different status."
+                    message_type = "error"
+                else:
+                    message = "No approved requests found in Overseerr"
+                    message_type = "success"
+            else:
+                # Get existing external_ids from database
+                result = await db.execute(select(RequestModel.external_id))
+                existing_external_ids = set(row[0] for row in result.fetchall())
+
+                # Process each request
+                for ov_req in overseerr_requests:
+                    try:
+                        # Overseerr API returns media info nested under "media" key
+                        media = ov_req.get("media") or {}
+                        tmdb_id = media.get("tmdbId")
+                        tvdb_id = media.get("tvdbId")
+
+                        if tmdb_id is None and tvdb_id is None:
+                            skipped_count += 1
+                            continue
+
+                        external_id = str(tmdb_id) if tmdb_id is not None else str(tvdb_id)
+
+                        # Skip if already exists
+                        if external_id in existing_external_ids:
+                            skipped_count += 1
+                            continue
+
+                        # Determine media type
+                        media_type_str = media.get("mediaType", "")
+                        media_type = MediaType.MOVIE if media_type_str == "movie" else MediaType.TV
+
+                        # Get requested seasons/episodes
+                        requested_seasons = media.get("requestedSeasons")
+                        requested_episodes = media.get("requestedEpisodes")
+
+                        # Get requester info - use plexUsername or displayName as fallback for username
+                        requested_by = ov_req.get("requestedBy") or {}
+                        username = (
+                            requested_by.get("username")
+                            or requested_by.get("plexUsername")
+                            or requested_by.get("displayName")
+                        )
+                        email = requested_by.get("email")
+
+                        # Fetch title from Overseerr media details endpoint
+                        title = ""
+                        media_external_id = tmdb_id if tmdb_id else tvdb_id
+                        if media_external_id:
+                            media_type_for_api = "movie" if media_type == MediaType.MOVIE else "tv"
+                            media_details = await overseerr_service.get_media_details(
+                                media_type_for_api, media_external_id
+                            )
+                            if media_details:
+                                title = media_details.get("title") or media_details.get("name") or ""
+
+                        # Create new request
+                        new_request = RequestModel(
+                            external_id=external_id,
+                            media_type=media_type,
+                            tmdb_id=tmdb_id,
+                            tvdb_id=tvdb_id,
+                            title=title,
+                            requested_seasons=str(requested_seasons) if requested_seasons else None,
+                            requested_episodes=str(requested_episodes) if requested_episodes else None,
+                            requester_username=username,
+                            requester_email=email,
+                            status=RequestStatus.PENDING,
+                        )
+                        db.add(new_request)
+                        existing_external_ids.add(external_id)  # Prevent duplicates in same sync
+                        synced_count += 1
+                    except Exception as e:
+                        # Log individual request processing errors but continue
+                        skipped_count += 1
+                        continue
+
+                await db.commit()
+
+                if synced_count > 0:
+                    message = f"Synced {synced_count} new request(s) from Overseerr"
+                    message_type = "success"
+                else:
+                    message = f"No new requests to sync ({skipped_count} already existed)"
+                    message_type = "success"
+        except Exception as e:
+            message = f"Sync error: {str(e)}"
+            message_type = "error"
+        finally:
+            await overseerr_service.close()
+
     return templates.TemplateResponse(
         request,
         "settings.html",
         {
             "request": request,
-            "message": "Overseerr sync not yet implemented",
-            "message_type": "error",
+            "message": message,
+            "message_type": message_type,
+            "env": eff_settings,
+            "staging_enabled": staging_enabled,
+            "pending_count": pending_count,
+            "stats": {
+                "total_requests": total_requests,
+                "completed": completed,
+                "pending": pending,
+                "failed": failed,
+            },
         },
     )
 
