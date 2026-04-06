@@ -122,30 +122,6 @@ class OverseerrService:
             except httpx.RequestError:
                 return None
 
-    async def get_request(self, request_id: int) -> dict | None:
-        """Get full request details from Overseerr.
-
-        Args:
-            request_id: The Overseerr request ID.
-
-        Returns:
-            A dict containing request details if successful, None otherwise.
-        """
-        if not self.base_url or not self.api_key:
-            return None
-
-        endpoint = f"{self.base_url}/api/v1/request/{request_id}"
-        headers = {"X-Api-Key": self.api_key}
-
-        async with httpx.AsyncClient() as client:
-            try:
-                response = await client.get(endpoint, headers=headers, timeout=30.0)
-                if response.status_code == 200:
-                    return response.json()
-                return None
-            except httpx.RequestError:
-                return None
-
     async def approve_request(self, request_id: int) -> bool:
         """Approve a request in Overseerr via API."""
         if not self.base_url or not self.api_key:
