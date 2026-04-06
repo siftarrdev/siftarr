@@ -2,6 +2,8 @@
 
 Media search and download decision middleware for users who want granular control over release selection.
 
+![Arbitratarr icon](icons/brand/arbitratarr-network-hub.png)
+
 ## Overview
 
 Arbitratarr sits between Overseerr (requests), Prowlarr (indexers), and qBittorrent:

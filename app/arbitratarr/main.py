@@ -6,6 +6,7 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 from fastapi import FastAPI, Request
+from fastapi.staticfiles import StaticFiles
 from fastapi.responses import JSONResponse, RedirectResponse
 
 from app.arbitratarr.config import get_settings
@@ -56,6 +57,8 @@ def create_app() -> FastAPI:
         version="0.1.0",
         lifespan=lifespan,
     )
+
+    app.mount("/static", StaticFiles(directory=Path(__file__).parent / "static"), name="static")
 
     # Include routers
     app.include_router(dashboard.router)
