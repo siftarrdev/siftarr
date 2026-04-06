@@ -85,18 +85,19 @@
                             <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-400">{{ req.requester_username or 'Unknown' }}</td>
                             <td class="px-6 py-4 whitespace-nowrap text-sm">
                                 {% if req.overseerr_request_id %}
+                                {% set ov_status = overseerr_statuses.get(req.id, 'unknown') %}
                                 <span class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full 
-                                    {% if overseerr_statuses[req.id] == 'approved' %}bg-green-900 text-green-200
-                                    {% elif overseerr_statuses[req.id] == 'declined' %}bg-red-900 text-red-200
-                                    {% elif overseerr_statuses[req.id] == 'pending' %}bg-yellow-900 text-yellow-200
-                                    {% elif overseerr_statuses[req.id] == 'available' %}bg-blue-900 text-blue-200
+                                    {% if ov_status == 'approved' %}bg-green-900 text-green-200
+                                    {% elif ov_status == 'declined' %}bg-red-900 text-red-200
+                                    {% elif ov_status == 'pending' %}bg-yellow-900 text-yellow-200
+                                    {% elif ov_status == 'available' %}bg-blue-900 text-blue-200
                                     {% else %}bg-gray-700 text-gray-300{% endif %}">
-                                    {{ overseerr_statuses[req.id] or 'unknown' }}
+                                    {{ ov_status or 'unknown' }}
                                 </span>
                                 {% endif %}
                             </td>
                             <td class="px-6 py-4 whitespace-nowrap text-sm space-x-2">
-                                {% if req.overseerr_request_id and overseerr_statuses[req.id] in ['pending', 'requested'] %}
+                                {% if req.overseerr_request_id and overseerr_statuses.get(req.id, 'unknown') in ['pending', 'requested'] %}
                                 <form action="/requests/{{ req.id }}/approve" method="post" class="inline">
                                     <button type="submit" class="text-green-400 hover:text-green-300">Approve</button>
                                 </form>

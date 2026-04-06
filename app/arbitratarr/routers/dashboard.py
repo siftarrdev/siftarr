@@ -38,11 +38,15 @@ async def dashboard(
         if req.overseerr_request_id:
             try:
                 ov_status = await overseerr_service.get_request_status(req.overseerr_request_id)
-                if ov_status:
+                if ov_status and isinstance(ov_status, dict):
                     media = ov_status.get("media") or {}
                     overseerr_statuses[req.id] = media.get("status", "unknown")
+                else:
+                    overseerr_statuses[req.id] = "unknown"
             except Exception:
                 overseerr_statuses[req.id] = "unknown"
+        else:
+            overseerr_statuses[req.id] = "no_overseerr_id"
 
     await overseerr_service.close()
 
