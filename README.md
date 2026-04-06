@@ -4,21 +4,25 @@ Media search and download decision middleware for users who want granular contro
 
 ## Overview
 
-Arbitratarr sits between Overseerr (requests), Prowlarr (indexers), and qBittorrent. It provides:
+Arbitratarr sits between Overseerr (requests), Prowlarr (indexers), and qBittorrent:
 
-- **Rule-based filtering**: Reject releases matching exclusion patterns (e.g., CAM, TS, HDCAM)
-- **Rule-based scoring**: Prefer releases matching scorer patterns (e.g., x265, specific release groups)
-- **Season-first TV logic**: Prefers season packs, falls back to individual episodes
-- **Staging mode**: Review torrents before sending to qBittorrent
-- **Automatic retry**: Pending requests are retried every 24 hours
+```
+Overseerr → Arbitratarr → qBittorrent
+                ↓
+            Prowlarr
+```
+
+**Features:**
+- Rule-based filtering and scoring for releases
+- Season-first TV logic (prefers season packs, falls back to episodes)
+- Staging mode to review torrents before download
+- Automatic retry for pending requests every 24 hours
 
 ## Quick Start
 
 ### Docker Compose
 
 ```yaml
-version: "3.8"
-
 services:
   arbitratarr:
     image: ghcr.io/yourusername/arbitratarr:latest
@@ -33,182 +37,69 @@ services:
       - PUID=1000
       - PGID=1000
       - OVERSEERR_URL=http://overseerr:5055
-      - OVERSEERR_API_KEY=your_api_key
+      - OVERSEERR_API_KEY=your_key
       - PROWLARR_URL=http://prowlarr:9696
-      - PROWLARR_API_KEY=your_api_key
+      - PROWLARR_API_KEY=your_key
       - QBITTORRENT_URL=http://qbittorrent:8080
       - QBITTORRENT_USERNAME=admin
       - QBITTORRENT_PASSWORD=your_password
 ```
 
-### Configuration
+### Required Environment Variables
 
-Create a `.env` file or set environment variables:
-
-| Variable | Description | Required |
-|----------|-------------|----------|
-| `OVERSEERR_URL` | Overseerr base URL | Yes |
-| `OVERSEERR_API_KEY` | Overseerr API key | Yes |
-| `PROWLARR_URL` | Prowlarr base URL | Yes |
-| `PROWLARR_API_KEY` | Prowlarr API key | Yes |
-| `QBITTORRENT_URL` | qBittorrent Web UI URL | Yes |
-| `QBITTORRENT_USERNAME` | qBittorrent username | Yes |
-| `QBITTORRENT_PASSWORD` | qBittorrent password | Yes |
-| `TZ` | Timezone (default: UTC) | No |
-| `PUID` | User ID for file permissions (default: 1000) | No |
-| `PGID` | Group ID for file permissions (default: 1000) | No |
+| Variable | Description |
+|----------|-------------|
+| `OVERSEERR_URL` / `OVERSEERR_API_KEY` | Overseerr connection |
+| `PROWLARR_URL` / `PROWLARR_API_KEY` | Prowlarr connection |
+| `QBITTORRENT_URL` / `QBITTORRENT_USERNAME` / `QBITTORRENT_PASSWORD` | qBittorrent connection |
 
 ### Volume Structure
 
 The `/data` volume contains:
-
-- `/data/db/` - SQLite database files
+- `/data/db/` - SQLite database
 - `/data/staging/` - Staged torrent files (when staging mode is enabled)
 
-## Setup Guide
+## Setup
 
 ### 1. Configure Overseerr Webhook
 
-1. In Overseerr, go to **Settings → Notifications → Webhooks**
-2. Add a new webhook with URL:
-   ```
-   http://your-arbitratarr:8000/webhook/overseerr
-   ```
+1. Go to **Settings → Notifications → Webhooks**
+2. Add webhook URL: `http://your-arbitratarr:8000/webhook/overseerr`
 3. Enable **"Media Requested"** and **"Media Approved"** events
-4. Test the webhook to ensure connectivity
 
-### 2. Configure Arbitratarr Rules
+### 2. Configure Rules
 
-Access the web UI at `http://localhost:8000` and navigate to the Rules page:
+Access the web UI at `http://localhost:8000/rules`:
 
-#### Exclusion Rules
-Release titles matching exclusion patterns are automatically rejected.
+- **Exclusions**: Patterns that reject releases (e.g., `CAM|TS|HDCAM`)
+- **Requirements**: Patterns releases must match (e.g., `1080p|2160p`)
+- **Scorers**: Patterns that add points (e.g., `x265` = +50)
 
-**Example:** `CAM|TS|HDCAM|SCR` rejects camera recordings and screeners.
+### 3. Optional: Enable Staging Mode
 
-#### Requirement Rules
-Release titles must match at least one requirement pattern.
-
-**Example:** `1080p|2160p|720p` requires HD resolution.
-
-#### Scorer Rules
-Matching scorer patterns adds points to the release's score.
-
-| Pattern | Points | Description |
-|---------|--------|-------------|
-| `x265\|HEVC` | +50 | Prefer HEVC codec |
-| `MeGusta` | +100 | Prefer MeGusta releases |
-| `SPiCYLAMA\|LAMA` | +100 | Prefer SPiCYLAMA releases |
-
-The highest-scoring release that passes all filters is selected.
-
-### 3. Staging Mode (Optional)
-
-When staging mode is enabled in Settings:
-
-1. Approved releases are saved to `/data/staging/` as `.torrent` and `.json` files
-2. Files are named: `{title}_{release_group}_{id}.torrent`
-3. Review torrents in the Dashboard and approve or discard them
-4. Approved torrents are then sent to qBittorrent
+In Settings, enable staging mode to review torrents before they're sent to qBittorrent.
 
 ## Usage
 
-### Web Interface
+The web UI at `http://localhost:8000` provides:
+- **Dashboard**: Active requests, pending items, staged torrents
+- **Rules**: Configure filtering and scoring
+- **Settings**: Toggle staging mode, trigger manual retries
 
-Access the web UI at `http://localhost:8000`:
-
-- **Dashboard**: View active requests, pending items, and staged torrents
-- **Rules**: Configure filtering and scoring rules
-- **Settings**: Toggle staging mode, trigger manual retries, view logs
-
-### Request Status Flow
+### Request Flow
 
 ```
-received → searching → pending (no matches, retry later)
-                         ↓
-               staged (if staging mode on)
-                         ↓
-               downloading → completed
+received → searching → pending (retry every 24h)
+                          ↓
+                 staged (if staging mode on)
+                          ↓
+                 downloading → completed
 ```
-
-### Manual Operations
-
-From the Settings page, you can:
-
-- **Trigger Manual Retry**: Immediately retry all pending requests
-- **Toggle Staging Mode**: Enable/disable staging mode
-- **View Logs**: Check application logs for debugging
-
-## Architecture
-
-```
-┌─────────────┐     ┌──────────────┐     ┌────────────┐
-│  Overseerr  │────▶│ Arbitratarr  │────▶│ qBittorrent│
-│  (requests) │     │   (logic)    │     │ (download) │
-└─────────────┘     └──────────────┘     └────────────┘
-                           │
-                           ▼
-                    ┌──────────────┐
-                    │   Prowlarr   │
-                    │  (indexers)  │
-                    └──────────────┘
-```
-
-## Features
-
-### Smart TV Show Handling
-
-For TV requests, Arbitratarr follows a season-first approach:
-
-1. **Search Season Packs**: Queries Prowlarr for complete season packs
-2. **Evaluate**: If a pack passes all rules with the highest score, it's selected
-3. **Fallback**: If no suitable pack found, searches for individual episodes
-
-### Strict ID Matching
-
-To avoid mismatches, all Prowlarr searches use the exact `tmdbid` or `tvdbid` from Overseerr, not text search.
-
-### Category Tagging
-
-Downloads are automatically tagged with categories for your *arr applications:
-
-- Movies: `radarr` category
-- TV Shows: `sonarr` category
-
-## Troubleshooting
-
-### Common Issues
-
-**Webhooks not working:**
-- Verify Overseerr can reach Arbitratarr (check network/DNS)
-- Check Arbitratarr logs for webhook payload errors
-- Ensure API keys are correct
-
-**No search results:**
-- Verify Prowlarr indexers are healthy
-- Check that Prowlarr can reach indexers
-- Review exclusion rules (might be too strict)
-
-**qBittorrent connection failed:**
-- Verify qBittorrent Web UI is enabled
-- Check credentials and URL
-- Ensure network connectivity between containers
-
-**Files not in staging:**
-- Check staging mode is enabled in Settings
-- Verify `/data/staging/` directory exists and has write permissions
-- Check PUID/PGID match your user
-
-### Getting Help
-
-- Check the [Issues](https://github.com/yourusername/arbitratarr/issues) page
-- Review application logs in the Settings page
-- Enable debug logging for more details
 
 ## Development
 
-Interested in contributing? See [CONTRIBUTION.md](CONTRIBUTION.md) for development setup and guidelines.
+See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup.
 
 ## License
 
-MIT License - See [LICENSE](LICENSE) file for details.
+MIT License - See [LICENSE](LICENSE) file.

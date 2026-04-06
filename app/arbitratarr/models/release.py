@@ -3,7 +3,7 @@
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING
 
-from sqlalchemy import BigInteger, Boolean, DateTime, Integer, String, Text
+from sqlalchemy import BigInteger, Boolean, DateTime, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.arbitratarr.models._base import Base  # noqa: PLC0414
@@ -21,7 +21,7 @@ class Release(Base):
     __tablename__ = "releases"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    request_id: Mapped[int] = mapped_column(Integer, nullable=False)
+    request_id: Mapped[int] = mapped_column(ForeignKey("requests.id"), nullable=False)
 
     # Release info
     title: Mapped[str] = mapped_column(String(500), nullable=False)

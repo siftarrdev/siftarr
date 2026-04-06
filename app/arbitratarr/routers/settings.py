@@ -8,7 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.arbitratarr.config import get_settings
 from app.arbitratarr.database import get_db
-from app.arbitratarr.models.request import RequestStatus
+from app.arbitratarr.models.request import Request as RequestModel, RequestStatus
 from app.arbitratarr.models.settings import Settings
 from app.arbitratarr.services.pending_queue_service import PendingQueueService
 from app.arbitratarr.services.rule_service import RuleService
@@ -38,13 +38,13 @@ async def get_settings_page(
     pending_count = len(ready)
 
     # Get request stats
-    result = await db.execute(select(RequestStatus))
-    all_statuses = list(result.scalars().all())
+    result = await db.execute(select(RequestModel))
+    all_requests = list(result.scalars().all())
 
-    total_requests = len(all_statuses)
-    completed = sum(1 for s in all_statuses if s == RequestStatus.COMPLETED)
-    pending = sum(1 for s in all_statuses if s == RequestStatus.PENDING)
-    failed = sum(1 for s in all_statuses if s == RequestStatus.FAILED)
+    total_requests = len(all_requests)
+    completed = sum(1 for r in all_requests if r.status == RequestStatus.COMPLETED)
+    pending = sum(1 for r in all_requests if r.status == RequestStatus.PENDING)
+    failed = sum(1 for r in all_requests if r.status == RequestStatus.FAILED)
 
     return templates.TemplateResponse(
         request,
