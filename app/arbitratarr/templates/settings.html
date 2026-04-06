@@ -6,6 +6,168 @@
 <div class="space-y-6">
     <h1 class="text-2xl font-bold">Settings</h1>
 
+    {% if message %}
+    <div class="bg-gray-800 rounded-lg border border-gray-700 p-4 {% if message_type == 'error' %}border-red-500{% else %}border-green-500{% endif %}">
+        <p class="text-white">{{ message }}</p>
+    </div>
+    {% endif %}
+
+    <!-- Connection Settings -->
+    <div class="bg-gray-800 rounded-lg border border-gray-700">
+        <div class="px-6 py-4 border-b border-gray-700">
+            <h2 class="text-lg font-medium">Connection Settings</h2>
+            <p class="text-sm text-gray-400 mt-1">Configure your service URLs and API keys</p>
+        </div>
+        <div class="p-6">
+            <form action="/settings/connections" method="post" class="space-y-6">
+                <!-- Overseerr -->
+                <div class="border-b border-gray-700 pb-6">
+                    <h3 class="text-md font-medium text-white mb-4">Overseerr</h3>
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div>
+                            <label for="overseerr_url" class="block text-sm font-medium text-gray-400 mb-1">URL</label>
+                            <input type="url" id="overseerr_url" name="overseerr_url" 
+                                   value="{{ env.overseerr_url }}"
+                                   placeholder="http://overseerr:5055"
+                                   class="w-full bg-gray-700 border border-gray-600 rounded-md px-3 py-2 text-white focus:outline-none focus:ring-2 focus:ring-blue-500">
+                        </div>
+                        <div>
+                            <label for="overseerr_api_key" class="block text-sm font-medium text-gray-400 mb-1">API Key</label>
+                            <div class="relative">
+                                <input type="password" id="overseerr_api_key" name="overseerr_api_key" 
+                                       value="{{ env.overseerr_api_key }}"
+                                       placeholder="Your Overseerr API key"
+                                       class="w-full bg-gray-700 border border-gray-600 rounded-md px-3 py-2 text-white focus:outline-none focus:ring-2 focus:ring-blue-500">
+                                <button type="button" onclick="togglePassword('overseerr_api_key')" 
+                                        class="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-white">
+                                    <svg id="eye-overseerr_api_key" class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path>
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"></path>
+                                    </svg>
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="mt-4">
+                        <button type="button" onclick="testConnection('overseerr')" 
+                                id="btn-test-overseerr"
+                                class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-md text-sm font-medium">
+                            Test Connection
+                        </button>
+                        <span id="status-overseerr" class="ml-4 text-sm"></span>
+                    </div>
+                </div>
+
+                <!-- Prowlarr -->
+                <div class="border-b border-gray-700 pb-6">
+                    <h3 class="text-md font-medium text-white mb-4">Prowlarr</h3>
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div>
+                            <label for="prowlarr_url" class="block text-sm font-medium text-gray-400 mb-1">URL</label>
+                            <input type="url" id="prowlarr_url" name="prowlarr_url" 
+                                   value="{{ env.prowlarr_url }}"
+                                   placeholder="http://prowlarr:9696"
+                                   class="w-full bg-gray-700 border border-gray-600 rounded-md px-3 py-2 text-white focus:outline-none focus:ring-2 focus:ring-blue-500">
+                        </div>
+                        <div>
+                            <label for="prowlarr_api_key" class="block text-sm font-medium text-gray-400 mb-1">API Key</label>
+                            <div class="relative">
+                                <input type="password" id="prowlarr_api_key" name="prowlarr_api_key" 
+                                       value="{{ env.prowlarr_api_key }}"
+                                       placeholder="Your Prowlarr API key"
+                                       class="w-full bg-gray-700 border border-gray-600 rounded-md px-3 py-2 text-white focus:outline-none focus:ring-2 focus:ring-blue-500">
+                                <button type="button" onclick="togglePassword('prowlarr_api_key')" 
+                                        class="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-white">
+                                    <svg id="eye-prowlarr_api_key" class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path>
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"></path>
+                                    </svg>
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="mt-4">
+                        <button type="button" onclick="testConnection('prowlarr')" 
+                                id="btn-test-prowlarr"
+                                class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-md text-sm font-medium">
+                            Test Connection
+                        </button>
+                        <span id="status-prowlarr" class="ml-4 text-sm"></span>
+                    </div>
+                </div>
+
+                <!-- qBittorrent -->
+                <div class="pb-6">
+                    <h3 class="text-md font-medium text-white mb-4">qBittorrent</h3>
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div>
+                            <label for="qbittorrent_url" class="block text-sm font-medium text-gray-400 mb-1">URL</label>
+                            <input type="url" id="qbittorrent_url" name="qbittorrent_url" 
+                                   value="{{ env.qbittorrent_url }}"
+                                   placeholder="http://qbittorrent:8080"
+                                   class="w-full bg-gray-700 border border-gray-600 rounded-md px-3 py-2 text-white focus:outline-none focus:ring-2 focus:ring-blue-500">
+                        </div>
+                        <div>
+                            <label for="qbittorrent_username" class="block text-sm font-medium text-gray-400 mb-1">Username</label>
+                            <input type="text" id="qbittorrent_username" name="qbittorrent_username" 
+                                   value="{{ env.qbittorrent_username }}"
+                                   placeholder="admin"
+                                   class="w-full bg-gray-700 border border-gray-600 rounded-md px-3 py-2 text-white focus:outline-none focus:ring-2 focus:ring-blue-500">
+                        </div>
+                        <div>
+                            <label for="qbittorrent_password" class="block text-sm font-medium text-gray-400 mb-1">Password</label>
+                            <div class="relative">
+                                <input type="password" id="qbittorrent_password" name="qbittorrent_password" 
+                                       value="{{ env.qbittorrent_password }}"
+                                       placeholder="••••••••"
+                                       class="w-full bg-gray-700 border border-gray-600 rounded-md px-3 py-2 text-white focus:outline-none focus:ring-2 focus:ring-blue-500">
+                                <button type="button" onclick="togglePassword('qbittorrent_password')" 
+                                        class="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-white">
+                                    <svg id="eye-qbittorrent_password" class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path>
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"></path>
+                                    </svg>
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="mt-4">
+                        <button type="button" onclick="testConnection('qbittorrent')" 
+                                id="btn-test-qbittorrent"
+                                class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-md text-sm font-medium">
+                            Test Connection
+                        </button>
+                        <span id="status-qbittorrent" class="ml-4 text-sm"></span>
+                    </div>
+                </div>
+
+                <!-- Timezone -->
+                <div class="border-t border-gray-700 pt-6">
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div>
+                            <label for="tz" class="block text-sm font-medium text-gray-400 mb-1">Timezone</label>
+                            <input type="text" id="tz" name="tz" 
+                                   value="{{ env.tz }}"
+                                   placeholder="UTC"
+                                   class="w-full bg-gray-700 border border-gray-600 rounded-md px-3 py-2 text-white focus:outline-none focus:ring-2 focus:ring-blue-500">
+                        </div>
+                    </div>
+                </div>
+
+                <div class="flex items-center gap-4 pt-4">
+                    <button type="submit" 
+                            class="bg-green-600 hover:bg-green-700 text-white px-6 py-2 rounded-md text-sm font-medium">
+                        Save Settings
+                    </button>
+                    <button type="button" onclick="testAllConnections()" 
+                            class="bg-purple-600 hover:bg-purple-700 text-white px-4 py-2 rounded-md text-sm font-medium">
+                        Test All Connections
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+
     <!-- Staging Mode -->
     <div class="bg-gray-800 rounded-lg border border-gray-700">
         <div class="px-6 py-4 border-b border-gray-700">
@@ -82,33 +244,73 @@
             </div>
         </div>
     </div>
-
-    <!-- Environment Info (Read-only) -->
-    <div class="bg-gray-800 rounded-lg border border-gray-700">
-        <div class="px-6 py-4 border-b border-gray-700">
-            <h2 class="text-lg font-medium">Environment Configuration</h2>
-            <p class="text-sm text-gray-400 mt-1">Current environment variables (read-only)</p>
-        </div>
-        <div class="p-6">
-            <dl class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div>
-                    <dt class="text-sm font-medium text-gray-400">Overseerr URL</dt>
-                    <dd class="mt-1 text-sm text-white">{{ env.OVERSEERR_URL }}</dd>
-                </div>
-                <div>
-                    <dt class="text-sm font-medium text-gray-400">Prowlarr URL</dt>
-                    <dd class="mt-1 text-sm text-white">{{ env.PROWLARR_URL }}</dd>
-                </div>
-                <div>
-                    <dt class="text-sm font-medium text-gray-400">qBittorrent URL</dt>
-                    <dd class="mt-1 text-sm text-white">{{ env.QBITTORRENT_URL }}</dd>
-                </div>
-                <div>
-                    <dt class="text-sm font-medium text-gray-400">Timezone</dt>
-                    <dd class="mt-1 text-sm text-white">{{ env.TZ }}</dd>
-                </div>
-            </dl>
-        </div>
-    </div>
 </div>
+
+<script>
+function togglePassword(fieldId) {
+    const field = document.getElementById(fieldId);
+    const eyeIcon = document.getElementById('eye-' + fieldId);
+    if (field.type === 'password') {
+        field.type = 'text';
+        eyeIcon.innerHTML = '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.542-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.88 9.88l-3.29-3.29m7.532 7.532l3.29 3.29M3 3l3.59 3.59m0 0A9.953 9.953 0 0112 5c4.478 0 8.268 2.943 9.542 7a10.025 10.025 0 01-4.132 5.411m0 0L21 21"></path>';
+    } else {
+        field.type = 'password';
+        eyeIcon.innerHTML = '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"></path>';
+    }
+}
+
+async function testConnection(service) {
+    const btn = document.getElementById('btn-test-' + service);
+    const status = document.getElementById('status-' + service);
+    
+    // Disable button and show loading
+    btn.disabled = true;
+    btn.classList.add('opacity-50');
+    status.textContent = 'Testing...';
+    status.className = 'ml-4 text-sm text-gray-400';
+
+    try {
+        const response = await fetch('/settings/api/test/' + service, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+        });
+        
+        const data = await response.json();
+        
+        if (data.success) {
+            status.textContent = '✓ ' + data.message + (data.details ? ' (' + data.details + ')' : '');
+            status.className = 'ml-4 text-sm text-green-400';
+        } else {
+            status.textContent = '✗ ' + data.message + (data.details ? ' - ' + data.details : '');
+            status.className = 'ml-4 text-sm text-red-400';
+        }
+    } catch (error) {
+        status.textContent = '✗ Connection test failed: ' + error.message;
+        status.className = 'ml-4 text-sm text-red-400';
+    } finally {
+        btn.disabled = false;
+        btn.classList.remove('opacity-50');
+    }
+}
+
+async function testAllConnections() {
+    const services = ['overseerr', 'prowlarr', 'qbittorrent'];
+    
+    for (const service of services) {
+        await testConnection(service);
+    }
+}
+
+// Check for saved/reset query params and show notification
+const urlParams = new URLSearchParams(window.location.search);
+if (urlParams.get('saved') === 'true') {
+    // Could show a toast notification here
+    console.log('Settings saved successfully');
+}
+if (urlParams.get('reset') === 'true') {
+    console.log('Settings reset to environment variables');
+}
+</script>
 {% endblock %}

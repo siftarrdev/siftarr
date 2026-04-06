@@ -17,8 +17,8 @@ RUN uv sync --frozen
 
 # Copy application code
 COPY app/ ./app/
-COPY alembic/ ./alembic/
-COPY alembic.ini ./
+COPY db/alembic/ ./alembic/
+COPY db/alembic.ini ./
 COPY ruff.toml ./
 COPY ty.toml ./
 

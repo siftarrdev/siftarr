@@ -1,20 +1,104 @@
 """Settings page router for viewing and editing application settings."""
 
+from typing import Annotated
+
 from fastapi import APIRouter, Depends, Form, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
+from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.arbitratarr.config import get_settings
+from app.arbitratarr.config import Settings, get_settings
 from app.arbitratarr.database import get_db
 from app.arbitratarr.models.request import Request as RequestModel, RequestStatus
-from app.arbitratarr.models.settings import Settings
+from app.arbitratarr.models.settings import Settings as DBSettings
+from app.arbitratarr.services.connection_tester import ConnectionTester, ConnectionTestResult
 from app.arbitratarr.services.pending_queue_service import PendingQueueService
 from app.arbitratarr.services.rule_service import RuleService
 
 router = APIRouter(prefix="/settings", tags=["settings"])
 templates = Jinja2Templates(directory="app/arbitratarr/templates")
+
+
+# Pydantic models for connection settings
+class ConnectionSettings(BaseModel):
+    """Connection settings model."""
+
+    overseerr_url: str | None = None
+    overseerr_api_key: str | None = None
+    prowlarr_url: str | None = None
+    prowlarr_api_key: str | None = None
+    qbittorrent_url: str | None = None
+    qbittorrent_username: str | None = None
+    qbittorrent_password: str | None = None
+    tz: str = "UTC"
+
+
+class ConnectionTestResponse(BaseModel):
+    """Response model for connection test."""
+
+    service: str
+    success: bool
+    message: str
+    details: str | None = None
+
+
+async def _get_db_setting(db: AsyncSession, key: str) -> str | None:
+    """Get a setting value from the database."""
+    result = await db.execute(select(DBSettings).where(DBSettings.key == key))
+    setting = result.scalar_one_or_none()
+    return setting.value if setting else None
+
+
+async def _set_db_setting(db: AsyncSession, key: str, value: str, description: str | None = None) -> None:
+    """Set a setting value in the database."""
+    result = await db.execute(select(DBSettings).where(DBSettings.key == key))
+    setting = result.scalar_one_or_none()
+    if setting:
+        setting.value = value
+    else:
+        setting = DBSettings(key=key, value=value, description=description)
+        db.add(setting)
+
+
+async def _build_effective_settings(db: AsyncSession, env_settings: Settings) -> dict:
+    """Build effective settings, preferring database values over environment variables."""
+    overseerr_url = await _get_db_setting(db, "overseerr_url")
+    overseerr_api_key = await _get_db_setting(db, "overseerr_api_key")
+    prowlarr_url = await _get_db_setting(db, "prowlarr_url")
+    prowlarr_api_key = await _get_db_setting(db, "prowlarr_api_key")
+    qbittorrent_url = await _get_db_setting(db, "qbittorrent_url")
+    qbittorrent_username = await _get_db_setting(db, "qbittorrent_username")
+    qbittorrent_password = await _get_db_setting(db, "qbittorrent_password")
+    tz = await _get_db_setting(db, "tz")
+
+    return {
+        "overseerr_url": overseerr_url if overseerr_url else str(env_settings.overseerr_url or ""),
+        "overseerr_api_key": overseerr_api_key if overseerr_api_key else str(env_settings.overseerr_api_key or ""),
+        "prowlarr_url": prowlarr_url if prowlarr_url else str(env_settings.prowlarr_url or ""),
+        "prowlarr_api_key": prowlarr_api_key if prowlarr_api_key else str(env_settings.prowlarr_api_key or ""),
+        "qbittorrent_url": qbittorrent_url if qbittorrent_url else str(env_settings.qbittorrent_url or ""),
+        "qbittorrent_username": qbittorrent_username if qbittorrent_username else env_settings.qbittorrent_username,
+        "qbittorrent_password": qbittorrent_password if qbittorrent_password else env_settings.qbittorrent_password,
+        "tz": tz if tz else env_settings.tz,
+    }
+
+
+async def _build_effective_settings_obj(db: AsyncSession, env_settings: Settings) -> Settings:
+    """Build effective Settings object, preferring database values over environment variables."""
+    eff = await _build_effective_settings(db, env_settings)
+    # Create a new Settings object with effective values
+    return Settings(
+        overseerr_url=eff["overseerr_url"] or None,
+        overseerr_api_key=eff["overseerr_api_key"] or None,
+        prowlarr_url=eff["prowlarr_url"] or None,
+        prowlarr_api_key=eff["prowlarr_api_key"] or None,
+        qbittorrent_url=eff["qbittorrent_url"] or None,
+        qbittorrent_username=eff["qbittorrent_username"],
+        qbittorrent_password=eff["qbittorrent_password"],
+        tz=eff["tz"],
+    )
 
 
 @router.get("")
@@ -23,11 +107,12 @@ async def get_settings_page(
     db: AsyncSession = Depends(get_db),
 ) -> HTMLResponse:
     """Display settings page."""
-    settings = get_settings()
+    env_settings = get_settings()
+    eff_settings = await _build_effective_settings(db, env_settings)
 
     # Get staging mode setting
     result = await db.execute(
-        select(Settings).where(Settings.key == "staging_mode_enabled"),
+        select(DBSettings).where(DBSettings.key == "staging_mode_enabled"),
     )
     staging_setting = result.scalar_one_or_none()
     staging_enabled = staging_setting.value == "true" if staging_setting else False
@@ -59,14 +144,130 @@ async def get_settings_page(
                 "pending": pending,
                 "failed": failed,
             },
-            "env": {
-                "OVERSEERR_URL": str(settings.overseerr_url),
-                "PROWLARR_URL": str(settings.prowlarr_url),
-                "QBITTORRENT_URL": str(settings.qbittorrent_url),
-                "TZ": settings.tz,
-            },
+            "env": eff_settings,
         },
     )
+
+
+@router.post("/connections")
+async def save_connections(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    overseerr_url: str | None = Form(None),
+    overseerr_api_key: str | None = Form(None),
+    prowlarr_url: str | None = Form(None),
+    prowlarr_api_key: str | None = Form(None),
+    qbittorrent_url: str | None = Form(None),
+    qbittorrent_username: str | None = Form(None),
+    qbittorrent_password: str | None = Form(None),
+    tz: str | None = Form(None),
+) -> RedirectResponse:
+    """Save connection settings to database."""
+    await _set_db_setting(db, "overseerr_url", overseerr_url or "", "Overseerr URL")
+    await _set_db_setting(db, "overseerr_api_key", overseerr_api_key or "", "Overseerr API key")
+    await _set_db_setting(db, "prowlarr_url", prowlarr_url or "", "Prowlarr URL")
+    await _set_db_setting(db, "prowlarr_api_key", prowlarr_api_key or "", "Prowlarr API key")
+    await _set_db_setting(db, "qbittorrent_url", qbittorrent_url or "", "qBittorrent URL")
+    await _set_db_setting(db, "qbittorrent_username", qbittorrent_username or "", "qBittorrent username")
+    await _set_db_setting(db, "qbittorrent_password", qbittorrent_password or "", "qBittorrent password")
+    if tz:
+        await _set_db_setting(db, "tz", tz, "Timezone")
+
+    await db.commit()
+
+    return RedirectResponse(url="/settings?saved=true", status_code=303)
+
+
+@router.post("/connections/reset")
+async def reset_connections(
+    request: Request,
+) -> RedirectResponse:
+    """Reset connection settings by clearing database values."""
+    # This just redirects - the effective settings will fall back to env vars
+    return RedirectResponse(url="/settings?reset=true", status_code=303)
+
+
+# API endpoints for testing connections
+@router.get("/api/connections", response_model=dict)
+async def get_connections_api(db: AsyncSession = Depends(get_db)) -> dict:
+    """Get current connection settings (for API)."""
+    env_settings = get_settings()
+    eff = await _build_effective_settings(db, env_settings)
+    return {
+        "overseerr_url": eff["overseerr_url"],
+        "overseerr_api_key": eff["overseerr_api_key"],
+        "prowlarr_url": eff["prowlarr_url"],
+        "prowlarr_api_key": eff["prowlarr_api_key"],
+        "qbittorrent_url": eff["qbittorrent_url"],
+        "qbittorrent_username": eff["qbittorrent_username"],
+        "qbittorrent_password": eff["qbittorrent_password"],
+        "tz": eff["tz"],
+    }
+
+
+@router.post("/api/test/overseerr", response_model=ConnectionTestResponse)
+async def test_overseerr_connection(db: AsyncSession = Depends(get_db)) -> ConnectionTestResponse:
+    """Test connection to Overseerr."""
+    env_settings = get_settings()
+    eff_settings = await _build_effective_settings_obj(db, env_settings)
+    result: ConnectionTestResult = await ConnectionTester.test_overseerr(eff_settings)
+    return ConnectionTestResponse(
+        service="overseerr",
+        success=result.success,
+        message=result.message,
+        details=result.details,
+    )
+
+
+@router.post("/api/test/prowlarr", response_model=ConnectionTestResponse)
+async def test_prowlarr_connection(db: AsyncSession = Depends(get_db)) -> ConnectionTestResponse:
+    """Test connection to Prowlarr."""
+    env_settings = get_settings()
+    eff_settings = await _build_effective_settings_obj(db, env_settings)
+    result: ConnectionTestResult = await ConnectionTester.test_prowlarr(eff_settings)
+    return ConnectionTestResponse(
+        service="prowlarr",
+        success=result.success,
+        message=result.message,
+        details=result.details,
+    )
+
+
+@router.post("/api/test/qbittorrent", response_model=ConnectionTestResponse)
+async def test_qbittorrent_connection(db: AsyncSession = Depends(get_db)) -> ConnectionTestResponse:
+    """Test connection to qBittorrent."""
+    env_settings = get_settings()
+    eff_settings = await _build_effective_settings_obj(db, env_settings)
+    result: ConnectionTestResult = await ConnectionTester.test_qbittorrent(eff_settings)
+    return ConnectionTestResponse(
+        service="qbittorrent",
+        success=result.success,
+        message=result.message,
+        details=result.details,
+    )
+
+
+@router.post("/api/test/all", response_model=list[ConnectionTestResponse])
+async def test_all_connections(db: AsyncSession = Depends(get_db)) -> list[ConnectionTestResponse]:
+    """Test connections to all services."""
+    env_settings = get_settings()
+    eff_settings = await _build_effective_settings_obj(db, env_settings)
+
+    results = []
+    for service_name, tester in [
+        ("overseerr", ConnectionTester.test_overseerr),
+        ("prowlarr", ConnectionTester.test_prowlarr),
+        ("qbittorrent", ConnectionTester.test_qbittorrent),
+    ]:
+        result: ConnectionTestResult = await tester(eff_settings)
+        results.append(ConnectionTestResponse(
+            service=service_name,
+            success=result.success,
+            message=result.message,
+            details=result.details,
+        ))
+
+    return results
 
 
 @router.post("/staging")
@@ -75,14 +276,14 @@ async def toggle_staging_mode(
 ) -> RedirectResponse:
     """Toggle staging mode."""
     result = await db.execute(
-        select(Settings).where(Settings.key == "staging_mode_enabled"),
+        select(DBSettings).where(DBSettings.key == "staging_mode_enabled"),
     )
     staging_setting = result.scalar_one_or_none()
 
     if staging_setting:
         staging_setting.value = "false" if staging_setting.value == "true" else "true"
     else:
-        staging_setting = Settings(
+        staging_setting = DBSettings(
             key="staging_mode_enabled",
             value="true",
             description="Enable staging mode to save torrents locally",
