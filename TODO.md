@@ -4,5 +4,6 @@
 - add option to view request details (including synopsis, cover photo and torrent matches) from the dashboard when focusing on a request
 - Rules should have the option to only apply to movies or TV shows, or both
 - Add option to only apply rules to requests from certain users or groups
+- Increase unit test coverage to 85% (currently at 47% - need router integration tests and complex async service tests)
 
 ## Bugs

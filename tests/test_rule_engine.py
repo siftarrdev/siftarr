@@ -1,102 +1,195 @@
-"""Tests for the Rule Engine."""
+"""Expanded tests for RuleEngine."""
 
+from unittest.mock import MagicMock
+
+import pytest
+
+from app.arbitratarr.models.rule import Rule, RuleType
 from app.arbitratarr.services.prowlarr_service import ProwlarrRelease
-from app.arbitratarr.services.rule_engine import RuleEngine
+from app.arbitratarr.services.rule_engine import ReleaseEvaluation, RuleEngine, RuleMatch
 
 
 class TestRuleEngine:
     """Test cases for RuleEngine."""
 
-    def test_size_filter_min(self) -> None:
-        """Test minimum size filter."""
-        engine = RuleEngine(min_size_bytes=1024 * 1024 * 1024)  # 1GB
+    def test_from_db_rules(self):
+        """Test creating RuleEngine from database rules."""
+        mock_rule1 = MagicMock(spec=Rule)
+        mock_rule1.is_enabled = True
+        mock_rule1.rule_type = RuleType.EXCLUSION
+        mock_rule1.id = 1
+        mock_rule1.name = "CAM rejection"
+        mock_rule1.pattern = "CAM|TS"
+        mock_rule1.score = 0
+
+        mock_rule2 = MagicMock(spec=Rule)
+        mock_rule2.is_enabled = True
+        mock_rule2.rule_type = RuleType.SCORER
+        mock_rule2.id = 2
+        mock_rule2.name = "x265 bonus"
+        mock_rule2.pattern = "x265"
+        mock_rule2.score = 50
+
+        engine = RuleEngine.from_db_rules(rules=[mock_rule1, mock_rule2])
+
+        assert len(engine.exclusion_patterns) == 1
+        assert len(engine.scorer_patterns) == 1
+
+    def test_from_db_rules_disabled_rules(self):
+        """Test that disabled rules are excluded."""
+        mock_rule = MagicMock(spec=Rule)
+        mock_rule.is_enabled = False
+        mock_rule.rule_type = RuleType.SCORER
+        mock_rule.id = 1
+        mock_rule.name = "Disabled"
+        mock_rule.pattern = "x265"
+        mock_rule.score = 50
+
+        engine = RuleEngine.from_db_rules(rules=[mock_rule])
+
+        assert len(engine.scorer_patterns) == 0
+
+    def test_from_db_rules_size_limits(self):
+        """Test size limit conversion from GB to bytes."""
+        engine = RuleEngine.from_db_rules(size_min_gb=1, size_max_gb=10)
+
+        assert engine.min_size_bytes == 1 * 1024 * 1024 * 1024
+        assert engine.max_size_bytes == 10 * 1024 * 1024 * 1024
+
+    def test_evaluate_no_rules(self):
+        """Test evaluating with no rules."""
+        engine = RuleEngine()
 
         release = ProwlarrRelease(
             title="Test.Movie.2024.1080p.x264-RLSGRP",
-            size=500 * 1024 * 1024,  # 500MB
+            size=1024,
             seeders=10,
             leechers=2,
-            download_url="https://example.com/torrent",
+            download_url="http://example.com",
             indexer="test",
         )
 
         result = engine.evaluate(release)
-        assert not result.passed
-        assert result.rejection_reason is not None
+
+        assert result.passed is True
+        assert result.total_score == 0
+
+    def test_evaluate_min_size_rejection(self):
+        """Test minimum size rejection."""
+        engine = RuleEngine(min_size_bytes=1024 * 1024 * 1024)
+
+        release = ProwlarrRelease(
+            title="Test.Movie.2024.1080p.x264-RLSGRP",
+            size=500 * 1024 * 1024,
+            seeders=10,
+            leechers=2,
+            download_url="http://example.com",
+            indexer="test",
+        )
+
+        result = engine.evaluate(release)
+
+        assert result.passed is False
         assert "below minimum" in result.rejection_reason
 
-    def test_size_filter_max(self) -> None:
-        """Test maximum size filter."""
-        engine = RuleEngine(max_size_bytes=10 * 1024 * 1024 * 1024)  # 10GB
+    def test_evaluate_max_size_rejection(self):
+        """Test maximum size rejection."""
+        engine = RuleEngine(max_size_bytes=10 * 1024 * 1024)
 
         release = ProwlarrRelease(
             title="Test.Movie.2024.1080p.x264-RLSGRP",
-            size=20 * 1024 * 1024 * 1024,  # 20GB
+            size=20 * 1024 * 1024,
             seeders=10,
             leechers=2,
-            download_url="https://example.com/torrent",
+            download_url="http://example.com",
             indexer="test",
         )
 
         result = engine.evaluate(release)
-        assert not result.passed
-        assert result.rejection_reason is not None
+
+        assert result.passed is False
         assert "above maximum" in result.rejection_reason
 
-    def test_exclusion_pattern(self) -> None:
-        """Test exclusion pattern matching."""
+    def test_evaluate_exclusion_rejection(self):
+        """Test exclusion pattern rejection."""
         engine = RuleEngine(
-            exclusion_patterns=[(1, "CAM/TS rejection", r"CAM|TS|HDCAM")],
+            exclusion_patterns=[(1, "CAM rejection", r"CAM|TS|SCR|HDCAM")],
         )
 
         release = ProwlarrRelease(
             title="Movie.2024.HDCAM.x264-RLSGRP",
-            size=1024 * 1024 * 1024,
+            size=1024,
             seeders=10,
             leechers=2,
-            download_url="https://example.com/torrent",
+            download_url="http://example.com",
             indexer="test",
         )
 
         result = engine.evaluate(release)
-        assert not result.passed
-        assert result.rejection_reason is not None
+
+        assert result.passed is False
         assert "exclusion" in result.rejection_reason.lower()
 
-    def test_requirement_pattern(self) -> None:
-        """Test requirement pattern matching."""
+    def test_evaluate_invalid_regex(self):
+        """Test handling of invalid regex pattern."""
+        engine = RuleEngine(
+            exclusion_patterns=[(1, "Bad regex", r"[invalid")],
+        )
+
+        release = ProwlarrRelease(
+            title="Test.Movie.2024.x264-RLSGRP",
+            size=1024,
+            seeders=10,
+            leechers=2,
+            download_url="http://example.com",
+            indexer="test",
+        )
+
+        result = engine.evaluate(release)
+
+        assert result.passed is True
+
+    def test_evaluate_requirement_match(self):
+        """Test requirement pattern match."""
         engine = RuleEngine(
             requirement_patterns=[(1, "HD required", r"1080p|720p")],
         )
 
-        # Should pass - has 1080p
-        release_pass = ProwlarrRelease(
+        release = ProwlarrRelease(
             title="Movie.2024.1080p.x264-RLSGRP",
-            size=1024 * 1024 * 1024,
+            size=1024,
             seeders=10,
             leechers=2,
-            download_url="https://example.com/torrent",
+            download_url="http://example.com",
             indexer="test",
         )
 
-        result = engine.evaluate(release_pass)
-        assert result.passed
+        result = engine.evaluate(release)
 
-        # Should fail - no HD resolution
-        release_fail = ProwlarrRelease(
+        assert result.passed is True
+
+    def test_evaluate_requirement_no_match(self):
+        """Test requirement pattern no match."""
+        engine = RuleEngine(
+            requirement_patterns=[(1, "HD required", r"1080p|720p")],
+        )
+
+        release = ProwlarrRelease(
             title="Movie.2024.480p.x264-RLSGRP",
-            size=1024 * 1024 * 1024,
+            size=1024,
             seeders=10,
             leechers=2,
-            download_url="https://example.com/torrent",
+            download_url="http://example.com",
             indexer="test",
         )
 
-        result = engine.evaluate(release_fail)
-        assert not result.passed
+        result = engine.evaluate(release)
 
-    def test_scorer_pattern(self) -> None:
-        """Test scorer pattern matching."""
+        assert result.passed is False
+        assert "requirement" in result.rejection_reason.lower()
+
+    def test_evaluate_scorer(self):
+        """Test scorer pattern scoring."""
         engine = RuleEngine(
             scorer_patterns=[
                 (1, "x265 bonus", r"x265|HEVC", 50),
@@ -106,19 +199,20 @@ class TestRuleEngine:
 
         release = ProwlarrRelease(
             title="Movie.2024.1080p.x265-MeGusta-RLSGRP",
-            size=1024 * 1024 * 1024,
+            size=1024,
             seeders=10,
             leechers=2,
-            download_url="https://example.com/torrent",
+            download_url="http://example.com",
             indexer="test",
         )
 
         result = engine.evaluate(release)
-        assert result.passed
-        assert result.total_score == 150  # 50 + 100
 
-    def test_evaluate_batch(self) -> None:
-        """Test batch evaluation returns sorted results."""
+        assert result.passed is True
+        assert result.total_score == 150
+
+    def test_evaluate_batch(self):
+        """Test batch evaluation."""
         engine = RuleEngine(
             requirement_patterns=[(1, "HD", r"1080p")],
             scorer_patterns=[(2, "x265", r"x265", 50)],
@@ -146,19 +240,18 @@ class TestRuleEngine:
         results = engine.evaluate_batch(releases)
 
         assert len(results) == 2
-        assert results[0].total_score == 50  # x265 scored
+        assert results[0].total_score == 50
         assert results[0].release.title == "Movie.2024.1080p.x265-RLSGRP"
 
-    def test_get_best_release(self) -> None:
-        """Test getting the single best release."""
+    def test_get_best_release(self):
+        """Test getting best release."""
         engine = RuleEngine(
-            requirement_patterns=[(1, "HD", r"1080p")],
-            scorer_patterns=[(2, "MeGusta", r"MeGusta", 100)],
+            scorer_patterns=[(1, "x265", r"x265", 50)],
         )
 
         releases = [
             ProwlarrRelease(
-                title="Movie.2024.1080p-RLSGRP",
+                title="Movie.2024.1080p.x264-RLSGRP",
                 size=1024,
                 seeders=10,
                 leechers=2,
@@ -166,7 +259,7 @@ class TestRuleEngine:
                 indexer="test",
             ),
             ProwlarrRelease(
-                title="Movie.2024.1080p-MeGusta-RLSGRP",
+                title="Movie.2024.1080p.x265-RLSGRP",
                 size=1024,
                 seeders=10,
                 leechers=2,
@@ -178,4 +271,83 @@ class TestRuleEngine:
         best = engine.get_best_release(releases)
 
         assert best is not None
-        assert best.total_score == 100
+        assert best.total_score == 50
+        assert best.release.title == "Movie.2024.1080p.x265-RLSGRP"
+
+    def test_get_best_release_none_pass(self):
+        """Test getting best release when none pass."""
+        engine = RuleEngine(
+            exclusion_patterns=[(1, "Reject", r"CAM")],
+        )
+
+        releases = [
+            ProwlarrRelease(
+                title="Movie.CAM.x264-RLSGRP",
+                size=1024,
+                seeders=10,
+                leechers=2,
+                download_url="url1",
+                indexer="test",
+            ),
+        ]
+
+        best = engine.get_best_release(releases)
+
+        assert best is None
+
+    def test_multiple_exclusions_first_match_rejects(self):
+        """Test that first matching exclusion rejects."""
+        engine = RuleEngine(
+            exclusion_patterns=[
+                (1, "CAM", r"CAM"),
+                (2, "TS", r"TS"),
+            ],
+        )
+
+        release = ProwlarrRelease(
+            title="Movie.TS.x264-RLSGRP",
+            size=1024,
+            seeders=10,
+            leechers=2,
+            download_url="http://example.com",
+            indexer="test",
+        )
+
+        result = engine.evaluate(release)
+
+        assert result.passed is False
+
+    def test_rule_match_dataclass(self):
+        """Test RuleMatch dataclass."""
+        match = RuleMatch(
+            rule_id=1,
+            rule_name="Test",
+            matched=True,
+            score_delta=50,
+        )
+
+        assert match.rule_id == 1
+        assert match.matched is True
+        assert match.score_delta == 50
+
+    def test_release_evaluation_dataclass(self):
+        """Test ReleaseEvaluation dataclass."""
+        release = ProwlarrRelease(
+            title="Test",
+            size=1024,
+            seeders=10,
+            leechers=2,
+            download_url="http://example.com",
+            indexer="test",
+        )
+
+        evaluation = ReleaseEvaluation(
+            release=release,
+            passed=True,
+            total_score=100,
+            matches=[],
+        )
+
+        assert evaluation.passed is True
+        assert evaluation.total_score == 100
+        assert evaluation.rejection_reason is None
