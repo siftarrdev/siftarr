@@ -21,7 +21,7 @@ version: "3.8"
 
 services:
   arbitratarr:
-    build: .
+    image: ghcr.io/yourusername/arbitratarr:latest
     container_name: arbitratarr
     restart: unless-stopped
     ports:
@@ -47,25 +47,69 @@ Create a `.env` file or set environment variables:
 
 | Variable | Description | Required |
 |----------|-------------|----------|
-| `OVERSEERR_URL` | Overseerr URL | Yes |
+| `OVERSEERR_URL` | Overseerr base URL | Yes |
 | `OVERSEERR_API_KEY` | Overseerr API key | Yes |
-| `PROWLARR_URL` | Prowlarr URL | Yes |
+| `PROWLARR_URL` | Prowlarr base URL | Yes |
 | `PROWLARR_API_KEY` | Prowlarr API key | Yes |
-| `QBITTORRENT_URL` | qBittorrent URL | Yes |
+| `QBITTORRENT_URL` | qBittorrent Web UI URL | Yes |
 | `QBITTORRENT_USERNAME` | qBittorrent username | Yes |
 | `QBITTORRENT_PASSWORD` | qBittorrent password | Yes |
 | `TZ` | Timezone (default: UTC) | No |
-| `PUID` | User ID for file permissions | No |
-| `PGID` | Group ID for file permissions | No |
+| `PUID` | User ID for file permissions (default: 1000) | No |
+| `PGID` | Group ID for file permissions (default: 1000) | No |
 
-### Overseerr Webhook Setup
+### Volume Structure
 
-1. In Overseerr, go to Settings → Notifications → Webhooks
-2. Add a new webhook with the following URL:
+The `/data` volume contains:
+
+- `/data/db/` - SQLite database files
+- `/data/staging/` - Staged torrent files (when staging mode is enabled)
+
+## Setup Guide
+
+### 1. Configure Overseerr Webhook
+
+1. In Overseerr, go to **Settings → Notifications → Webhooks**
+2. Add a new webhook with URL:
    ```
    http://your-arbitratarr:8000/webhook/overseerr
    ```
-3. Enable the "Media Requested" and "Media Approved" events
+3. Enable **"Media Requested"** and **"Media Approved"** events
+4. Test the webhook to ensure connectivity
+
+### 2. Configure Arbitratarr Rules
+
+Access the web UI at `http://localhost:8000` and navigate to the Rules page:
+
+#### Exclusion Rules
+Release titles matching exclusion patterns are automatically rejected.
+
+**Example:** `CAM|TS|HDCAM|SCR` rejects camera recordings and screeners.
+
+#### Requirement Rules
+Release titles must match at least one requirement pattern.
+
+**Example:** `1080p|2160p|720p` requires HD resolution.
+
+#### Scorer Rules
+Matching scorer patterns adds points to the release's score.
+
+| Pattern | Points | Description |
+|---------|--------|-------------|
+| `x265\|HEVC` | +50 | Prefer HEVC codec |
+| `MeGusta` | +100 | Prefer MeGusta releases |
+| `SPiCYLAMA\|LAMA` | +100 | Prefer SPiCYLAMA releases |
+
+The highest-scoring release that passes all filters is selected.
+
+### 3. Staging Mode (Optional)
+
+When staging mode is enabled in Settings:
+
+1. Approved releases are saved to `/data/staging/` as `.torrent` and `.json` files
+2. Files are named: `{title}_{release_group}_{id}.torrent`
+3. Review torrents in the Dashboard and approve or discard them
+4. Approved torrents are then sent to qBittorrent
 
 ## Usage
 
@@ -75,87 +119,31 @@ Access the web UI at `http://localhost:8000`:
 
 - **Dashboard**: View active requests, pending items, and staged torrents
 - **Rules**: Configure filtering and scoring rules
-- **Settings**: Toggle staging mode, trigger manual retries
+- **Settings**: Toggle staging mode, trigger manual retries, view logs
 
-### Rule Configuration
-
-#### Exclusion Rules
-Release titles matching exclusion patterns are automatically rejected.
-
-Example: `CAM|TS|HDCAM|SCR` rejects camera recordings and screeners.
-
-#### Requirement Rules
-Release titles must match at least one requirement pattern.
-
-Example: `1080p|2160p|720p` requires HD resolution.
-
-#### Scorer Rules
-Matching scorer patterns adds points to the release's score.
-
-| Pattern | Points |
-|---------|--------|
-| `x265\|HEVC` | +50 |
-| `MeGusta` | +100 |
-| `SPiCYLAMA\|LAMA` | +100 |
-
-The highest-scoring release that passes all filters is selected.
-
-### Staging Mode
-
-When staging mode is enabled:
-1. Approved releases are saved to `/data/staging/` instead of being sent to qBittorrent
-2. Files are named: `{title}_{release_group}_{id}.torrent` and `.json`
-3. Review and approve/discard from the Dashboard
-
-### Status Flow
+### Request Status Flow
 
 ```
 received → searching → pending (no matches, retry later)
-                        ↓
-              staged (staging mode on)
-                        ↓
-              downloading → completed
+                         ↓
+               staged (if staging mode on)
+                         ↓
+               downloading → completed
 ```
 
-## Development
+### Manual Operations
 
-### Setup
+From the Settings page, you can:
 
-```bash
-# Install dependencies
-uv sync
-
-# Run database migrations
-uv run alembic upgrade head
-
-# Run the application
-uv run uvicorn arbitratarr.main:app --reload
-```
-
-### Code Quality
-
-```bash
-# Format code
-ruff format .
-
-# Lint
-ruff check .
-
-# Type check
-pyright
-```
-
-### Testing
-
-```bash
-pytest tests/
-```
+- **Trigger Manual Retry**: Immediately retry all pending requests
+- **Toggle Staging Mode**: Enable/disable staging mode
+- **View Logs**: Check application logs for debugging
 
 ## Architecture
 
 ```
 ┌─────────────┐     ┌──────────────┐     ┌────────────┐
-│  Overseerr  │────▶│ Arbitratarr  │────▶│  qBittorrent │
+│  Overseerr  │────▶│ Arbitratarr  │────▶│ qBittorrent│
 │  (requests) │     │   (logic)    │     │ (download) │
 └─────────────┘     └──────────────┘     └────────────┘
                            │
@@ -166,6 +154,61 @@ pytest tests/
                     └──────────────┘
 ```
 
+## Features
+
+### Smart TV Show Handling
+
+For TV requests, Arbitratarr follows a season-first approach:
+
+1. **Search Season Packs**: Queries Prowlarr for complete season packs
+2. **Evaluate**: If a pack passes all rules with the highest score, it's selected
+3. **Fallback**: If no suitable pack found, searches for individual episodes
+
+### Strict ID Matching
+
+To avoid mismatches, all Prowlarr searches use the exact `tmdbid` or `tvdbid` from Overseerr, not text search.
+
+### Category Tagging
+
+Downloads are automatically tagged with categories for your *arr applications:
+
+- Movies: `radarr` category
+- TV Shows: `sonarr` category
+
+## Troubleshooting
+
+### Common Issues
+
+**Webhooks not working:**
+- Verify Overseerr can reach Arbitratarr (check network/DNS)
+- Check Arbitratarr logs for webhook payload errors
+- Ensure API keys are correct
+
+**No search results:**
+- Verify Prowlarr indexers are healthy
+- Check that Prowlarr can reach indexers
+- Review exclusion rules (might be too strict)
+
+**qBittorrent connection failed:**
+- Verify qBittorrent Web UI is enabled
+- Check credentials and URL
+- Ensure network connectivity between containers
+
+**Files not in staging:**
+- Check staging mode is enabled in Settings
+- Verify `/data/staging/` directory exists and has write permissions
+- Check PUID/PGID match your user
+
+### Getting Help
+
+- Check the [Issues](https://github.com/yourusername/arbitratarr/issues) page
+- Review application logs in the Settings page
+- Enable debug logging for more details
+
+## Development
+
+Interested in contributing? See [CONTRIBUTION.md](CONTRIBUTION.md) for development setup and guidelines.
+
 ## License
 
-MIT
+MIT License - See [LICENSE](LICENSE) file for details.
