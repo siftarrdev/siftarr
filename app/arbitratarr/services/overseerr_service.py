@@ -145,3 +145,48 @@ class OverseerrService:
                 return None
             except httpx.RequestError:
                 return None
+
+    async def approve_request(self, request_id: int) -> bool:
+        """Approve a request in Overseerr via API."""
+        if not self.base_url or not self.api_key:
+            return False
+
+        endpoint = f"{self.base_url}/api/v1/request/{request_id}/approve"
+        client = await self._get_client()
+
+        try:
+            response = await client.post(endpoint)
+            return response.status_code == 200
+        except httpx.RequestError:
+            return False
+
+    async def decline_request(self, request_id: int, reason: str | None = None) -> bool:
+        """Decline a request in Overseerr via API."""
+        if not self.base_url or not self.api_key:
+            return False
+
+        endpoint = f"{self.base_url}/api/v1/request/{request_id}/decline"
+        client = await self._get_client()
+
+        try:
+            body = {"reason": reason} if reason else {}
+            response = await client.post(endpoint, json=body)
+            return response.status_code == 200
+        except httpx.RequestError:
+            return False
+
+    async def get_request_status(self, request_id: int) -> dict | None:
+        """Get request status from Overseerr API."""
+        if not self.base_url or not self.api_key:
+            return None
+
+        endpoint = f"{self.base_url}/api/v1/request/{request_id}"
+        client = await self._get_client()
+
+        try:
+            response = await client.get(endpoint)
+            if response.status_code == 200:
+                return response.json()
+            return None
+        except httpx.RequestError:
+            return None

@@ -58,6 +58,7 @@ class Request(Base):
     requester_email: Mapped[str | None] = mapped_column(String(255), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utc_now)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=_utc_now, onupdate=_utc_now)
+    overseerr_request_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
     # Relationships
     releases: Mapped[list["Release"]] = relationship(

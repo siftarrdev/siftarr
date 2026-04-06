@@ -51,35 +51,58 @@
     <div id="content-active" class="tab-content">
         {% if active_requests %}
         <div class="bg-gray-800 rounded-lg border border-gray-700 overflow-hidden">
-            <table class="min-w-full divide-y divide-gray-700">
-                <thead class="bg-gray-700">
-                    <tr>
-                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Title</th>
-                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Type</th>
-                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Status</th>
-                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Requested</th>
-                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Requested By</th>
-                    </tr>
-                </thead>
-                <tbody class="divide-y divide-gray-700">
-                    {% for req in active_requests %}
-                    <tr class="hover:bg-gray-700">
-                        <td class="px-6 py-4 whitespace-nowrap text-sm">{{ req.title }}</td>
-                        <td class="px-6 py-4 whitespace-nowrap text-sm capitalize">{{ req.media_type.value }}</td>
-                        <td class="px-6 py-4 whitespace-nowrap text-sm">
-                            <span class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full 
-                                {% if req.status.value == 'searching' %}bg-yellow-900 text-yellow-200
-                                {% elif req.status.value == 'downloading' %}bg-blue-900 text-blue-200
-                                {% else %}bg-gray-700 text-gray-300{% endif %}">
-                                {{ req.status.value }}
-                            </span>
-                        </td>
-                        <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-400">{{ req.created_at.strftime('%Y-%m-%d %H:%M') }}</td>
-                        <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-400">{{ req.requester_username or 'Unknown' }}</td>
-                    </tr>
-                    {% endfor %}
-                </tbody>
-            </table>
+            <div class="p-4 border-b border-gray-700">
+                <input type="text" id="filter-input" placeholder="Filter requests..." 
+                       class="w-full md:w-64 px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:border-blue-500">
+            </div>
+            <div class="overflow-x-auto">
+                <table class="min-w-full divide-y divide-gray-700" id="active-requests-table">
+                    <thead class="bg-gray-700">
+                        <tr>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider cursor-pointer hover:bg-gray-600" data-sort="title" data-col="0">Title <span class="sort-indicator text-gray-400"></span></th>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider cursor-pointer hover:bg-gray-600" data-sort="type" data-col="1">Type <span class="sort-indicator text-gray-400"></span></th>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider cursor-pointer hover:bg-gray-600" data-sort="status" data-col="2">Status <span class="sort-indicator text-gray-400"></span></th>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider cursor-pointer hover:bg-gray-600" data-sort="requested" data-col="3">Requested <span class="sort-indicator text-gray-400"></span></th>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider cursor-pointer hover:bg-gray-600" data-sort="requestedby" data-col="4">Requested By <span class="sort-indicator text-gray-400"></span></th>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Overseerr Status</th>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody class="divide-y divide-gray-700" id="active-requests-body">
+                        {% for req in active_requests %}
+                        <tr class="hover:bg-gray-700" data-overseerr="{{ 'true' if req.overseerr_request_id else 'false' }}" data-status="{{ req.status.value }}" data-title="{{ req.title|lower }}" data-type="{{ req.media_type.value|lower }}" data-status-low="{{ req.status.value|lower }}" data-requestedby="{{ req.requester_username|default('Unknown')|lower }}" data-requested="{{ req.created_at.strftime('%Y-%m-%d %H:%M') }}">
+                            <td class="px-6 py-4 whitespace-nowrap text-sm">{{ req.title }}</td>
+                            <td class="px-6 py-4 whitespace-nowrap text-sm capitalize">{{ req.media_type.value }}</td>
+                            <td class="px-6 py-4 whitespace-nowrap text-sm">
+                                <span class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full 
+                                    {% if req.status.value == 'searching' %}bg-yellow-900 text-yellow-200
+                                    {% elif req.status.value == 'downloading' %}bg-blue-900 text-blue-200
+                                    {% else %}bg-gray-700 text-gray-300{% endif %}">
+                                    {{ req.status.value }}
+                                </span>
+                            </td>
+                            <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-400" data-sort-value="{{ req.created_at.strftime('%Y-%m-%d %H:%M') }}">{{ req.created_at.strftime('%Y-%m-%d %H:%M') }}</td>
+                            <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-400">{{ req.requester_username or 'Unknown' }}</td>
+                            <td class="px-6 py-4 whitespace-nowrap text-sm">
+                                {% if req.overseerr_request_id %}
+                                <span class="text-gray-400">Overseerr #{{ req.overseerr_request_id }}</span>
+                                {% endif %}
+                            </td>
+                            <td class="px-6 py-4 whitespace-nowrap text-sm space-x-2">
+                                {% if req.overseerr_request_id and req.status.value in ['PENDING', 'RECEIVED'] %}
+                                <form action="/requests/{{ req.id }}/approve" method="post" class="inline">
+                                    <button type="submit" class="text-green-400 hover:text-green-300">Approve</button>
+                                </form>
+                                <form action="/requests/{{ req.id }}/decline" method="post" class="inline">
+                                    <button type="submit" class="text-red-400 hover:text-red-300">Deny</button>
+                                </form>
+                                {% endif %}
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
         </div>
         {% else %}
         <p class="text-gray-400">No active requests.</p>
@@ -163,18 +186,76 @@
 </div>
 
 <script>
+let currentSort = { column: null, direction: 'asc' };
+
 function showTab(tabName) {
-    // Hide all content
     document.querySelectorAll('.tab-content').forEach(el => el.classList.add('hidden'));
     document.querySelectorAll('.tab-button').forEach(el => {
         el.classList.remove('border-blue-500', 'text-blue-500');
         el.classList.add('border-transparent', 'text-gray-400');
     });
     
-    // Show selected
     document.getElementById('content-' + tabName).classList.remove('hidden');
     document.getElementById('tab-' + tabName).classList.remove('border-transparent', 'text-gray-400');
     document.getElementById('tab-' + tabName).classList.add('border-blue-500', 'text-blue-500');
 }
+
+function filterTable() {
+    const input = document.getElementById('filter-input');
+    const filter = input.value.toLowerCase();
+    const tbody = document.getElementById('active-requests-body');
+    const rows = tbody.querySelectorAll('tr');
+
+    rows.forEach(row => {
+        const title = row.dataset.title;
+        const type = row.dataset.type;
+        const status = row.dataset.statusLow;
+        const requestedBy = row.dataset.requestedby;
+        const textContent = `${title} ${type} ${status} ${requestedBy}`;
+        row.style.display = textContent.includes(filter) ? '' : 'none';
+    });
+}
+
+function sortTable(column, colIndex) {
+    const tbody = document.getElementById('active-requests-body');
+    const rows = Array.from(tbody.querySelectorAll('tr'));
+    
+    if (currentSort.column === column) {
+        currentSort.direction = currentSort.direction === 'asc' ? 'desc' : 'asc';
+    } else {
+        currentSort.column = column;
+        currentSort.direction = 'asc';
+    }
+
+    document.querySelectorAll('#active-requests-table .sort-indicator').forEach(el => el.textContent = '');
+    const activeHeader = document.querySelector(`#active-requests-table th[data-sort="${column}"] .sort-indicator`);
+    activeHeader.textContent = currentSort.direction === 'asc' ? ' ▲' : ' ▼';
+
+    rows.sort((a, b) => {
+        let aVal, bVal;
+        
+        if (column === 'requested') {
+            aVal = a.querySelector(`td:nth-child(${colIndex + 1})`).dataset.sortValue;
+            bVal = b.querySelector(`td:nth-child(${colIndex + 1})`).dataset.sortValue;
+        } else {
+            aVal = a.dataset[column] || '';
+            bVal = b.dataset[column] || '';
+        }
+
+        if (aVal < bVal) return currentSort.direction === 'asc' ? -1 : 1;
+        if (aVal > bVal) return currentSort.direction === 'asc' ? 1 : -1;
+        return 0;
+    });
+
+    rows.forEach(row => tbody.appendChild(row));
+}
+
+document.getElementById('filter-input').addEventListener('input', filterTable);
+
+document.querySelectorAll('#active-requests-table th[data-sort]').forEach(th => {
+    th.addEventListener('click', () => {
+        sortTable(th.dataset.sort, parseInt(th.dataset.col));
+    });
+});
 </script>
 {% endblock %}
