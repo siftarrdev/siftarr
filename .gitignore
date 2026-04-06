@@ -1,0 +1,62 @@
+# Environment and secrets
+.env
+*.env
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.so
+*.egg
+*.egg-info/
+dist/
+build/
+eggs/
+.eggs/
+*.manifest
+*.spec
+
+# Virtual environments
+.venv/
+venv/
+ENV/
+env/
+.env/
+
+# IDE and Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Testing and linting
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+*.cover
+.tox/
+.nox/
+
+# Project specific
+data/
+.plans/
+*.log
+*.sqlite3
+*.db
+*.db-shm
+*.db-wal
+
+# Plans and documentation (if not tracked)
+.plans/
+
+# Temporary files
+*.tmp
+*.temp
+.cache/
