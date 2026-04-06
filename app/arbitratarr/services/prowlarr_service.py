@@ -40,7 +40,10 @@ class ProwlarrService:
         self.api_key = self.settings.prowlarr_api_key
 
     def _get_headers(self) -> dict[str, str]:
-        return {"X-Api-Key": self.api_key}
+        api_key = self.api_key
+        if api_key is None:
+            api_key = ""
+        return {"X-Api-Key": api_key}
 
     def _parse_release_info(self, release: dict) -> ProwlarrRelease:
         """Parse a release from Prowlarr response."""

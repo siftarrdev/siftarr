@@ -1,6 +1,6 @@
 """Pending queue model for items awaiting retry."""
 
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import TYPE_CHECKING
 
 from sqlalchemy import DateTime, ForeignKey, Integer, String
@@ -10,6 +10,11 @@ from app.arbitratarr.models._base import Base  # noqa: PLC0414
 
 if TYPE_CHECKING:
     from app.arbitratarr.models.request import Request
+
+
+def _utc_now() -> datetime:
+    """Return current UTC time as timezone-aware datetime."""
+    return datetime.now(timezone.utc)
 
 
 class PendingQueue(Base):
@@ -22,10 +27,8 @@ class PendingQueue(Base):
     retry_count: Mapped[int] = mapped_column(Integer, default=0)
     next_retry_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
     last_error: Mapped[str | None] = mapped_column(String(1000), nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
-    updated_at: Mapped[datetime] = mapped_column(
-        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
-    )
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utc_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=_utc_now, onupdate=_utc_now)
 
     # Relationships
     request: Mapped["Request"] = relationship("Request", back_populates="pending_item")

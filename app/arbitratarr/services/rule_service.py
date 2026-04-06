@@ -1,9 +1,23 @@
+from typing import TypedDict
+
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.arbitratarr.models.rule import Rule, RuleType
 
-DEFAULT_RULES = [
+
+class RuleData(TypedDict):
+    """Type definition for rule data dictionary."""
+
+    name: str
+    rule_type: RuleType
+    pattern: str
+    score: int
+    priority: int
+    description: str
+
+
+DEFAULT_RULES: list[RuleData] = [
     {
         "name": "Reject Camera/TS/Screener",
         "rule_type": RuleType.EXCLUSION,

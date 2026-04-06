@@ -22,6 +22,7 @@ class TestRuleEngine:
 
         result = engine.evaluate(release)
         assert not result.passed
+        assert result.rejection_reason is not None
         assert "below minimum" in result.rejection_reason
 
     def test_size_filter_max(self) -> None:
@@ -39,6 +40,7 @@ class TestRuleEngine:
 
         result = engine.evaluate(release)
         assert not result.passed
+        assert result.rejection_reason is not None
         assert "above maximum" in result.rejection_reason
 
     def test_exclusion_pattern(self) -> None:
@@ -58,6 +60,7 @@ class TestRuleEngine:
 
         result = engine.evaluate(release)
         assert not result.passed
+        assert result.rejection_reason is not None
         assert "exclusion" in result.rejection_reason.lower()
 
     def test_requirement_pattern(self) -> None:

@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta
+from datetime import datetime, timezone, timedelta
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -63,6 +63,12 @@ class MovieDecisionService:
         # Get rule engine
         rule_engine = await self._get_rule_engine()
 
+        # Check we have a valid TMDB ID
+        if request.tmdb_id is None:
+            request.status = RequestStatus.FAILED
+            await self.db.commit()
+            return {"status": "error", "message": "No TMDB ID available for movie"}
+
         # Search for movie
         search_result = await self.prowlarr.search_by_tmdbid(
             tmdbid=request.tmdb_id,
@@ -75,7 +81,7 @@ class MovieDecisionService:
 
             pending_item = PendingQueue(
                 request_id=request.id,
-                next_retry_at=datetime.utcnow() + timedelta(hours=24),
+                next_retry_at=datetime.now(timezone.utc) + timedelta(hours=24),
                 retry_count=0,
             )
             self.db.add(pending_item)
@@ -120,7 +126,7 @@ class MovieDecisionService:
 
         pending_item = PendingQueue(
             request_id=request.id,
-            next_retry_at=datetime.utcnow() + timedelta(hours=24),
+            next_retry_at=datetime.now(timezone.utc) + timedelta(hours=24),
             retry_count=0,
             last_error="; ".join(set(rejection_reasons))[:500]
             if rejection_reasons

@@ -1,4 +1,5 @@
 import json
+from datetime import timezone
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -88,6 +89,12 @@ class TVDecisionService:
 
         # Get rule engine
         rule_engine = await self._get_rule_engine()
+
+        # Check we have a valid TVDB ID
+        if request.tvdb_id is None:
+            request.status = RequestStatus.FAILED
+            await self.db.commit()
+            return {"status": "error", "message": "No TVDB ID available for TV show"}
 
         # Get requested seasons
         requested_seasons = self._get_requested_seasons(request)
@@ -184,7 +191,7 @@ class TVDecisionService:
 
         pending_item = PendingQueue(
             request_id=request.id,
-            next_retry_at=datetime.utcnow() + timedelta(hours=24),
+            next_retry_at=datetime.now(timezone.utc) + timedelta(hours=24),
             retry_count=0,
         )
         self.db.add(pending_item)

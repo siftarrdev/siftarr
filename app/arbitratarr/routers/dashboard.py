@@ -19,7 +19,7 @@ templates = Jinja2Templates(directory="app/arbitratarr/templates")
 async def dashboard(
     request: Request,
     db: AsyncSession = Depends(get_db),
-) -> templates.TemplateResponse:
+):
     """Display main dashboard."""
     lifecycle_service = LifecycleService(db)
     queue_service = PendingQueueService(db)
@@ -42,6 +42,7 @@ async def dashboard(
     stats = await lifecycle_service.get_requests_stats()
 
     return templates.TemplateResponse(
+        request,
         "dashboard.html",
         {
             "request": request,

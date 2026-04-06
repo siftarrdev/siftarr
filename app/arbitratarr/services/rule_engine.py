@@ -1,6 +1,6 @@
 import re
-from typing import Optional
 from dataclasses import dataclass
+
 from app.arbitratarr.services.prowlarr_service import ProwlarrRelease
 
 
@@ -22,7 +22,7 @@ class ReleaseEvaluation:
     passed: bool
     total_score: int
     matches: list[RuleMatch]
-    rejection_reason: Optional[str] = None
+    rejection_reason: str | None = None
 
 
 class RuleEngine:
@@ -38,13 +38,12 @@ class RuleEngine:
 
     def __init__(
         self,
-        min_size_bytes: Optional[int] = None,
-        max_size_bytes: Optional[int] = None,
-        exclusion_patterns: Optional[list[tuple[int, str, str]]] = None,  # (id, name, pattern)
-        requirement_patterns: Optional[list[tuple[int, str, str]]] = None,  # (id, name, pattern)
-        scorer_patterns: Optional[
-            list[tuple[int, str, str, int]]
-        ] = None,  # (id, name, pattern, score)
+        min_size_bytes: int | None = None,
+        max_size_bytes: int | None = None,
+        exclusion_patterns: list[tuple[int, str, str]] | None = None,  # (id, name, pattern)
+        requirement_patterns: list[tuple[int, str, str]] | None = None,  # (id, name, pattern)
+        scorer_patterns: list[tuple[int, str, str, int]]
+        | None = None,  # (id, name, pattern, score)
     ):
         self.min_size_bytes = min_size_bytes
         self.max_size_bytes = max_size_bytes
@@ -55,9 +54,9 @@ class RuleEngine:
     @classmethod
     def from_db_rules(
         cls,
-        size_min_gb: Optional[float] = None,
-        size_max_gb: Optional[float] = None,
-        rules: Optional[list] = None,
+        size_min_gb: float | None = None,
+        size_max_gb: float | None = None,
+        rules: list | None = None,
     ) -> "RuleEngine":
         """Create RuleEngine from database rules."""
         # Convert GB to bytes
@@ -88,7 +87,7 @@ class RuleEngine:
             scorer_patterns=scorers,
         )
 
-    def _to_bytes(self, size_str: str) -> Optional[int]:
+    def _to_bytes(self, size_str: str) -> int | None:
         """Convert size string like '5GB' to bytes."""
         size_str = size_str.strip().upper()
         multipliers = {
@@ -117,7 +116,7 @@ class RuleEngine:
         matches: list[RuleMatch] = []
         total_score = 0
         passed = True
-        rejection_reason: Optional[str] = None
+        rejection_reason: str | None = None
 
         # Check size limits
         if self.min_size_bytes is not None and release.size < self.min_size_bytes:
@@ -243,7 +242,7 @@ class RuleEngine:
 
         return passed
 
-    def get_best_release(self, releases: list[ProwlarrRelease]) -> Optional[ReleaseEvaluation]:
+    def get_best_release(self, releases: list[ProwlarrRelease]) -> ReleaseEvaluation | None:
         """
         Get the best release from a list.
 

@@ -1,6 +1,6 @@
 """Release model for Prowlarr results."""
 
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import TYPE_CHECKING
 
 from sqlalchemy import BigInteger, Boolean, DateTime, Integer, String, Text
@@ -10,6 +10,11 @@ from app.arbitratarr.models._base import Base  # noqa: PLC0414
 
 if TYPE_CHECKING:
     from app.arbitratarr.models.request import Request
+
+
+def _utc_now() -> datetime:
+    """Return current UTC time as timezone-aware datetime."""
+    return datetime.now(timezone.utc)
 
 
 class Release(Base):
@@ -43,7 +48,7 @@ class Release(Base):
     # Status tracking
     is_downloaded: Mapped[bool] = mapped_column(Boolean, default=False)
     downloaded_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utc_now)
 
     # Relationships
     request: Mapped["Request"] = relationship("Request", back_populates="releases")

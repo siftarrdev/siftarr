@@ -1,11 +1,16 @@
 """Staged torrent metadata model."""
 
-from datetime import datetime
+from datetime import datetime, timezone
 
 from sqlalchemy import BigInteger, DateTime, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.arbitratarr.models._base import Base
+
+
+def _utc_now() -> datetime:
+    """Return current UTC time as timezone-aware datetime."""
+    return datetime.now(timezone.utc)
 
 
 class StagedTorrent(Base):
@@ -28,10 +33,8 @@ class StagedTorrent(Base):
 
     # Status
     status: Mapped[str] = mapped_column(String(50), default="staged")  # staged, approved, discarded
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
-    updated_at: Mapped[datetime] = mapped_column(
-        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
-    )
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utc_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=_utc_now, onupdate=_utc_now)
 
     def __repr__(self) -> str:
         return f"<StagedTorrent(id={self.id}, title='{self.title[:30]}...')>"

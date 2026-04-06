@@ -1,7 +1,7 @@
 """Request model for Overseerr requests."""
 
 import enum
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import TYPE_CHECKING
 
 from sqlalchemy import DateTime, Integer, String
@@ -15,12 +15,17 @@ if TYPE_CHECKING:
     from app.arbitratarr.models.release import Release
 
 
-class MediaType(enum.StrEnum):
+def _utc_now() -> datetime:
+    """Return current UTC time as timezone-aware datetime."""
+    return datetime.now(timezone.utc)
+
+
+class MediaType(str, enum.Enum):
     MOVIE = "movie"
     TV = "tv"
 
 
-class RequestStatus(enum.StrEnum):
+class RequestStatus(str, enum.Enum):
     RECEIVED = "received"
     SEARCHING = "searching"
     PENDING = "pending"
@@ -51,10 +56,8 @@ class Request(Base):
     )
     requester_username: Mapped[str | None] = mapped_column(String(255), nullable=True)
     requester_email: Mapped[str | None] = mapped_column(String(255), nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
-    updated_at: Mapped[datetime] = mapped_column(
-        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
-    )
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utc_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=_utc_now, onupdate=_utc_now)
 
     # Relationships
     releases: Mapped[list["Release"]] = relationship(

@@ -1,10 +1,9 @@
 """Router for rules management pages."""
 
 import re
-from typing import Optional
 
-from fastapi import APIRouter, Form, HTTPException, Request
-from fastapi.responses import RedirectResponse
+from fastapi import APIRouter, Depends, Form, HTTPException, Request
+from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -19,34 +18,38 @@ templates = Jinja2Templates(directory="app/arbitratarr/templates")
 
 
 @router.get("")
-async def list_rules(request: Request, db: AsyncSession = None) -> templates.TemplateResponse:
+async def list_rules(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+) -> HTMLResponse:
     """List all rules grouped by type."""
-    async with get_db() as db:
-        rule_service = RuleService(db)
+    rule_service = RuleService(db)
 
-        exclusions = await rule_service.get_exclusions()
-        requirements = await rule_service.get_requirements()
-        scorers = await rule_service.get_scorers()
+    exclusions = await rule_service.get_exclusions()
+    requirements = await rule_service.get_requirements()
+    scorers = await rule_service.get_scorers()
 
-        return templates.TemplateResponse(
-            "rules.html",
-            {
-                "request": request,
-                "exclusion_rules": exclusions,
-                "requirement_rules": requirements,
-                "scorer_rules": scorers,
-                "size_limits": {"min": None, "max": None},
-            },
-        )
+    return templates.TemplateResponse(
+        request,
+        "rules.html",
+        {
+            "request": request,
+            "exclusion_rules": exclusions,
+            "requirement_rules": requirements,
+            "scorer_rules": scorers,
+            "size_limits": {"min": None, "max": None},
+        },
+    )
 
 
 @router.get("/new")
 async def new_rule_form(
     request: Request,
-    rule_type: Optional[str] = None,
-) -> templates.TemplateResponse:
+    rule_type: str | None = None,
+) -> HTMLResponse:
     """Show form to create a new rule."""
     return templates.TemplateResponse(
+        request,
         "rule_form.html",
         {
             "request": request,
@@ -64,24 +67,24 @@ async def create_rule(
     rule_type: str = Form(...),
     pattern: str = Form(...),
     score: int = Form(0),
-    description: Optional[str] = Form(None),
+    description: str | None = Form(None),
+    db: AsyncSession = Depends(get_db),
 ) -> RedirectResponse:
     """Create a new rule."""
     # Validate regex pattern
     try:
         re.compile(pattern)
     except re.error as e:
-        raise HTTPException(status_code=400, detail=f"Invalid regex pattern: {e}")
+        raise HTTPException(status_code=400, detail=f"Invalid regex pattern: {e}") from e
 
-    async with get_db() as db:
-        rule_service = RuleService(db)
-        await rule_service.create_rule(
-            name=name,
-            rule_type=RuleType(rule_type),
-            pattern=pattern,
-            score=score,
-            description=description,
-        )
+    rule_service = RuleService(db)
+    await rule_service.create_rule(
+        name=name,
+        rule_type=RuleType(rule_type),
+        pattern=pattern,
+        score=score,
+        description=description,
+    )
 
     return RedirectResponse(url="/rules", status_code=303)
 
@@ -90,23 +93,24 @@ async def create_rule(
 async def edit_rule_form(
     request: Request,
     rule_id: int,
-) -> templates.TemplateResponse:
+    db: AsyncSession = Depends(get_db),
+) -> HTMLResponse:
     """Show form to edit a rule."""
-    async with get_db() as db:
-        rule_service = RuleService(db)
-        rule = await rule_service.get_rule_by_id(rule_id)
+    rule_service = RuleService(db)
+    rule = await rule_service.get_rule_by_id(rule_id)
 
-        if not rule:
-            raise HTTPException(status_code=404, detail="Rule not found")
+    if not rule:
+        raise HTTPException(status_code=404, detail="Rule not found")
 
-        return templates.TemplateResponse(
-            "rule_form.html",
-            {
-                "request": request,
-                "rule": rule,
-                "action": f"/rules/{rule_id}",
-            },
-        )
+    return templates.TemplateResponse(
+        request,
+        "rule_form.html",
+        {
+            "request": request,
+            "rule": rule,
+            "action": f"/rules/{rule_id}",
+        },
+    )
 
 
 @router.post("/{rule_id}")
@@ -116,27 +120,27 @@ async def update_rule(
     name: str = Form(...),
     pattern: str = Form(...),
     score: int = Form(0),
-    description: Optional[str] = Form(None),
+    description: str | None = Form(None),
+    db: AsyncSession = Depends(get_db),
 ) -> RedirectResponse:
     """Update an existing rule."""
     # Validate regex pattern
     try:
         re.compile(pattern)
     except re.error as e:
-        raise HTTPException(status_code=400, detail=f"Invalid regex pattern: {e}")
+        raise HTTPException(status_code=400, detail=f"Invalid regex pattern: {e}") from e
 
-    async with get_db() as db:
-        rule_service = RuleService(db)
-        rule = await rule_service.update_rule(
-            rule_id=rule_id,
-            name=name,
-            pattern=pattern,
-            score=score,
-            description=description,
-        )
+    rule_service = RuleService(db)
+    rule = await rule_service.update_rule(
+        rule_id=rule_id,
+        name=name,
+        pattern=pattern,
+        score=score,
+        description=description,
+    )
 
-        if not rule:
-            raise HTTPException(status_code=404, detail="Rule not found")
+    if not rule:
+        raise HTTPException(status_code=404, detail="Rule not found")
 
     return RedirectResponse(url="/rules", status_code=303)
 
@@ -144,14 +148,14 @@ async def update_rule(
 @router.post("/{rule_id}/toggle")
 async def toggle_rule(
     rule_id: int,
+    db: AsyncSession = Depends(get_db),
 ) -> RedirectResponse:
     """Toggle a rule's enabled status."""
-    async with get_db() as db:
-        rule_service = RuleService(db)
-        rule = await rule_service.toggle_rule(rule_id)
+    rule_service = RuleService(db)
+    rule = await rule_service.toggle_rule(rule_id)
 
-        if not rule:
-            raise HTTPException(status_code=404, detail="Rule not found")
+    if not rule:
+        raise HTTPException(status_code=404, detail="Rule not found")
 
     return RedirectResponse(url="/rules", status_code=303)
 
@@ -159,14 +163,14 @@ async def toggle_rule(
 @router.post("/{rule_id}/delete")
 async def delete_rule(
     rule_id: int,
+    db: AsyncSession = Depends(get_db),
 ) -> RedirectResponse:
     """Delete a rule."""
-    async with get_db() as db:
-        rule_service = RuleService(db)
-        deleted = await rule_service.delete_rule(rule_id)
+    rule_service = RuleService(db)
+    deleted = await rule_service.delete_rule(rule_id)
 
-        if not deleted:
-            raise HTTPException(status_code=404, detail="Rule not found")
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Rule not found")
 
     return RedirectResponse(url="/rules", status_code=303)
 
@@ -175,47 +179,48 @@ async def delete_rule(
 async def test_rule(
     request: Request,
     title: str = Form(...),
-) -> templates.TemplateResponse:
+    db: AsyncSession = Depends(get_db),
+) -> HTMLResponse:
     """Test a release title against all rules."""
-    async with get_db() as db:
-        from sqlalchemy import select
+    from sqlalchemy import select
 
-        result = await db.execute(select(Rule))
-        rules = list(result.scalars().all())
+    result = await db.execute(select(Rule))
+    rules = list(result.scalars().all())
 
-        engine = RuleEngine.from_db_rules(rules=rules)
+    engine = RuleEngine.from_db_rules(rules=rules)
 
-        # Create a mock release for testing
-        mock_release = ProwlarrRelease(
-            title=title,
-            size=0,
-            seeders=0,
-            leechers=0,
-            download_url="",
-            indexer="test",
-        )
+    # Create a mock release for testing
+    mock_release = ProwlarrRelease(
+        title=title,
+        size=0,
+        seeders=0,
+        leechers=0,
+        download_url="",
+        indexer="test",
+    )
 
-        evaluation = engine.evaluate(mock_release)
+    evaluation = engine.evaluate(mock_release)
 
-        # Re-render the rules page with test results
-        rule_service = RuleService(db)
-        exclusions = await rule_service.get_exclusions()
-        requirements = await rule_service.get_requirements()
-        scorers = await rule_service.get_scorers()
+    # Re-render the rules page with test results
+    rule_service = RuleService(db)
+    exclusions = await rule_service.get_exclusions()
+    requirements = await rule_service.get_requirements()
+    scorers = await rule_service.get_scorers()
 
-        return templates.TemplateResponse(
-            "rules.html",
-            {
-                "request": request,
-                "exclusion_rules": exclusions,
-                "requirement_rules": requirements,
-                "scorer_rules": scorers,
-                "size_limits": {"min": None, "max": None},
-                "test_result": {
-                    "passed": evaluation.passed,
-                    "rejection_reason": evaluation.rejection_reason,
-                    "total_score": evaluation.total_score,
-                    "matched_rules": [m for m in evaluation.matches if m.matched],
-                },
+    return templates.TemplateResponse(
+        request,
+        "rules.html",
+        {
+            "request": request,
+            "exclusion_rules": exclusions,
+            "requirement_rules": requirements,
+            "scorer_rules": scorers,
+            "size_limits": {"min": None, "max": None},
+            "test_result": {
+                "passed": evaluation.passed,
+                "rejection_reason": evaluation.rejection_reason,
+                "total_score": evaluation.total_score,
+                "matched_rules": [m for m in evaluation.matches if m.matched],
             },
-        )
+        },
+    )

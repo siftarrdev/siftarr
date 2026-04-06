@@ -1,6 +1,6 @@
-from datetime import datetime, timedelta
-from typing import Optional
-from sqlalchemy import select, and_
+from datetime import datetime, timezone, timedelta
+
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.arbitratarr.models.pending_queue import PendingQueue
@@ -22,7 +22,7 @@ class PendingQueueService:
         self,
         request_id: int,
         retry_interval_hours: int = 24,
-        error_message: Optional[str] = None,
+        error_message: str | None = None,
     ) -> PendingQueue:
         """
         Add a request to the pending queue.
@@ -35,7 +35,7 @@ class PendingQueueService:
         Returns:
             The created PendingQueue entry
         """
-        next_retry = datetime.utcnow() + timedelta(hours=retry_interval_hours)
+        next_retry = datetime.now(timezone.utc) + timedelta(hours=retry_interval_hours)
 
         # Check if already in queue
         existing = await self.get_by_request_id(request_id)
@@ -58,7 +58,7 @@ class PendingQueueService:
         await self.db.refresh(entry)
         return entry
 
-    async def get_by_request_id(self, request_id: int) -> Optional[PendingQueue]:
+    async def get_by_request_id(self, request_id: int) -> PendingQueue | None:
         """Get pending queue entry by request ID."""
         result = await self.db.execute(
             select(PendingQueue).where(PendingQueue.request_id == request_id)
@@ -71,7 +71,7 @@ class PendingQueueService:
 
         Returns items where next_retry_at <= now.
         """
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
         result = await self.db.execute(
             select(PendingQueue)
             .where(PendingQueue.next_retry_at <= now)
@@ -130,7 +130,7 @@ class PendingQueueService:
             return True, True
 
         # Update next retry time
-        entry.next_retry_at = datetime.utcnow() + timedelta(hours=24)
+        entry.next_retry_at = datetime.now(timezone.utc) + timedelta(hours=24)
         await self.db.commit()
         return True, False
 
@@ -148,7 +148,7 @@ class PendingQueueService:
         """Get statistics about the pending queue."""
         result = await self.db.execute(select(PendingQueue))
         all_items = list(result.scalars().all())
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
 
         ready = [i for i in all_items if i.next_retry_at <= now]
         waiting = [i for i in all_items if i.next_retry_at > now]

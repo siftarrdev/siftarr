@@ -1,8 +1,9 @@
 """Service for interacting with qBittorrent API."""
 
-import qbittorrentapi
-from typing import Optional
+import asyncio
 from enum import Enum
+
+import qbittorrentapi
 
 
 class MediaCategory(str, Enum):
@@ -20,7 +21,7 @@ class QbittorrentService:
         from app.arbitratarr.config import get_settings
 
         self.settings = get_settings()
-        self._client: Optional[qbittorrentapi.Client] = None
+        self._client: qbittorrentapi.Client | None = None
 
     @property
     def client(self) -> qbittorrentapi.Client:
@@ -40,7 +41,7 @@ class QbittorrentService:
             True if authentication successful, False otherwise.
         """
         try:
-            await self.client.auth.log_in()
+            await asyncio.to_thread(self.client.auth.log_in)
             return True
         except qbittorrentapi.LoginFailed:
             return False
@@ -55,9 +56,10 @@ class QbittorrentService:
             True if category exists or was created, False otherwise.
         """
         try:
-            categories = await self.client.torrents_categories()
+            categories = await asyncio.to_thread(self.client.torrents_categories)
             if category not in categories:
-                await self.client.torrents_create_category(
+                await asyncio.to_thread(
+                    self.client.torrents_create_category,
                     name=category,
                     save_path=None,
                 )
@@ -67,14 +69,14 @@ class QbittorrentService:
 
     async def add_torrent(
         self,
-        torrent_path: Optional[str] = None,
-        magnet_uri: Optional[str] = None,
+        torrent_path: str | None = None,
+        magnet_uri: str | None = None,
         category: MediaCategory = MediaCategory.MOVIES,
-        download_path: Optional[str] = None,
+        download_path: str | None = None,
         is_paused: bool = False,
-        ratio_limit: Optional[float] = None,
-        seeding_time_limit: Optional[int] = None,
-    ) -> Optional[str]:
+        ratio_limit: float | None = None,
+        seeding_time_limit: int | None = None,
+    ) -> str | None:
         """Add a torrent to qBittorrent.
 
         Args:
@@ -93,31 +95,28 @@ class QbittorrentService:
             # Ensure category exists
             await self.ensure_category_exists(category.value)
 
-            # Prepare kwargs
-            kwargs: dict[str, object] = {
-                "category": category.value,
-                "is_paused": is_paused,
-            }
-
-            if download_path:
-                kwargs["download_path"] = download_path
-            if ratio_limit is not None:
-                kwargs["ratio_limit"] = ratio_limit
-            if seeding_time_limit is not None:
-                kwargs["seeding_time_limit"] = seeding_time_limit
-
             # Add torrent
             if magnet_uri:
-                result = await self.client.torrents_add(
+                result = await asyncio.to_thread(
+                    self.client.torrents_add,
                     urls=magnet_uri,
-                    **kwargs,
+                    category=category.value,
+                    is_paused=is_paused,
+                    download_path=download_path,
+                    ratio_limit=ratio_limit,
+                    seeding_time_limit=seeding_time_limit,
                 )
             elif torrent_path:
                 with open(torrent_path, "rb") as f:
                     torrent_data = f.read()
-                result = await self.client.torrents_add(
+                result = await asyncio.to_thread(
+                    self.client.torrents_add,
                     torrent_files=[torrent_data],
-                    **kwargs,
+                    category=category.value,
+                    is_paused=is_paused,
+                    download_path=download_path,
+                    ratio_limit=ratio_limit,
+                    seeding_time_limit=seeding_time_limit,
                 )
             else:
                 raise ValueError("Either torrent_path or magnet_uri must be provided")
@@ -126,18 +125,18 @@ class QbittorrentService:
             if result == "Ok.":
                 # Get torrent hash if we have a magnet URI
                 if magnet_uri:
-                    torrents = await self.client.torrents_info()
+                    torrents = await asyncio.to_thread(self.client.torrents_info)
                     # Find the torrent we just added (most recent)
                     for torrent in sorted(torrents, key=lambda t: t.added_on, reverse=True):
                         if magnet_uri in (torrent.magnet_uri or ""):
-                            return torrent.hash
-                return result
+                            return str(torrent.hash)
+                return str(result) if result == "Ok." else None
             return None
         except Exception as e:
             print(f"Error adding torrent: {e}")
             return None
 
-    async def get_torrent_info(self, torrent_hash: str) -> Optional[dict]:
+    async def get_torrent_info(self, torrent_hash: str) -> dict | None:
         """Get information about a torrent.
 
         Args:
@@ -147,7 +146,10 @@ class QbittorrentService:
             A dict containing torrent information if found, None otherwise.
         """
         try:
-            torrents = await self.client.torrents_info(torrent_hashes=torrent_hash)
+            torrents = await asyncio.to_thread(
+                self.client.torrents_info,
+                torrent_hashes=torrent_hash,
+            )
             if torrents:
                 torrent = torrents[0]
                 return {
@@ -176,7 +178,10 @@ class QbittorrentService:
             A list of dicts containing torrent information.
         """
         try:
-            torrents = await self.client.torrents_info(category=category)
+            torrents = await asyncio.to_thread(
+                self.client.torrents_info,
+                category=category,
+            )
             return [
                 {
                     "hash": t.hash,
@@ -201,7 +206,8 @@ class QbittorrentService:
             True if deletion successful, False otherwise.
         """
         try:
-            await self.client.torrents_delete(
+            await asyncio.to_thread(
+                self.client.torrents_delete,
                 torrent_hashes=torrent_hash,
                 delete_files=delete_files,
             )

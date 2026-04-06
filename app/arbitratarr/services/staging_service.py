@@ -3,9 +3,8 @@
 import json
 import os
 import re
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
-from typing import Optional
 
 import httpx
 from sqlalchemy import select
@@ -30,7 +29,7 @@ class StagingService:
     - {sanitized_title}_{release_group}_{request_id}.json (metadata)
     """
 
-    def __init__(self, db: AsyncSession) -> None:
+    def __init__(self, db: AsyncSession | None) -> None:
         self.db = db
 
     def _sanitize_filename(self, title: str) -> str:
@@ -50,7 +49,7 @@ class StagingService:
     def _generate_filename(
         self,
         title: str,
-        release_group: Optional[str],
+        release_group: str | None,
         request_id: int,
     ) -> str:
         """Generate a human-readable filename."""
@@ -75,7 +74,12 @@ class StagingService:
 
         Returns:
             The created StagedTorrent record
+
+        Raises:
+            RuntimeError: If database session is not available
         """
+        if self.db is None:
+            raise RuntimeError("Database session is required for save_release")
         # Generate filename
         filename = self._generate_filename(
             title=release.title,
@@ -124,7 +128,7 @@ class StagingService:
                 "download_url": release.download_url,
                 "magnet_url": release.magnet_url,
             },
-            "staged_at": datetime.utcnow().isoformat(),
+            "staged_at": datetime.now(timezone.utc).isoformat(),
             "filename": filename,
         }
 
@@ -151,13 +155,17 @@ class StagingService:
 
         return staged
 
-    async def get_staged_torrent(self, torrent_id: int) -> Optional[StagedTorrent]:
+    async def get_staged_torrent(self, torrent_id: int) -> StagedTorrent | None:
         """Get a staged torrent by ID."""
+        if self.db is None:
+            raise RuntimeError("Database session is required for get_staged_torrent")
         result = await self.db.execute(select(StagedTorrent).where(StagedTorrent.id == torrent_id))
         return result.scalar_one_or_none()
 
     async def get_all_staged(self) -> list[StagedTorrent]:
         """Get all staged torrents."""
+        if self.db is None:
+            raise RuntimeError("Database session is required for get_all_staged")
         result = await self.db.execute(
             select(StagedTorrent)
             .where(StagedTorrent.status == "staged")
@@ -186,6 +194,9 @@ class StagingService:
 
         Returns list of any orphaned files found.
         """
+        if self.db is None:
+            raise RuntimeError("Database session is required for scan_staging_directory")
+
         orphaned = []
 
         if not STAGING_DIR.exists():

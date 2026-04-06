@@ -1,7 +1,7 @@
 """Settings page router for viewing and editing application settings."""
 
 from fastapi import APIRouter, Depends, Form, Request
-from fastapi.responses import RedirectResponse
+from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -20,8 +20,8 @@ templates = Jinja2Templates(directory="app/arbitratarr/templates")
 @router.get("")
 async def get_settings_page(
     request: Request,
-    db: AsyncSession = Depends(get_db),  # noqa: B008
-) -> templates.TemplateResponse:
+    db: AsyncSession = Depends(get_db),
+) -> HTMLResponse:
     """Display settings page."""
     settings = get_settings()
 
@@ -47,6 +47,7 @@ async def get_settings_page(
     failed = sum(1 for s in all_statuses if s == RequestStatus.FAILED)
 
     return templates.TemplateResponse(
+        request,
         "settings.html",
         {
             "request": request,
@@ -70,7 +71,7 @@ async def get_settings_page(
 
 @router.post("/staging")
 async def toggle_staging_mode(
-    db: AsyncSession = Depends(get_db),  # noqa: B008
+    db: AsyncSession = Depends(get_db),
 ) -> RedirectResponse:
     """Toggle staging mode."""
     result = await db.execute(
@@ -96,8 +97,8 @@ async def toggle_staging_mode(
 @router.post("/retry-pending")
 async def retry_pending(
     request: Request,
-    db: AsyncSession = Depends(get_db),  # noqa: B008
-) -> templates.TemplateResponse:
+    db: AsyncSession = Depends(get_db),
+) -> HTMLResponse:
     """Manually trigger retry of pending items."""
     from app.arbitratarr.main import scheduler_service
 
@@ -108,6 +109,7 @@ async def retry_pending(
         message = "Scheduler not available"
 
     return templates.TemplateResponse(
+        request,
         "settings.html",
         {
             "request": request,
@@ -118,10 +120,11 @@ async def retry_pending(
 
 
 @router.post("/sync-overseerr")
-async def sync_overseerr(request: Request) -> templates.TemplateResponse:
+async def sync_overseerr(request: Request) -> HTMLResponse:
     """Sync with Overseerr for new requests."""
     # TODO: Implement Overseerr sync
     return templates.TemplateResponse(
+        request,
         "settings.html",
         {
             "request": request,
@@ -134,13 +137,14 @@ async def sync_overseerr(request: Request) -> templates.TemplateResponse:
 @router.post("/reseed-rules")
 async def reseed_rules(
     request: Request,
-    db: AsyncSession = Depends(get_db),  # noqa: B008
-) -> templates.TemplateResponse:
+    db: AsyncSession = Depends(get_db),
+) -> HTMLResponse:
     """Reseed default rules."""
     rule_service = RuleService(db)
     await rule_service.seed_default_rules()
 
     return templates.TemplateResponse(
+        request,
         "settings.html",
         {
             "request": request,
@@ -155,7 +159,7 @@ async def update_size_limits(
     request: Request,
     min_size: float | None = Form(None),
     max_size: float | None = Form(None),
-    db: AsyncSession = Depends(get_db),  # noqa: B008
+    db: AsyncSession = Depends(get_db),
 ) -> RedirectResponse:
     """Update size limit settings."""
     # TODO: Implement size limit settings

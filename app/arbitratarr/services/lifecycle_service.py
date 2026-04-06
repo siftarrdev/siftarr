@@ -1,5 +1,4 @@
-from datetime import datetime
-from typing import Optional
+from datetime import datetime, timezone
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -61,8 +60,8 @@ class LifecycleService:
         self,
         request_id: int,
         new_status: RequestStatus,
-        reason: Optional[str] = None,
-    ) -> Optional[Request]:
+        reason: str | None = None,
+    ) -> Request | None:
         """
         Transition a request to a new status.
 
@@ -84,13 +83,13 @@ class LifecycleService:
             raise ValueError(f"Invalid transition from {request.status} to {new_status}")
 
         request.status = new_status
-        request.updated_at = datetime.utcnow()
+        request.updated_at = datetime.now(timezone.utc)
         await self.db.commit()
         await self.db.refresh(request)
 
         return request
 
-    async def get_request_status(self, request_id: int) -> Optional[RequestStatus]:
+    async def get_request_status(self, request_id: int) -> RequestStatus | None:
         """Get the current status of a request."""
         result = await self.db.execute(select(Request.status).where(Request.id == request_id))
         return result.scalar_one_or_none()
@@ -150,10 +149,10 @@ class LifecycleService:
     async def update_request_metadata(
         self,
         request_id: int,
-        title: Optional[str] = None,
-        year: Optional[int] = None,
-        overview: Optional[str] = None,
-    ) -> Optional[Request]:
+        title: str | None = None,
+        year: int | None = None,
+        overview: str | None = None,
+    ) -> Request | None:
         """Update request metadata (title, year, etc.)."""
         result = await self.db.execute(select(Request).where(Request.id == request_id))
         request = result.scalar_one_or_none()
@@ -166,32 +165,32 @@ class LifecycleService:
         if year is not None:
             request.year = year
 
-        request.updated_at = datetime.utcnow()
+        request.updated_at = datetime.now(timezone.utc)
         await self.db.commit()
         await self.db.refresh(request)
 
         return request
 
-    async def mark_as_staged(self, request_id: int) -> Optional[Request]:
+    async def mark_as_staged(self, request_id: int) -> Request | None:
         """Convenience method to mark a request as staged."""
         return await self.transition(request_id, RequestStatus.STAGED)
 
-    async def mark_as_downloading(self, request_id: int) -> Optional[Request]:
+    async def mark_as_downloading(self, request_id: int) -> Request | None:
         """Convenience method to mark a request as downloading."""
         return await self.transition(request_id, RequestStatus.DOWNLOADING)
 
-    async def mark_as_completed(self, request_id: int) -> Optional[Request]:
+    async def mark_as_completed(self, request_id: int) -> Request | None:
         """Convenience method to mark a request as completed."""
         return await self.transition(request_id, RequestStatus.COMPLETED)
 
     async def mark_as_failed(
         self,
         request_id: int,
-        reason: Optional[str] = None,
-    ) -> Optional[Request]:
+        reason: str | None = None,
+    ) -> Request | None:
         """Convenience method to mark a request as failed."""
         return await self.transition(request_id, RequestStatus.FAILED, reason)
 
-    async def mark_as_pending(self, request_id: int) -> Optional[Request]:
+    async def mark_as_pending(self, request_id: int) -> Request | None:
         """Convenience method to mark a request as pending."""
         return await self.transition(request_id, RequestStatus.PENDING)
