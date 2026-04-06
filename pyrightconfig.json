@@ -1,8 +1,0 @@
-[pyright]
-strict = true
-pythonVersion = "3.12"
-
-[tool.pyright]
-include = ["app"]
-pythonVersion = "3.12"
-typeCheckingMode = "strict"

@@ -98,7 +98,7 @@ received → searching → pending (retry every 24h)
 
 ## Development
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup.
+See [docs/CONTRIBUTING.md](docs/CONTRIBUTING.md) for development setup.
 
 ## License
 
