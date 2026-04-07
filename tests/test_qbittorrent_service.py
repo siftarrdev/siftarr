@@ -24,7 +24,9 @@ class TestQbittorrentServiceUnit:
 
     def test_client_property_creates_client(self):
         """Test client property creates qbittorrent client when accessed."""
-        with patch("app.arbitratarr.config.get_settings") as mock_get_settings:
+        with patch(
+            "app.arbitratarr.services.qbittorrent_service.get_settings"
+        ) as mock_get_settings:
             mock_settings = MagicMock()
             mock_settings.qbittorrent_url = "http://localhost:8080"
             mock_settings.qbittorrent_username = "admin"
@@ -43,7 +45,9 @@ class TestQbittorrentServiceUnit:
 
     def test_client_property_reuses_client(self):
         """Test client property reuses existing client."""
-        with patch("app.arbitratarr.config.get_settings") as mock_get_settings:
+        with patch(
+            "app.arbitratarr.services.qbittorrent_service.get_settings"
+        ) as mock_get_settings:
             mock_settings = MagicMock()
             mock_settings.qbittorrent_url = "http://localhost:8080"
             mock_settings.qbittorrent_username = "admin"
@@ -94,7 +98,9 @@ class TestQbittorrentServiceUnit:
             mock_client = MagicMock()
             service._client = mock_client
 
-            with patch("asyncio.to_thread", side_effect=qbittorrentapi.LoginFailed("Invalid credentials")):
+            with patch(
+                "asyncio.to_thread", side_effect=qbittorrentapi.LoginFailed("Invalid credentials")
+            ):
                 result = await service.authenticate()
                 assert result is False
 
@@ -113,7 +119,9 @@ class TestQbittorrentServiceUnit:
             mock_client.torrents_categories = {"radarr", "sonarr"}
             service._client = mock_client
 
-            with patch("asyncio.to_thread", AsyncMock(return_value=mock_client.torrents_categories)):
+            with patch(
+                "asyncio.to_thread", AsyncMock(return_value=mock_client.torrents_categories)
+            ):
                 result = await service.ensure_category_exists("radarr")
                 assert result is True
 
@@ -165,6 +173,7 @@ class TestQbittorrentServiceUnit:
             with patch("asyncio.to_thread", AsyncMock(return_value=[mock_torrent])):
                 result = await service.get_torrent_info("abc123")
 
+                assert result is not None
                 assert result["hash"] == "abc123"
                 assert result["name"] == "Test.Torrent"
 

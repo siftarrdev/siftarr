@@ -1,13 +1,13 @@
-from datetime import UTC, datetime, timedelta
-
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.arbitratarr.models.pending_queue import PendingQueue
+from app.arbitratarr.models.release import Release
 from app.arbitratarr.models.request import MediaType, Request, RequestStatus
 from app.arbitratarr.models.rule import Rule
+from app.arbitratarr.services.pending_queue_service import PendingQueueService
 from app.arbitratarr.services.prowlarr_service import ProwlarrService
 from app.arbitratarr.services.qbittorrent_service import QbittorrentService
+from app.arbitratarr.services.release_selection_service import store_search_results, use_releases
 from app.arbitratarr.services.rule_engine import RuleEngine
 
 
@@ -38,7 +38,7 @@ class MovieDecisionService:
         result = await self.db.execute(select(Rule))
         rules = list(result.scalars().all())
 
-        return RuleEngine.from_db_rules(rules=rules)
+        return RuleEngine.from_db_rules(rules=rules, media_type=MediaType.MOVIE.value)
 
     async def process_request(self, request_id: int) -> dict:
         """
@@ -72,6 +72,8 @@ class MovieDecisionService:
         # Search for movie
         search_result = await self.prowlarr.search_by_tmdbid(
             tmdbid=request.tmdb_id,
+            title=request.title,
+            year=request.year,
         )
 
         if not search_result.releases:
@@ -79,29 +81,37 @@ class MovieDecisionService:
             request.status = RequestStatus.PENDING
             await self.db.commit()
 
-            pending_item = PendingQueue(
-                request_id=request.id,
-                next_retry_at=datetime.now(UTC) + timedelta(hours=24),
-                retry_count=0,
-            )
-            self.db.add(pending_item)
-            await self.db.commit()
+            queue_service = PendingQueueService(self.db)
+            await queue_service.add_to_queue(request.id)
 
             return {
                 "status": "pending",
                 "message": "No releases found in Prowlarr, added to pending queue",
             }
 
-        # Evaluate all releases
-        best = rule_engine.get_best_release(search_result.releases)
+        all_evaluated = [rule_engine.evaluate(release) for release in search_result.releases]
+        await store_search_results(self.db, request.id, all_evaluated)
+
+        passed_results = [evaluation for evaluation in all_evaluated if evaluation.passed]
+        best = passed_results[0] if passed_results else None
 
         if best:
-            # Found a passing release
-            request.status = RequestStatus.COMPLETED
-            await self.db.commit()
+            release_result = await self.db.execute(
+                select(Release).where(
+                    Release.request_id == request.id,
+                    Release.title == best.release.title,
+                )
+            )
+            stored_release = release_result.scalar_one_or_none()
+            action_result = await use_releases(
+                self.db,
+                request,
+                [stored_release] if stored_release else [],
+                selection_source="rule",
+            )
 
             return {
-                "status": "completed",
+                "status": action_result["status"],
                 "selected_release": {
                     "title": best.release.title,
                     "score": best.total_score,
@@ -110,30 +120,25 @@ class MovieDecisionService:
                     "download_url": best.release.download_url,
                     "magnet_url": best.release.magnet_url,
                 },
-                "message": f"Selected release with score {best.total_score}",
+                "message": action_result["message"],
             }
 
         # No releases passed rules - add to pending queue
         request.status = RequestStatus.PENDING
         await self.db.commit()
 
-        # Get rejection info
-        evaluated = rule_engine.evaluate_batch(search_result.releases)
         rejection_reasons = []
-        for e in evaluated:
+        for e in all_evaluated:
             if e.rejection_reason:
                 rejection_reasons.append(e.rejection_reason)
 
-        pending_item = PendingQueue(
-            request_id=request.id,
-            next_retry_at=datetime.now(UTC) + timedelta(hours=24),
-            retry_count=0,
-            last_error="; ".join(set(rejection_reasons))[:500]
+        queue_service = PendingQueueService(self.db)
+        await queue_service.add_to_queue(
+            request.id,
+            error_message="; ".join(set(rejection_reasons))[:500]
             if rejection_reasons
             else "All releases rejected by rules",
         )
-        self.db.add(pending_item)
-        await self.db.commit()
 
         return {
             "status": "pending",

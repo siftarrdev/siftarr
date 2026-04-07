@@ -62,6 +62,8 @@ class StagingService:
         self,
         release: ProwlarrRelease,
         request: Request,
+        score: int = 0,
+        selection_source: str = "rule",
     ) -> StagedTorrent:
         """
         Save a release to staging.
@@ -144,8 +146,9 @@ class StagingService:
             title=release.title,
             size=release.size,
             indexer=release.indexer,
-            score=0,  # Could calculate this from rules
+            score=score,
             magnet_url=release.magnet_url,
+            selection_source=selection_source,
             status="staged",
         )
 

@@ -12,6 +12,7 @@ from app.arbitratarr.services.movie_decision_service import MovieDecisionService
 from app.arbitratarr.services.pending_queue_service import PendingQueueService
 from app.arbitratarr.services.prowlarr_service import ProwlarrService
 from app.arbitratarr.services.qbittorrent_service import QbittorrentService
+from app.arbitratarr.services.runtime_settings import get_effective_settings
 from app.arbitratarr.services.tv_decision_service import TVDecisionService
 
 
@@ -33,20 +34,6 @@ class SchedulerService:
         """
         self.db_session_factory = db_session_factory
         self.scheduler: AsyncIOScheduler | None = None
-        self._prowlarr: ProwlarrService | None = None
-        self._qbittorrent: QbittorrentService | None = None
-
-    @property
-    def prowlarr(self) -> ProwlarrService:
-        if self._prowlarr is None:
-            self._prowlarr = ProwlarrService()
-        return self._prowlarr
-
-    @property
-    def qbittorrent(self) -> QbittorrentService:
-        if self._qbittorrent is None:
-            self._qbittorrent = QbittorrentService()
-        return self._qbittorrent
 
     async def _process_pending_item(self, pending_item: PendingQueue) -> None:
         """Process a single pending item."""
@@ -63,11 +50,15 @@ class SchedulerService:
                 await db.commit()
                 return
 
+            runtime_settings = await get_effective_settings(db)
+            prowlarr = ProwlarrService(settings=runtime_settings)
+            qbittorrent = QbittorrentService(settings=runtime_settings)
+
             # Create decision service based on media type
             if request.media_type == MediaType.TV:
-                decision_service = TVDecisionService(db, self.prowlarr, self.qbittorrent)
+                decision_service = TVDecisionService(db, prowlarr, qbittorrent)
             else:
-                decision_service = MovieDecisionService(db, self.prowlarr, self.qbittorrent)
+                decision_service = MovieDecisionService(db, prowlarr, qbittorrent)
 
             try:
                 result = await decision_service.process_request(request.id)

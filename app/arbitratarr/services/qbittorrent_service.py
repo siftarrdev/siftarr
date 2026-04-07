@@ -5,6 +5,8 @@ from enum import StrEnum
 
 import qbittorrentapi
 
+from app.arbitratarr.config import Settings, get_settings
+
 
 class MediaCategory(StrEnum):
     """Media categories for torrent categorization."""
@@ -16,11 +18,9 @@ class MediaCategory(StrEnum):
 class QbittorrentService:
     """Service for interacting with qBittorrent API."""
 
-    def __init__(self) -> None:
+    def __init__(self, settings: Settings | None = None) -> None:
         """Initialize the qBittorrent service."""
-        from app.arbitratarr.config import get_settings
-
-        self.settings = get_settings()
+        self.settings = settings or get_settings()
         self._client: qbittorrentapi.Client | None = None
 
     @property

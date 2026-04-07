@@ -1,11 +1,10 @@
 """Tests for LifecycleService."""
 
-from datetime import datetime, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from app.arbitratarr.models.request import MediaType, Request, RequestStatus
+from app.arbitratarr.models.request import Request, RequestStatus
 from app.arbitratarr.services.lifecycle_service import LifecycleService
 
 
@@ -170,9 +169,7 @@ class TestLifecycleService:
         mock_result.scalar_one_or_none.return_value = mock_request
         mock_db.execute.return_value = mock_result
 
-        result = await service.update_request_metadata(
-            1, title="New Title", year=2024
-        )
+        result = await service.update_request_metadata(1, title="New Title", year=2024)
 
         assert result.title == "New Title"
         assert result.year == 2024
@@ -200,7 +197,7 @@ class TestLifecycleService:
         mock_result.scalar_one_or_none.return_value = mock_request
         mock_db.execute.return_value = mock_result
 
-        with patch.object(service, 'transition', return_value=mock_request) as mock_transition:
+        with patch.object(service, "transition", return_value=mock_request) as mock_transition:
             result = await service.mark_as_staged(1)
 
             mock_transition.assert_called_once_with(1, RequestStatus.STAGED)
@@ -213,8 +210,8 @@ class TestLifecycleService:
         mock_request.status = RequestStatus.STAGED
         mock_request.id = 1
 
-        with patch.object(service, 'transition', return_value=mock_request) as mock_transition:
-            result = await service.mark_as_downloading(1)
+        with patch.object(service, "transition", return_value=mock_request) as mock_transition:
+            await service.mark_as_downloading(1)
 
             mock_transition.assert_called_once_with(1, RequestStatus.DOWNLOADING)
 
@@ -223,8 +220,8 @@ class TestLifecycleService:
         """Test marking request as completed."""
         mock_request = MagicMock(spec=Request)
 
-        with patch.object(service, 'transition', return_value=mock_request) as mock_transition:
-            result = await service.mark_as_completed(1)
+        with patch.object(service, "transition", return_value=mock_request) as mock_transition:
+            await service.mark_as_completed(1)
 
             mock_transition.assert_called_once_with(1, RequestStatus.COMPLETED)
 
@@ -233,8 +230,8 @@ class TestLifecycleService:
         """Test marking request as failed."""
         mock_request = MagicMock(spec=Request)
 
-        with patch.object(service, 'transition', return_value=mock_request) as mock_transition:
-            result = await service.mark_as_failed(1, reason="Test error")
+        with patch.object(service, "transition", return_value=mock_request) as mock_transition:
+            await service.mark_as_failed(1, reason="Test error")
 
             mock_transition.assert_called_once_with(1, RequestStatus.FAILED, "Test error")
 
@@ -243,7 +240,7 @@ class TestLifecycleService:
         """Test marking request as pending."""
         mock_request = MagicMock(spec=Request)
 
-        with patch.object(service, 'transition', return_value=mock_request) as mock_transition:
-            result = await service.mark_as_pending(1)
+        with patch.object(service, "transition", return_value=mock_request) as mock_transition:
+            await service.mark_as_pending(1)
 
             mock_transition.assert_called_once_with(1, RequestStatus.PENDING)

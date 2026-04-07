@@ -12,6 +12,8 @@ from app.arbitratarr.models.request import MediaType, Request
 from app.arbitratarr.models.staged_torrent import StagedTorrent
 from app.arbitratarr.services.lifecycle_service import LifecycleService
 from app.arbitratarr.services.qbittorrent_service import MediaCategory, QbittorrentService
+from app.arbitratarr.services.runtime_settings import get_effective_settings
+from app.arbitratarr.services.staging_decision_logger import log_staging_decision
 
 router = APIRouter(prefix="/staged", tags=["staged"])
 
@@ -39,8 +41,22 @@ async def approve_staged_torrent(
     if request and request.media_type == MediaType.MOVIE:
         category = MediaCategory.MOVIES
 
+    rules_selected_torrent = None
+    if request is not None:
+        rules_selected_result = await db.execute(
+            select(StagedTorrent)
+            .where(
+                StagedTorrent.request_id == request.id,
+                StagedTorrent.selection_source == "rule",
+                StagedTorrent.status.in_(["staged", "approved"]),
+            )
+            .order_by(StagedTorrent.score.desc(), StagedTorrent.created_at.asc())
+        )
+        rules_selected_torrent = rules_selected_result.scalars().first()
+
     # Add to qBittorrent
-    qbittorrent = QbittorrentService()
+    runtime_settings = await get_effective_settings(db)
+    qbittorrent = QbittorrentService(settings=runtime_settings)
     success = False
 
     if torrent.magnet_url:
@@ -59,6 +75,12 @@ async def approve_staged_torrent(
         )
 
     if success:
+        log_staging_decision(
+            request=request,
+            approved_torrent=torrent,
+            rules_selected_torrent=rules_selected_torrent,
+        )
+
         # Update torrent status
         torrent.status = "approved"
 

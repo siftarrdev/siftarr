@@ -55,23 +55,30 @@ class TestRuleService:
     @pytest.mark.asyncio
     async def test_get_exclusions(self, mock_db, service):
         """Test getting exclusion rules."""
-        with patch.object(service, 'get_rules_by_type', return_value=[]) as mock_get:
+        with patch.object(service, "get_rules_by_type", return_value=[]) as mock_get:
             await service.get_exclusions()
             mock_get.assert_called_once_with(RuleType.EXCLUSION)
 
     @pytest.mark.asyncio
     async def test_get_requirements(self, mock_db, service):
         """Test getting requirement rules."""
-        with patch.object(service, 'get_rules_by_type', return_value=[]) as mock_get:
+        with patch.object(service, "get_rules_by_type", return_value=[]) as mock_get:
             await service.get_requirements()
             mock_get.assert_called_once_with(RuleType.REQUIREMENT)
 
     @pytest.mark.asyncio
     async def test_get_scorers(self, mock_db, service):
         """Test getting scorer rules."""
-        with patch.object(service, 'get_rules_by_type', return_value=[]) as mock_get:
+        with patch.object(service, "get_rules_by_type", return_value=[]) as mock_get:
             await service.get_scorers()
             mock_get.assert_called_once_with(RuleType.SCORER)
+
+    @pytest.mark.asyncio
+    async def test_get_size_limits(self, mock_db, service):
+        """Test getting size limit rules."""
+        with patch.object(service, "get_rules_by_type", return_value=[]) as mock_get:
+            await service.get_size_limits()
+            mock_get.assert_called_once_with(RuleType.SIZE_LIMIT)
 
     @pytest.mark.asyncio
     async def test_get_rule_by_id(self, mock_db, service):
@@ -103,11 +110,13 @@ class TestRuleService:
         mock_db.commit = AsyncMock()
         mock_db.refresh = AsyncMock()
 
-        result = await service.create_rule(
+        await service.create_rule(
             name="Test Rule",
             rule_type=RuleType.EXCLUSION,
             pattern="CAM|TS",
             score=0,
+            min_size_gb=None,
+            max_size_gb=None,
             priority=1,
             is_enabled=True,
             description="Test description",
@@ -126,7 +135,7 @@ class TestRuleService:
         mock_result.scalar_one_or_none.return_value = mock_rule
         mock_db.execute.return_value = mock_result
 
-        result = await service.update_rule(
+        await service.update_rule(
             rule_id=1,
             name="New Name",
             pattern="NEWPATTERN",
@@ -159,7 +168,7 @@ class TestRuleService:
         mock_result.scalar_one_or_none.return_value = mock_rule
         mock_db.execute.return_value = mock_result
 
-        result = await service.update_rule(rule_id=1, score=50)
+        await service.update_rule(rule_id=1, score=50)
 
         assert mock_rule.name == "Original"
         assert mock_rule.pattern == "OriginalPattern"
@@ -202,13 +211,10 @@ class TestRuleService:
         mock_db.commit = AsyncMock()
         mock_db.refresh = AsyncMock()
 
-        with patch.object(service, 'get_all_rules', return_value=[]) as mock_get:
-            with patch.object(service, 'create_rule', return_value=MagicMock(spec=Rule)) as mock_create:
-                mock_get.return_value = []
-                result = await service.seed_default_rules()
+        with patch.object(service, "get_all_rules", return_value=[]):
+            result = await service.seed_default_rules()
 
-                assert len(result) == len(DEFAULT_RULES)
-                assert mock_create.call_count == len(DEFAULT_RULES)
+            assert len(result) == len(DEFAULT_RULES)
 
     @pytest.mark.asyncio
     async def test_seed_default_rules_already_exists(self, mock_db, service):
@@ -218,7 +224,7 @@ class TestRuleService:
         mock_result.scalars.return_value.all.return_value = existing_rules
         mock_db.execute.return_value = mock_result
 
-        with patch.object(service, 'get_all_rules', return_value=existing_rules) as mock_get:
+        with patch.object(service, "get_all_rules", return_value=existing_rules):
             result = await service.seed_default_rules()
 
             assert result == existing_rules
@@ -235,7 +241,7 @@ class TestRuleService:
         mock_result.scalar_one_or_none.return_value = mock_rule
         mock_db.execute.return_value = mock_result
 
-        result = await service.toggle_rule(1)
+        await service.toggle_rule(1)
 
         assert mock_rule.is_enabled is False
         mock_db.commit.assert_called_once()

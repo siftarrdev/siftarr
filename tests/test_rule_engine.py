@@ -2,8 +2,6 @@
 
 from unittest.mock import MagicMock
 
-import pytest
-
 from app.arbitratarr.models.rule import Rule, RuleType
 from app.arbitratarr.services.prowlarr_service import ProwlarrRelease
 from app.arbitratarr.services.rule_engine import ReleaseEvaluation, RuleEngine, RuleMatch
@@ -50,11 +48,21 @@ class TestRuleEngine:
         assert len(engine.scorer_patterns) == 0
 
     def test_from_db_rules_size_limits(self):
-        """Test size limit conversion from GB to bytes."""
-        engine = RuleEngine.from_db_rules(size_min_gb=1, size_max_gb=10)
+        """Test size limit conversion from DB rules to bytes."""
+        mock_rule = MagicMock(spec=Rule)
+        mock_rule.is_enabled = True
+        mock_rule.rule_type = RuleType.SIZE_LIMIT
+        mock_rule.id = 3
+        mock_rule.name = "Movie Size Limits"
+        mock_rule.pattern = "size_limit"
+        mock_rule.min_size_gb = 1
+        mock_rule.max_size_gb = 10
 
-        assert engine.min_size_bytes == 1 * 1024 * 1024 * 1024
-        assert engine.max_size_bytes == 10 * 1024 * 1024 * 1024
+        engine = RuleEngine.from_db_rules(rules=[mock_rule])
+
+        assert len(engine.size_limit_rules) == 1
+        assert engine.size_limit_rules[0][2] == 1 * 1024 * 1024 * 1024
+        assert engine.size_limit_rules[0][3] == 10 * 1024 * 1024 * 1024
 
     def test_evaluate_no_rules(self):
         """Test evaluating with no rules."""
@@ -76,7 +84,7 @@ class TestRuleEngine:
 
     def test_evaluate_min_size_rejection(self):
         """Test minimum size rejection."""
-        engine = RuleEngine(min_size_bytes=1024 * 1024 * 1024)
+        engine = RuleEngine(size_limit_rules=[(1, "Min Size", 1024 * 1024 * 1024, None)])
 
         release = ProwlarrRelease(
             title="Test.Movie.2024.1080p.x264-RLSGRP",
@@ -90,11 +98,12 @@ class TestRuleEngine:
         result = engine.evaluate(release)
 
         assert result.passed is False
+        assert result.rejection_reason is not None
         assert "below minimum" in result.rejection_reason
 
     def test_evaluate_max_size_rejection(self):
         """Test maximum size rejection."""
-        engine = RuleEngine(max_size_bytes=10 * 1024 * 1024)
+        engine = RuleEngine(size_limit_rules=[(1, "Max Size", None, 10 * 1024 * 1024)])
 
         release = ProwlarrRelease(
             title="Test.Movie.2024.1080p.x264-RLSGRP",
@@ -108,6 +117,7 @@ class TestRuleEngine:
         result = engine.evaluate(release)
 
         assert result.passed is False
+        assert result.rejection_reason is not None
         assert "above maximum" in result.rejection_reason
 
     def test_evaluate_exclusion_rejection(self):
@@ -128,6 +138,7 @@ class TestRuleEngine:
         result = engine.evaluate(release)
 
         assert result.passed is False
+        assert result.rejection_reason is not None
         assert "exclusion" in result.rejection_reason.lower()
 
     def test_evaluate_invalid_regex(self):
@@ -186,6 +197,7 @@ class TestRuleEngine:
         result = engine.evaluate(release)
 
         assert result.passed is False
+        assert result.rejection_reason is not None
         assert "requirement" in result.rejection_reason.lower()
 
     def test_evaluate_scorer(self):

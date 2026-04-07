@@ -1,6 +1,8 @@
 """Tests for ProwlarrService."""
 
-from app.arbitratarr.services.prowlarr_service import ProwlarrService
+import pytest
+
+from app.arbitratarr.services.prowlarr_service import ProwlarrSearchResult, ProwlarrService
 
 
 class TestProwlarrService:
@@ -43,3 +45,93 @@ class TestProwlarrService:
         assert result.year == 2024
         assert result.month == 1
         assert result.day == 15
+
+    def test_extract_release_items_supports_flat_search_results(self) -> None:
+        """Flat Prowlarr search payloads should still be parsed as releases."""
+        payload = [
+            {
+                "title": "Return.to.Me.2000.1080p.x265-GROUP",
+                "downloadUrl": "https://example.com/return-to-me.torrent",
+                "indexer": "IPT",
+            }
+        ]
+
+        releases = ProwlarrService._extract_release_items(payload)
+
+        assert len(releases) == 1
+        assert releases[0]["title"] == "Return.to.Me.2000.1080p.x265-GROUP"
+
+    def test_extract_release_items_supports_nested_search_results(self) -> None:
+        """Nested Prowlarr search payloads should still be parsed as releases."""
+        payload = [
+            {
+                "indexer": "IPT",
+                "releases": [
+                    {
+                        "title": "Return.to.Me.2000.1080p.x264-GROUP",
+                        "downloadUrl": "https://example.com/return-to-me.torrent",
+                    }
+                ],
+            }
+        ]
+
+        releases = ProwlarrService._extract_release_items(payload)
+
+        assert len(releases) == 1
+        assert releases[0]["title"] == "Return.to.Me.2000.1080p.x264-GROUP"
+
+    def test_build_movie_query_uses_tmdbid_tokens(self) -> None:
+        """Movie queries should encode metadata in the query string."""
+        query = ProwlarrService._build_movie_query("Return to Me", 1234, 2000)
+
+        assert query == "Return to Me {tmdbid:1234} {year:2000}"
+
+    def test_build_tv_query_uses_tvsearch_tokens(self) -> None:
+        """TV queries should encode metadata in the query string."""
+        query = ProwlarrService._build_tv_query(
+            "Example Show", 5678, season=1, episode=2, year=2024
+        )
+
+        assert query == "Example Show {tvdbid:5678} {season:1} {episode:2} {year:2024}"
+
+    @pytest.mark.asyncio
+    async def test_search_by_tmdbid_falls_back_to_title_query(self, monkeypatch) -> None:
+        """Movie search should retry with a title query when metadata search is empty."""
+        service = ProwlarrService()
+        calls = []
+
+        async def fake_search(params):
+            calls.append(params)
+            if len(calls) == 1:
+                return ProwlarrSearchResult(releases=[], query_time_ms=10)
+            return ProwlarrSearchResult(releases=[], query_time_ms=15)
+
+        monkeypatch.setattr(service, "_search", fake_search)
+
+        await service.search_by_tmdbid(2621, title="Return to Me", year=2000)
+
+        assert calls[0]["type"] == "movie"
+        assert calls[0]["query"] == "Return to Me {tmdbid:2621} {year:2000}"
+        assert calls[1]["type"] == "search"
+        assert calls[1]["query"] == "Return to Me 2000"
+
+    @pytest.mark.asyncio
+    async def test_search_by_tvdbid_falls_back_to_title_query(self, monkeypatch) -> None:
+        """TV search should retry with a title query when metadata search is empty."""
+        service = ProwlarrService()
+        calls = []
+
+        async def fake_search(params):
+            calls.append(params)
+            if len(calls) == 1:
+                return ProwlarrSearchResult(releases=[], query_time_ms=10)
+            return ProwlarrSearchResult(releases=[], query_time_ms=15)
+
+        monkeypatch.setattr(service, "_search", fake_search)
+
+        await service.search_by_tvdbid(5678, title="Example Show", season=1, episode=2, year=2024)
+
+        assert calls[0]["type"] == "tvsearch"
+        assert calls[0]["query"] == "Example Show {tvdbid:5678} {season:1} {episode:2} {year:2024}"
+        assert calls[1]["type"] == "search"
+        assert calls[1]["query"] == "Example Show S01E02 2024"

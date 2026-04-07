@@ -4,7 +4,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from app.arbitratarr.services.connection_tester import ConnectionTestResult, ConnectionTester
+from app.arbitratarr.services.connection_tester import ConnectionTester, ConnectionTestResult
 
 
 class TestConnectionTestResult:
@@ -82,6 +82,7 @@ class TestConnectionTester:
             result = await ConnectionTester.test_overseerr(mock_settings)
 
             assert result.success is True
+            assert result.details is not None
             assert "1.0.0" in result.details
 
     @pytest.mark.asyncio
@@ -190,8 +191,9 @@ class TestConnectionTester:
 
             result = await ConnectionTester.test_prowlarr(mock_settings)
 
-            assert result.success is True
-            assert "2.0.0" in result.details
+        assert result.success is True
+        assert result.details is not None
+        assert "2.0.0" in result.details
 
     @pytest.mark.asyncio
     async def test_test_prowlarr_unauthorized(self, mock_settings):
@@ -259,18 +261,20 @@ class TestConnectionTester:
     @pytest.mark.asyncio
     async def test_test_qbittorrent_success(self, mock_settings):
         """Test successful qBittorrent connection."""
-        import qbittorrentapi
 
         mock_client = MagicMock()
         mock_client.auth.log_in = MagicMock()
         mock_client.app.web_api_version = "v2.0"
 
-        with patch("qbittorrentapi.Client", return_value=mock_client):
-            with patch("asyncio.to_thread", AsyncMock()):
-                result = await ConnectionTester.test_qbittorrent(mock_settings)
+        with (
+            patch("qbittorrentapi.Client", return_value=mock_client),
+            patch("asyncio.to_thread", AsyncMock()),
+        ):
+            result = await ConnectionTester.test_qbittorrent(mock_settings)
 
-                assert result.success is True
-                assert "Web API Version" in result.details
+        assert result.success is True
+        assert result.details is not None
+        assert "Web API Version" in result.details
 
     @pytest.mark.asyncio
     async def test_test_qbittorrent_login_failed(self, mock_settings):
@@ -290,17 +294,20 @@ class TestConnectionTester:
     @pytest.mark.asyncio
     async def test_test_qbittorrent_version_check_failed(self, mock_settings):
         """Test qBittorrent when version check fails but login succeeds."""
-        import qbittorrentapi
 
         mock_client = MagicMock()
         mock_client.auth.log_in = MagicMock()
-        mock_client.app.web_api_version = property(lambda self: (_ for _ in ()).throw(Exception("Failed")))
+        mock_client.app.web_api_version = property(
+            lambda self: (_ for _ in ()).throw(Exception("Failed"))
+        )
 
-        with patch("qbittorrentapi.Client", return_value=mock_client):
-            with patch("asyncio.to_thread", AsyncMock()):
-                result = await ConnectionTester.test_qbittorrent(mock_settings)
+        with (
+            patch("qbittorrentapi.Client", return_value=mock_client),
+            patch("asyncio.to_thread", AsyncMock()),
+        ):
+            result = await ConnectionTester.test_qbittorrent(mock_settings)
 
-                assert result.success is True
+        assert result.success is True
 
     @pytest.mark.asyncio
     async def test_test_qbittorrent_connection_error(self, mock_settings):

@@ -30,6 +30,7 @@ class StagedTorrent(Base):
     indexer: Mapped[str] = mapped_column(String(255), nullable=False)
     score: Mapped[int] = mapped_column(Integer, default=0)
     magnet_url: Mapped[str | None] = mapped_column(Text, nullable=True)
+    selection_source: Mapped[str] = mapped_column(String(20), default="rule")
 
     # Status
     status: Mapped[str] = mapped_column(String(50), default="staged")  # staged, approved, discarded

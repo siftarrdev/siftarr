@@ -1,8 +1,6 @@
 """Tests for database module."""
 
-from unittest.mock import AsyncMock, MagicMock, patch
-
-import pytest
+from unittest.mock import AsyncMock, patch
 
 
 class TestDatabaseModule:
@@ -18,12 +16,15 @@ class TestDatabaseModule:
         """Test database initialization."""
         from app.arbitratarr.database import init_db
 
-        with patch("app.arbitratarr.database.engine") as mock_engine:
-            with patch("app.arbitratarr.database.async_session_maker") as mock_maker:
-                mock_session = AsyncMock()
-                mock_session.__aenter__ = AsyncMock(return_value=mock_session)
-                mock_session.__aexit__ = AsyncMock(return_value=None)
-                mock_maker.return_value = mock_session
+        with (
+            patch("app.arbitratarr.database.engine"),
+            patch("app.arbitratarr.database.async_session_maker") as mock_maker,
+        ):
+            mock_session = AsyncMock()
+            mock_session.__aenter__ = AsyncMock(return_value=mock_session)
+            mock_session.__aexit__ = AsyncMock(return_value=None)
+            mock_maker.return_value = mock_session
 
-                import asyncio
-                asyncio.run(init_db())
+            import asyncio
+
+            asyncio.run(init_db())

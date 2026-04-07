@@ -29,7 +29,9 @@ class TestTorrentService:
 
             with patch("builtins.open", mock_open()) as mock_file:
                 save_path = Path("/tmp/test.torrent")
-                result = await TorrentService.download_torrent("http://example.com/test.torrent", save_path)
+                result = await TorrentService.download_torrent(
+                    "http://example.com/test.torrent", save_path
+                )
 
                 assert result is True
                 mock_file.assert_called_with(save_path, "wb")
@@ -57,7 +59,9 @@ class TestTorrentService:
             mock_client_class.return_value = mock_client
 
             save_path = Path("/tmp/test.torrent")
-            result = await TorrentService.download_torrent("http://example.com/test.torrent", save_path)
+            result = await TorrentService.download_torrent(
+                "http://example.com/test.torrent", save_path
+            )
 
             assert result is False
 
@@ -74,7 +78,9 @@ class TestTorrentService:
             mock_client_class.return_value = mock_client
 
             save_path = Path("/tmp/test.torrent")
-            result = await TorrentService.download_torrent("http://example.com/test.torrent", save_path)
+            result = await TorrentService.download_torrent(
+                "http://example.com/test.torrent", save_path
+            )
 
             assert result is False
 
@@ -85,13 +91,19 @@ class TestTorrentService:
 
         with patch("httpx.AsyncClient") as mock_client_class:
             mock_client = AsyncMock()
-            mock_client.get = AsyncMock(side_effect=httpx.HTTPStatusError("Error", request=MagicMock(), response=MagicMock()))
+            mock_client.get = AsyncMock(
+                side_effect=httpx.HTTPStatusError(
+                    "Error", request=MagicMock(), response=MagicMock()
+                )
+            )
             mock_client.__aenter__.return_value = mock_client
             mock_client.__aexit__.return_value = None
             mock_client_class.return_value = mock_client
 
             save_path = Path("/tmp/test.torrent")
-            result = await TorrentService.download_torrent("http://example.com/test.torrent", save_path)
+            result = await TorrentService.download_torrent(
+                "http://example.com/test.torrent", save_path
+            )
 
             assert result is False
 

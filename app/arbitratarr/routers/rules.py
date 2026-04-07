@@ -1,8 +1,9 @@
 """Router for rules management pages."""
 
 import re
+from typing import Annotated
 
-from fastapi import APIRouter, Depends, Form, HTTPException, Request
+from fastapi import APIRouter, Depends, Form, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -17,6 +18,36 @@ router = APIRouter(prefix="/rules", tags=["rules"])
 templates = Jinja2Templates(directory="app/arbitratarr/templates")
 
 
+def _validate_rule_input(
+    rule_type: RuleType,
+    pattern: str,
+    min_size_gb: float | None,
+    max_size_gb: float | None,
+) -> None:
+    """Validate rule input based on rule type."""
+    if rule_type == RuleType.SIZE_LIMIT:
+        if min_size_gb is None and max_size_gb is None:
+            raise HTTPException(
+                status_code=400,
+                detail="Size limit rules need a minimum or maximum size.",
+            )
+        if min_size_gb is not None and min_size_gb < 0:
+            raise HTTPException(status_code=400, detail="Minimum size cannot be negative.")
+        if max_size_gb is not None and max_size_gb < 0:
+            raise HTTPException(status_code=400, detail="Maximum size cannot be negative.")
+        if min_size_gb is not None and max_size_gb is not None and min_size_gb > max_size_gb:
+            raise HTTPException(
+                status_code=400,
+                detail="Minimum size cannot be greater than maximum size.",
+            )
+        return
+
+    try:
+        re.compile(pattern)
+    except re.error as e:
+        raise HTTPException(status_code=400, detail=f"Invalid regex pattern: {e}") from e
+
+
 @router.get("")
 async def list_rules(
     request: Request,
@@ -24,10 +55,12 @@ async def list_rules(
 ) -> HTMLResponse:
     """List all rules grouped by type."""
     rule_service = RuleService(db)
+    await rule_service.ensure_default_rules()
 
-    exclusions = await rule_service.get_exclusions()
-    requirements = await rule_service.get_requirements()
-    scorers = await rule_service.get_scorers()
+    exclusions = await rule_service.get_all_rules_by_type(RuleType.EXCLUSION)
+    requirements = await rule_service.get_all_rules_by_type(RuleType.REQUIREMENT)
+    scorers = await rule_service.get_all_rules_by_type(RuleType.SCORER)
+    size_limits = await rule_service.get_all_rules_by_type(RuleType.SIZE_LIMIT)
 
     return templates.TemplateResponse(
         request,
@@ -37,7 +70,7 @@ async def list_rules(
             "exclusion_rules": exclusions,
             "requirement_rules": requirements,
             "scorer_rules": scorers,
-            "size_limits": {"min": None, "max": None},
+            "size_limit_rules": size_limits,
         },
     )
 
@@ -45,7 +78,7 @@ async def list_rules(
 @router.get("/new")
 async def new_rule_form(
     request: Request,
-    rule_type: str | None = None,
+    rule_type: Annotated[str | None, Query(alias="type")] = None,
 ) -> HTMLResponse:
     """Show form to create a new rule."""
     return templates.TemplateResponse(
@@ -65,24 +98,27 @@ async def create_rule(
     request: Request,
     name: str = Form(...),
     rule_type: str = Form(...),
+    media_scope: str = Form("both"),
     pattern: str = Form(...),
     score: int = Form(0),
+    min_size_gb: float | None = Form(None),
+    max_size_gb: float | None = Form(None),
     description: str | None = Form(None),
     db: AsyncSession = Depends(get_db),
 ) -> RedirectResponse:
     """Create a new rule."""
-    # Validate regex pattern
-    try:
-        re.compile(pattern)
-    except re.error as e:
-        raise HTTPException(status_code=400, detail=f"Invalid regex pattern: {e}") from e
+    parsed_rule_type = RuleType(rule_type)
+    _validate_rule_input(parsed_rule_type, pattern, min_size_gb, max_size_gb)
 
     rule_service = RuleService(db)
     await rule_service.create_rule(
         name=name,
-        rule_type=RuleType(rule_type),
+        rule_type=parsed_rule_type,
+        media_scope=media_scope,
         pattern=pattern,
         score=score,
+        min_size_gb=min_size_gb,
+        max_size_gb=max_size_gb,
         description=description,
     )
 
@@ -118,29 +154,32 @@ async def update_rule(
     request: Request,
     rule_id: int,
     name: str = Form(...),
+    media_scope: str = Form("both"),
     pattern: str = Form(...),
     score: int = Form(0),
+    min_size_gb: float | None = Form(None),
+    max_size_gb: float | None = Form(None),
     description: str | None = Form(None),
     db: AsyncSession = Depends(get_db),
 ) -> RedirectResponse:
     """Update an existing rule."""
-    # Validate regex pattern
-    try:
-        re.compile(pattern)
-    except re.error as e:
-        raise HTTPException(status_code=400, detail=f"Invalid regex pattern: {e}") from e
-
     rule_service = RuleService(db)
-    rule = await rule_service.update_rule(
+    existing_rule = await rule_service.get_rule_by_id(rule_id)
+    if not existing_rule:
+        raise HTTPException(status_code=404, detail="Rule not found")
+
+    _validate_rule_input(existing_rule.rule_type, pattern, min_size_gb, max_size_gb)
+
+    await rule_service.update_rule(
         rule_id=rule_id,
         name=name,
+        media_scope=media_scope,
         pattern=pattern,
         score=score,
+        min_size_gb=min_size_gb,
+        max_size_gb=max_size_gb,
         description=description,
     )
-
-    if not rule:
-        raise HTTPException(status_code=404, detail="Rule not found")
 
     return RedirectResponse(url="/rules", status_code=303)
 
@@ -184,6 +223,9 @@ async def test_rule(
     """Test a release title against all rules."""
     from sqlalchemy import select
 
+    rule_service = RuleService(db)
+    await rule_service.ensure_default_rules()
+
     result = await db.execute(select(Rule))
     rules = list(result.scalars().all())
 
@@ -203,9 +245,10 @@ async def test_rule(
 
     # Re-render the rules page with test results
     rule_service = RuleService(db)
-    exclusions = await rule_service.get_exclusions()
-    requirements = await rule_service.get_requirements()
-    scorers = await rule_service.get_scorers()
+    exclusions = await rule_service.get_all_rules_by_type(RuleType.EXCLUSION)
+    requirements = await rule_service.get_all_rules_by_type(RuleType.REQUIREMENT)
+    scorers = await rule_service.get_all_rules_by_type(RuleType.SCORER)
+    size_limits = await rule_service.get_all_rules_by_type(RuleType.SIZE_LIMIT)
 
     return templates.TemplateResponse(
         request,
@@ -215,7 +258,7 @@ async def test_rule(
             "exclusion_rules": exclusions,
             "requirement_rules": requirements,
             "scorer_rules": scorers,
-            "size_limits": {"min": None, "max": None},
+            "size_limit_rules": size_limits,
             "test_result": {
                 "passed": evaluation.passed,
                 "rejection_reason": evaluation.rejection_reason,
