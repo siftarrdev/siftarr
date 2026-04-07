@@ -18,6 +18,7 @@ from app.arbitratarr.version import __version__
 
 scheduler_service: SchedulerService | None = None
 INITIAL_MIGRATION_REVISION = "bc9c8cfbe08b"
+LATEST_KNOWN_MIGRATION_REVISION = "add_rejection_reason_to_requests"
 
 
 def _ensure_db_directory():
@@ -88,6 +89,76 @@ def _prepare_legacy_sqlite_database_for_migrations() -> None:
     )
 
 
+def _repair_missing_alembic_revision() -> None:
+    """Reset a stale alembic_version entry to the latest known revision."""
+    db_path = _get_sqlite_db_path()
+    if db_path is None or not db_path.exists():
+        return
+
+    with sqlite3.connect(db_path) as connection:
+        cursor = connection.execute("SELECT name FROM sqlite_master WHERE type = 'table'")
+        table_names = {row[0] for row in cursor.fetchall()}
+        if "alembic_version" not in table_names:
+            return
+
+        version_cursor = connection.execute("SELECT version_num FROM alembic_version")
+        versions = [row[0] for row in version_cursor.fetchall() if row[0]]
+        if not versions or versions[0] == LATEST_KNOWN_MIGRATION_REVISION:
+            return
+
+        connection.execute("DELETE FROM alembic_version")
+        connection.execute(
+            "INSERT INTO alembic_version (version_num) VALUES (?)",
+            (LATEST_KNOWN_MIGRATION_REVISION,),
+        )
+        connection.commit()
+
+
+def _ensure_request_rejection_reason_column() -> None:
+    """Add requests.rejection_reason for databases that missed the migration."""
+    db_path = _get_sqlite_db_path()
+    if db_path is None or not db_path.exists():
+        return
+
+    with sqlite3.connect(db_path) as connection:
+        cursor = connection.execute(
+            "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'requests'"
+        )
+        if cursor.fetchone() is None:
+            return
+
+        columns = {row[1] for row in connection.execute("PRAGMA table_info(requests)")}
+        if "rejection_reason" in columns:
+            return
+
+        connection.execute("ALTER TABLE requests ADD COLUMN rejection_reason VARCHAR(500)")
+        connection.commit()
+
+
+def _ensure_staged_torrents_selection_source_column() -> None:
+    """Add staged_torrents.selection_source for databases that missed the migration."""
+    db_path = _get_sqlite_db_path()
+    if db_path is None or not db_path.exists():
+        return
+
+    with sqlite3.connect(db_path) as connection:
+        cursor = connection.execute(
+            "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'staged_torrents'"
+        )
+        if cursor.fetchone() is None:
+            return
+
+        columns = {row[1] for row in connection.execute("PRAGMA table_info(staged_torrents)")}
+        if "selection_source" in columns:
+            return
+
+        connection.execute("ALTER TABLE staged_torrents ADD COLUMN selection_source VARCHAR(20)")
+        connection.execute(
+            "UPDATE staged_torrents SET selection_source = 'rule' WHERE selection_source IS NULL"
+        )
+        connection.commit()
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Application lifespan manager for startup/shutdown events."""
@@ -98,7 +169,16 @@ async def lifespan(app: FastAPI):
 
     # Apply migrations before table initialization so the runtime schema stays current
     _prepare_legacy_sqlite_database_for_migrations()
-    subprocess.run(["uv", "run", "alembic", "upgrade", "head"], check=True)
+    try:
+        subprocess.run(["uv", "run", "alembic", "upgrade", "head"], check=True)
+    except subprocess.CalledProcessError as exc:
+        if exc.returncode != 255:
+            raise
+        _repair_missing_alembic_revision()
+        subprocess.run(["uv", "run", "alembic", "upgrade", "head"], check=True)
+
+    _ensure_request_rejection_reason_column()
+    _ensure_staged_torrents_selection_source_column()
 
     # Initialize database tables
     await init_db()

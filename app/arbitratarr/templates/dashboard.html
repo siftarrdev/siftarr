@@ -6,11 +6,12 @@
 <div class="space-y-6">
     <h1 class="text-2xl font-bold">Dashboard</h1>
 
-    <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
+    <div class="grid grid-cols-2 md:grid-cols-5 gap-4">
         <div class="bg-gray-800 rounded-lg p-4 border border-gray-700"><div class="text-gray-400 text-sm">Active Requests</div><div class="text-3xl font-bold text-white">{{ stats.active }}</div></div>
         <div class="bg-gray-800 rounded-lg p-4 border border-gray-700"><div class="text-gray-400 text-sm">Pending Search</div><div class="text-3xl font-bold text-yellow-400">{{ stats.pending }}</div></div>
         <div class="bg-gray-800 rounded-lg p-4 border border-gray-700"><div class="text-gray-400 text-sm">Staged / Downloading</div><div class="text-3xl font-bold text-blue-400">{{ stats.staged }}</div></div>
         <div class="bg-gray-800 rounded-lg p-4 border border-gray-700"><div class="text-gray-400 text-sm">Completed</div><div class="text-3xl font-bold text-green-400">{{ stats.completed }}</div></div>
+        <div class="bg-gray-800 rounded-lg p-4 border border-gray-700"><div class="text-gray-400 text-sm">Rejected</div><div class="text-3xl font-bold text-red-400">{{ stats.rejected }}</div></div>
     </div>
 
     <div class="border-b border-gray-700">
@@ -18,6 +19,8 @@
             <button onclick="showTab('active')" id="tab-active" class="tab-button border-b-2 border-blue-500 pb-4 px-1 text-blue-500 font-medium">Active Requests</button>
             <button onclick="showTab('pending')" id="tab-pending" class="tab-button border-b-2 border-transparent pb-4 px-1 text-gray-400 hover:text-gray-300">Pending Search</button>
             <button onclick="showTab('staged')" id="tab-staged" class="tab-button border-b-2 border-transparent pb-4 px-1 text-gray-400 hover:text-gray-300">Staged / Downloading</button>
+            <button onclick="showTab('finished')" id="tab-finished" class="tab-button border-b-2 border-transparent pb-4 px-1 text-gray-400 hover:text-gray-300">Finished</button>
+            <button onclick="showTab('rejected')" id="tab-rejected" class="tab-button border-b-2 border-transparent pb-4 px-1 text-gray-400 hover:text-gray-300">Rejected</button>
         </nav>
     </div>
 
@@ -94,7 +97,7 @@
                                 <button type="button" onclick="openRequestDetails({{ req.id }})" class="text-blue-400 hover:text-blue-300">Details</button>
                                 {% if req.overseerr_request_id and overseerr_request_statuses.get(req.id, 'unknown') in ['pending', 'requested'] %}
                                  <form action="/requests/{{ req.id }}/approve" method="post" class="inline"><input type="hidden" name="redirect_to" value="/?tab=active"><button type="submit" class="text-green-400 hover:text-green-300">Approve</button></form>
-                                 <form action="/requests/{{ req.id }}/deny" method="post" class="inline"><input type="hidden" name="redirect_to" value="/?tab=active"><button type="submit" class="text-red-400 hover:text-red-300">Deny</button></form>
+                                 <button type="button" onclick="openDenyModal({{ req.id }}, '/?tab=active')" class="text-red-400 hover:text-red-300">Deny</button>
                                  {% endif %}
                              </td>
                          </tr>
@@ -175,7 +178,7 @@
                                     {% if req.overseerr_request_id %}
                                     <form action="/requests/{{ req.id }}/approve" method="post" class="inline"><input type="hidden" name="redirect_to" value="/?tab=pending"><button type="submit" class="text-green-400 hover:text-green-300">Approve</button></form>
                                     {% endif %}
-                                    <form action="/requests/{{ req.id }}/deny" method="post" class="inline"><input type="hidden" name="redirect_to" value="/?tab=pending"><button type="submit" class="text-red-400 hover:text-red-300">Deny</button></form>
+                                    <button type="button" onclick="openDenyModal({{ req.id }}, '/?tab=pending')" class="text-red-400 hover:text-red-300">Deny</button>
                                 </td>
                             </tr>
                             {% endfor %}
@@ -240,6 +243,90 @@
         </div>
         {% else %}<p class="text-gray-400">No staged or downloading torrents.</p>{% endif %}
     </div>
+
+    <div id="content-finished" class="tab-content hidden">
+        {% if completed_requests %}
+        <div class="bg-gray-800 rounded-lg border border-gray-700 overflow-hidden">
+            <div class="p-4 border-b border-gray-700">
+                <div class="text-sm font-medium text-white">Finished Requests</div>
+                <div class="text-sm text-gray-400">Requests that have been completed and downloaded.</div>
+                <div class="mt-3">
+                    <input type="text" id="finished-filter-input" placeholder="Filter finished requests..." class="w-full lg:w-96 px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:border-blue-500">
+                </div>
+            </div>
+            <div class="overflow-x-auto">
+                <table class="min-w-full divide-y divide-gray-700" id="finished-requests-table">
+                    <thead class="bg-gray-700">
+                        <tr>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider cursor-pointer hover:bg-gray-600" data-table="finished" data-sort="title">Title <span class="sort-indicator text-gray-400"></span></th>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider cursor-pointer hover:bg-gray-600" data-table="finished" data-sort="type">Type <span class="sort-indicator text-gray-400"></span></th>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider cursor-pointer hover:bg-gray-600" data-table="finished" data-sort="requestedby">Requested By <span class="sort-indicator text-gray-400"></span></th>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider cursor-pointer hover:bg-gray-600" data-table="finished" data-sort="requested">Requested <span class="sort-indicator text-gray-400"></span></th>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider cursor-pointer hover:bg-gray-600" data-table="finished" data-sort="completed">Completed <span class="sort-indicator text-gray-400"></span></th>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody class="divide-y divide-gray-700" id="finished-requests-body">
+                        {% for req in completed_requests %}
+                        <tr class="hover:bg-gray-700 cursor-pointer" onclick="openRequestDetails({{ req.id }})" data-title="{{ req.title|lower }}" data-type="{{ req.media_type.value|lower }}" data-requestedby="{{ req.requester_username|default('Unknown')|lower }}" data-requested="{{ req.created_at.strftime('%Y-%m-%d %H:%M') }}" data-completed="{{ req.updated_at.strftime('%Y-%m-%d %H:%M') }}">
+                            <td class="px-6 py-4 whitespace-nowrap text-sm text-white">{{ req.title }}</td>
+                            <td class="px-6 py-4 whitespace-nowrap text-sm capitalize text-gray-300">{{ req.media_type.value }}</td>
+                            <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-400">{{ req.requester_username or 'Unknown' }}</td>
+                            <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-400">{{ req.created_at.strftime('%Y-%m-%d %H:%M') }}</td>
+                            <td class="px-6 py-4 whitespace-nowrap text-sm text-green-400">{{ req.updated_at.strftime('%Y-%m-%d %H:%M') }}</td>
+                            <td class="px-6 py-4 whitespace-nowrap text-sm" onclick="event.stopPropagation()">
+                                <button type="button" onclick="openRequestDetails({{ req.id }})" class="text-blue-400 hover:text-blue-300">Details</button>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+        {% else %}<p class="text-gray-400">No finished requests.</p>{% endif %}
+    </div>
+
+    <div id="content-rejected" class="tab-content hidden">
+        {% if rejected_requests %}
+        <div class="bg-gray-800 rounded-lg border border-gray-700 overflow-hidden">
+            <div class="p-4 border-b border-gray-700">
+                <div class="text-sm font-medium text-white">Rejected Requests</div>
+                <div class="text-sm text-gray-400">Requests that have been denied, along with the reason for rejection.</div>
+                <div class="mt-3">
+                    <input type="text" id="rejected-filter-input" placeholder="Filter rejected requests..." class="w-full lg:w-96 px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:border-blue-500">
+                </div>
+            </div>
+            <div class="overflow-x-auto">
+                <table class="min-w-full divide-y divide-gray-700" id="rejected-requests-table">
+                    <thead class="bg-gray-700">
+                        <tr>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider cursor-pointer hover:bg-gray-600" data-table="rejected" data-sort="title">Title <span class="sort-indicator text-gray-400"></span></th>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider cursor-pointer hover:bg-gray-600" data-table="rejected" data-sort="type">Type <span class="sort-indicator text-gray-400"></span></th>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider cursor-pointer hover:bg-gray-600" data-table="rejected" data-sort="requestedby">Requested By <span class="sort-indicator text-gray-400"></span></th>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider cursor-pointer hover:bg-gray-600" data-table="rejected" data-sort="reason">Reason <span class="sort-indicator text-gray-400"></span></th>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider cursor-pointer hover:bg-gray-600" data-table="rejected" data-sort="rejectedat">Rejected <span class="sort-indicator text-gray-400"></span></th>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody class="divide-y divide-gray-700" id="rejected-requests-body">
+                        {% for req in rejected_requests %}
+                        <tr class="hover:bg-gray-700 cursor-pointer" onclick="openRequestDetails({{ req.id }})" data-title="{{ req.title|lower }}" data-type="{{ req.media_type.value|lower }}" data-requestedby="{{ req.requester_username|default('Unknown')|lower }}" data-reason="{{ (req.rejection_reason or '')|lower }}" data-rejectedat="{{ req.updated_at.strftime('%Y-%m-%d %H:%M') }}">
+                            <td class="px-6 py-4 whitespace-nowrap text-sm text-white">{{ req.title }}</td>
+                            <td class="px-6 py-4 whitespace-nowrap text-sm capitalize text-gray-300">{{ req.media_type.value }}</td>
+                            <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-400">{{ req.requester_username or 'Unknown' }}</td>
+                            <td class="px-6 py-4 text-sm text-red-400 max-w-xs overflow-hidden text-ellipsis">{{ req.rejection_reason or '-' }}</td>
+                            <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-400">{{ req.updated_at.strftime('%Y-%m-%d %H:%M') }}</td>
+                            <td class="px-6 py-4 whitespace-nowrap text-sm" onclick="event.stopPropagation()">
+                                <button type="button" onclick="openRequestDetails({{ req.id }})" class="text-blue-400 hover:text-blue-300">Details</button>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+        {% else %}<p class="text-gray-400">No rejected requests.</p>{% endif %}
+    </div>
 </div>
 
 <div id="request-details-modal" class="fixed inset-0 z-50 hidden">
@@ -273,11 +360,29 @@
     </div>
 </div>
 
+<div id="deny-modal" class="fixed inset-0 z-[60] hidden">
+    <div class="absolute inset-0 bg-black/70" onclick="closeDenyModal()"></div>
+    <div class="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-full max-w-md bg-gray-900 border border-gray-700 rounded-xl shadow-2xl p-6">
+        <h3 class="text-lg font-semibold text-white mb-2">Deny Request</h3>
+        <p class="text-sm text-gray-400 mb-4">Are you sure you want to deny this request? You can optionally provide a reason.</p>
+        <form id="deny-form" method="post">
+            <input type="hidden" name="redirect_to" id="deny-redirect" value="/">
+            <textarea name="reason" id="deny-reason" rows="3" placeholder="Reason for rejection (optional)" class="w-full px-3 py-2 bg-gray-800 border border-gray-600 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:border-blue-500 mb-4"></textarea>
+            <div class="flex justify-end gap-3">
+                <button type="button" onclick="closeDenyModal()" class="px-4 py-2 rounded-lg bg-gray-700 text-gray-300 hover:bg-gray-600">Cancel</button>
+                <button type="submit" class="px-4 py-2 rounded-lg bg-red-600 text-white hover:bg-red-500">Deny Request</button>
+            </div>
+        </form>
+    </div>
+</div>
+
 <script>
 const tableSortState = {
     active: { column: null, direction: 'asc' },
     pending: { column: null, direction: 'asc' },
     staged: { column: null, direction: 'asc' },
+    finished: { column: null, direction: 'asc' },
+    rejected: { column: null, direction: 'asc' },
 };
 
 function setActiveTab(tabName) {
@@ -418,16 +523,40 @@ function filterStagedTable() {
     });
 }
 
+function filterFinishedTable() {
+    const filterEl = document.getElementById('finished-filter-input');
+    if (!filterEl) return;
+    const filter = filterEl.value.toLowerCase();
+    document.querySelectorAll('#finished-requests-body tr').forEach(row => {
+        const textContent = `${row.dataset.title} ${row.dataset.type} ${row.dataset.requestedby}`;
+        row.style.display = textContent.includes(filter) ? '' : 'none';
+    });
+}
+
+function filterRejectedTable() {
+    const filterEl = document.getElementById('rejected-filter-input');
+    if (!filterEl) return;
+    const filter = filterEl.value.toLowerCase();
+    document.querySelectorAll('#rejected-requests-body tr').forEach(row => {
+        const textContent = `${row.dataset.title} ${row.dataset.type} ${row.dataset.requestedby} ${row.dataset.reason}`;
+        row.style.display = textContent.includes(filter) ? '' : 'none';
+    });
+}
+
 function sortTable(tableName, sortKey) {
     const tableIdMap = {
         active: 'active-requests-table',
         pending: 'pending-requests-table',
         staged: 'staged-torrents-table',
+        finished: 'finished-requests-table',
+        rejected: 'rejected-requests-table',
     };
     const bodyIdMap = {
         active: 'active-requests-body',
         pending: 'pending-requests-body',
         staged: 'staged-torrents-body',
+        finished: 'finished-requests-body',
+        rejected: 'rejected-requests-body',
     };
     const numericKeys = new Set(['ovrank', 'retrycount', 'size', 'score']);
     const state = tableSortState[tableName];
@@ -519,6 +648,8 @@ const pendingFilterInput = document.getElementById('pending-filter-input');
 const pendingStatusFilter = document.getElementById('pending-overseerr-filter');
 const stagedFilterInput = document.getElementById('staged-filter-input');
 const stagedStatusFilter = document.getElementById('staged-status-filter');
+const finishedFilterInput = document.getElementById('finished-filter-input');
+const rejectedFilterInput = document.getElementById('rejected-filter-input');
 const activeSelectAll = document.getElementById('active-select-all');
 const pendingSelectAll = document.getElementById('pending-select-all');
 if (filterInput) filterInput.addEventListener('input', filterTable);
@@ -527,6 +658,8 @@ if (pendingFilterInput) pendingFilterInput.addEventListener('input', filterPendi
 if (pendingStatusFilter) pendingStatusFilter.addEventListener('change', filterPendingTable);
 if (stagedFilterInput) stagedFilterInput.addEventListener('input', filterStagedTable);
 if (stagedStatusFilter) stagedStatusFilter.addEventListener('change', filterStagedTable);
+if (finishedFilterInput) finishedFilterInput.addEventListener('input', filterFinishedTable);
+if (rejectedFilterInput) rejectedFilterInput.addEventListener('input', filterRejectedTable);
 function bindSelectAll(toggle, checkboxSelector) {
     if (!toggle) return;
     toggle.addEventListener('change', event => {
@@ -545,6 +678,21 @@ document.querySelectorAll('th[data-table][data-sort]').forEach(th => {
         sortTable(th.dataset.table, sortKey);
     });
 });
+
+function openDenyModal(requestId, redirectTo) {
+    const modal = document.getElementById('deny-modal');
+    const form = document.getElementById('deny-form');
+    const redirect = document.getElementById('deny-redirect');
+    const reason = document.getElementById('deny-reason');
+    form.action = '/requests/' + requestId + '/deny';
+    redirect.value = redirectTo || '/';
+    reason.value = '';
+    modal.classList.remove('hidden');
+}
+
+function closeDenyModal() {
+    document.getElementById('deny-modal').classList.add('hidden');
+}
 
 const initialTab = new URLSearchParams(window.location.search).get('tab');
 if (initialTab && document.getElementById('content-' + initialTab) && document.getElementById('tab-' + initialTab)) {

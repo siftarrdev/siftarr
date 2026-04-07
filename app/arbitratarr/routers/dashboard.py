@@ -130,6 +130,7 @@ async def _approve_and_search_request(
 async def _deny_request_record(
     request: RequestModel,
     db: AsyncSession,
+    reason: str | None = None,
 ) -> None:
     """Decline a request in Overseerr and mark it failed locally."""
     effective_settings = await get_effective_settings(db)
@@ -139,10 +140,10 @@ async def _deny_request_record(
 
     try:
         if request.overseerr_request_id:
-            await overseerr_service.decline_request(request.overseerr_request_id)
+            await overseerr_service.decline_request(request.overseerr_request_id, reason=reason)
 
         await queue_service.remove_from_queue(request.id)
-        await lifecycle_service.mark_as_failed(request.id)
+        await lifecycle_service.mark_as_failed(request.id, reason=reason)
     finally:
         await overseerr_service.close()
 
@@ -240,6 +241,23 @@ async def dashboard(
             request_id: status.value for request_id, status in staged_request_result.all()
         }
 
+    # Get completed requests for the Finished tab
+    completed_requests = await lifecycle_service.get_requests_by_status(
+        RequestStatus.COMPLETED, limit=500
+    )
+
+    # Get rejected requests (failed with a rejection reason) for the Rejected tab
+    rejected_result = await db.execute(
+        select(RequestModel)
+        .where(
+            RequestModel.status == RequestStatus.FAILED,
+            RequestModel.rejection_reason.isnot(None),
+        )
+        .order_by(RequestModel.updated_at.desc())
+        .limit(500)
+    )
+    rejected_requests = list(rejected_result.scalars().all())
+
     # Get stats
     stats = await lifecycle_service.get_requests_stats()
 
@@ -257,11 +275,14 @@ async def dashboard(
             "pending_items_by_request_id": pending_items_by_request_id,
             "staged_torrents": staged_torrents,
             "staged_request_statuses": staged_request_statuses,
+            "completed_requests": completed_requests,
+            "rejected_requests": rejected_requests,
             "stats": {
                 "active": len(active_requests),
                 "pending": len(pending_requests),
                 "staged": len(staged_torrents),
                 "completed": stats["by_status"].get(RequestStatus.COMPLETED.value, 0),
+                "rejected": len(rejected_requests),
             },
         },
     )
@@ -464,6 +485,7 @@ async def use_request_release(
 async def deny_request(
     request_id: int,
     redirect_to: str | None = Form(default=None),
+    reason: str | None = Form(default=None),
     db: AsyncSession = Depends(get_db),
 ) -> RedirectResponse:
     """Decline a request in Overseerr and mark as failed."""
@@ -473,5 +495,5 @@ async def deny_request(
     if not request:
         raise HTTPException(status_code=404, detail="Request not found")
 
-    await _deny_request_record(request, db)
+    await _deny_request_record(request, db, reason=reason)
     return RedirectResponse(url=redirect_to or "/", status_code=303)

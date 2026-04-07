@@ -1,3 +1,4 @@
+import asyncio
 import json
 
 from sqlalchemy import select
@@ -108,15 +109,19 @@ class TVDecisionService:
         all_selected_releases: list[ReleaseEvaluation] = []
         season_pack_selected = False
 
-        # Step 1: Try season packs
-        for season in requested_seasons:
-            search_result = await self.prowlarr.search_by_tvdbid(
+        # Step 1: Try season packs - search all seasons concurrently
+        season_search_coros = [
+            self.prowlarr.search_by_tvdbid(
                 tvdbid=request.tvdb_id,
                 title=request.title,
                 season=season,
                 year=request.year,
             )
+            for season in requested_seasons
+        ]
+        season_results = await asyncio.gather(*season_search_coros)
 
+        for search_result in season_results:
             if not search_result.releases:
                 continue
 
@@ -128,55 +133,47 @@ class TVDecisionService:
             if best_pack and best_pack.passed:
                 all_selected_releases.append(best_pack)
                 season_pack_selected = True
-                break  # Found a good season pack, no need for episode searches
+                break  # Found a good season pack
 
         # Step 2: If no season pack, try individual episodes
         if not season_pack_selected:
+            episode_search_coros = []
             for season in requested_seasons:
                 episodes_to_search = requested_episodes.get(season, [])
 
                 if not episodes_to_search:
-                    # If no specific episodes requested, get all episodes for season
-                    # This is a simplification - real implementation would query Overseerr
-                    search_result = await self.prowlarr.search_by_tvdbid(
-                        tvdbid=request.tvdb_id,
-                        title=request.title,
-                        season=season,
-                        year=request.year,
-                    )
-
-                    if not search_result.releases:
-                        continue
-
-                    evaluated = [
-                        rule_engine.evaluate(release) for release in search_result.releases
-                    ]
-                    all_evaluated_releases.extend(evaluated)
-                    all_selected_releases.extend(
-                        [result_item for result_item in evaluated if result_item.passed]
-                    )
-                else:
-                    # Search for specific episodes
-                    for episode in episodes_to_search:
-                        search_result = await self.prowlarr.search_by_tvdbid(
+                    episode_search_coros.append(
+                        self.prowlarr.search_by_tvdbid(
                             tvdbid=request.tvdb_id,
                             title=request.title,
                             season=season,
-                            episode=episode,
                             year=request.year,
                         )
+                    )
+                else:
+                    for episode in episodes_to_search:
+                        episode_search_coros.append(
+                            self.prowlarr.search_by_tvdbid(
+                                tvdbid=request.tvdb_id,
+                                title=request.title,
+                                season=season,
+                                episode=episode,
+                                year=request.year,
+                            )
+                        )
 
-                        if not search_result.releases:
-                            continue
+            episode_results = await asyncio.gather(*episode_search_coros)
 
-                        evaluated = [
-                            rule_engine.evaluate(release) for release in search_result.releases
-                        ]
-                        all_evaluated_releases.extend(evaluated)
-                        passing = [result_item for result_item in evaluated if result_item.passed]
-                        best = passing[0] if passing else None
-                        if best:
-                            all_selected_releases.append(best)
+            for search_result in episode_results:
+                if not search_result.releases:
+                    continue
+
+                evaluated = [rule_engine.evaluate(release) for release in search_result.releases]
+                all_evaluated_releases.extend(evaluated)
+                passing = [result_item for result_item in evaluated if result_item.passed]
+                best = passing[0] if passing else None
+                if best:
+                    all_selected_releases.append(best)
 
         await store_search_results(self.db, request.id, all_evaluated_releases)
 

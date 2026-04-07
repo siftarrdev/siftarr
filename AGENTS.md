@@ -57,5 +57,8 @@ uv run alembic upgrade head
 ## Quality Gates (in order)
 
 ```bash
-uv run ruff format . && uv run ruff check . && uv run ty check && uv run pytest
+uv run ruff format .
+uv run ruff check .
+uv run ty check
+uv run pytest
 ```

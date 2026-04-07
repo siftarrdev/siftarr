@@ -79,6 +79,8 @@ dependencies = [
     { name = "httpx" },
     { name = "jinja2" },
     { name = "pydantic-settings" },
+    { name = "pytest" },
+    { name = "pytest-asyncio" },
     { name = "python-multipart" },
     { name = "qbittorrent-api" },
     { name = "sqlalchemy", extra = ["asyncio"] },
@@ -87,8 +89,6 @@ dependencies = [
 
 [package.optional-dependencies]
 dev = [
-    { name = "pytest" },
-    { name = "pytest-asyncio" },
     { name = "ruff" },
     { name = "setuptools-scm" },
 ]
@@ -102,8 +102,8 @@ requires-dist = [
     { name = "httpx", specifier = ">=0.27.0" },
     { name = "jinja2", specifier = ">=3.1.0" },
     { name = "pydantic-settings", specifier = ">=2.0.0" },
-    { name = "pytest", marker = "extra == 'dev'", specifier = ">=7.0.0" },
-    { name = "pytest-asyncio", marker = "extra == 'dev'", specifier = ">=0.21.0" },
+    { name = "pytest", specifier = ">=7.0.0" },
+    { name = "pytest-asyncio", specifier = ">=0.21.0" },
     { name = "python-multipart", specifier = ">=0.0.9" },
     { name = "qbittorrent-api", specifier = ">=2024.0.0" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.6.0" },
