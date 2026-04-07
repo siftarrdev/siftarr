@@ -1,4 +1,5 @@
 import re
+import logging
 from datetime import datetime
 from typing import Any, cast
 
@@ -6,6 +7,9 @@ import httpx
 from pydantic import BaseModel
 
 from app.siftarr.config import Settings, get_settings
+
+
+logger = logging.getLogger(__name__)
 
 
 class ProwlarrRelease(BaseModel):
@@ -133,6 +137,13 @@ class ProwlarrService:
         endpoint = f"{self.base_url}/api/v1/search"
         headers = self._get_headers()
 
+        logger.info(
+            "Prowlarr search request: type=%s query=%s categories=%s",
+            params.get("type"),
+            params.get("query"),
+            params.get("categories"),
+        )
+
         releases = []
         async with httpx.AsyncClient() as client:
             try:
@@ -146,8 +157,26 @@ class ProwlarrService:
                     results = response.json()
                     for release_data in self._extract_release_items(results):
                         releases.append(self._parse_release_info(release_data))
+                    logger.info(
+                        "Prowlarr search response: type=%s query=%s releases=%s elapsed_ms=%s",
+                        params.get("type"),
+                        params.get("query"),
+                        len(releases),
+                        int((time.time() - start_time) * 1000),
+                    )
+                else:
+                    logger.warning(
+                        "Prowlarr search failed: type=%s query=%s status_code=%s",
+                        params.get("type"),
+                        params.get("query"),
+                        response.status_code,
+                    )
             except httpx.RequestError:
-                pass
+                logger.exception(
+                    "Prowlarr search request error: type=%s query=%s",
+                    params.get("type"),
+                    params.get("query"),
+                )
 
         return ProwlarrSearchResult(
             releases=releases,

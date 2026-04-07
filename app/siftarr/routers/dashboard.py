@@ -207,11 +207,14 @@ async def dashboard(
     pending_requests = [
         req
         for req in active_requests
-        if req.status == RequestStatus.PENDING
-        and req.overseerr_request_id
-        and (
-            overseerr_request_statuses.get(req.id) == "approved"
-            or overseerr_media_statuses.get(req.id) == "partially_available"
+        if req.status == RequestStatus.SEARCHING
+        or (
+            req.status == RequestStatus.PENDING
+            and req.overseerr_request_id
+            and (
+                overseerr_request_statuses.get(req.id) == "approved"
+                or overseerr_media_statuses.get(req.id) == "partially_available"
+            )
         )
     ]
 

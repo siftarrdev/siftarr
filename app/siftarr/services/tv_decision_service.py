@@ -1,3 +1,4 @@
+import logging
 import asyncio
 import json
 
@@ -12,6 +13,9 @@ from app.siftarr.services.prowlarr_service import ProwlarrService
 from app.siftarr.services.qbittorrent_service import QbittorrentService
 from app.siftarr.services.release_selection_service import store_search_results, use_releases
 from app.siftarr.services.rule_engine import ReleaseEvaluation, RuleEngine
+
+
+logger = logging.getLogger(__name__)
 
 
 class TVDecisionService:
@@ -64,7 +68,14 @@ class TVDecisionService:
         try:
             data = json.loads(request.requested_episodes)
             if isinstance(data, dict):
-                return {int(k): v for k, v in data.items()}
+                return {int(k): [int(episode) for episode in v] for k, v in data.items()}
+            if isinstance(data, list):
+                episodes = [int(episode) for episode in data if isinstance(episode, (int, str))]
+                if not episodes:
+                    return {}
+
+                seasons = self._get_requested_seasons(request)
+                return {season: episodes for season in seasons}
             return {}
         except (json.JSONDecodeError, TypeError, ValueError):
             return {}
@@ -89,6 +100,15 @@ class TVDecisionService:
         request.status = RequestStatus.SEARCHING
         await self.db.commit()
 
+        logger.info(
+            "TV search started: request_id=%s title=%s tvdb_id=%s seasons=%s episodes=%s",
+            request.id,
+            request.title,
+            request.tvdb_id,
+            request.requested_seasons,
+            request.requested_episodes,
+        )
+
         # Get rule engine
         rule_engine = await self._get_rule_engine()
 
@@ -101,6 +121,13 @@ class TVDecisionService:
         # Get requested seasons
         requested_seasons = self._get_requested_seasons(request)
         requested_episodes = self._get_requested_episodes(request)
+
+        logger.info(
+            "TV search parsed request: request_id=%s seasons=%s episodes_by_season=%s",
+            request.id,
+            requested_seasons,
+            requested_episodes,
+        )
 
         if not requested_seasons:
             return {"status": "error", "message": "No seasons specified"}
@@ -120,6 +147,12 @@ class TVDecisionService:
             for season in requested_seasons
         ]
         season_results = await asyncio.gather(*season_search_coros)
+        logger.info(
+            "TV season search completed: request_id=%s queries=%s results=%s",
+            request.id,
+            len(season_search_coros),
+            [len(result.releases) for result in season_results],
+        )
 
         for search_result in season_results:
             if not search_result.releases:
@@ -163,6 +196,12 @@ class TVDecisionService:
                         )
 
             episode_results = await asyncio.gather(*episode_search_coros)
+            logger.info(
+                "TV episode search completed: request_id=%s queries=%s results=%s",
+                request.id,
+                len(episode_search_coros),
+                [len(result.releases) for result in episode_results],
+            )
 
             for search_result in episode_results:
                 if not search_result.releases:
@@ -213,6 +252,12 @@ class TVDecisionService:
         # Step 4: No releases passed - add to pending queue
         request.status = RequestStatus.PENDING
         await self.db.commit()
+
+        logger.info(
+            "TV search produced no passing releases: request_id=%s evaluated=%s",
+            request.id,
+            len(all_evaluated_releases),
+        )
 
         queue_service = PendingQueueService(self.db)
         await queue_service.add_to_queue(request.id)

@@ -94,6 +94,18 @@ class TestProwlarrService:
 
         assert query == "Example Show {tvdbid:5678} {season:1} {episode:2} {year:2024}"
 
+    def test_build_tv_query_handles_season_only_searches(self) -> None:
+        """TV queries should still work when only a season is requested."""
+        query = ProwlarrService._build_tv_query("Example Show", 5678, season=8, year=2024)
+
+        assert query == "Example Show {tvdbid:5678} {season:8} {year:2024}"
+
+    def test_build_tv_title_query_handles_season_only_searches(self) -> None:
+        """Fallback TV queries should still work when only a season is requested."""
+        query = ProwlarrService._build_tv_title_query("Example Show", season=8, year=2024)
+
+        assert query == "Example Show S08 2024"
+
     @pytest.mark.asyncio
     async def test_search_by_tmdbid_falls_back_to_title_query(self, monkeypatch) -> None:
         """Movie search should retry with a title query when metadata search is empty."""
