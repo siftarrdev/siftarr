@@ -249,13 +249,9 @@ async def dashboard(
         RequestStatus.COMPLETED, limit=500
     )
 
-    # Get rejected requests (failed with a rejection reason) for the Rejected tab
     rejected_result = await db.execute(
         select(RequestModel)
-        .where(
-            RequestModel.status == RequestStatus.FAILED,
-            RequestModel.rejection_reason.isnot(None),
-        )
+        .where(RequestModel.status == RequestStatus.FAILED)
         .order_by(RequestModel.updated_at.desc())
         .limit(500)
     )
@@ -350,7 +346,7 @@ async def bulk_request_action(
         elif action == "approve":
             await _approve_and_search_request(request, db)
         elif action == "reject":
-            await _deny_request_record(request, db)
+            await _deny_request_record(request, db, reason="Bulk rejected")
 
     return RedirectResponse(url=redirect_url, status_code=303)
 

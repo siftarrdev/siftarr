@@ -84,7 +84,11 @@ class TestDashboardRouter:
                 return None
 
         monkeypatch.setattr(dashboard, "OverseerrService", FakeOverseerrService)
-        monkeypatch.setattr(dashboard, "PendingQueueService", lambda db: AsyncMock(get_all_pending=AsyncMock(return_value=[])))
+        monkeypatch.setattr(
+            dashboard,
+            "PendingQueueService",
+            lambda db: AsyncMock(get_all_pending=AsyncMock(return_value=[])),
+        )
 
         mock_db.execute.return_value = MagicMock(
             scalars=MagicMock(return_value=MagicMock(all=MagicMock(return_value=[])))

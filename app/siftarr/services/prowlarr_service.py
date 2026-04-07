@@ -1,5 +1,5 @@
-import re
 import logging
+import re
 from datetime import datetime
 from typing import Any, cast
 
@@ -7,7 +7,6 @@ import httpx
 from pydantic import BaseModel
 
 from app.siftarr.config import Settings, get_settings
-
 
 logger = logging.getLogger(__name__)
 

@@ -1,6 +1,6 @@
-import logging
 import asyncio
 import json
+import logging
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -9,11 +9,12 @@ from app.siftarr.models.release import Release
 from app.siftarr.models.request import MediaType, Request, RequestStatus
 from app.siftarr.models.rule import Rule
 from app.siftarr.services.pending_queue_service import PendingQueueService
-from app.siftarr.services.prowlarr_service import ProwlarrService
+from app.siftarr.services.prowlarr_service import ProwlarrSearchResult, ProwlarrService
 from app.siftarr.services.qbittorrent_service import QbittorrentService
 from app.siftarr.services.release_selection_service import store_search_results, use_releases
 from app.siftarr.services.rule_engine import ReleaseEvaluation, RuleEngine
 
+MAX_CONCURRENT_SEARCHES = 5
 
 logger = logging.getLogger(__name__)
 
@@ -41,16 +42,14 @@ class TVDecisionService:
         self.db = db
         self.prowlarr = prowlarr
         self.qbittorrent = qbittorrent
+        self._search_semaphore = asyncio.Semaphore(MAX_CONCURRENT_SEARCHES)
 
     async def _get_rule_engine(self) -> RuleEngine:
-        """Get configured rule engine from database rules."""
         result = await self.db.execute(select(Rule))
         rules = list(result.scalars().all())
-
         return RuleEngine.from_db_rules(rules=rules, media_type=MediaType.TV.value)
 
     def _get_requested_seasons(self, request: Request) -> list[int]:
-        """Parse requested seasons from JSON string."""
         if not request.requested_seasons:
             return []
         try:
@@ -59,10 +58,6 @@ class TVDecisionService:
             return []
 
     def _get_requested_episodes(self, request: Request) -> dict[int, list[int]]:
-        """
-        Parse requested episodes by season.
-        Returns: {season: [episode, episode, ...]}
-        """
         if not request.requested_episodes:
             return {}
         try:
@@ -70,23 +65,20 @@ class TVDecisionService:
             if isinstance(data, dict):
                 return {int(k): [int(episode) for episode in v] for k, v in data.items()}
             if isinstance(data, list):
-                episodes = [int(episode) for episode in data if isinstance(episode, (int, str))]
+                episodes = [int(episode) for episode in data if isinstance(episode, int | str)]
                 if not episodes:
                     return {}
-
                 seasons = self._get_requested_seasons(request)
                 return {season: episodes for season in seasons}
             return {}
         except (json.JSONDecodeError, TypeError, ValueError):
             return {}
 
-    async def process_request(self, request_id: int) -> dict:
-        """
-        Process a TV request through the season-first workflow.
+    async def _limited_search(self, coro):
+        async with self._search_semaphore:
+            return await coro
 
-        Returns:
-            Dict with status, selected releases, and any errors
-        """
+    async def process_request(self, request_id: int) -> dict:
         result = await self.db.execute(select(Request).where(Request.id == request_id))
         request = result.scalar_one_or_none()
 
@@ -96,7 +88,6 @@ class TVDecisionService:
         if request.media_type != MediaType.TV:
             return {"status": "error", "message": "Request is not TV type"}
 
-        # Update status to searching
         request.status = RequestStatus.SEARCHING
         await self.db.commit()
 
@@ -109,16 +100,13 @@ class TVDecisionService:
             request.requested_episodes,
         )
 
-        # Get rule engine
         rule_engine = await self._get_rule_engine()
 
-        # Check we have a valid TVDB ID
         if request.tvdb_id is None:
             request.status = RequestStatus.FAILED
             await self.db.commit()
             return {"status": "error", "message": "No TVDB ID available for TV show"}
 
-        # Get requested seasons
         requested_seasons = self._get_requested_seasons(request)
         requested_episodes = self._get_requested_episodes(request)
 
@@ -138,35 +126,52 @@ class TVDecisionService:
 
         # Step 1: Try season packs - search all seasons concurrently
         season_search_coros = [
-            self.prowlarr.search_by_tvdbid(
-                tvdbid=request.tvdb_id,
-                title=request.title,
-                season=season,
-                year=request.year,
+            self._limited_search(
+                self.prowlarr.search_by_tvdbid(
+                    tvdbid=request.tvdb_id,
+                    title=request.title,
+                    season=season,
+                    year=request.year,
+                )
             )
             for season in requested_seasons
         ]
-        season_results = await asyncio.gather(*season_search_coros)
+        season_results = await asyncio.gather(*season_search_coros, return_exceptions=True)
+
+        season_search_successes = []
+        for i, sr in enumerate(season_results):
+            if isinstance(sr, Exception):
+                logger.warning(
+                    "TV season search failed: request_id=%s season=%s error=%s",
+                    request.id,
+                    requested_seasons[i],
+                    sr,
+                )
+            elif isinstance(sr, ProwlarrSearchResult):
+                season_search_successes.append(sr)
+
         logger.info(
             "TV season search completed: request_id=%s queries=%s results=%s",
             request.id,
             len(season_search_coros),
-            [len(result.releases) for result in season_results],
+            [len(sr.releases) for sr in season_search_successes],
         )
 
-        for search_result in season_results:
+        all_passing_packs: list[ReleaseEvaluation] = []
+        for search_result in season_search_successes:
             if not search_result.releases:
                 continue
 
             evaluated_packs = [rule_engine.evaluate(release) for release in search_result.releases]
             all_evaluated_releases.extend(evaluated_packs)
-            passing_packs = [evaluation for evaluation in evaluated_packs if evaluation.passed]
-            best_pack = passing_packs[0] if passing_packs else None
+            passing_packs = [e for e in evaluated_packs if e.passed]
+            all_passing_packs.extend(passing_packs)
 
-            if best_pack and best_pack.passed:
-                all_selected_releases.append(best_pack)
-                season_pack_selected = True
-                break  # Found a good season pack
+        if all_passing_packs:
+            all_passing_packs.sort(key=lambda e: e.total_score, reverse=True)
+            best_pack = all_passing_packs[0]
+            all_selected_releases.append(best_pack)
+            season_pack_selected = True
 
         # Step 2: If no season pack, try individual episodes
         if not season_pack_selected:
@@ -176,40 +181,56 @@ class TVDecisionService:
 
                 if not episodes_to_search:
                     episode_search_coros.append(
-                        self.prowlarr.search_by_tvdbid(
-                            tvdbid=request.tvdb_id,
-                            title=request.title,
-                            season=season,
-                            year=request.year,
+                        self._limited_search(
+                            self.prowlarr.search_by_tvdbid(
+                                tvdbid=request.tvdb_id,
+                                title=request.title,
+                                season=season,
+                                year=request.year,
+                            )
                         )
                     )
                 else:
                     for episode in episodes_to_search:
                         episode_search_coros.append(
-                            self.prowlarr.search_by_tvdbid(
-                                tvdbid=request.tvdb_id,
-                                title=request.title,
-                                season=season,
-                                episode=episode,
-                                year=request.year,
+                            self._limited_search(
+                                self.prowlarr.search_by_tvdbid(
+                                    tvdbid=request.tvdb_id,
+                                    title=request.title,
+                                    season=season,
+                                    episode=episode,
+                                    year=request.year,
+                                )
                             )
                         )
 
-            episode_results = await asyncio.gather(*episode_search_coros)
+            episode_results = await asyncio.gather(*episode_search_coros, return_exceptions=True)
+
+            episode_search_successes = []
+            for er in episode_results:
+                if isinstance(er, Exception):
+                    logger.warning(
+                        "TV episode search failed: request_id=%s error=%s",
+                        request.id,
+                        er,
+                    )
+                elif isinstance(er, ProwlarrSearchResult):
+                    episode_search_successes.append(er)
+
             logger.info(
                 "TV episode search completed: request_id=%s queries=%s results=%s",
                 request.id,
                 len(episode_search_coros),
-                [len(result.releases) for result in episode_results],
+                [len(er.releases) for er in episode_search_successes],
             )
 
-            for search_result in episode_results:
+            for search_result in episode_search_successes:
                 if not search_result.releases:
                     continue
 
                 evaluated = [rule_engine.evaluate(release) for release in search_result.releases]
                 all_evaluated_releases.extend(evaluated)
-                passing = [result_item for result_item in evaluated if result_item.passed]
+                passing = [e for e in evaluated if e.passed]
                 best = passing[0] if passing else None
                 if best:
                     all_selected_releases.append(best)
@@ -218,10 +239,9 @@ class TVDecisionService:
 
         # Step 3: If we have selected releases, send to qBittorrent
         if all_selected_releases:
-            # Sort by score
             all_selected_releases.sort(key=lambda x: x.total_score, reverse=True)
 
-            selected_titles = {result_item.release.title for result_item in all_selected_releases}
+            selected_titles = {e.release.title for e in all_selected_releases}
             stored_releases_result = await self.db.execute(
                 select(Release).where(
                     Release.request_id == request.id, Release.title.in_(selected_titles)
@@ -253,6 +273,11 @@ class TVDecisionService:
         request.status = RequestStatus.PENDING
         await self.db.commit()
 
+        rejection_reasons = []
+        for e in all_evaluated_releases:
+            if e.rejection_reason:
+                rejection_reasons.append(e.rejection_reason)
+
         logger.info(
             "TV search produced no passing releases: request_id=%s evaluated=%s",
             request.id,
@@ -260,9 +285,15 @@ class TVDecisionService:
         )
 
         queue_service = PendingQueueService(self.db)
-        await queue_service.add_to_queue(request.id)
+        await queue_service.add_to_queue(
+            request.id,
+            error_message="; ".join(set(rejection_reasons))[:500]
+            if rejection_reasons
+            else "All releases rejected by rules",
+        )
 
         return {
             "status": "pending",
-            "message": "No releases passed rules, added to pending queue",
+            "message": f"No releases passed rules. {len(all_evaluated_releases)} releases evaluated.",
+            "rejection_reasons": list(set(rejection_reasons))[:5],
         }

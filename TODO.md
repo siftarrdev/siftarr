@@ -5,10 +5,11 @@
 - make the different sections in settings as collapsible sections to make it easier to navigate
 - harmonise the UI design of the dashboard and settings pages to make it more consistent and visually appealing. Include better use of spacing, typography, and color to improve readability and user experience.
 
-- add a tab in the dashboard to see finished requests. it will show requests that are completed and downlaoded.
-- add a tab in the dashboard to see rejected requests. it will show requests that have been rejected by the rules engine, along with the reason for rejection if provided.
-- when rejecting a torrent, add an option to provide a reason for the rejection that is then saved to the database and can be viewed in the dashboard
-- When searching for torrents with prowlarr we should make sure to add the movie year to the search query if we have it available from the media request, this should help improve the accuracy of search results and reduce the chances of incorrect matches being returned.
-- When doing multiple prowlarr searches at the same time we should run them concurrently to speed up the search process, we can use asyncio.gather to run multiple search tasks at the same time and then aggregate the results once they are all complete.
-
 ## Bugs
+- Failed requests without a rejection_reason are invisible in the dashboard (not in Active, Finished, or Rejected tabs)
+- Bulk reject action passes no rejection reason, making bulk-rejected requests invisible in the Rejected tab
+- TVDecisionService doesn't propagate rejection reasons to the pending queue or return dict (MovieDecisionService does)
+- asyncio.gather in TVDecisionService called without return_exceptions=True — a single search failure crashes all in-flight searches
+- No concurrency limiter (asyncio.Semaphore) for Prowlarr searches — a show with 20+ episodes fires 20+ simultaneous requests
+- Year can be None if Overseerr is unreachable at request creation time, with no retroactive fill mechanism
+- Duplicated year extraction logic between webhooks.py and settings.py

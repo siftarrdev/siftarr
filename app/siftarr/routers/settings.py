@@ -1,7 +1,5 @@
 """Settings page router for viewing and editing application settings."""
 
-import contextlib
-
 from fastapi import APIRouter, Depends, Form, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
@@ -15,6 +13,7 @@ from app.siftarr.models.request import MediaType, RequestStatus
 from app.siftarr.models.request import Request as RequestModel
 from app.siftarr.models.settings import Settings as DBSettings
 from app.siftarr.services.connection_tester import ConnectionTester, ConnectionTestResult
+from app.siftarr.services.media_helpers import extract_media_title_and_year
 from app.siftarr.services.overseerr_service import OverseerrService
 from app.siftarr.services.pending_queue_service import PendingQueueService
 from app.siftarr.services.rule_service import RuleService
@@ -424,28 +423,15 @@ async def sync_overseerr(
                         )
                         email = requested_by.get("email")
 
-                        # Fetch title from Overseerr media details endpoint
+                        # Fetch title and year from Overseerr media details
                         title = ""
                         year = None
                         media_external_id = tmdb_id if tmdb_id else tvdb_id
                         if media_external_id:
                             media_type_for_api = "movie" if media_type == MediaType.MOVIE else "tv"
-                            media_details = await overseerr_service.get_media_details(
-                                media_type_for_api, media_external_id
+                            title, year = await extract_media_title_and_year(
+                                overseerr_service, media_type_for_api, media_external_id
                             )
-                            if media_details:
-                                title = (
-                                    media_details.get("title") or media_details.get("name") or ""
-                                )
-                                # Extract year from release/air date
-                                date_str = (
-                                    media_details.get("releaseDate")
-                                    or media_details.get("firstAirDate")
-                                    or ""
-                                )
-                                if date_str and len(date_str) >= 4:
-                                    with contextlib.suppress(ValueError, TypeError):
-                                        year = int(date_str[:4])
 
                         # Create new request
                         new_request = RequestModel(
