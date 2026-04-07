@@ -156,8 +156,9 @@ class TestStagingServiceIntegration:
         mock_staged.torrent_path = str(tmp_path / "test.torrent")
         mock_staged.json_path = str(tmp_path / "test.json")
 
-        with patch("os.path.exists", return_value=True), patch(
-            "os.remove", side_effect=OSError("Permission denied")
+        with (
+            patch("os.path.exists", return_value=True),
+            patch("os.remove", side_effect=OSError("Permission denied")),
         ):
             result = await service.delete_staged_files(mock_staged)
 

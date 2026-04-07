@@ -2,10 +2,10 @@
 
 from logging.config import fileConfig
 
+from alembic import context
 from sqlalchemy import engine_from_config, pool
 from sqlalchemy.engine import Connection
 
-from alembic import context
 from app.arbitratarr.config import get_settings
 from app.arbitratarr.models import Base
 

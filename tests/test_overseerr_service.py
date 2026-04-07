@@ -276,6 +276,7 @@ class TestOverseerrService:
 
                 result = await service.get_media_details("movie", 123)
 
+                assert result is not None
                 assert result["id"] == 123
 
     @pytest.mark.asyncio

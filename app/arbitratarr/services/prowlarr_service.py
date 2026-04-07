@@ -1,5 +1,6 @@
 import re
 from datetime import datetime
+from typing import Any, cast
 
 import httpx
 from pydantic import BaseModel
@@ -154,15 +155,16 @@ class ProwlarrService:
         )
 
     @staticmethod
-    def _extract_release_items(payload: object) -> list[dict]:
+    def _extract_release_items(payload: object) -> list[dict[str, Any]]:
         """Normalize different Prowlarr search response shapes into release items."""
         if not isinstance(payload, list):
             return []
 
-        releases: list[dict] = []
+        releases: list[dict[str, Any]] = []
         for item in payload:
             if not isinstance(item, dict):
                 continue
+            item = cast(dict[str, Any], item)
             nested_releases = item.get("releases")
             if isinstance(nested_releases, list):
                 releases.extend(r for r in nested_releases if isinstance(r, dict))

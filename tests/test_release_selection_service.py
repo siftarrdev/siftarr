@@ -93,7 +93,9 @@ class TestReleaseSelectionService:
         queue_service.remove_from_queue.assert_awaited_once_with(request_record.id)
 
     @pytest.mark.asyncio
-    async def test_use_releases_keeps_existing_staged_release(self, mock_db, request_record, selected_release):
+    async def test_use_releases_keeps_existing_staged_release(
+        self, mock_db, request_record, selected_release
+    ):
         """Already staged releases should be reused instead of staged again."""
         settings = MagicMock(staging_mode_enabled=True)
         queue_service = AsyncMock()

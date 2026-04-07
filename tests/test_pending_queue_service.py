@@ -1,7 +1,7 @@
 """Tests for PendingQueueService."""
 
-from datetime import datetime, timedelta, timezone
-from unittest.mock import AsyncMock, MagicMock, patch
+from datetime import UTC, datetime, timedelta
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -33,7 +33,7 @@ class TestPendingQueueService:
         mock_db.commit = AsyncMock()
         mock_db.refresh = AsyncMock()
 
-        result = await service.add_to_queue(
+        await service.add_to_queue(
             request_id=1,
             retry_interval_hours=24,
             error_message=None,
@@ -55,7 +55,7 @@ class TestPendingQueueService:
         mock_db.commit = AsyncMock()
         mock_db.refresh = AsyncMock()
 
-        result = await service.add_to_queue(request_id=1)
+        await service.add_to_queue(request_id=1)
 
         assert existing.retry_count == 2
         mock_db.add.assert_not_called()
@@ -87,7 +87,7 @@ class TestPendingQueueService:
     @pytest.mark.asyncio
     async def test_get_ready_for_retry(self, mock_db, service):
         """Test getting items ready for retry."""
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         mock_entries = [
             MagicMock(spec=PendingQueue, request_id=1, next_retry_at=now - timedelta(hours=1)),
             MagicMock(spec=PendingQueue, request_id=2, next_retry_at=now - timedelta(hours=2)),
@@ -149,7 +149,7 @@ class TestPendingQueueService:
         """Test marking retry as failed when under max retries."""
         mock_entry = MagicMock(spec=PendingQueue)
         mock_entry.retry_count = 3
-        mock_entry.next_retry_at = datetime.now(timezone.utc)
+        mock_entry.next_retry_at = datetime.now(UTC)
 
         mock_request = MagicMock(spec=Request)
 
@@ -242,7 +242,7 @@ class TestPendingQueueService:
     @pytest.mark.asyncio
     async def test_get_queue_stats(self, mock_db, service):
         """Test getting queue statistics."""
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         mock_entries = [
             MagicMock(spec=PendingQueue, next_retry_at=now - timedelta(hours=1)),
             MagicMock(spec=PendingQueue, next_retry_at=now - timedelta(hours=2)),

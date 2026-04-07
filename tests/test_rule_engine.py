@@ -98,6 +98,7 @@ class TestRuleEngine:
         result = engine.evaluate(release)
 
         assert result.passed is False
+        assert result.rejection_reason is not None
         assert "below minimum" in result.rejection_reason
 
     def test_evaluate_max_size_rejection(self):
@@ -116,6 +117,7 @@ class TestRuleEngine:
         result = engine.evaluate(release)
 
         assert result.passed is False
+        assert result.rejection_reason is not None
         assert "above maximum" in result.rejection_reason
 
     def test_evaluate_exclusion_rejection(self):
@@ -136,6 +138,7 @@ class TestRuleEngine:
         result = engine.evaluate(release)
 
         assert result.passed is False
+        assert result.rejection_reason is not None
         assert "exclusion" in result.rejection_reason.lower()
 
     def test_evaluate_invalid_regex(self):
@@ -194,6 +197,7 @@ class TestRuleEngine:
         result = engine.evaluate(release)
 
         assert result.passed is False
+        assert result.rejection_reason is not None
         assert "requirement" in result.rejection_reason.lower()
 
     def test_evaluate_scorer(self):

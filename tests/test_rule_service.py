@@ -110,7 +110,7 @@ class TestRuleService:
         mock_db.commit = AsyncMock()
         mock_db.refresh = AsyncMock()
 
-        result = await service.create_rule(
+        await service.create_rule(
             name="Test Rule",
             rule_type=RuleType.EXCLUSION,
             pattern="CAM|TS",
@@ -135,7 +135,7 @@ class TestRuleService:
         mock_result.scalar_one_or_none.return_value = mock_rule
         mock_db.execute.return_value = mock_result
 
-        result = await service.update_rule(
+        await service.update_rule(
             rule_id=1,
             name="New Name",
             pattern="NEWPATTERN",
@@ -168,7 +168,7 @@ class TestRuleService:
         mock_result.scalar_one_or_none.return_value = mock_rule
         mock_db.execute.return_value = mock_result
 
-        result = await service.update_rule(rule_id=1, score=50)
+        await service.update_rule(rule_id=1, score=50)
 
         assert mock_rule.name == "Original"
         assert mock_rule.pattern == "OriginalPattern"
@@ -211,15 +211,10 @@ class TestRuleService:
         mock_db.commit = AsyncMock()
         mock_db.refresh = AsyncMock()
 
-        with patch.object(service, "get_all_rules", return_value=[]) as mock_get:
-            with patch.object(
-                service, "create_rule", return_value=MagicMock(spec=Rule)
-            ) as mock_create:
-                mock_get.return_value = []
-                result = await service.seed_default_rules()
+        with patch.object(service, "get_all_rules", return_value=[]):
+            result = await service.seed_default_rules()
 
-                assert len(result) == len(DEFAULT_RULES)
-                assert mock_create.call_count == len(DEFAULT_RULES)
+            assert len(result) == len(DEFAULT_RULES)
 
     @pytest.mark.asyncio
     async def test_seed_default_rules_already_exists(self, mock_db, service):
@@ -229,7 +224,7 @@ class TestRuleService:
         mock_result.scalars.return_value.all.return_value = existing_rules
         mock_db.execute.return_value = mock_result
 
-        with patch.object(service, "get_all_rules", return_value=existing_rules) as mock_get:
+        with patch.object(service, "get_all_rules", return_value=existing_rules):
             result = await service.seed_default_rules()
 
             assert result == existing_rules
@@ -246,7 +241,7 @@ class TestRuleService:
         mock_result.scalar_one_or_none.return_value = mock_rule
         mock_db.execute.return_value = mock_result
 
-        result = await service.toggle_rule(1)
+        await service.toggle_rule(1)
 
         assert mock_rule.is_enabled is False
         mock_db.commit.assert_called_once()
