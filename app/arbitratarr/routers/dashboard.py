@@ -127,6 +127,11 @@ async def _deny_request_record(
         await overseerr_service.close()
 
 
+def _get_bulk_redirect_url(redirect_to: str | None) -> str:
+    """Return the target tab after a bulk action completes."""
+    return redirect_to or "/?tab=pending"
+
+
 @router.get("/")
 async def dashboard(
     request: FastAPIRequest,
@@ -280,11 +285,13 @@ async def search_request_now(
 async def bulk_request_action(
     action: str = Form(...),
     request_ids: list[int] = Form(default=[]),
+    redirect_to: str | None = Form(default=None),
     db: AsyncSession = Depends(get_db),
 ) -> RedirectResponse:
     """Apply a bulk action to selected requests."""
+    redirect_url = _get_bulk_redirect_url(redirect_to)
     if not request_ids:
-        return RedirectResponse(url="/?tab=pending", status_code=303)
+        return RedirectResponse(url=redirect_url, status_code=303)
 
     result = await db.execute(
         select(RequestModel)
@@ -301,7 +308,7 @@ async def bulk_request_action(
         elif action == "reject":
             await _deny_request_record(request, db)
 
-    return RedirectResponse(url="/?tab=pending", status_code=303)
+    return RedirectResponse(url=redirect_url, status_code=303)
 
 
 @router.get("/requests/{request_id}/details")

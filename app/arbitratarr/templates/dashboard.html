@@ -24,24 +24,42 @@
     <div id="content-active" class="tab-content">
         {% if active_requests %}
         <div class="bg-gray-800 rounded-lg border border-gray-700 overflow-hidden">
-            <div class="p-4 border-b border-gray-700 flex flex-col gap-3 md:flex-row md:items-center">
-                <input type="text" id="filter-input" placeholder="Filter requests..." class="w-full md:flex-1 px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:border-blue-500">
-                <select id="overseerr-status-filter" class="w-full md:w-56 px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white focus:outline-none focus:border-blue-500">
-                    <option value="">All Overseerr Statuses</option>
-                    <option value="approved">Approved</option>
-                    <option value="pending">Pending</option>
-                    <option value="processing">Processing</option>
-                    <option value="partially_available">Partially Available</option>
-                    <option value="available">Available</option>
-                    <option value="declined">Declined</option>
-                    <option value="completed">Completed</option>
-                    <option value="deleted">Deleted</option>
-                </select>
-            </div>
-            <div class="overflow-x-auto">
-                <table class="min-w-full divide-y divide-gray-700" id="active-requests-table">
+            <form action="/requests/bulk" method="post">
+                <input type="hidden" name="redirect_to" value="/?tab=active">
+                <div class="border-b border-gray-700 px-4 py-3">
+                    <div class="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+                        <div class="min-w-0">
+                            <div class="text-sm font-medium text-white">Active Requests</div>
+                            <div class="text-sm text-gray-400">Browse active requests, filter the list, and run actions on multiple items at once.</div>
+                        </div>
+                        <div class="flex flex-wrap gap-2">
+                            <button type="submit" name="action" value="search" class="px-3 py-2 rounded-lg bg-blue-600 hover:bg-blue-500 text-white text-sm">Search Selected</button>
+                            <button type="submit" name="action" value="approve" class="px-3 py-2 rounded-lg bg-green-600 hover:bg-green-500 text-white text-sm">Approve Selected</button>
+                            <button type="submit" name="action" value="reject" class="px-3 py-2 rounded-lg bg-red-600 hover:bg-red-500 text-white text-sm">Reject Selected</button>
+                        </div>
+                    </div>
+                    <div class="mt-3 flex flex-col gap-2 lg:flex-row lg:items-center">
+                        <input type="text" id="filter-input" placeholder="Filter active requests..." class="w-full lg:flex-1 px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:border-blue-500">
+                        <select id="overseerr-status-filter" class="w-full lg:w-56 px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white focus:outline-none focus:border-blue-500">
+                            <option value="">All Overseerr Statuses</option>
+                            <option value="approved">Approved</option>
+                            <option value="pending">Pending</option>
+                            <option value="processing">Processing</option>
+                            <option value="partially_available">Partially Available</option>
+                            <option value="available">Available</option>
+                            <option value="declined">Declined</option>
+                            <option value="completed">Completed</option>
+                            <option value="deleted">Deleted</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="overflow-x-auto">
+                    <table class="min-w-full divide-y divide-gray-700" id="active-requests-table">
                     <thead class="bg-gray-700">
                         <tr>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider w-12">
+                                <input id="active-select-all" type="checkbox" class="rounded border-gray-500 bg-gray-800 text-blue-500 focus:ring-blue-500">
+                            </th>
                             <th class="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider cursor-pointer hover:bg-gray-600" data-table="active" data-sort="title">Title <span class="sort-indicator text-gray-400"></span></th>
                             <th class="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider cursor-pointer hover:bg-gray-600" data-table="active" data-sort="type">Type <span class="sort-indicator text-gray-400"></span></th>
                             <th class="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider cursor-pointer hover:bg-gray-600" data-table="active" data-sort="status">Status <span class="sort-indicator text-gray-400"></span></th>
@@ -54,6 +72,9 @@
                     <tbody class="divide-y divide-gray-700" id="active-requests-body">
                         {% for req in active_requests %}
                         <tr class="hover:bg-gray-700 cursor-pointer" onclick="openRequestDetails({{ req.id }})" data-overseerr="{{ 'true' if req.overseerr_request_id else 'false' }}" data-status="{{ req.status.value }}" data-title="{{ req.title|lower }}" data-type="{{ req.media_type.value|lower }}" data-status-low="{{ req.status.value|lower }}" data-requestedby="{{ req.requester_username|default('Unknown')|lower }}" data-requested="{{ req.created_at.strftime('%Y-%m-%d %H:%M') }}" data-ovstatus="{{ overseerr_statuses.get(req.id, 'unknown') }}" data-ovrank="{{ {'approved':0,'pending':1,'processing':2,'partially_available':3,'available':4,'completed':5,'declined':6,'deleted':7}.get(overseerr_statuses.get(req.id, 'unknown'), 99) }}">
+                            <td class="px-6 py-4 whitespace-nowrap text-sm" onclick="event.stopPropagation()">
+                                <input name="request_ids" value="{{ req.id }}" type="checkbox" class="active-request-checkbox rounded border-gray-500 bg-gray-800 text-blue-500 focus:ring-blue-500">
+                            </td>
                             <td class="px-6 py-4 whitespace-nowrap text-sm">{{ req.title }}</td>
                             <td class="px-6 py-4 whitespace-nowrap text-sm capitalize">{{ req.media_type.value }}</td>
                             <td class="px-6 py-4 whitespace-nowrap text-sm"><span class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full {% if req.status.value == 'searching' %}bg-yellow-900 text-yellow-200{% elif req.status.value == 'downloading' %}bg-blue-900 text-blue-200{% else %}bg-gray-700 text-gray-300{% endif %}">{{ req.status.value }}</span></td>
@@ -72,15 +93,16 @@
                             <td class="px-6 py-4 whitespace-nowrap text-sm space-x-2" onclick="event.stopPropagation()">
                                 <button type="button" onclick="openRequestDetails({{ req.id }})" class="text-blue-400 hover:text-blue-300">Details</button>
                                 {% if req.overseerr_request_id and overseerr_request_statuses.get(req.id, 'unknown') in ['pending', 'requested'] %}
-                                <form action="/requests/{{ req.id }}/approve" method="post" class="inline"><button type="submit" class="text-green-400 hover:text-green-300">Approve</button></form>
-                                <form action="/requests/{{ req.id }}/deny" method="post" class="inline"><button type="submit" class="text-red-400 hover:text-red-300">Deny</button></form>
-                                {% endif %}
-                            </td>
-                        </tr>
-                        {% endfor %}
+                                 <form action="/requests/{{ req.id }}/approve" method="post" class="inline"><input type="hidden" name="redirect_to" value="/?tab=active"><button type="submit" class="text-green-400 hover:text-green-300">Approve</button></form>
+                                 <form action="/requests/{{ req.id }}/deny" method="post" class="inline"><input type="hidden" name="redirect_to" value="/?tab=active"><button type="submit" class="text-red-400 hover:text-red-300">Deny</button></form>
+                                 {% endif %}
+                             </td>
+                         </tr>
+                         {% endfor %}
                     </tbody>
-                </table>
-            </div>
+                    </table>
+                </div>
+            </form>
         </div>
         {% else %}<p class="text-gray-400">No active requests.</p>{% endif %}
     </div>
@@ -89,23 +111,26 @@
         {% if pending_requests %}
         <div class="bg-gray-800 rounded-lg border border-gray-700 overflow-hidden">
             <form action="/requests/bulk" method="post">
-                <div class="p-4 border-b border-gray-700 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-                    <div>
-                        <div class="text-sm font-medium text-white">Pending Search Queue</div>
-                        <div class="text-sm text-gray-400">Approved or partially available Overseerr requests that still need a torrent search.</div>
+                <input type="hidden" name="redirect_to" value="/?tab=pending">
+                <div class="border-b border-gray-700 px-4 py-3">
+                    <div class="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+                        <div class="min-w-0">
+                            <div class="text-sm font-medium text-white">Pending Search Queue</div>
+                            <div class="text-sm text-gray-400">Approved or partially available Overseerr requests that still need a torrent search.</div>
+                        </div>
+                        <div class="flex flex-wrap gap-2">
+                            <button type="submit" name="action" value="search" class="px-3 py-2 rounded-lg bg-blue-600 hover:bg-blue-500 text-white text-sm">Search Selected</button>
+                            <button type="submit" name="action" value="approve" class="px-3 py-2 rounded-lg bg-green-600 hover:bg-green-500 text-white text-sm">Approve Selected</button>
+                            <button type="submit" name="action" value="reject" class="px-3 py-2 rounded-lg bg-red-600 hover:bg-red-500 text-white text-sm">Reject Selected</button>
+                        </div>
                     </div>
-                    <div class="w-full md:max-w-xl flex flex-col gap-3 md:flex-row md:items-center">
-                        <input type="text" id="pending-filter-input" placeholder="Filter pending requests..." class="w-full md:flex-1 px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:border-blue-500">
-                        <select id="pending-overseerr-filter" class="w-full md:w-56 px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white focus:outline-none focus:border-blue-500">
+                    <div class="mt-3 flex flex-col gap-2 lg:flex-row lg:items-center">
+                        <input type="text" id="pending-filter-input" placeholder="Filter pending requests..." class="w-full lg:flex-1 px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:border-blue-500">
+                        <select id="pending-overseerr-filter" class="w-full lg:w-56 px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white focus:outline-none focus:border-blue-500">
                             <option value="">All Overseerr Statuses</option>
                             <option value="approved">Approved</option>
                             <option value="partially_available">Partially Available</option>
                         </select>
-                    </div>
-                    <div class="flex flex-wrap gap-2">
-                        <button type="submit" name="action" value="search" class="px-3 py-2 rounded-lg bg-blue-600 hover:bg-blue-500 text-white text-sm">Search Selected</button>
-                        <button type="submit" name="action" value="approve" class="px-3 py-2 rounded-lg bg-green-600 hover:bg-green-500 text-white text-sm">Approve Selected</button>
-                        <button type="submit" name="action" value="reject" class="px-3 py-2 rounded-lg bg-red-600 hover:bg-red-500 text-white text-sm">Reject Selected</button>
                     </div>
                 </div>
                 <div class="overflow-x-auto">
@@ -408,6 +433,7 @@ const pendingFilterInput = document.getElementById('pending-filter-input');
 const pendingStatusFilter = document.getElementById('pending-overseerr-filter');
 const stagedFilterInput = document.getElementById('staged-filter-input');
 const stagedStatusFilter = document.getElementById('staged-status-filter');
+const activeSelectAll = document.getElementById('active-select-all');
 const pendingSelectAll = document.getElementById('pending-select-all');
 if (filterInput) filterInput.addEventListener('input', filterTable);
 if (statusFilter) statusFilter.addEventListener('change', filterTable);
@@ -415,13 +441,17 @@ if (pendingFilterInput) pendingFilterInput.addEventListener('input', filterPendi
 if (pendingStatusFilter) pendingStatusFilter.addEventListener('change', filterPendingTable);
 if (stagedFilterInput) stagedFilterInput.addEventListener('input', filterStagedTable);
 if (stagedStatusFilter) stagedStatusFilter.addEventListener('change', filterStagedTable);
-if (pendingSelectAll) {
-    pendingSelectAll.addEventListener('change', event => {
-        document.querySelectorAll('.pending-request-checkbox').forEach(checkbox => {
+function bindSelectAll(toggle, checkboxSelector) {
+    if (!toggle) return;
+    toggle.addEventListener('change', event => {
+        document.querySelectorAll(checkboxSelector).forEach(checkbox => {
             checkbox.checked = event.target.checked;
         });
     });
 }
+
+bindSelectAll(activeSelectAll, '.active-request-checkbox');
+bindSelectAll(pendingSelectAll, '.pending-request-checkbox');
 
 document.querySelectorAll('th[data-table][data-sort]').forEach(th => {
     th.addEventListener('click', () => {
