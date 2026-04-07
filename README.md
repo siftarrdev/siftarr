@@ -1,15 +1,15 @@
-# Arbitratarr
+# Siftarr
 
 Media search and download decision middleware for users who want granular control over release selection.
 
-![Arbitratarr icon](icons/brand/arbitratarr-network-hub.png)
+![Siftarr icon](icons/brand/siftarr-network-hub.png)
 
 ## Overview
 
-Arbitratarr sits between Overseerr (requests), Prowlarr (indexers), and qBittorrent:
+Siftarr sits between Overseerr (requests), Prowlarr (indexers), and qBittorrent:
 
 ```
-Overseerr → Arbitratarr → qBittorrent
+Overseerr → Siftarr → qBittorrent
                 ↓
             Prowlarr
 ```
@@ -26,9 +26,9 @@ Overseerr → Arbitratarr → qBittorrent
 
 ```yaml
 services:
-  arbitratarr:
-    image: ghcr.io/yourusername/arbitratarr:latest
-    container_name: arbitratarr
+  siftarr:
+    image: ghcr.io/yourusername/siftarr:latest
+    container_name: siftarr
     restart: unless-stopped
     ports:
       - "8000:8000"
@@ -47,7 +47,7 @@ services:
       - QBITTORRENT_PASSWORD=your_password
 ```
 
-Use `ghcr.io/yourusername/arbitratarr:latest` for the newest published image, or pin a release tag like `ghcr.io/yourusername/arbitratarr:v1.2.3`.
+Use `ghcr.io/yourusername/siftarr:latest` for the newest published image, or pin a release tag like `ghcr.io/yourusername/siftarr:v1.2.3`.
 
 For local source builds, use the helper script:
 
@@ -76,7 +76,7 @@ The `/data` volume contains:
 ### 1. Configure Overseerr Webhook
 
 1. Go to **Settings → Notifications → Webhooks**
-2. Add webhook URL: `http://your-arbitratarr:8000/webhook/overseerr`
+2. Add webhook URL: `http://your-siftarr:8000/webhook/overseerr`
 3. Enable **"Media Requested"** and **"Media Approved"** events
 
 ### 2. Configure Rules

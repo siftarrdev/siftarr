@@ -6,4 +6,4 @@ select = ["E", "F", "W", "I", "UP", "B", "C4", "SIM"]
 ignore = ["E501", "B008"]
 
 [lint.isort]
-known-first-party = ["arbitratarr"]
+known-first-party = ["siftarr"]

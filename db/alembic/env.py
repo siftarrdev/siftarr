@@ -6,8 +6,8 @@ from alembic import context
 from sqlalchemy import engine_from_config, pool
 from sqlalchemy.engine import Connection
 
-from app.arbitratarr.config import get_settings
-from app.arbitratarr.models import Base
+from app.siftarr.config import get_settings
+from app.siftarr.models import Base
 
 config = context.config
 settings = get_settings()

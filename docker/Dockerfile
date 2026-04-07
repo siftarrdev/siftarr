@@ -1,9 +1,9 @@
 FROM python:3.12-slim
 
-ARG ARBITRATARR_VERSION=0.0.0
-LABEL org.opencontainers.image.title="arbitratarr"
-LABEL org.opencontainers.image.version="${ARBITRATARR_VERSION}"
-ENV ARBITRATARR_VERSION="${ARBITRATARR_VERSION}"
+ARG SIFTARR_VERSION=0.0.0
+LABEL org.opencontainers.image.title="siftarr"
+LABEL org.opencontainers.image.version="${SIFTARR_VERSION}"
+ENV SIFTARR_VERSION="${SIFTARR_VERSION}"
 
 # Install uv
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
@@ -18,7 +18,7 @@ RUN groupadd -g 568 appgroup && useradd -u 568 -g appgroup -m -s /bin/bash appus
 COPY pyproject.toml uv.lock* ./
 
 # Install dependencies
-RUN SETUPTOOLS_SCM_PRETEND_VERSION_FOR_ARBITRATARR="${ARBITRATARR_VERSION#v}" uv sync --frozen
+RUN SETUPTOOLS_SCM_PRETEND_VERSION_FOR_SIFTARR="${SIFTARR_VERSION#v}" uv sync --frozen
 
 # Copy application code
 COPY app/ ./app/
@@ -47,4 +47,4 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=10s --retries=3 \
 
 # Run the application
 ENTRYPOINT ["/entrypoint.sh"]
-CMD ["/app/.venv/bin/python", "-m", "uvicorn", "app.arbitratarr.main:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["/app/.venv/bin/python", "-m", "uvicorn", "app.siftarr.main:app", "--host", "0.0.0.0", "--port", "8000"]

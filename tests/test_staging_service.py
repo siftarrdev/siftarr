@@ -4,10 +4,10 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from app.arbitratarr.models.request import MediaType, Request
-from app.arbitratarr.models.staged_torrent import StagedTorrent
-from app.arbitratarr.services.prowlarr_service import ProwlarrRelease
-from app.arbitratarr.services.staging_service import StagingService
+from app.siftarr.models.request import MediaType, Request
+from app.siftarr.models.staged_torrent import StagedTorrent
+from app.siftarr.services.prowlarr_service import ProwlarrRelease
+from app.siftarr.services.staging_service import StagingService
 
 
 class TestStagingServiceUnit:
@@ -186,7 +186,7 @@ class TestStagingServiceIntegration:
             indexer="Indexer A",
         )
 
-        with patch("app.arbitratarr.services.staging_service.STAGING_DIR", tmp_path):
+        with patch("app.siftarr.services.staging_service.STAGING_DIR", tmp_path):
             saved = await service.save_release(
                 release,
                 request,

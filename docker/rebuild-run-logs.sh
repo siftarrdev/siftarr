@@ -23,7 +23,7 @@ else:
 
 printf 'Using build version: %s\n' "$VERSION"
 
-ARBITRATARR_VERSION="$VERSION" docker compose -f "$SCRIPT_DIR/docker-compose.yml" down
-ARBITRATARR_VERSION="$VERSION" docker compose -f "$SCRIPT_DIR/docker-compose.yml" build arbitratarr
-ARBITRATARR_VERSION="$VERSION" docker compose -f "$SCRIPT_DIR/docker-compose.yml" up -d arbitratarr
-docker compose -f "$SCRIPT_DIR/docker-compose.yml" logs -f arbitratarr
+SIFTARR_VERSION="$VERSION" docker compose -f "$SCRIPT_DIR/docker-compose.yml" down
+SIFTARR_VERSION="$VERSION" docker compose -f "$SCRIPT_DIR/docker-compose.yml" build siftarr
+SIFTARR_VERSION="$VERSION" docker compose -f "$SCRIPT_DIR/docker-compose.yml" up -d siftarr
+docker compose -f "$SCRIPT_DIR/docker-compose.yml" logs -f siftarr

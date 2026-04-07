@@ -4,8 +4,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from app.arbitratarr.models.rule import Rule, RuleType
-from app.arbitratarr.services.rule_service import DEFAULT_RULES, RuleService
+from app.siftarr.models.rule import Rule, RuleType
+from app.siftarr.services.rule_service import DEFAULT_RULES, RuleService
 
 
 class TestRuleService:

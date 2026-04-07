@@ -4,7 +4,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from app.arbitratarr.routers import dashboard
+from app.siftarr.routers import dashboard
 
 
 class TestDashboardRouter:

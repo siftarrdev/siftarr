@@ -1,4 +1,4 @@
-# Contributing to Arbitratarr
+# Contributing to Siftarr
 
 ## Development Setup
 
@@ -11,7 +11,7 @@
 
 ```bash
 git clone <repository-url>
-cd arbitratarr
+cd siftarr
 uv sync
 source .venv/bin/activate
 
@@ -19,7 +19,7 @@ source .venv/bin/activate
 mkdir -p data/db
 
 uv run alembic upgrade head
-uv run uvicorn app.arbitratarr.main:app --reload
+uv run uvicorn app.siftarr.main:app --reload
 ```
 
 Project versions come from git tags through `setuptools-scm`.
@@ -31,10 +31,10 @@ Create release tags in the form `v1.2.3`.
 
 ```bash
 # Development with auto-reload
-uv run uvicorn app.arbitratarr.main:app --reload
+uv run uvicorn app.siftarr.main:app --reload
 
 # Production
-uv run uvicorn app.arbitratarr.main:app
+uv run uvicorn app.siftarr.main:app
 ```
 
 ### Versioned Docker Builds
@@ -44,7 +44,7 @@ uv run uvicorn app.arbitratarr.main:app
 ```
 
 The helper script derives the current git version and passes it as a build arg.
-The Docker image uses `ARBITRATARR_VERSION` only at build time because `.git` is excluded from the Docker build context.
+The Docker image uses `SIFTARR_VERSION` only at build time because `.git` is excluded from the Docker build context.
 Python package metadata is normalized from the tag for PEP 440 compatibility.
 
 ### Code Quality
@@ -78,7 +78,7 @@ uv add --dev <package>    # Development dependency
 ## Project Structure
 
 ```
-app/arbitratarr/
+app/siftarr/
 ├── main.py           # FastAPI entry point
 ├── config.py         # Configuration
 ├── database.py       # SQLAlchemy setup

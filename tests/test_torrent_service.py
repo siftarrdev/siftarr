@@ -5,7 +5,7 @@ from unittest.mock import AsyncMock, MagicMock, mock_open, patch
 
 import pytest
 
-from app.arbitratarr.services.torrent_service import TorrentService
+from app.siftarr.services.torrent_service import TorrentService
 
 
 class TestTorrentService:

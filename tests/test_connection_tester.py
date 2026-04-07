@@ -4,7 +4,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from app.arbitratarr.services.connection_tester import ConnectionTester, ConnectionTestResult
+from app.siftarr.services.connection_tester import ConnectionTester, ConnectionTestResult
 
 
 class TestConnectionTestResult:

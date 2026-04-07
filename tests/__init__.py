@@ -1,1 +1,1 @@
-"""Tests for Arbitratarr."""
+"""Tests for Siftarr."""

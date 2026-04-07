@@ -4,8 +4,8 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from app.arbitratarr.models.request import MediaType, Request, RequestStatus
-from app.arbitratarr.services import release_selection_service
+from app.siftarr.models.request import MediaType, Request, RequestStatus
+from app.siftarr.services import release_selection_service
 
 
 class TestReleaseSelectionService:

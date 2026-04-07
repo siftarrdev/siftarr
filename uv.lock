@@ -69,7 +69,7 @@ wheels = [
 ]
 
 [[package]]
-name = "arbitratarr"
+name = "siftarr"
 source = { editable = "." }
 dependencies = [
     { name = "aiosqlite" },

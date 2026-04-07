@@ -4,7 +4,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from app.arbitratarr.services import runtime_settings
+from app.siftarr.services import runtime_settings
 
 
 @pytest.mark.asyncio

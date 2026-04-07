@@ -1,0 +1,207 @@
+{% extends "base.html" %}
+
+{% block title %}Rules - Siftarr{% endblock %}
+
+{% block content %}
+<div class="space-y-6">
+    <div class="flex justify-between items-center">
+        <h1 class="text-2xl font-bold">Rules Configuration</h1>
+    </div>
+
+    <div class="bg-gray-800 rounded-lg border border-gray-700">
+        <div class="px-6 py-4 border-b border-gray-700">
+            <div class="flex items-center justify-between">
+                <h2 class="text-lg font-medium">Existing Rules</h2>
+                <span class="text-sm text-gray-400">{{ exclusion_rules|length + requirement_rules|length + scorer_rules|length + size_limit_rules|length }} total rules</span>
+            </div>
+            <nav class="mt-4 -mb-4 flex flex-wrap gap-x-6 gap-y-2">
+                <button onclick="showRuleTab('exclusion')" id="rtab-exclusion" class="rule-tab border-b-2 border-red-500 pb-4 px-1 text-red-400 font-medium text-sm">Exclusions <span class="ml-1 bg-red-900 text-red-200 text-xs px-1.5 py-0.5 rounded-full">{{ exclusion_rules|length }}</span></button>
+                <button onclick="showRuleTab('requirement')" id="rtab-requirement" class="rule-tab border-b-2 border-transparent pb-4 px-1 text-gray-400 hover:text-gray-300 font-medium text-sm">Requirements <span class="ml-1 bg-gray-700 text-gray-300 text-xs px-1.5 py-0.5 rounded-full">{{ requirement_rules|length }}</span></button>
+                <button onclick="showRuleTab('scorer')" id="rtab-scorer" class="rule-tab border-b-2 border-transparent pb-4 px-1 text-gray-400 hover:text-gray-300 font-medium text-sm">Scoring <span class="ml-1 bg-gray-700 text-gray-300 text-xs px-1.5 py-0.5 rounded-full">{{ scorer_rules|length }}</span></button>
+                <button onclick="showRuleTab('size-limit')" id="rtab-size-limit" class="rule-tab border-b-2 border-transparent pb-4 px-1 text-gray-400 hover:text-gray-300 font-medium text-sm">Size Limits <span class="ml-1 bg-gray-700 text-gray-300 text-xs px-1.5 py-0.5 rounded-full">{{ size_limit_rules|length }}</span></button>
+            </nav>
+        </div>
+
+        <div id="rcontent-exclusion" class="rule-tab-content p-6">
+            <p class="text-sm text-gray-400 mb-4">Release titles matching these patterns will be automatically rejected.</p>
+            {% if exclusion_rules %}
+            <div class="space-y-2">
+                {% for rule in exclusion_rules %}
+                <div class="flex items-center justify-between bg-gray-700/50 rounded-lg px-4 py-3 border border-gray-600/50 {% if not rule.is_enabled %}opacity-50{% endif %}">
+                    <div class="min-w-0 flex-1">
+                        <div class="flex items-center gap-2 flex-wrap">
+                            <span class="font-medium text-white text-sm">{{ rule.name }}</span>
+                            {% if rule.media_scope == 'movie' %}<span class="px-1.5 py-0.5 text-xs rounded bg-purple-900/60 text-purple-300 border border-purple-700/50">Movie</span>{% elif rule.media_scope == 'tv' %}<span class="px-1.5 py-0.5 text-xs rounded bg-blue-900/60 text-blue-300 border border-blue-700/50">TV</span>{% else %}<span class="px-1.5 py-0.5 text-xs rounded bg-gray-600/60 text-gray-300 border border-gray-500/50">All</span>{% endif %}
+                            {% if not rule.is_enabled %}<span class="px-1.5 py-0.5 text-xs rounded bg-gray-600 text-gray-400">Disabled</span>{% endif %}
+                        </div>
+                        <code class="text-red-300 text-xs mt-1 block truncate">{{ rule.pattern }}</code>
+                        {% if rule.description %}<p class="text-xs text-gray-500 mt-0.5">{{ rule.description }}</p>{% endif %}
+                    </div>
+                    <div class="flex items-center gap-2 ml-4 shrink-0">
+                        <form action="/rules/{{ rule.id }}/toggle" method="post"><button type="submit" class="w-8 h-5 rounded-full relative transition-colors {% if rule.is_enabled %}bg-green-600{% else %}bg-gray-600{% endif %}" title="{{ 'Disable' if rule.is_enabled else 'Enable' }}"><span class="absolute top-0.5 {% if rule.is_enabled %}right-0.5{% else %}left-0.5{% endif %} w-4 h-4 bg-white rounded-full shadow transition-all"></span></button></form>
+                        <a href="/rules/{{ rule.id }}/edit" class="text-gray-400 hover:text-blue-400 transition-colors" title="Edit"><svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"></path></svg></a>
+                        <form action="/rules/{{ rule.id }}/delete" method="post" onsubmit="return confirm('Delete this rule?')"><button type="submit" class="text-gray-400 hover:text-red-400 transition-colors" title="Delete"><svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg></button></form>
+                    </div>
+                </div>
+                {% endfor %}
+            </div>
+            {% else %}
+            <p class="text-gray-500 text-sm">No exclusion rules defined.</p>
+            {% endif %}
+            <a href="/rules/new?type=exclusion" class="inline-flex items-center gap-1 mt-4 text-red-400 hover:text-red-300 text-sm font-medium"><svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"></path></svg>Add Exclusion Rule</a>
+        </div>
+
+        <div id="rcontent-requirement" class="rule-tab-content hidden p-6">
+            <p class="text-sm text-gray-400 mb-4">Release titles must match at least one of these patterns to pass.</p>
+            {% if requirement_rules %}
+            <div class="space-y-2">
+                {% for rule in requirement_rules %}
+                <div class="flex items-center justify-between bg-gray-700/50 rounded-lg px-4 py-3 border border-gray-600/50 {% if not rule.is_enabled %}opacity-50{% endif %}">
+                    <div class="min-w-0 flex-1">
+                        <div class="flex items-center gap-2 flex-wrap">
+                            <span class="font-medium text-white text-sm">{{ rule.name }}</span>
+                            {% if rule.media_scope == 'movie' %}<span class="px-1.5 py-0.5 text-xs rounded bg-purple-900/60 text-purple-300 border border-purple-700/50">Movie</span>{% elif rule.media_scope == 'tv' %}<span class="px-1.5 py-0.5 text-xs rounded bg-blue-900/60 text-blue-300 border border-blue-700/50">TV</span>{% else %}<span class="px-1.5 py-0.5 text-xs rounded bg-gray-600/60 text-gray-300 border border-gray-500/50">All</span>{% endif %}
+                            {% if not rule.is_enabled %}<span class="px-1.5 py-0.5 text-xs rounded bg-gray-600 text-gray-400">Disabled</span>{% endif %}
+                        </div>
+                        <code class="text-yellow-300 text-xs mt-1 block truncate">{{ rule.pattern }}</code>
+                        {% if rule.description %}<p class="text-xs text-gray-500 mt-0.5">{{ rule.description }}</p>{% endif %}
+                    </div>
+                    <div class="flex items-center gap-2 ml-4 shrink-0">
+                        <form action="/rules/{{ rule.id }}/toggle" method="post"><button type="submit" class="w-8 h-5 rounded-full relative transition-colors {% if rule.is_enabled %}bg-green-600{% else %}bg-gray-600{% endif %}" title="{{ 'Disable' if rule.is_enabled else 'Enable' }}"><span class="absolute top-0.5 {% if rule.is_enabled %}right-0.5{% else %}left-0.5{% endif %} w-4 h-4 bg-white rounded-full shadow transition-all"></span></button></form>
+                        <a href="/rules/{{ rule.id }}/edit" class="text-gray-400 hover:text-blue-400 transition-colors" title="Edit"><svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"></path></svg></a>
+                        <form action="/rules/{{ rule.id }}/delete" method="post" onsubmit="return confirm('Delete this rule?')"><button type="submit" class="text-gray-400 hover:text-red-400 transition-colors" title="Delete"><svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg></button></form>
+                    </div>
+                </div>
+                {% endfor %}
+            </div>
+            {% else %}
+            <p class="text-gray-500 text-sm">No requirement rules defined.</p>
+            {% endif %}
+            <a href="/rules/new?type=requirement" class="inline-flex items-center gap-1 mt-4 text-yellow-400 hover:text-yellow-300 text-sm font-medium"><svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"></path></svg>Add Requirement Rule</a>
+        </div>
+
+        <div id="rcontent-scorer" class="rule-tab-content hidden p-6">
+            <p class="text-sm text-gray-400 mb-4">Matching these patterns adds points to the release score. Higher scoring releases are preferred.</p>
+            {% if scorer_rules %}
+            <div class="space-y-2">
+                {% for rule in scorer_rules %}
+                <div class="flex items-center justify-between bg-gray-700/50 rounded-lg px-4 py-3 border border-gray-600/50 {% if not rule.is_enabled %}opacity-50{% endif %}">
+                    <div class="flex items-center gap-4 min-w-0 flex-1">
+                        <div class="shrink-0 w-16 text-center"><span class="text-xl font-bold text-green-400">+{{ rule.score }}</span></div>
+                        <div class="min-w-0 flex-1">
+                            <div class="flex items-center gap-2 flex-wrap">
+                                <span class="font-medium text-white text-sm">{{ rule.name }}</span>
+                                {% if rule.media_scope == 'movie' %}<span class="px-1.5 py-0.5 text-xs rounded bg-purple-900/60 text-purple-300 border border-purple-700/50">Movie</span>{% elif rule.media_scope == 'tv' %}<span class="px-1.5 py-0.5 text-xs rounded bg-blue-900/60 text-blue-300 border border-blue-700/50">TV</span>{% else %}<span class="px-1.5 py-0.5 text-xs rounded bg-gray-600/60 text-gray-300 border border-gray-500/50">All</span>{% endif %}
+                                {% if not rule.is_enabled %}<span class="px-1.5 py-0.5 text-xs rounded bg-gray-600 text-gray-400">Disabled</span>{% endif %}
+                            </div>
+                            <code class="text-green-300 text-xs mt-1 block truncate">{{ rule.pattern }}</code>
+                            {% if rule.description %}<p class="text-xs text-gray-500 mt-0.5">{{ rule.description }}</p>{% endif %}
+                        </div>
+                    </div>
+                    <div class="flex items-center gap-2 ml-4 shrink-0">
+                        <form action="/rules/{{ rule.id }}/toggle" method="post"><button type="submit" class="w-8 h-5 rounded-full relative transition-colors {% if rule.is_enabled %}bg-green-600{% else %}bg-gray-600{% endif %}" title="{{ 'Disable' if rule.is_enabled else 'Enable' }}"><span class="absolute top-0.5 {% if rule.is_enabled %}right-0.5{% else %}left-0.5{% endif %} w-4 h-4 bg-white rounded-full shadow transition-all"></span></button></form>
+                        <a href="/rules/{{ rule.id }}/edit" class="text-gray-400 hover:text-blue-400 transition-colors" title="Edit"><svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"></path></svg></a>
+                        <form action="/rules/{{ rule.id }}/delete" method="post" onsubmit="return confirm('Delete this rule?')"><button type="submit" class="text-gray-400 hover:text-red-400 transition-colors" title="Delete"><svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg></button></form>
+                    </div>
+                </div>
+                {% endfor %}
+            </div>
+            {% else %}
+            <p class="text-gray-500 text-sm">No scoring rules defined.</p>
+            {% endif %}
+            <a href="/rules/new?type=scorer" class="inline-flex items-center gap-1 mt-4 text-green-400 hover:text-green-300 text-sm font-medium"><svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"></path></svg>Add Scoring Rule</a>
+        </div>
+
+        <div id="rcontent-size-limit" class="rule-tab-content hidden p-6">
+            <p class="text-sm text-gray-400 mb-4">Size limits now behave like rules and can be scoped to Movies, TV, or both.</p>
+            {% if size_limit_rules %}
+            <div class="space-y-2">
+                {% for rule in size_limit_rules %}
+                <div class="flex items-center justify-between bg-gray-700/50 rounded-lg px-4 py-3 border border-gray-600/50 {% if not rule.is_enabled %}opacity-50{% endif %}">
+                    <div class="min-w-0 flex-1">
+                        <div class="flex items-center gap-2 flex-wrap">
+                            <span class="font-medium text-white text-sm">{{ rule.name }}</span>
+                            {% if rule.media_scope == 'movie' %}<span class="px-1.5 py-0.5 text-xs rounded bg-purple-900/60 text-purple-300 border border-purple-700/50">Movie</span>{% elif rule.media_scope == 'tv' %}<span class="px-1.5 py-0.5 text-xs rounded bg-blue-900/60 text-blue-300 border border-blue-700/50">TV</span>{% else %}<span class="px-1.5 py-0.5 text-xs rounded bg-gray-600/60 text-gray-300 border border-gray-500/50">All</span>{% endif %}
+                            {% if not rule.is_enabled %}<span class="px-1.5 py-0.5 text-xs rounded bg-gray-600 text-gray-400">Disabled</span>{% endif %}
+                        </div>
+                        <div class="text-cyan-300 text-sm mt-1">{% if rule.min_size_gb is not none %}Min {{ rule.min_size_gb }} GB{% else %}No min{% endif %} • {% if rule.max_size_gb is not none %}Max {{ rule.max_size_gb }} GB{% else %}No max{% endif %}</div>
+                        {% if rule.description %}<p class="text-xs text-gray-500 mt-0.5">{{ rule.description }}</p>{% endif %}
+                    </div>
+                    <div class="flex items-center gap-2 ml-4 shrink-0">
+                        <form action="/rules/{{ rule.id }}/toggle" method="post"><button type="submit" class="w-8 h-5 rounded-full relative transition-colors {% if rule.is_enabled %}bg-green-600{% else %}bg-gray-600{% endif %}" title="{{ 'Disable' if rule.is_enabled else 'Enable' }}"><span class="absolute top-0.5 {% if rule.is_enabled %}right-0.5{% else %}left-0.5{% endif %} w-4 h-4 bg-white rounded-full shadow transition-all"></span></button></form>
+                        <a href="/rules/{{ rule.id }}/edit" class="text-gray-400 hover:text-blue-400 transition-colors" title="Edit"><svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"></path></svg></a>
+                        <form action="/rules/{{ rule.id }}/delete" method="post" onsubmit="return confirm('Delete this rule?')"><button type="submit" class="text-gray-400 hover:text-red-400 transition-colors" title="Delete"><svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg></button></form>
+                    </div>
+                </div>
+                {% endfor %}
+            </div>
+            {% else %}
+            <p class="text-gray-500 text-sm">No size limit rules defined.</p>
+            {% endif %}
+            <a href="/rules/new?type=size_limit" class="inline-flex items-center gap-1 mt-4 text-cyan-400 hover:text-cyan-300 text-sm font-medium"><svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"></path></svg>Add Size Limit Rule</a>
+        </div>
+    </div>
+
+    <div class="bg-gray-800 rounded-lg border border-gray-700">
+        <div class="px-6 py-4 border-b border-gray-700">
+            <h2 class="text-lg font-medium">Create New Rule</h2>
+            <p class="text-sm text-gray-400 mt-1">Add a new exclusion, requirement, scoring, or size-limit rule</p>
+        </div>
+        <div class="p-6">
+            <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
+                <a href="/rules/new?type=exclusion" class="group block bg-gray-700/50 hover:bg-red-900/20 border border-gray-600/50 hover:border-red-700/50 rounded-lg p-4 transition-colors"><div class="flex items-center gap-3"><div class="w-10 h-10 rounded-lg bg-red-900/40 flex items-center justify-center shrink-0"><svg class="w-5 h-5 text-red-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636"></path></svg></div><div><div class="font-medium text-white text-sm group-hover:text-red-300">Exclusion Rule</div><div class="text-xs text-gray-400">Auto-reject matching releases</div></div></div></a>
+                <a href="/rules/new?type=requirement" class="group block bg-gray-700/50 hover:bg-yellow-900/20 border border-gray-600/50 hover:border-yellow-700/50 rounded-lg p-4 transition-colors"><div class="flex items-center gap-3"><div class="w-10 h-10 rounded-lg bg-yellow-900/40 flex items-center justify-center shrink-0"><svg class="w-5 h-5 text-yellow-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg></div><div><div class="font-medium text-white text-sm group-hover:text-yellow-300">Requirement Rule</div><div class="text-xs text-gray-400">Must match to pass</div></div></div></a>
+                <a href="/rules/new?type=scorer" class="group block bg-gray-700/50 hover:bg-green-900/20 border border-gray-600/50 hover:border-green-700/50 rounded-lg p-4 transition-colors"><div class="flex items-center gap-3"><div class="w-10 h-10 rounded-lg bg-green-900/40 flex items-center justify-center shrink-0"><svg class="w-5 h-5 text-green-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6"></path></svg></div><div><div class="font-medium text-white text-sm group-hover:text-green-300">Scoring Rule</div><div class="text-xs text-gray-400">Add points to matching releases</div></div></div></a>
+                <a href="/rules/new?type=size_limit" class="group block bg-gray-700/50 hover:bg-cyan-900/20 border border-gray-600/50 hover:border-cyan-700/50 rounded-lg p-4 transition-colors"><div class="flex items-center gap-3"><div class="w-10 h-10 rounded-lg bg-cyan-900/40 flex items-center justify-center shrink-0"><svg class="w-5 h-5 text-cyan-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-10V6m0 12v-2m9-4a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg></div><div><div class="font-medium text-white text-sm group-hover:text-cyan-300">Size Limit Rule</div><div class="text-xs text-gray-400">Reject releases outside a size range</div></div></div></a>
+            </div>
+        </div>
+    </div>
+
+    <div class="bg-gray-800 rounded-lg border border-gray-700">
+        <div class="px-6 py-4 border-b border-gray-700">
+            <h2 class="text-lg font-medium">Test Rule Matching</h2>
+            <p class="text-sm text-gray-400 mt-1">Enter a release title to see how your rules would evaluate it</p>
+        </div>
+        <div class="p-6">
+            <form action="/rules/test" method="post" class="flex gap-4">
+                <input type="text" name="title" placeholder="Enter release title to test..." class="flex-1 bg-gray-700 border border-gray-600 rounded-md px-4 py-2 text-white">
+                <button type="submit" class="bg-blue-600 hover:bg-blue-700 text-white px-6 py-2 rounded-md text-sm font-medium">Test</button>
+            </form>
+            {% if test_result %}
+            <div class="mt-4 p-4 rounded-md {% if test_result.passed %}bg-green-900/50 border border-green-700{% else %}bg-red-900/50 border border-red-700{% endif %}">
+                <p class="font-medium {% if test_result.passed %}text-green-200{% else %}text-red-200{% endif %}">{{ 'Would PASS' if test_result.passed else 'Would REJECT' }}{% if test_result.rejection_reason %} - {{ test_result.rejection_reason }}{% endif %}</p>
+                {% if test_result.matched_rules %}
+                <p class="text-sm text-gray-300 mt-2">Matched rules:</p>
+                <ul class="text-sm text-gray-400 mt-1 space-y-0.5">
+                    {% for match in test_result.matched_rules %}
+                    <li>{{ match.rule_name }}{% if match.score_delta %}: <span class="text-green-400">+{{ match.score_delta }}</span>{% endif %}</li>
+                    {% endfor %}
+                </ul>
+                {% endif %}
+                {% if test_result.total_score > 0 %}<p class="text-sm text-green-300 mt-2 font-medium">Total score: +{{ test_result.total_score }}</p>{% endif %}
+            </div>
+            {% endif %}
+        </div>
+    </div>
+</div>
+
+<script>
+function showRuleTab(tabName) {
+    document.querySelectorAll('.rule-tab-content').forEach(el => el.classList.add('hidden'));
+    document.querySelectorAll('.rule-tab').forEach(el => {
+        el.classList.remove('border-red-500', 'text-red-400', 'border-yellow-500', 'text-yellow-400', 'border-green-500', 'text-green-400', 'border-cyan-500', 'text-cyan-400');
+        el.classList.add('border-transparent', 'text-gray-400');
+    });
+    document.getElementById('rcontent-' + tabName).classList.remove('hidden');
+    const tab = document.getElementById('rtab-' + tabName);
+    tab.classList.remove('border-transparent', 'text-gray-400');
+    const colors = {
+        exclusion: ['border-red-500', 'text-red-400'],
+        requirement: ['border-yellow-500', 'text-yellow-400'],
+        scorer: ['border-green-500', 'text-green-400'],
+        'size-limit': ['border-cyan-500', 'text-cyan-400'],
+    };
+    tab.classList.add(...(colors[tabName] || ['border-blue-500', 'text-blue-400']));
+}
+</script>
+{% endblock %}

@@ -8,17 +8,17 @@ class TestDatabaseModule:
 
     def test_base_model(self):
         """Test Base model import."""
-        from app.arbitratarr.models._base import Base
+        from app.siftarr.models._base import Base
 
         assert Base is not None
 
     def test_init_db(self):
         """Test database initialization."""
-        from app.arbitratarr.database import init_db
+        from app.siftarr.database import init_db
 
         with (
-            patch("app.arbitratarr.database.engine"),
-            patch("app.arbitratarr.database.async_session_maker") as mock_maker,
+            patch("app.siftarr.database.engine"),
+            patch("app.siftarr.database.async_session_maker") as mock_maker,
         ):
             mock_session = AsyncMock()
             mock_session.__aenter__ = AsyncMock(return_value=mock_session)

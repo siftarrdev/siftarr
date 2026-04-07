@@ -14,22 +14,22 @@ Implement sorting, filtering, and approve/deny functionality for the dashboard t
 ---
 
 ## Phase 1: Client-Side Sorting & Filtering
-**File:** `app/arbitratarr/templates/dashboard.html`
+**File:** `app/siftarr/templates/dashboard.html`
 
 ## Phase 2: OverseerrService Enhancement
-**File:** `app/arbitratarr/services/overseerr_service.py`
+**File:** `app/siftarr/services/overseerr_service.py`
 
 ## Phase 3: Database Model Update
-**File:** `app/arbitratarr/models/request.py`
+**File:** `app/siftarr/models/request.py`
 
 ## Phase 4: Dashboard Router Endpoints
-**File:** `app/arbitratarr/routers/dashboard.py`
+**File:** `app/siftarr/routers/dashboard.py`
 
 ## Phase 5: Dashboard Template Update
-**File:** `app/arbitratarr/templates/dashboard.html`
+**File:** `app/siftarr/templates/dashboard.html`
 
 ## Phase 6: Webhook Handler Update
-**File:** `app/arbitratarr/routers/webhooks.py`
+**File:** `app/siftarr/routers/webhooks.py`
 
 ## Phase 7: Tests for OverseerrService
 **File:** `tests/test_overseerr_service.py`

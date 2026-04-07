@@ -1,5 +1,5 @@
 [project]
-name = "arbitratarr"
+name = "siftarr"
 dynamic = ["version"]
 description = "Media search and download decision middleware"
 requires-python = ">=3.12"

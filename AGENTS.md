@@ -1,4 +1,4 @@
-# Arbitratarr
+# Siftarr
 
 Media search and download decision middleware (FastAPI app).
 
@@ -12,13 +12,13 @@ uv run ty check            # Type check
 uv run pytest              # Run tests
 
 uv run alembic upgrade head # Run database migrations
-uv run uvicorn app.arbitratarr.main:app --reload  # Dev server
+uv run uvicorn app.siftarr.main:app --reload  # Dev server
 ```
 
 ## Project Structure
 
-- `app/arbitratarr/` - Main application code
-  - `main.py` - FastAPI entry point (`app.arbitratarr.main:app`)
+- `app/siftarr/` - Main application code
+  - `main.py` - FastAPI entry point (`app.siftarr.main:app`)
   - `config.py` - Configuration
   - `database.py` - SQLAlchemy setup
   - `models/` - Database models
@@ -42,7 +42,7 @@ When validating the app in Docker, prefer a full rebuild so code changes are def
 
 ```bash
 cd docker/
-docker compose down && docker compose build arbitratarr && docker compose up -d arbitratarr
+docker compose down && docker compose build siftarr && docker compose up -d siftarr
 ```
 
 This is the preferred way to run and test the app locally in Docker.

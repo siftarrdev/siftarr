@@ -5,9 +5,9 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from app.arbitratarr.models.pending_queue import PendingQueue
-from app.arbitratarr.models.request import Request, RequestStatus
-from app.arbitratarr.services.pending_queue_service import PendingQueueService
+from app.siftarr.models.pending_queue import PendingQueue
+from app.siftarr.models.request import Request, RequestStatus
+from app.siftarr.services.pending_queue_service import PendingQueueService
 
 
 class TestPendingQueueService:

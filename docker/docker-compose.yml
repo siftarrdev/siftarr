@@ -1,12 +1,12 @@
 services:
-  arbitratarr:
-    image: arbitratarr:latest
+  siftarr:
+    image: siftarr:latest
     build:
       context: ..
       dockerfile: docker/Dockerfile
       args:
-        ARBITRATARR_VERSION: ${ARBITRATARR_VERSION:-0.0.0}
-    container_name: arbitratarr
+        SIFTARR_VERSION: ${SIFTARR_VERSION:-0.0.0}
+    container_name: siftarr
     restart: unless-stopped
     ports:
       - "8000:8000"

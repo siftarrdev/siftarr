@@ -2,9 +2,9 @@
 
 from unittest.mock import MagicMock
 
-from app.arbitratarr.models.rule import Rule, RuleType
-from app.arbitratarr.services.prowlarr_service import ProwlarrRelease
-from app.arbitratarr.services.rule_engine import ReleaseEvaluation, RuleEngine, RuleMatch
+from app.siftarr.models.rule import Rule, RuleType
+from app.siftarr.services.prowlarr_service import ProwlarrRelease
+from app.siftarr.services.rule_engine import ReleaseEvaluation, RuleEngine, RuleMatch
 
 
 class TestRuleEngine:

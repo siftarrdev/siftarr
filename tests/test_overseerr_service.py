@@ -4,7 +4,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from app.arbitratarr.services.overseerr_service import OverseerrService
+from app.siftarr.services.overseerr_service import OverseerrService
 
 
 class TestOverseerrService:
@@ -12,7 +12,7 @@ class TestOverseerrService:
 
     def test_init(self):
         """Test service initialization."""
-        with patch("app.arbitratarr.services.overseerr_service.get_settings") as mock_get_settings:
+        with patch("app.siftarr.services.overseerr_service.get_settings") as mock_get_settings:
             mock_settings = MagicMock()
             mock_settings.overseerr_url = "http://localhost:5055"
             mock_settings.overseerr_api_key = "test_api_key"
@@ -26,7 +26,7 @@ class TestOverseerrService:
 
     def test_init_strips_trailing_slash(self):
         """Test that URL trailing slash is stripped."""
-        with patch("app.arbitratarr.services.overseerr_service.get_settings") as mock_get_settings:
+        with patch("app.siftarr.services.overseerr_service.get_settings") as mock_get_settings:
             mock_settings = MagicMock()
             mock_settings.overseerr_url = "http://localhost:5055/"
             mock_settings.overseerr_api_key = "test_api_key"
@@ -39,7 +39,7 @@ class TestOverseerrService:
     @pytest.mark.asyncio
     async def test_close_with_client(self):
         """Test closing the HTTP client."""
-        with patch("app.arbitratarr.services.overseerr_service.get_settings") as mock_get_settings:
+        with patch("app.siftarr.services.overseerr_service.get_settings") as mock_get_settings:
             mock_settings = MagicMock()
             mock_settings.overseerr_url = "http://localhost:5055"
             mock_settings.overseerr_api_key = "test"
@@ -58,7 +58,7 @@ class TestOverseerrService:
     @pytest.mark.asyncio
     async def test_close_without_client(self):
         """Test closing when no client exists."""
-        with patch("app.arbitratarr.services.overseerr_service.get_settings") as mock_get_settings:
+        with patch("app.siftarr.services.overseerr_service.get_settings") as mock_get_settings:
             mock_settings = MagicMock()
             mock_settings.overseerr_url = "http://localhost:5055"
             mock_settings.overseerr_api_key = "test"
@@ -74,7 +74,7 @@ class TestOverseerrService:
     @pytest.mark.asyncio
     async def test_get_requests_no_url(self):
         """Test get_requests when URL is empty."""
-        with patch("app.arbitratarr.services.overseerr_service.get_settings") as mock_get_settings:
+        with patch("app.siftarr.services.overseerr_service.get_settings") as mock_get_settings:
             mock_settings = MagicMock()
             mock_settings.overseerr_url = ""
             mock_settings.overseerr_api_key = "test"
@@ -88,7 +88,7 @@ class TestOverseerrService:
     @pytest.mark.asyncio
     async def test_get_requests_no_api_key(self):
         """Test get_requests when API key is empty."""
-        with patch("app.arbitratarr.services.overseerr_service.get_settings") as mock_get_settings:
+        with patch("app.siftarr.services.overseerr_service.get_settings") as mock_get_settings:
             mock_settings = MagicMock()
             mock_settings.overseerr_url = "http://localhost:5055"
             mock_settings.overseerr_api_key = ""
@@ -102,7 +102,7 @@ class TestOverseerrService:
     @pytest.mark.asyncio
     async def test_get_requests_success(self):
         """Test successful get_requests."""
-        with patch("app.arbitratarr.services.overseerr_service.get_settings") as mock_get_settings:
+        with patch("app.siftarr.services.overseerr_service.get_settings") as mock_get_settings:
             mock_settings = MagicMock()
             mock_settings.overseerr_url = "http://localhost:5055"
             mock_settings.overseerr_api_key = "test"
@@ -128,7 +128,7 @@ class TestOverseerrService:
     @pytest.mark.asyncio
     async def test_get_requests_without_filter(self):
         """Test get_requests omits filter when status is not provided."""
-        with patch("app.arbitratarr.services.overseerr_service.get_settings") as mock_get_settings:
+        with patch("app.siftarr.services.overseerr_service.get_settings") as mock_get_settings:
             mock_settings = MagicMock()
             mock_settings.overseerr_url = "http://localhost:5055"
             mock_settings.overseerr_api_key = "test"
@@ -153,7 +153,7 @@ class TestOverseerrService:
     @pytest.mark.asyncio
     async def test_get_all_requests_paginates(self):
         """Test get_all_requests aggregates paginated responses."""
-        with patch("app.arbitratarr.services.overseerr_service.get_settings") as mock_get_settings:
+        with patch("app.siftarr.services.overseerr_service.get_settings") as mock_get_settings:
             mock_settings = MagicMock()
             mock_settings.overseerr_url = "http://localhost:5055"
             mock_settings.overseerr_api_key = "test"
@@ -186,7 +186,7 @@ class TestOverseerrService:
     @pytest.mark.asyncio
     async def test_get_requests_unauthorized(self):
         """Test get_requests with 401 response."""
-        with patch("app.arbitratarr.services.overseerr_service.get_settings") as mock_get_settings:
+        with patch("app.siftarr.services.overseerr_service.get_settings") as mock_get_settings:
             mock_settings = MagicMock()
             mock_settings.overseerr_url = "http://localhost:5055"
             mock_settings.overseerr_api_key = "test"
@@ -209,7 +209,7 @@ class TestOverseerrService:
         """Test get_requests with network error."""
         import httpx
 
-        with patch("app.arbitratarr.services.overseerr_service.get_settings") as mock_get_settings:
+        with patch("app.siftarr.services.overseerr_service.get_settings") as mock_get_settings:
             mock_settings = MagicMock()
             mock_settings.overseerr_url = "http://localhost:5055"
             mock_settings.overseerr_api_key = "test"
@@ -228,7 +228,7 @@ class TestOverseerrService:
     @pytest.mark.asyncio
     async def test_get_request_no_url(self):
         """Test get_request when not configured."""
-        with patch("app.arbitratarr.services.overseerr_service.get_settings") as mock_get_settings:
+        with patch("app.siftarr.services.overseerr_service.get_settings") as mock_get_settings:
             mock_settings = MagicMock()
             mock_settings.overseerr_url = ""
             mock_settings.overseerr_api_key = "test"
@@ -242,7 +242,7 @@ class TestOverseerrService:
     @pytest.mark.asyncio
     async def test_get_media_details_no_url(self):
         """Test get_media_details when not configured."""
-        with patch("app.arbitratarr.services.overseerr_service.get_settings") as mock_get_settings:
+        with patch("app.siftarr.services.overseerr_service.get_settings") as mock_get_settings:
             mock_settings = MagicMock()
             mock_settings.overseerr_url = ""
             mock_settings.overseerr_api_key = "test"
@@ -256,7 +256,7 @@ class TestOverseerrService:
     @pytest.mark.asyncio
     async def test_get_media_details_success(self):
         """Test successful get_media_details."""
-        with patch("app.arbitratarr.services.overseerr_service.get_settings") as mock_get_settings:
+        with patch("app.siftarr.services.overseerr_service.get_settings") as mock_get_settings:
             mock_settings = MagicMock()
             mock_settings.overseerr_url = "http://localhost:5055"
             mock_settings.overseerr_api_key = "test"
@@ -282,7 +282,7 @@ class TestOverseerrService:
     @pytest.mark.asyncio
     async def test_get_media_details_not_found(self):
         """Test get_media_details with 404 response."""
-        with patch("app.arbitratarr.services.overseerr_service.get_settings") as mock_get_settings:
+        with patch("app.siftarr.services.overseerr_service.get_settings") as mock_get_settings:
             mock_settings = MagicMock()
             mock_settings.overseerr_url = "http://localhost:5055"
             mock_settings.overseerr_api_key = "test"
@@ -306,7 +306,7 @@ class TestOverseerrService:
     @pytest.mark.asyncio
     async def test_approve_request_success(self):
         """Test approving a request successfully."""
-        with patch("app.arbitratarr.services.overseerr_service.get_settings") as mock_get_settings:
+        with patch("app.siftarr.services.overseerr_service.get_settings") as mock_get_settings:
             mock_settings = MagicMock()
             mock_settings.overseerr_url = "http://localhost:5055"
             mock_settings.overseerr_api_key = "test"
@@ -328,7 +328,7 @@ class TestOverseerrService:
     @pytest.mark.asyncio
     async def test_approve_request_failure(self):
         """Test approve returns False on failure."""
-        with patch("app.arbitratarr.services.overseerr_service.get_settings") as mock_get_settings:
+        with patch("app.siftarr.services.overseerr_service.get_settings") as mock_get_settings:
             mock_settings = MagicMock()
             mock_settings.overseerr_url = "http://localhost:5055"
             mock_settings.overseerr_api_key = "test"
@@ -349,7 +349,7 @@ class TestOverseerrService:
     @pytest.mark.asyncio
     async def test_decline_request_success(self):
         """Test declining a request successfully."""
-        with patch("app.arbitratarr.services.overseerr_service.get_settings") as mock_get_settings:
+        with patch("app.siftarr.services.overseerr_service.get_settings") as mock_get_settings:
             mock_settings = MagicMock()
             mock_settings.overseerr_url = "http://localhost:5055"
             mock_settings.overseerr_api_key = "test"
@@ -371,7 +371,7 @@ class TestOverseerrService:
     @pytest.mark.asyncio
     async def test_decline_request_with_reason(self):
         """Test decline with reason in body."""
-        with patch("app.arbitratarr.services.overseerr_service.get_settings") as mock_get_settings:
+        with patch("app.siftarr.services.overseerr_service.get_settings") as mock_get_settings:
             mock_settings = MagicMock()
             mock_settings.overseerr_url = "http://localhost:5055"
             mock_settings.overseerr_api_key = "test"
@@ -395,7 +395,7 @@ class TestOverseerrService:
     @pytest.mark.asyncio
     async def test_decline_request_failure(self):
         """Test decline returns False on failure."""
-        with patch("app.arbitratarr.services.overseerr_service.get_settings") as mock_get_settings:
+        with patch("app.siftarr.services.overseerr_service.get_settings") as mock_get_settings:
             mock_settings = MagicMock()
             mock_settings.overseerr_url = "http://localhost:5055"
             mock_settings.overseerr_api_key = "test"
@@ -416,7 +416,7 @@ class TestOverseerrService:
     @pytest.mark.asyncio
     async def test_get_request_status_success(self):
         """Test getting request status successfully."""
-        with patch("app.arbitratarr.services.overseerr_service.get_settings") as mock_get_settings:
+        with patch("app.siftarr.services.overseerr_service.get_settings") as mock_get_settings:
             mock_settings = MagicMock()
             mock_settings.overseerr_url = "http://localhost:5055"
             mock_settings.overseerr_api_key = "test"
@@ -438,7 +438,7 @@ class TestOverseerrService:
     @pytest.mark.asyncio
     async def test_get_request_status_failure(self):
         """Test get_request_status returns None on failure."""
-        with patch("app.arbitratarr.services.overseerr_service.get_settings") as mock_get_settings:
+        with patch("app.siftarr.services.overseerr_service.get_settings") as mock_get_settings:
             mock_settings = MagicMock()
             mock_settings.overseerr_url = "http://localhost:5055"
             mock_settings.overseerr_api_key = "test"

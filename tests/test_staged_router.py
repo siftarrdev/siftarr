@@ -4,8 +4,8 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from app.arbitratarr.models.request import MediaType
-from app.arbitratarr.routers import staged
+from app.siftarr.models.request import MediaType
+from app.siftarr.routers import staged
 
 
 class TestStagedRouter:

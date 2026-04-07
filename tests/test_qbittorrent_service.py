@@ -4,7 +4,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from app.arbitratarr.services.qbittorrent_service import MediaCategory, QbittorrentService
+from app.siftarr.services.qbittorrent_service import MediaCategory, QbittorrentService
 
 
 class TestMediaCategory:
@@ -24,9 +24,7 @@ class TestQbittorrentServiceUnit:
 
     def test_client_property_creates_client(self):
         """Test client property creates qbittorrent client when accessed."""
-        with patch(
-            "app.arbitratarr.services.qbittorrent_service.get_settings"
-        ) as mock_get_settings:
+        with patch("app.siftarr.services.qbittorrent_service.get_settings") as mock_get_settings:
             mock_settings = MagicMock()
             mock_settings.qbittorrent_url = "http://localhost:8080"
             mock_settings.qbittorrent_username = "admin"
@@ -45,9 +43,7 @@ class TestQbittorrentServiceUnit:
 
     def test_client_property_reuses_client(self):
         """Test client property reuses existing client."""
-        with patch(
-            "app.arbitratarr.services.qbittorrent_service.get_settings"
-        ) as mock_get_settings:
+        with patch("app.siftarr.services.qbittorrent_service.get_settings") as mock_get_settings:
             mock_settings = MagicMock()
             mock_settings.qbittorrent_url = "http://localhost:8080"
             mock_settings.qbittorrent_username = "admin"
@@ -63,7 +59,7 @@ class TestQbittorrentServiceUnit:
     @pytest.mark.asyncio
     async def test_authenticate_success(self):
         """Test successful authentication."""
-        with patch("app.arbitratarr.config.get_settings") as mock_get_settings:
+        with patch("app.siftarr.config.get_settings") as mock_get_settings:
             mock_settings = MagicMock()
             mock_settings.qbittorrent_url = "http://localhost:8080"
             mock_settings.qbittorrent_username = "admin"
@@ -87,7 +83,7 @@ class TestQbittorrentServiceUnit:
         """Test failed authentication."""
         import qbittorrentapi
 
-        with patch("app.arbitratarr.config.get_settings") as mock_get_settings:
+        with patch("app.siftarr.config.get_settings") as mock_get_settings:
             mock_settings = MagicMock()
             mock_settings.qbittorrent_url = "http://localhost:8080"
             mock_settings.qbittorrent_username = "admin"
@@ -107,7 +103,7 @@ class TestQbittorrentServiceUnit:
     @pytest.mark.asyncio
     async def test_ensure_category_exists_already_exists(self):
         """Test ensure_category_exists when category exists."""
-        with patch("app.arbitratarr.config.get_settings") as mock_get_settings:
+        with patch("app.siftarr.config.get_settings") as mock_get_settings:
             mock_settings = MagicMock()
             mock_settings.qbittorrent_url = "http://localhost:8080"
             mock_settings.qbittorrent_username = "admin"
@@ -128,7 +124,7 @@ class TestQbittorrentServiceUnit:
     @pytest.mark.asyncio
     async def test_ensure_category_exists_error(self):
         """Test ensure_category_exists with error."""
-        with patch("app.arbitratarr.config.get_settings") as mock_get_settings:
+        with patch("app.siftarr.config.get_settings") as mock_get_settings:
             mock_settings = MagicMock()
             mock_settings.qbittorrent_url = "http://localhost:8080"
             mock_settings.qbittorrent_username = "admin"
@@ -146,7 +142,7 @@ class TestQbittorrentServiceUnit:
     @pytest.mark.asyncio
     async def test_get_torrent_info_found(self):
         """Test getting torrent info for existing torrent."""
-        with patch("app.arbitratarr.config.get_settings") as mock_get_settings:
+        with patch("app.siftarr.config.get_settings") as mock_get_settings:
             mock_settings = MagicMock()
             mock_settings.qbittorrent_url = "http://localhost:8080"
             mock_settings.qbittorrent_username = "admin"
@@ -180,7 +176,7 @@ class TestQbittorrentServiceUnit:
     @pytest.mark.asyncio
     async def test_get_torrent_info_not_found(self):
         """Test getting torrent info for non-existent torrent."""
-        with patch("app.arbitratarr.config.get_settings") as mock_get_settings:
+        with patch("app.siftarr.config.get_settings") as mock_get_settings:
             mock_settings = MagicMock()
             mock_settings.qbittorrent_url = "http://localhost:8080"
             mock_settings.qbittorrent_username = "admin"
@@ -199,7 +195,7 @@ class TestQbittorrentServiceUnit:
     @pytest.mark.asyncio
     async def test_get_torrents_by_category(self):
         """Test getting torrents by category."""
-        with patch("app.arbitratarr.config.get_settings") as mock_get_settings:
+        with patch("app.siftarr.config.get_settings") as mock_get_settings:
             mock_settings = MagicMock()
             mock_settings.qbittorrent_url = "http://localhost:8080"
             mock_settings.qbittorrent_username = "admin"
@@ -233,7 +229,7 @@ class TestQbittorrentServiceUnit:
     @pytest.mark.asyncio
     async def test_get_torrents_by_category_error(self):
         """Test getting torrents by category with error."""
-        with patch("app.arbitratarr.config.get_settings") as mock_get_settings:
+        with patch("app.siftarr.config.get_settings") as mock_get_settings:
             mock_settings = MagicMock()
             mock_settings.qbittorrent_url = "http://localhost:8080"
             mock_settings.qbittorrent_username = "admin"
@@ -251,7 +247,7 @@ class TestQbittorrentServiceUnit:
     @pytest.mark.asyncio
     async def test_delete_torrent_success(self):
         """Test successful torrent deletion."""
-        with patch("app.arbitratarr.config.get_settings") as mock_get_settings:
+        with patch("app.siftarr.config.get_settings") as mock_get_settings:
             mock_settings = MagicMock()
             mock_settings.qbittorrent_url = "http://localhost:8080"
             mock_settings.qbittorrent_username = "admin"
@@ -269,7 +265,7 @@ class TestQbittorrentServiceUnit:
     @pytest.mark.asyncio
     async def test_delete_torrent_error(self):
         """Test torrent deletion with error."""
-        with patch("app.arbitratarr.config.get_settings") as mock_get_settings:
+        with patch("app.siftarr.config.get_settings") as mock_get_settings:
             mock_settings = MagicMock()
             mock_settings.qbittorrent_url = "http://localhost:8080"
             mock_settings.qbittorrent_username = "admin"
@@ -287,7 +283,7 @@ class TestQbittorrentServiceUnit:
     @pytest.mark.asyncio
     async def test_delete_torrent_with_files(self):
         """Test deleting torrent with files."""
-        with patch("app.arbitratarr.config.get_settings") as mock_get_settings:
+        with patch("app.siftarr.config.get_settings") as mock_get_settings:
             mock_settings = MagicMock()
             mock_settings.qbittorrent_url = "http://localhost:8080"
             mock_settings.qbittorrent_username = "admin"

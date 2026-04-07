@@ -2,7 +2,7 @@
 
 import pytest
 
-from app.arbitratarr.services.prowlarr_service import ProwlarrSearchResult, ProwlarrService
+from app.siftarr.services.prowlarr_service import ProwlarrSearchResult, ProwlarrService
 
 
 class TestProwlarrService:

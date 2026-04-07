@@ -1,4 +1,4 @@
 # Brand assets
 
-- `arbitratarr-network-hub.svg`
-- `arbitratarr-network-hub.png`
+- `siftarr-network-hub.svg`
+- `siftarr-network-hub.png`

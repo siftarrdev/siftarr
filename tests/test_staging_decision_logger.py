@@ -2,9 +2,9 @@
 
 import json
 
-from app.arbitratarr.models.request import MediaType, Request
-from app.arbitratarr.models.staged_torrent import StagedTorrent
-from app.arbitratarr.services import staging_decision_logger
+from app.siftarr.models.request import MediaType, Request
+from app.siftarr.models.staged_torrent import StagedTorrent
+from app.siftarr.services import staging_decision_logger
 
 
 def test_log_staging_decision_records_rule_accept(tmp_path):

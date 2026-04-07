@@ -1,7 +1,7 @@
-# Project Specification: Arbitratarr
+# Project Specification: Siftarr
 
 ## 1. Project Overview
-Arbitratarr is a custom Python middleware application that handles media search and download decisions. It sits between Overseerr (requests), Prowlarr (indexers), and qBittorrent. It is designed for users who want granular control over release selection that standard *arr apps do not provide.
+Siftarr is a custom Python middleware application that handles media search and download decisions. It sits between Overseerr (requests), Prowlarr (indexers), and qBittorrent. It is designed for users who want granular control over release selection that standard *arr apps do not provide.
 
 ## 2. Technology Stack
 * **Language:** Python 3.12+ (managed by `uv`).

@@ -4,8 +4,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from app.arbitratarr.models.request import Request, RequestStatus
-from app.arbitratarr.services.lifecycle_service import LifecycleService
+from app.siftarr.models.request import Request, RequestStatus
+from app.siftarr.services.lifecycle_service import LifecycleService
 
 
 class TestLifecycleService:
