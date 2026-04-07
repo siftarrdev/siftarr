@@ -94,7 +94,9 @@ class TestQbittorrentServiceUnit:
             mock_client = MagicMock()
             service._client = mock_client
 
-            with patch("asyncio.to_thread", side_effect=qbittorrentapi.LoginFailed("Invalid credentials")):
+            with patch(
+                "asyncio.to_thread", side_effect=qbittorrentapi.LoginFailed("Invalid credentials")
+            ):
                 result = await service.authenticate()
                 assert result is False
 
@@ -113,7 +115,9 @@ class TestQbittorrentServiceUnit:
             mock_client.torrents_categories = {"radarr", "sonarr"}
             service._client = mock_client
 
-            with patch("asyncio.to_thread", AsyncMock(return_value=mock_client.torrents_categories)):
+            with patch(
+                "asyncio.to_thread", AsyncMock(return_value=mock_client.torrents_categories)
+            ):
                 result = await service.ensure_category_exists("radarr")
                 assert result is True
 

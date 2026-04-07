@@ -1,5 +1,7 @@
 """FastAPI application for Arbitratarr."""
 
+import sqlite3
+import subprocess
 from contextlib import asynccontextmanager
 from pathlib import Path
 from urllib.parse import urlparse
@@ -14,6 +16,7 @@ from app.arbitratarr.routers import dashboard, rules, settings, staged, webhooks
 from app.arbitratarr.services.scheduler_service import SchedulerService
 
 scheduler_service: SchedulerService | None = None
+INITIAL_MIGRATION_REVISION = "bc9c8cfbe08b"
 
 
 def _ensure_db_directory():
@@ -30,6 +33,60 @@ def _ensure_db_directory():
         db_dir.mkdir(parents=True, exist_ok=True)
 
 
+def _get_sqlite_db_path() -> Path | None:
+    """Return the SQLite database path when using SQLite."""
+    settings = get_settings()
+    parsed = urlparse(settings.database_url)
+    if not parsed.scheme.startswith("sqlite"):
+        return None
+
+    path = parsed.path
+    if path.startswith("/."):
+        path = path[1:]
+    return Path(path)
+
+
+def _prepare_legacy_sqlite_database_for_migrations() -> None:
+    """Stamp legacy SQLite databases so Alembic can upgrade them safely."""
+    db_path = _get_sqlite_db_path()
+    if db_path is None or not db_path.exists():
+        return
+
+    with sqlite3.connect(db_path) as connection:
+        cursor = connection.execute("SELECT name FROM sqlite_master WHERE type = 'table'")
+        table_names = {row[0] for row in cursor.fetchall()}
+        has_alembic_version_table = "alembic_version" in table_names
+        alembic_versions: list[str] = []
+        if has_alembic_version_table:
+            version_cursor = connection.execute("SELECT version_num FROM alembic_version")
+            alembic_versions = [row[0] for row in version_cursor.fetchall() if row[0]]
+
+    if not table_names:
+        return
+
+    app_tables = {
+        "pending_queue",
+        "releases",
+        "requests",
+        "rules",
+        "settings",
+        "staged_torrents",
+    }
+    if not table_names.intersection(app_tables):
+        return
+
+    if alembic_versions and alembic_versions[0] == INITIAL_MIGRATION_REVISION:
+        return
+
+    if alembic_versions:
+        return
+
+    subprocess.run(
+        ["uv", "run", "alembic", "stamp", INITIAL_MIGRATION_REVISION],
+        check=True,
+    )
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Application lifespan manager for startup/shutdown events."""
@@ -37,6 +94,10 @@ async def lifespan(app: FastAPI):
 
     # Ensure database directory exists
     _ensure_db_directory()
+
+    # Apply migrations before table initialization so the runtime schema stays current
+    _prepare_legacy_sqlite_database_for_migrations()
+    subprocess.run(["uv", "run", "alembic", "upgrade", "head"], check=True)
 
     # Initialize database tables
     await init_db()

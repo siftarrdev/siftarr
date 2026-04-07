@@ -294,7 +294,9 @@ class TestConnectionTester:
 
         mock_client = MagicMock()
         mock_client.auth.log_in = MagicMock()
-        mock_client.app.web_api_version = property(lambda self: (_ for _ in ()).throw(Exception("Failed")))
+        mock_client.app.web_api_version = property(
+            lambda self: (_ for _ in ()).throw(Exception("Failed"))
+        )
 
         with patch("qbittorrentapi.Client", return_value=mock_client):
             with patch("asyncio.to_thread", AsyncMock()):

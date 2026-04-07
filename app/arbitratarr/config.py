@@ -36,7 +36,7 @@ class Settings(BaseSettings):
     qbittorrent_password: str = "adminadmin"
 
     # Application settings (with defaults)
-    staging_mode_enabled: bool = False
+    staging_mode_enabled: bool = True
     retry_interval_hours: int = 24
     max_retry_duration_days: int = 7
 

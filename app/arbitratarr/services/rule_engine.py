@@ -38,31 +38,31 @@ class RuleEngine:
 
     def __init__(
         self,
-        min_size_bytes: int | None = None,
-        max_size_bytes: int | None = None,
+        size_limit_rules: list[tuple[int, str, int | None, int | None]] | None = None,
         exclusion_patterns: list[tuple[int, str, str]] | None = None,  # (id, name, pattern)
         requirement_patterns: list[tuple[int, str, str]] | None = None,  # (id, name, pattern)
         scorer_patterns: list[tuple[int, str, str, int]]
         | None = None,  # (id, name, pattern, score)
     ):
-        self.min_size_bytes = min_size_bytes
-        self.max_size_bytes = max_size_bytes
+        self.size_limit_rules = size_limit_rules or []
         self.exclusion_patterns = exclusion_patterns or []
         self.requirement_patterns = requirement_patterns or []
         self.scorer_patterns = scorer_patterns or []
 
+    @staticmethod
+    def _scope_matches(rule_scope: str, media_type: str | None) -> bool:
+        if not rule_scope or rule_scope == "both" or media_type is None:
+            return True
+        return rule_scope == media_type
+
     @classmethod
     def from_db_rules(
         cls,
-        size_min_gb: float | None = None,
-        size_max_gb: float | None = None,
         rules: list | None = None,
+        media_type: str | None = None,
     ) -> "RuleEngine":
         """Create RuleEngine from database rules."""
-        # Convert GB to bytes
-        min_bytes = int(size_min_gb * 1024 * 1024 * 1024) if size_min_gb else None
-        max_bytes = int(size_max_gb * 1024 * 1024 * 1024) if size_max_gb else None
-
+        size_limit_rules = []
         exclusions = []
         requirements = []
         scorers = []
@@ -71,8 +71,22 @@ class RuleEngine:
             for rule in rules:
                 if not rule.is_enabled:
                     continue
+                if not cls._scope_matches(getattr(rule, "media_scope", "both"), media_type):
+                    continue
                 pattern = rule.pattern
-                if rule.rule_type.value == "exclusion":
+                if rule.rule_type.value == "size_limit":
+                    min_bytes = (
+                        int(rule.min_size_gb * 1024 * 1024 * 1024)
+                        if getattr(rule, "min_size_gb", None) is not None
+                        else None
+                    )
+                    max_bytes = (
+                        int(rule.max_size_gb * 1024 * 1024 * 1024)
+                        if getattr(rule, "max_size_gb", None) is not None
+                        else None
+                    )
+                    size_limit_rules.append((rule.id, rule.name, min_bytes, max_bytes))
+                elif rule.rule_type.value == "exclusion":
                     exclusions.append((rule.id, rule.name, pattern))
                 elif rule.rule_type.value == "requirement":
                     requirements.append((rule.id, rule.name, pattern))
@@ -80,8 +94,7 @@ class RuleEngine:
                     scorers.append((rule.id, rule.name, pattern, rule.score))
 
         return cls(
-            min_size_bytes=min_bytes,
-            max_size_bytes=max_bytes,
+            size_limit_rules=size_limit_rules,
             exclusion_patterns=exclusions,
             requirement_patterns=requirements,
             scorer_patterns=scorers,
@@ -119,24 +132,34 @@ class RuleEngine:
         rejection_reason: str | None = None
 
         # Check size limits
-        if self.min_size_bytes is not None and release.size < self.min_size_bytes:
-            passed = False
-            rejection_reason = f"Size {release.size} below minimum {self.min_size_bytes}"
-            matches.append(
-                RuleMatch(
-                    rule_id=0,
-                    rule_name="min_size",
-                    matched=False,
+        for rule_id, rule_name, min_size_bytes, max_size_bytes in self.size_limit_rules:
+            if min_size_bytes is not None and release.size < min_size_bytes:
+                passed = False
+                rejection_reason = f"Size {release.size} below minimum {min_size_bytes}"
+                matches.append(
+                    RuleMatch(
+                        rule_id=rule_id,
+                        rule_name=rule_name,
+                        matched=False,
+                    )
                 )
-            )
-        elif self.max_size_bytes is not None and release.size > self.max_size_bytes:
-            passed = False
-            rejection_reason = f"Size {release.size} above maximum {self.max_size_bytes}"
+                break
+            if max_size_bytes is not None and release.size > max_size_bytes:
+                passed = False
+                rejection_reason = f"Size {release.size} above maximum {max_size_bytes}"
+                matches.append(
+                    RuleMatch(
+                        rule_id=rule_id,
+                        rule_name=rule_name,
+                        matched=False,
+                    )
+                )
+                break
             matches.append(
                 RuleMatch(
-                    rule_id=0,
-                    rule_name="max_size",
-                    matched=False,
+                    rule_id=rule_id,
+                    rule_name=rule_name,
+                    matched=True,
                 )
             )
 

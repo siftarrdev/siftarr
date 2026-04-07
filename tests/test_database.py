@@ -26,4 +26,5 @@ class TestDatabaseModule:
                 mock_maker.return_value = mock_session
 
                 import asyncio
+
                 asyncio.run(init_db())

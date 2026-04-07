@@ -21,7 +21,7 @@ class TestStagingServiceUnit:
 
         assert service._sanitize_filename("Movie: Title 2019") == "Movie_Title_2019"
         assert service._sanitize_filename("Movie/Title") == "Movie_Title"
-        assert service._sanitize_filename('Movie*Title?2019') == "Movie_Title_2019"
+        assert service._sanitize_filename("Movie*Title?2019") == "Movie_Title_2019"
         assert service._sanitize_filename('Movie"Title"2019') == "Movie_Title_2019"
         assert service._sanitize_filename("Movie|Title") == "Movie_Title"
 

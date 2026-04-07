@@ -3,245 +3,182 @@
 {% block title %}Settings - Arbitratarr{% endblock %}
 
 {% block content %}
-<div class="space-y-6">
+<div class="space-y-5">
     <h1 class="text-2xl font-bold">Settings</h1>
 
     {% if message %}
-    <div class="bg-gray-800 rounded-lg border border-gray-700 p-4 {% if message_type == 'error' %}border-red-500{% else %}border-green-500{% endif %}">
-        <p class="text-white">{{ message }}</p>
+    <div class="bg-gray-800 rounded-lg border p-3 {% if message_type == 'error' %}border-red-500{% else %}border-green-500{% endif %}">
+        <p class="text-sm text-white">{{ message }}</p>
     </div>
     {% endif %}
 
-    <!-- Connection Settings -->
     <div class="bg-gray-800 rounded-lg border border-gray-700">
-        <div class="px-6 py-4 border-b border-gray-700">
-            <h2 class="text-lg font-medium">Connection Settings</h2>
-            <p class="text-sm text-gray-400 mt-1">Configure your service URLs and API keys</p>
+        <div class="px-5 py-4 border-b border-gray-700 flex items-center justify-between gap-4">
+            <div>
+                <h2 class="text-lg font-medium">Connection Settings</h2>
+                <p class="text-sm text-gray-400 mt-0.5">Configure service URLs and credentials</p>
+            </div>
+            <button type="button" onclick="testAllConnections()" class="bg-purple-600 hover:bg-purple-700 text-white px-3 py-1.5 rounded-md text-xs font-medium shrink-0">
+                Test All
+            </button>
         </div>
-        <div class="p-6">
-            <form action="/settings/connections" method="post" class="space-y-6">
-                <!-- Overseerr -->
-                <div class="border-b border-gray-700 pb-6">
-                    <h3 class="text-md font-medium text-white mb-4">Overseerr</h3>
-                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div class="p-5">
+            <form action="/settings/connections" method="post" class="space-y-5">
+                <div class="border border-gray-700 rounded-lg p-4 space-y-3">
+                    <div class="flex items-center justify-between gap-4">
                         <div>
-                            <label for="overseerr_url" class="block text-sm font-medium text-gray-400 mb-1">URL</label>
-                            <input type="url" id="overseerr_url" name="overseerr_url" 
-                                   value="{{ env.overseerr_url }}"
-                                   placeholder="http://overseerr:5055"
-                                   class="w-full bg-gray-700 border border-gray-600 rounded-md px-3 py-2 text-white focus:outline-none focus:ring-2 focus:ring-blue-500">
+                            <h3 class="text-sm font-semibold text-white">Overseerr</h3>
+                            <p class="text-xs text-gray-500">Requests and metadata source</p>
+                        </div>
+                        <div class="flex items-center gap-3 shrink-0">
+                            <button type="button" onclick="testConnection('overseerr')" id="btn-test-overseerr" class="bg-blue-600 hover:bg-blue-700 text-white px-3 py-1.5 rounded-md text-xs font-medium">Test</button>
+                            <span id="status-overseerr" class="text-xs"></span>
+                        </div>
+                    </div>
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+                        <div>
+                            <label for="overseerr_url" class="block text-xs font-medium text-gray-400 mb-1">URL</label>
+                            <input type="url" id="overseerr_url" name="overseerr_url" value="{{ env.overseerr_url }}" placeholder="http://overseerr:5055" class="w-full bg-gray-700 border border-gray-600 rounded-md px-3 py-1.5 text-sm text-white focus:outline-none focus:ring-2 focus:ring-blue-500">
                         </div>
                         <div>
-                            <label for="overseerr_api_key" class="block text-sm font-medium text-gray-400 mb-1">API Key</label>
+                            <label for="overseerr_api_key" class="block text-xs font-medium text-gray-400 mb-1">API Key</label>
                             <div class="relative">
-                                <input type="password" id="overseerr_api_key" name="overseerr_api_key" 
-                                       value="{{ env.overseerr_api_key }}"
-                                       placeholder="Your Overseerr API key"
-                                       class="w-full bg-gray-700 border border-gray-600 rounded-md px-3 py-2 text-white focus:outline-none focus:ring-2 focus:ring-blue-500">
-                                <button type="button" onclick="togglePassword('overseerr_api_key')" 
-                                        class="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-white">
-                                    <svg id="eye-overseerr_api_key" class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path>
-                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"></path>
-                                    </svg>
+                                <input type="password" id="overseerr_api_key" name="overseerr_api_key" value="{{ env.overseerr_api_key }}" placeholder="Your Overseerr API key" class="w-full bg-gray-700 border border-gray-600 rounded-md px-3 py-1.5 pr-10 text-sm text-white focus:outline-none focus:ring-2 focus:ring-blue-500">
+                                <button type="button" onclick="togglePassword('overseerr_api_key')" class="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-white">
+                                    <svg id="eye-overseerr_api_key" class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"></path></svg>
                                 </button>
                             </div>
                         </div>
                     </div>
-                    <div class="mt-4">
-                        <button type="button" onclick="testConnection('overseerr')" 
-                                id="btn-test-overseerr"
-                                class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-md text-sm font-medium">
-                            Test Connection
-                        </button>
-                        <span id="status-overseerr" class="ml-4 text-sm"></span>
-                    </div>
                 </div>
 
-                <!-- Prowlarr -->
-                <div class="border-b border-gray-700 pb-6">
-                    <h3 class="text-md font-medium text-white mb-4">Prowlarr</h3>
-                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div class="border border-gray-700 rounded-lg p-4 space-y-3">
+                    <div class="flex items-center justify-between gap-4">
                         <div>
-                            <label for="prowlarr_url" class="block text-sm font-medium text-gray-400 mb-1">URL</label>
-                            <input type="url" id="prowlarr_url" name="prowlarr_url" 
-                                   value="{{ env.prowlarr_url }}"
-                                   placeholder="http://prowlarr:9696"
-                                   class="w-full bg-gray-700 border border-gray-600 rounded-md px-3 py-2 text-white focus:outline-none focus:ring-2 focus:ring-blue-500">
+                            <h3 class="text-sm font-semibold text-white">Prowlarr</h3>
+                            <p class="text-xs text-gray-500">Indexer search backend</p>
+                        </div>
+                        <div class="flex items-center gap-3 shrink-0">
+                            <button type="button" onclick="testConnection('prowlarr')" id="btn-test-prowlarr" class="bg-blue-600 hover:bg-blue-700 text-white px-3 py-1.5 rounded-md text-xs font-medium">Test</button>
+                            <span id="status-prowlarr" class="text-xs"></span>
+                        </div>
+                    </div>
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+                        <div>
+                            <label for="prowlarr_url" class="block text-xs font-medium text-gray-400 mb-1">URL</label>
+                            <input type="url" id="prowlarr_url" name="prowlarr_url" value="{{ env.prowlarr_url }}" placeholder="http://prowlarr:9696" class="w-full bg-gray-700 border border-gray-600 rounded-md px-3 py-1.5 text-sm text-white focus:outline-none focus:ring-2 focus:ring-blue-500">
                         </div>
                         <div>
-                            <label for="prowlarr_api_key" class="block text-sm font-medium text-gray-400 mb-1">API Key</label>
+                            <label for="prowlarr_api_key" class="block text-xs font-medium text-gray-400 mb-1">API Key</label>
                             <div class="relative">
-                                <input type="password" id="prowlarr_api_key" name="prowlarr_api_key" 
-                                       value="{{ env.prowlarr_api_key }}"
-                                       placeholder="Your Prowlarr API key"
-                                       class="w-full bg-gray-700 border border-gray-600 rounded-md px-3 py-2 text-white focus:outline-none focus:ring-2 focus:ring-blue-500">
-                                <button type="button" onclick="togglePassword('prowlarr_api_key')" 
-                                        class="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-white">
-                                    <svg id="eye-prowlarr_api_key" class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path>
-                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"></path>
-                                    </svg>
+                                <input type="password" id="prowlarr_api_key" name="prowlarr_api_key" value="{{ env.prowlarr_api_key }}" placeholder="Your Prowlarr API key" class="w-full bg-gray-700 border border-gray-600 rounded-md px-3 py-1.5 pr-10 text-sm text-white focus:outline-none focus:ring-2 focus:ring-blue-500">
+                                <button type="button" onclick="togglePassword('prowlarr_api_key')" class="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-white">
+                                    <svg id="eye-prowlarr_api_key" class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"></path></svg>
                                 </button>
                             </div>
                         </div>
                     </div>
-                    <div class="mt-4">
-                        <button type="button" onclick="testConnection('prowlarr')" 
-                                id="btn-test-prowlarr"
-                                class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-md text-sm font-medium">
-                            Test Connection
-                        </button>
-                        <span id="status-prowlarr" class="ml-4 text-sm"></span>
-                    </div>
                 </div>
 
-                <!-- qBittorrent -->
-                <div class="pb-6">
-                    <h3 class="text-md font-medium text-white mb-4">qBittorrent</h3>
-                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div class="border border-gray-700 rounded-lg p-4 space-y-3">
+                    <div class="flex items-center justify-between gap-4">
                         <div>
-                            <label for="qbittorrent_url" class="block text-sm font-medium text-gray-400 mb-1">URL</label>
-                            <input type="url" id="qbittorrent_url" name="qbittorrent_url" 
-                                   value="{{ env.qbittorrent_url }}"
-                                   placeholder="http://qbittorrent:8080"
-                                   class="w-full bg-gray-700 border border-gray-600 rounded-md px-3 py-2 text-white focus:outline-none focus:ring-2 focus:ring-blue-500">
+                            <h3 class="text-sm font-semibold text-white">qBittorrent</h3>
+                            <p class="text-xs text-gray-500">Download client target</p>
+                        </div>
+                        <div class="flex items-center gap-3 shrink-0">
+                            <button type="button" onclick="testConnection('qbittorrent')" id="btn-test-qbittorrent" class="bg-blue-600 hover:bg-blue-700 text-white px-3 py-1.5 rounded-md text-xs font-medium">Test</button>
+                            <span id="status-qbittorrent" class="text-xs"></span>
+                        </div>
+                    </div>
+                    <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
+                        <div>
+                            <label for="qbittorrent_url" class="block text-xs font-medium text-gray-400 mb-1">URL</label>
+                            <input type="url" id="qbittorrent_url" name="qbittorrent_url" value="{{ env.qbittorrent_url }}" placeholder="http://qbittorrent:8080" class="w-full bg-gray-700 border border-gray-600 rounded-md px-3 py-1.5 text-sm text-white focus:outline-none focus:ring-2 focus:ring-blue-500">
                         </div>
                         <div>
-                            <label for="qbittorrent_username" class="block text-sm font-medium text-gray-400 mb-1">Username</label>
-                            <input type="text" id="qbittorrent_username" name="qbittorrent_username" 
-                                   value="{{ env.qbittorrent_username }}"
-                                   placeholder="admin"
-                                   class="w-full bg-gray-700 border border-gray-600 rounded-md px-3 py-2 text-white focus:outline-none focus:ring-2 focus:ring-blue-500">
+                            <label for="qbittorrent_username" class="block text-xs font-medium text-gray-400 mb-1">Username</label>
+                            <input type="text" id="qbittorrent_username" name="qbittorrent_username" value="{{ env.qbittorrent_username }}" placeholder="admin" class="w-full bg-gray-700 border border-gray-600 rounded-md px-3 py-1.5 text-sm text-white focus:outline-none focus:ring-2 focus:ring-blue-500">
                         </div>
                         <div>
-                            <label for="qbittorrent_password" class="block text-sm font-medium text-gray-400 mb-1">Password</label>
+                            <label for="qbittorrent_password" class="block text-xs font-medium text-gray-400 mb-1">Password</label>
                             <div class="relative">
-                                <input type="password" id="qbittorrent_password" name="qbittorrent_password" 
-                                       value="{{ env.qbittorrent_password }}"
-                                       placeholder="••••••••"
-                                       class="w-full bg-gray-700 border border-gray-600 rounded-md px-3 py-2 text-white focus:outline-none focus:ring-2 focus:ring-blue-500">
-                                <button type="button" onclick="togglePassword('qbittorrent_password')" 
-                                        class="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-white">
-                                    <svg id="eye-qbittorrent_password" class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path>
-                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"></path>
-                                    </svg>
+                                <input type="password" id="qbittorrent_password" name="qbittorrent_password" value="{{ env.qbittorrent_password }}" placeholder="••••••••" class="w-full bg-gray-700 border border-gray-600 rounded-md px-3 py-1.5 pr-10 text-sm text-white focus:outline-none focus:ring-2 focus:ring-blue-500">
+                                <button type="button" onclick="togglePassword('qbittorrent_password')" class="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-white">
+                                    <svg id="eye-qbittorrent_password" class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"></path></svg>
                                 </button>
                             </div>
                         </div>
                     </div>
-                    <div class="mt-4">
-                        <button type="button" onclick="testConnection('qbittorrent')" 
-                                id="btn-test-qbittorrent"
-                                class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-md text-sm font-medium">
-                            Test Connection
-                        </button>
-                        <span id="status-qbittorrent" class="ml-4 text-sm"></span>
-                    </div>
                 </div>
 
-                <!-- Timezone -->
-                <div class="border-t border-gray-700 pt-6">
-                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        <div>
-                            <label for="tz" class="block text-sm font-medium text-gray-400 mb-1">Timezone</label>
-                            <input type="text" id="tz" name="tz" 
-                                   value="{{ env.tz }}"
-                                   placeholder="UTC"
-                                   class="w-full bg-gray-700 border border-gray-600 rounded-md px-3 py-2 text-white focus:outline-none focus:ring-2 focus:ring-blue-500">
-                        </div>
+                <div class="grid grid-cols-1 md:grid-cols-[220px_auto] gap-3 items-end">
+                    <div>
+                        <label for="tz" class="block text-xs font-medium text-gray-400 mb-1">Timezone</label>
+                        <input type="text" id="tz" name="tz" value="{{ env.tz }}" placeholder="UTC" class="w-full bg-gray-700 border border-gray-600 rounded-md px-3 py-1.5 text-sm text-white focus:outline-none focus:ring-2 focus:ring-blue-500">
                     </div>
-                </div>
-
-                <div class="flex items-center gap-4 pt-4">
-                    <button type="submit" 
-                            class="bg-green-600 hover:bg-green-700 text-white px-6 py-2 rounded-md text-sm font-medium">
-                        Save Settings
-                    </button>
-                    <button type="button" onclick="testAllConnections()" 
-                            class="bg-purple-600 hover:bg-purple-700 text-white px-4 py-2 rounded-md text-sm font-medium">
-                        Test All Connections
-                    </button>
+                    <div class="flex items-center gap-3">
+                        <button type="submit" class="bg-green-600 hover:bg-green-700 text-white px-4 py-1.5 rounded-md text-sm font-medium">Save Settings</button>
+                    </div>
                 </div>
             </form>
         </div>
     </div>
 
-    <!-- Staging Mode -->
-    <div class="bg-gray-800 rounded-lg border border-gray-700">
-        <div class="px-6 py-4 border-b border-gray-700">
-            <h2 class="text-lg font-medium">Staging Mode</h2>
-            <p class="text-sm text-gray-400 mt-1">When enabled, torrents are saved to staging instead of sending directly to qBittorrent</p>
+    <div class="grid grid-cols-1 lg:grid-cols-[1.2fr_1fr] gap-5">
+        <div class="bg-gray-800 rounded-lg border border-gray-700">
+            <div class="px-5 py-4 border-b border-gray-700">
+                <h2 class="text-lg font-medium">Staging Mode</h2>
+                <p class="text-sm text-gray-400 mt-0.5">Save torrents to staging instead of sending them directly to qBittorrent</p>
+            </div>
+            <div class="p-5">
+                <form action="/settings/staging" method="post" class="flex items-center justify-between gap-4">
+                    <div>
+                        <div class="text-sm font-medium {% if staging_enabled %}text-green-400{% else %}text-gray-400{% endif %}">{{ 'Enabled' if staging_enabled else 'Disabled' }}</div>
+                        <div class="text-xs text-gray-500 mt-0.5">Default is enabled for safer review-first downloads.</div>
+                    </div>
+                    <button type="submit" class="px-3 py-1.5 rounded-md text-sm font-medium {% if staging_enabled %}bg-red-600 hover:bg-red-700 text-white{% else %}bg-green-600 hover:bg-green-700 text-white{% endif %}">{{ 'Disable' if staging_enabled else 'Enable' }}</button>
+                </form>
+            </div>
         </div>
-        <div class="p-6">
-            <form action="/settings/staging" method="post" class="flex items-center justify-between">
-                <div>
-                    <span class="text-lg {% if staging_enabled %}text-green-400{% else %}text-gray-400{% endif %}">
-                        {{ 'Enabled' if staging_enabled else 'Disabled' }}
-                    </span>
-                </div>
-                <button type="submit" 
-                        class="px-4 py-2 rounded-md text-sm font-medium {% if staging_enabled %}bg-red-600 hover:bg-red-700 text-white{% else %}bg-green-600 hover:bg-green-700 text-white{% endif %}">
-                    {{ 'Disable' if staging_enabled else 'Enable' }}
-                </button>
-            </form>
-        </div>
-    </div>
 
-    <!-- Manual Actions -->
-    <div class="bg-gray-800 rounded-lg border border-gray-700">
-        <div class="px-6 py-4 border-b border-gray-700">
-            <h2 class="text-lg font-medium">Manual Actions</h2>
-        </div>
-        <div class="p-6 space-y-4">
-            <form action="/settings/retry-pending" method="post">
-                <button type="submit" class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-md text-sm font-medium">
-                    Retry Pending Now
-                </button>
-                <span class="ml-4 text-sm text-gray-400">{{ pending_count }} items ready for retry</span>
-            </form>
-            
-            <form action="/settings/sync-overseerr" method="post">
-                <button type="submit" class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-md text-sm font-medium">
-                    Sync with Overseerr
-                </button>
-                <span class="ml-4 text-sm text-gray-400">Fetch new approved requests</span>
-            </form>
-            
-            <form action="/settings/reseed-rules" method="post">
-                <button type="submit" class="bg-yellow-600 hover:bg-yellow-700 text-white px-4 py-2 rounded-md text-sm font-medium">
-                    Reseed Default Rules
-                </button>
-                <span class="ml-4 text-sm text-gray-400">Restore default rules (does not remove custom rules)</span>
-            </form>
-        </div>
-    </div>
-
-    <!-- Database Stats -->
-    <div class="bg-gray-800 rounded-lg border border-gray-700">
-        <div class="px-6 py-4 border-b border-gray-700">
-            <h2 class="text-lg font-medium">Database Statistics</h2>
-        </div>
-        <div class="p-6">
-            <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
-                <div>
-                    <div class="text-2xl font-bold text-white">{{ stats.total_requests }}</div>
-                    <div class="text-sm text-gray-400">Total Requests</div>
-                </div>
-                <div>
-                    <div class="text-2xl font-bold text-green-400">{{ stats.completed }}</div>
-                    <div class="text-sm text-gray-400">Completed</div>
-                </div>
-                <div>
-                    <div class="text-2xl font-bold text-yellow-400">{{ stats.pending }}</div>
-                    <div class="text-sm text-gray-400">Pending</div>
-                </div>
-                <div>
-                    <div class="text-2xl font-bold text-red-400">{{ stats.failed }}</div>
-                    <div class="text-sm text-gray-400">Failed</div>
+        <div class="bg-gray-800 rounded-lg border border-gray-700">
+            <div class="px-5 py-4 border-b border-gray-700">
+                <h2 class="text-lg font-medium">Database Statistics</h2>
+            </div>
+            <div class="p-5">
+                <div class="grid grid-cols-2 gap-3">
+                    <div class="bg-gray-700/50 rounded-lg p-3"><div class="text-xl font-bold text-white">{{ stats.total_requests }}</div><div class="text-xs text-gray-400">Total Requests</div></div>
+                    <div class="bg-gray-700/50 rounded-lg p-3"><div class="text-xl font-bold text-green-400">{{ stats.completed }}</div><div class="text-xs text-gray-400">Completed</div></div>
+                    <div class="bg-gray-700/50 rounded-lg p-3"><div class="text-xl font-bold text-yellow-400">{{ stats.pending }}</div><div class="text-xs text-gray-400">Pending</div></div>
+                    <div class="bg-gray-700/50 rounded-lg p-3"><div class="text-xl font-bold text-red-400">{{ stats.failed }}</div><div class="text-xs text-gray-400">Failed</div></div>
                 </div>
             </div>
+        </div>
+    </div>
+
+    <div class="bg-gray-800 rounded-lg border border-gray-700">
+        <div class="px-5 py-4 border-b border-gray-700">
+            <h2 class="text-lg font-medium">Manual Actions</h2>
+        </div>
+        <div class="p-5 grid grid-cols-1 lg:grid-cols-3 gap-3">
+            <form action="/settings/retry-pending" method="post" class="bg-gray-700/40 rounded-lg p-4 border border-gray-700 flex flex-col gap-2">
+                <div class="text-sm font-medium text-white">Retry Pending</div>
+                <div class="text-xs text-gray-400">{{ pending_count }} items ready for retry</div>
+                <button type="submit" class="mt-1 bg-blue-600 hover:bg-blue-700 text-white px-3 py-1.5 rounded-md text-sm font-medium w-fit">Retry Now</button>
+            </form>
+
+            <form action="/settings/sync-overseerr" method="post" class="bg-gray-700/40 rounded-lg p-4 border border-gray-700 flex flex-col gap-2">
+                <div class="text-sm font-medium text-white">Sync Overseerr</div>
+                <div class="text-xs text-gray-400">Fetch new approved or pending requests</div>
+                <button type="submit" class="mt-1 bg-blue-600 hover:bg-blue-700 text-white px-3 py-1.5 rounded-md text-sm font-medium w-fit">Sync</button>
+            </form>
+
+            <form action="/settings/reseed-rules" method="post" class="bg-gray-700/40 rounded-lg p-4 border border-gray-700 flex flex-col gap-2">
+                <div class="text-sm font-medium text-white">Reseed Default Rules</div>
+                <div class="text-xs text-gray-400">Restore bundled defaults without deleting custom rules</div>
+                <button type="submit" class="mt-1 bg-yellow-600 hover:bg-yellow-700 text-white px-3 py-1.5 rounded-md text-sm font-medium w-fit">Reseed</button>
+            </form>
         </div>
     </div>
 </div>
@@ -262,12 +199,11 @@ function togglePassword(fieldId) {
 async function testConnection(service) {
     const btn = document.getElementById('btn-test-' + service);
     const status = document.getElementById('status-' + service);
-    
-    // Disable button and show loading
+
     btn.disabled = true;
     btn.classList.add('opacity-50');
     status.textContent = 'Testing...';
-    status.className = 'ml-4 text-sm text-gray-400';
+    status.className = 'text-xs text-gray-400';
 
     try {
         const response = await fetch('/settings/api/test/' + service, {
@@ -276,19 +212,19 @@ async function testConnection(service) {
                 'Content-Type': 'application/json',
             },
         });
-        
+
         const data = await response.json();
-        
+
         if (data.success) {
-            status.textContent = '✓ ' + data.message + (data.details ? ' (' + data.details + ')' : '');
-            status.className = 'ml-4 text-sm text-green-400';
+            status.textContent = 'OK' + (data.details ? ' · ' + data.details : '');
+            status.className = 'text-xs text-green-400';
         } else {
-            status.textContent = '✗ ' + data.message + (data.details ? ' - ' + data.details : '');
-            status.className = 'ml-4 text-sm text-red-400';
+            status.textContent = 'Failed' + (data.details ? ' · ' + data.details : '');
+            status.className = 'text-xs text-red-400';
         }
     } catch (error) {
-        status.textContent = '✗ Connection test failed: ' + error.message;
-        status.className = 'ml-4 text-sm text-red-400';
+        status.textContent = 'Failed · ' + error.message;
+        status.className = 'text-xs text-red-400';
     } finally {
         btn.disabled = false;
         btn.classList.remove('opacity-50');
@@ -297,20 +233,9 @@ async function testConnection(service) {
 
 async function testAllConnections() {
     const services = ['overseerr', 'prowlarr', 'qbittorrent'];
-    
     for (const service of services) {
         await testConnection(service);
     }
-}
-
-// Check for saved/reset query params and show notification
-const urlParams = new URLSearchParams(window.location.search);
-if (urlParams.get('saved') === 'true') {
-    // Could show a toast notification here
-    console.log('Settings saved successfully');
-}
-if (urlParams.get('reset') === 'true') {
-    console.log('Settings reset to environment variables');
 }
 </script>
 {% endblock %}

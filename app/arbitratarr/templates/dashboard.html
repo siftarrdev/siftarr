@@ -5,109 +5,75 @@
 {% block content %}
 <div class="space-y-6">
     <h1 class="text-2xl font-bold">Dashboard</h1>
-    
-    <!-- Stats Cards -->
+
     <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
-        <div class="bg-gray-800 rounded-lg p-4 border border-gray-700">
-            <div class="text-gray-400 text-sm">Active Requests</div>
-            <div class="text-3xl font-bold text-white">{{ stats.active }}</div>
-        </div>
-        <div class="bg-gray-800 rounded-lg p-4 border border-gray-700">
-            <div class="text-gray-400 text-sm">Pending Search</div>
-            <div class="text-3xl font-bold text-yellow-400">{{ stats.pending }}</div>
-        </div>
-        <div class="bg-gray-800 rounded-lg p-4 border border-gray-700">
-            <div class="text-gray-400 text-sm">Staged Torrents</div>
-            <div class="text-3xl font-bold text-blue-400">{{ stats.staged }}</div>
-        </div>
-        <div class="bg-gray-800 rounded-lg p-4 border border-gray-700">
-            <div class="text-gray-400 text-sm">Completed</div>
-            <div class="text-3xl font-bold text-green-400">{{ stats.completed }}</div>
-        </div>
+        <div class="bg-gray-800 rounded-lg p-4 border border-gray-700"><div class="text-gray-400 text-sm">Active Requests</div><div class="text-3xl font-bold text-white">{{ stats.active }}</div></div>
+        <div class="bg-gray-800 rounded-lg p-4 border border-gray-700"><div class="text-gray-400 text-sm">Pending Search</div><div class="text-3xl font-bold text-yellow-400">{{ stats.pending }}</div></div>
+        <div class="bg-gray-800 rounded-lg p-4 border border-gray-700"><div class="text-gray-400 text-sm">Staged / Downloading</div><div class="text-3xl font-bold text-blue-400">{{ stats.staged }}</div></div>
+        <div class="bg-gray-800 rounded-lg p-4 border border-gray-700"><div class="text-gray-400 text-sm">Completed</div><div class="text-3xl font-bold text-green-400">{{ stats.completed }}</div></div>
     </div>
 
-    <!-- Tabs -->
     <div class="border-b border-gray-700">
         <nav class="-mb-4 flex space-x-8">
-            <button onclick="showTab('active')" 
-                    id="tab-active"
-                    class="tab-button border-b-2 border-blue-500 pb-4 px-1 text-blue-500 font-medium">
-                Active Requests
-            </button>
-            <button onclick="showTab('pending')" 
-                    id="tab-pending"
-                    class="tab-button border-b-2 border-transparent pb-4 px-1 text-gray-400 hover:text-gray-300">
-                Pending Search
-            </button>
-            <button onclick="showTab('staged')" 
-                    id="tab-staged"
-                    class="tab-button border-b-2 border-transparent pb-4 px-1 text-gray-400 hover:text-gray-300">
-                Staged Torrents
-            </button>
+            <button onclick="showTab('active')" id="tab-active" class="tab-button border-b-2 border-blue-500 pb-4 px-1 text-blue-500 font-medium">Active Requests</button>
+            <button onclick="showTab('pending')" id="tab-pending" class="tab-button border-b-2 border-transparent pb-4 px-1 text-gray-400 hover:text-gray-300">Pending Search</button>
+            <button onclick="showTab('staged')" id="tab-staged" class="tab-button border-b-2 border-transparent pb-4 px-1 text-gray-400 hover:text-gray-300">Staged / Downloading</button>
         </nav>
     </div>
 
-    <!-- Active Requests Tab -->
     <div id="content-active" class="tab-content">
         {% if active_requests %}
         <div class="bg-gray-800 rounded-lg border border-gray-700 overflow-hidden">
-            <div class="p-4 border-b border-gray-700">
-                <input type="text" id="filter-input" placeholder="Filter requests..." 
-                       class="w-full md:w-64 px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:border-blue-500">
+            <div class="p-4 border-b border-gray-700 flex flex-col gap-3 md:flex-row md:items-center">
+                <input type="text" id="filter-input" placeholder="Filter requests..." class="w-full md:flex-1 px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:border-blue-500">
+                <select id="overseerr-status-filter" class="w-full md:w-56 px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white focus:outline-none focus:border-blue-500">
+                    <option value="">All Overseerr Statuses</option>
+                    <option value="approved">Approved</option>
+                    <option value="pending">Pending</option>
+                    <option value="processing">Processing</option>
+                    <option value="partially_available">Partially Available</option>
+                    <option value="available">Available</option>
+                    <option value="declined">Declined</option>
+                    <option value="completed">Completed</option>
+                    <option value="deleted">Deleted</option>
+                </select>
             </div>
             <div class="overflow-x-auto">
                 <table class="min-w-full divide-y divide-gray-700" id="active-requests-table">
                     <thead class="bg-gray-700">
                         <tr>
-                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider cursor-pointer hover:bg-gray-600" data-sort="title" data-col="0">Title <span class="sort-indicator text-gray-400"></span></th>
-                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider cursor-pointer hover:bg-gray-600" data-sort="type" data-col="1">Type <span class="sort-indicator text-gray-400"></span></th>
-                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider cursor-pointer hover:bg-gray-600" data-sort="status" data-col="2">Status <span class="sort-indicator text-gray-400"></span></th>
-                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider cursor-pointer hover:bg-gray-600" data-sort="requested" data-col="3">Requested <span class="sort-indicator text-gray-400"></span></th>
-                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider cursor-pointer hover:bg-gray-600" data-sort="requestedby" data-col="4">Requested By <span class="sort-indicator text-gray-400"></span></th>
-                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Overseerr Status</th>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider cursor-pointer hover:bg-gray-600" data-table="active" data-sort="title">Title <span class="sort-indicator text-gray-400"></span></th>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider cursor-pointer hover:bg-gray-600" data-table="active" data-sort="type">Type <span class="sort-indicator text-gray-400"></span></th>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider cursor-pointer hover:bg-gray-600" data-table="active" data-sort="status">Status <span class="sort-indicator text-gray-400"></span></th>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider cursor-pointer hover:bg-gray-600" data-table="active" data-sort="requested">Requested <span class="sort-indicator text-gray-400"></span></th>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider cursor-pointer hover:bg-gray-600" data-table="active" data-sort="requestedby">Requested By <span class="sort-indicator text-gray-400"></span></th>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider cursor-pointer hover:bg-gray-600" data-table="active" data-sort="ovstatus">Overseerr Status <span class="sort-indicator text-gray-400"></span></th>
                             <th class="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Actions</th>
                         </tr>
                     </thead>
                     <tbody class="divide-y divide-gray-700" id="active-requests-body">
                         {% for req in active_requests %}
-                        <tr class="hover:bg-gray-700" data-overseerr="{{ 'true' if req.overseerr_request_id else 'false' }}" data-status="{{ req.status.value }}" data-title="{{ req.title|lower }}" data-type="{{ req.media_type.value|lower }}" data-status-low="{{ req.status.value|lower }}" data-requestedby="{{ req.requester_username|default('Unknown')|lower }}" data-requested="{{ req.created_at.strftime('%Y-%m-%d %H:%M') }}">
+                        <tr class="hover:bg-gray-700 cursor-pointer" onclick="openRequestDetails({{ req.id }})" data-overseerr="{{ 'true' if req.overseerr_request_id else 'false' }}" data-status="{{ req.status.value }}" data-title="{{ req.title|lower }}" data-type="{{ req.media_type.value|lower }}" data-status-low="{{ req.status.value|lower }}" data-requestedby="{{ req.requester_username|default('Unknown')|lower }}" data-requested="{{ req.created_at.strftime('%Y-%m-%d %H:%M') }}" data-ovstatus="{{ overseerr_statuses.get(req.id, 'unknown') }}" data-ovrank="{{ {'approved':0,'pending':1,'processing':2,'partially_available':3,'available':4,'completed':5,'declined':6,'deleted':7}.get(overseerr_statuses.get(req.id, 'unknown'), 99) }}">
                             <td class="px-6 py-4 whitespace-nowrap text-sm">{{ req.title }}</td>
                             <td class="px-6 py-4 whitespace-nowrap text-sm capitalize">{{ req.media_type.value }}</td>
-                            <td class="px-6 py-4 whitespace-nowrap text-sm">
-                                <span class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full 
-                                    {% if req.status.value == 'searching' %}bg-yellow-900 text-yellow-200
-                                    {% elif req.status.value == 'downloading' %}bg-blue-900 text-blue-200
-                                    {% else %}bg-gray-700 text-gray-300{% endif %}">
-                                    {{ req.status.value }}
-                                </span>
-                            </td>
+                            <td class="px-6 py-4 whitespace-nowrap text-sm"><span class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full {% if req.status.value == 'searching' %}bg-yellow-900 text-yellow-200{% elif req.status.value == 'downloading' %}bg-blue-900 text-blue-200{% else %}bg-gray-700 text-gray-300{% endif %}">{{ req.status.value }}</span></td>
                             <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-400" data-sort-value="{{ req.created_at.strftime('%Y-%m-%d %H:%M') }}">{{ req.created_at.strftime('%Y-%m-%d %H:%M') }}</td>
                             <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-400">{{ req.requester_username or 'Unknown' }}</td>
-                            <td class="px-6 py-4 whitespace-nowrap text-sm">
+                            <td class="px-6 py-4 whitespace-nowrap text-sm" onclick="event.stopPropagation()">
                                 {% if req.overseerr_request_id %}
                                 {% set ov_status = overseerr_statuses.get(req.id, 'unknown') %}
-                                <span class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full 
-                                    {% if ov_status == 'approved' %}bg-green-900 text-green-200
-                                    {% elif ov_status == 'declined' %}bg-red-900 text-red-200
-                                    {% elif ov_status == 'pending' %}bg-yellow-900 text-yellow-200
-                                    {% elif ov_status == 'processing' %}bg-indigo-900 text-indigo-200
-                                    {% elif ov_status == 'partially_available' %}bg-orange-900 text-orange-200
-                                    {% elif ov_status == 'available' %}bg-blue-900 text-blue-200
-                                    {% elif ov_status == 'completed' %}bg-emerald-900 text-emerald-200
-                                    {% elif ov_status == 'deleted' %}bg-gray-800 text-gray-300
-                                    {% else %}bg-gray-700 text-gray-300{% endif %}">
-                                    {{ ov_status or 'unknown' }}
-                                </span>
+                                {% if overseerr_url and req.tmdb_id %}
+                                <a href="{{ overseerr_url }}/{{ req.media_type.value }}/{{ req.tmdb_id }}" target="_blank" rel="noopener noreferrer" class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full cursor-pointer hover:opacity-80 transition-opacity {% if ov_status == 'approved' %}bg-green-900 text-green-200{% elif ov_status == 'declined' %}bg-red-900 text-red-200{% elif ov_status == 'pending' %}bg-yellow-900 text-yellow-200{% elif ov_status == 'processing' %}bg-blue-900 text-blue-200{% elif ov_status == 'partially_available' %}bg-green-900 text-green-200{% elif ov_status == 'available' %}bg-blue-900 text-blue-200{% elif ov_status == 'completed' %}bg-emerald-900 text-emerald-200{% elif ov_status == 'deleted' %}bg-gray-800 text-gray-300{% else %}bg-gray-700 text-gray-300{% endif %}">{{ ov_status or 'unknown' }} &#8599;</a>
+                                {% else %}
+                                <span class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full {% if ov_status == 'approved' %}bg-green-900 text-green-200{% elif ov_status == 'declined' %}bg-red-900 text-red-200{% elif ov_status == 'pending' %}bg-yellow-900 text-yellow-200{% elif ov_status == 'processing' %}bg-blue-900 text-blue-200{% elif ov_status == 'partially_available' %}bg-green-900 text-green-200{% elif ov_status == 'available' %}bg-blue-900 text-blue-200{% elif ov_status == 'completed' %}bg-emerald-900 text-emerald-200{% elif ov_status == 'deleted' %}bg-gray-800 text-gray-300{% else %}bg-gray-700 text-gray-300{% endif %}">{{ ov_status or 'unknown' }}</span>
+                                {% endif %}
                                 {% endif %}
                             </td>
-                            <td class="px-6 py-4 whitespace-nowrap text-sm space-x-2">
-                                {% if req.overseerr_request_id and overseerr_statuses.get(req.id, 'unknown') in ['pending', 'requested'] %}
-                                <form action="/requests/{{ req.id }}/approve" method="post" class="inline">
-                                    <button type="submit" class="text-green-400 hover:text-green-300">Approve</button>
-                                </form>
-                                <form action="/requests/{{ req.id }}/decline" method="post" class="inline">
-                                    <button type="submit" class="text-red-400 hover:text-red-300">Deny</button>
-                                </form>
+                            <td class="px-6 py-4 whitespace-nowrap text-sm space-x-2" onclick="event.stopPropagation()">
+                                <button type="button" onclick="openRequestDetails({{ req.id }})" class="text-blue-400 hover:text-blue-300">Details</button>
+                                {% if req.overseerr_request_id and overseerr_request_statuses.get(req.id, 'unknown') in ['pending', 'requested'] %}
+                                <form action="/requests/{{ req.id }}/approve" method="post" class="inline"><button type="submit" class="text-green-400 hover:text-green-300">Approve</button></form>
+                                <form action="/requests/{{ req.id }}/deny" method="post" class="inline"><button type="submit" class="text-red-400 hover:text-red-300">Deny</button></form>
                                 {% endif %}
                             </td>
                         </tr>
@@ -116,158 +82,357 @@
                 </table>
             </div>
         </div>
-        {% else %}
-        <p class="text-gray-400">No active requests.</p>
-        {% endif %}
+        {% else %}<p class="text-gray-400">No active requests.</p>{% endif %}
     </div>
 
-    <!-- Pending Search Tab -->
     <div id="content-pending" class="tab-content hidden">
-        {% if pending_items %}
+        {% if pending_requests %}
         <div class="bg-gray-800 rounded-lg border border-gray-700 overflow-hidden">
-            <table class="min-w-full divide-y divide-gray-700">
-                <thead class="bg-gray-700">
-                    <tr>
-                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Title</th>
-                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Retry Count</th>
-                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Next Retry</th>
-                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Last Error</th>
-                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Actions</th>
-                    </tr>
-                </thead>
-                <tbody class="divide-y divide-gray-700">
-                    {% for item in pending_items %}
-                    <tr class="hover:bg-gray-700">
-                        <td class="px-6 py-4 whitespace-nowrap text-sm">{{ item.request.title }}</td>
-                        <td class="px-6 py-4 whitespace-nowrap text-sm">{{ item.retry_count }}</td>
-                        <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-400">{{ item.next_retry_at.strftime('%Y-%m-%d %H:%M') }}</td>
-                        <td class="px-6 py-4 whitespace-nowrap text-sm text-red-400 truncate max-w-xs">{{ item.last_error or 'N/A' }}</td>
-                        <td class="px-6 py-4 whitespace-nowrap text-sm">
-                            <form action="/requests/{{ item.request_id }}/retry" method="post" class="inline">
-                                <button type="submit" class="text-blue-400 hover:text-blue-300">Retry Now</button>
-                            </form>
-                        </td>
-                    </tr>
-                    {% endfor %}
-                </tbody>
-            </table>
+            <form action="/requests/bulk" method="post">
+                <div class="p-4 border-b border-gray-700 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+                    <div>
+                        <div class="text-sm font-medium text-white">Pending Search Queue</div>
+                        <div class="text-sm text-gray-400">Approved or partially available Overseerr requests that still need a torrent search.</div>
+                    </div>
+                    <div class="w-full md:max-w-xl flex flex-col gap-3 md:flex-row md:items-center">
+                        <input type="text" id="pending-filter-input" placeholder="Filter pending requests..." class="w-full md:flex-1 px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:border-blue-500">
+                        <select id="pending-overseerr-filter" class="w-full md:w-56 px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white focus:outline-none focus:border-blue-500">
+                            <option value="">All Overseerr Statuses</option>
+                            <option value="approved">Approved</option>
+                            <option value="partially_available">Partially Available</option>
+                        </select>
+                    </div>
+                    <div class="flex flex-wrap gap-2">
+                        <button type="submit" name="action" value="search" class="px-3 py-2 rounded-lg bg-blue-600 hover:bg-blue-500 text-white text-sm">Search Selected</button>
+                        <button type="submit" name="action" value="approve" class="px-3 py-2 rounded-lg bg-green-600 hover:bg-green-500 text-white text-sm">Approve Selected</button>
+                        <button type="submit" name="action" value="reject" class="px-3 py-2 rounded-lg bg-red-600 hover:bg-red-500 text-white text-sm">Reject Selected</button>
+                    </div>
+                </div>
+                <div class="overflow-x-auto">
+                    <table class="min-w-full divide-y divide-gray-700" id="pending-requests-table">
+                        <thead class="bg-gray-700">
+                            <tr>
+                                <th class="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider w-12">
+                                    <input id="pending-select-all" type="checkbox" class="rounded border-gray-500 bg-gray-800 text-blue-500 focus:ring-blue-500">
+                                </th>
+                                <th class="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider cursor-pointer hover:bg-gray-600" data-table="pending" data-sort="title">Title <span class="sort-indicator text-gray-400"></span></th>
+                                <th class="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider cursor-pointer hover:bg-gray-600" data-table="pending" data-sort="type">Type <span class="sort-indicator text-gray-400"></span></th>
+                                <th class="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider cursor-pointer hover:bg-gray-600" data-table="pending" data-sort="requestedby">Requested By <span class="sort-indicator text-gray-400"></span></th>
+                                <th class="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider cursor-pointer hover:bg-gray-600" data-table="pending" data-sort="ovstatus">Overseerr Status <span class="sort-indicator text-gray-400"></span></th>
+                                <th class="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider cursor-pointer hover:bg-gray-600" data-table="pending" data-sort="retrycount">Retry Count <span class="sort-indicator text-gray-400"></span></th>
+                                <th class="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider cursor-pointer hover:bg-gray-600" data-table="pending" data-sort="nextretry">Next Retry <span class="sort-indicator text-gray-400"></span></th>
+                                <th class="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider cursor-pointer hover:bg-gray-600" data-table="pending" data-sort="lasterror">Last Error <span class="sort-indicator text-gray-400"></span></th>
+                                <th class="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody class="divide-y divide-gray-700" id="pending-requests-body">
+                            {% for req in pending_requests %}
+                            {% set pending_item = pending_items_by_request_id.get(req.id) %}
+                            {% set pending_ov_status = overseerr_statuses.get(req.id, 'unknown') %}
+                            <tr class="hover:bg-gray-700 cursor-pointer" onclick="openRequestDetails({{ req.id }})" data-title="{{ req.title|lower }}" data-type="{{ req.media_type.value|lower }}" data-requestedby="{{ req.requester_username|default('Unknown')|lower }}" data-ovstatus="{{ pending_ov_status }}" data-ovrank="{{ {'approved':0,'partially_available':1}.get(pending_ov_status, 99) }}" data-retrycount="{{ pending_item.retry_count if pending_item else 0 }}" data-nextretry="{{ pending_item.next_retry_at.strftime('%Y-%m-%d %H:%M') if pending_item and pending_item.next_retry_at else '0000-00-00 00:00' }}" data-lasterror="{{ (pending_item.last_error or 'No retry errors recorded')|lower if pending_item else 'no retry errors recorded' }}">
+                                <td class="px-6 py-4 whitespace-nowrap text-sm" onclick="event.stopPropagation()">
+                                    <input name="request_ids" value="{{ req.id }}" type="checkbox" class="pending-request-checkbox rounded border-gray-500 bg-gray-800 text-blue-500 focus:ring-blue-500">
+                                </td>
+                                <td class="px-6 py-4 text-sm text-white">{{ req.title }}</td>
+                                <td class="px-6 py-4 whitespace-nowrap text-sm capitalize text-gray-300">{{ req.media_type.value }}</td>
+                                <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-400">{{ req.requester_username or 'Unknown' }}</td>
+                                <td class="px-6 py-4 whitespace-nowrap text-sm"><span class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full {% if pending_ov_status == 'approved' %}bg-green-900 text-green-200{% elif pending_ov_status == 'partially_available' %}bg-emerald-900 text-emerald-200{% else %}bg-gray-700 text-gray-300{% endif %}">{{ pending_ov_status }}</span></td>
+                                <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-300">{{ pending_item.retry_count if pending_item else 0 }}</td>
+                                <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-400">{{ pending_item.next_retry_at.strftime('%Y-%m-%d %H:%M') if pending_item and pending_item.next_retry_at else 'Ready now' }}</td>
+                                <td class="px-6 py-4 text-sm text-red-400 max-w-sm">{{ pending_item.last_error if pending_item and pending_item.last_error else 'No retry errors recorded' }}</td>
+                                <td class="px-6 py-4 whitespace-nowrap text-sm space-x-2" onclick="event.stopPropagation()">
+                                    <button type="button" onclick="openRequestDetails({{ req.id }})" class="text-blue-400 hover:text-blue-300">Details</button>
+                                    <form action="/requests/{{ req.id }}/search" method="post" class="inline"><input type="hidden" name="redirect_to" value="/?tab=pending"><button type="submit" class="text-blue-400 hover:text-blue-300">Search</button></form>
+                                    {% if req.overseerr_request_id %}
+                                    <form action="/requests/{{ req.id }}/approve" method="post" class="inline"><input type="hidden" name="redirect_to" value="/?tab=pending"><button type="submit" class="text-green-400 hover:text-green-300">Approve</button></form>
+                                    {% endif %}
+                                    <form action="/requests/{{ req.id }}/deny" method="post" class="inline"><input type="hidden" name="redirect_to" value="/?tab=pending"><button type="submit" class="text-red-400 hover:text-red-300">Reject</button></form>
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </form>
         </div>
-        {% else %}
-        <p class="text-gray-400">No pending items.</p>
-        {% endif %}
+        {% else %}<p class="text-gray-400">No pending items.</p>{% endif %}
     </div>
 
-    <!-- Staged Torrents Tab -->
     <div id="content-staged" class="tab-content hidden">
         {% if staged_torrents %}
         <div class="bg-gray-800 rounded-lg border border-gray-700 overflow-hidden">
-            <table class="min-w-full divide-y divide-gray-700">
-                <thead class="bg-gray-700">
-                    <tr>
-                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Title</th>
-                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Size</th>
-                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Indexer</th>
-                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Score</th>
-                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Actions</th>
-                    </tr>
-                </thead>
-                <tbody class="divide-y divide-gray-700">
-                    {% for torrent in staged_torrents %}
-                    <tr class="hover:bg-gray-700">
-                        <td class="px-6 py-4 whitespace-nowrap text-sm">{{ torrent.title }}</td>
-                        <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-400">{{ (torrent.size / 1024 / 1024 / 1024)|round(2) }} GB</td>
-                        <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-400">{{ torrent.indexer }}</td>
-                        <td class="px-6 py-4 whitespace-nowrap text-sm text-green-400">{{ torrent.score }}</td>
-                        <td class="px-6 py-4 whitespace-nowrap text-sm space-x-2">
-                            <form action="/staged/{{ torrent.id }}/approve" method="post" class="inline">
-                                <button type="submit" class="text-green-400 hover:text-green-300">Approve</button>
-                            </form>
-                            <form action="/staged/{{ torrent.id }}/discard" method="post" class="inline">
-                                <button type="submit" class="text-red-400 hover:text-red-300">Discard</button>
-                            </form>
-                        </td>
-                    </tr>
-                    {% endfor %}
-                </tbody>
-            </table>
+            <div class="p-4 border-b border-gray-700 flex flex-col gap-3 md:flex-row md:items-center">
+                <input type="text" id="staged-filter-input" placeholder="Filter staged or downloading torrents..." class="w-full md:flex-1 px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:border-blue-500">
+                <select id="staged-status-filter" class="w-full md:w-56 px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white focus:outline-none focus:border-blue-500">
+                    <option value="">All Torrent States</option>
+                    <option value="staged">Staged</option>
+                    <option value="approved">Sent to qBittorrent</option>
+                </select>
+            </div>
+            <div class="overflow-x-auto">
+                <table class="min-w-full divide-y divide-gray-700" id="staged-torrents-table">
+                    <thead class="bg-gray-700">
+                        <tr>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider cursor-pointer hover:bg-gray-600" data-table="staged" data-sort="title">Title <span class="sort-indicator text-gray-400"></span></th>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider cursor-pointer hover:bg-gray-600" data-table="staged" data-sort="state">Torrent State <span class="sort-indicator text-gray-400"></span></th>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider cursor-pointer hover:bg-gray-600" data-table="staged" data-sort="requeststate">Request State <span class="sort-indicator text-gray-400"></span></th>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider cursor-pointer hover:bg-gray-600" data-table="staged" data-sort="size">Size <span class="sort-indicator text-gray-400"></span></th>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider cursor-pointer hover:bg-gray-600" data-table="staged" data-sort="indexer">Indexer <span class="sort-indicator text-gray-400"></span></th>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider cursor-pointer hover:bg-gray-600" data-table="staged" data-sort="score">Score <span class="sort-indicator text-gray-400"></span></th>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody class="divide-y divide-gray-700" id="staged-torrents-body">
+                        {% for torrent in staged_torrents %}
+                        {% set request_state = staged_request_statuses.get(torrent.request_id, 'unknown') %}
+                        <tr class="hover:bg-gray-700" data-title="{{ torrent.title|lower }}" data-state="{{ torrent.status|lower }}" data-requeststate="{{ request_state|lower }}" data-size="{{ torrent.size }}" data-indexer="{{ torrent.indexer|lower }}" data-score="{{ torrent.score }}">
+                            <td class="px-6 py-4 text-sm text-white">{{ torrent.title }}</td>
+                            <td class="px-6 py-4 whitespace-nowrap text-sm"><span class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full {% if torrent.status == 'staged' %}bg-yellow-900 text-yellow-200{% elif torrent.status == 'approved' %}bg-blue-900 text-blue-200{% else %}bg-gray-700 text-gray-300{% endif %}">{{ 'sent to qBittorrent' if torrent.status == 'approved' else torrent.status }}</span></td>
+                            <td class="px-6 py-4 whitespace-nowrap text-sm"><span class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full {% if request_state == 'downloading' %}bg-blue-900 text-blue-200{% elif request_state == 'staged' %}bg-yellow-900 text-yellow-200{% else %}bg-gray-700 text-gray-300{% endif %}">{{ request_state }}</span></td>
+                            <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-400">{{ (torrent.size / 1024 / 1024 / 1024)|round(2) }} GB</td>
+                            <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-400">{{ torrent.indexer }}</td>
+                            <td class="px-6 py-4 whitespace-nowrap text-sm text-green-400">{{ torrent.score }}</td>
+                            <td class="px-6 py-4 whitespace-nowrap text-sm space-x-2">
+                                {% if torrent.status == 'staged' %}
+                                <form action="/staged/{{ torrent.id }}/approve" method="post" class="inline"><button type="submit" class="text-green-400 hover:text-green-300">Approve</button></form>
+                                <form action="/staged/{{ torrent.id }}/discard" method="post" class="inline"><button type="submit" class="text-red-400 hover:text-red-300">Discard</button></form>
+                                {% else %}
+                                <span class="text-gray-500">No actions</span>
+                                {% endif %}
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
         </div>
-        {% else %}
-        <p class="text-gray-400">No staged torrents.</p>
-        {% endif %}
+        {% else %}<p class="text-gray-400">No staged or downloading torrents.</p>{% endif %}
+    </div>
+</div>
+
+<div id="request-details-modal" class="fixed inset-0 z-50 hidden">
+    <div class="absolute inset-0 bg-black/70" onclick="closeRequestDetails()"></div>
+    <div class="absolute inset-4 md:inset-10 bg-gray-900 border border-gray-700 rounded-xl shadow-2xl overflow-hidden flex flex-col">
+        <div class="flex items-center justify-between px-6 py-4 border-b border-gray-700 shrink-0"><div><h2 id="request-details-title" class="text-xl font-semibold">Request Details</h2><p id="request-details-meta" class="text-sm text-gray-400"></p></div><button onclick="closeRequestDetails()" class="text-gray-400 hover:text-white text-2xl leading-none">&times;</button></div>
+        <div class="grid md:grid-cols-[240px_1fr] gap-6 p-6 overflow-y-auto flex-1">
+            <div class="relative">
+                <img id="request-details-poster" class="hidden w-full rounded-lg bg-gray-800 border border-gray-700" alt="Poster" />
+                <div id="request-details-poster-fallback" class="flex min-h-80 items-center justify-center rounded-lg border border-dashed border-gray-700 bg-gray-800 p-8 text-center text-gray-500">No poster available</div>
+            </div>
+            <div class="space-y-4">
+                <div><div class="text-sm uppercase tracking-wide text-gray-500">Synopsis</div><p id="request-details-overview" class="mt-2 text-gray-200 whitespace-pre-wrap"></p></div>
+                <div><div class="text-sm uppercase tracking-wide text-gray-500">Matches</div><div id="request-details-releases" class="mt-3 space-y-3"></div></div>
+            </div>
+        </div>
     </div>
 </div>
 
 <script>
-let currentSort = { column: null, direction: 'asc' };
+const tableSortState = {
+    active: { column: null, direction: 'asc' },
+    pending: { column: null, direction: 'asc' },
+    staged: { column: null, direction: 'asc' },
+};
+
+function setActiveTab(tabName) {
+    const url = new URL(window.location);
+    url.searchParams.set('tab', tabName);
+    window.history.replaceState({}, '', url);
+}
 
 function showTab(tabName) {
     document.querySelectorAll('.tab-content').forEach(el => el.classList.add('hidden'));
-    document.querySelectorAll('.tab-button').forEach(el => {
-        el.classList.remove('border-blue-500', 'text-blue-500');
-        el.classList.add('border-transparent', 'text-gray-400');
-    });
-    
+    document.querySelectorAll('.tab-button').forEach(el => { el.classList.remove('border-blue-500', 'text-blue-500'); el.classList.add('border-transparent', 'text-gray-400'); });
     document.getElementById('content-' + tabName).classList.remove('hidden');
     document.getElementById('tab-' + tabName).classList.remove('border-transparent', 'text-gray-400');
     document.getElementById('tab-' + tabName).classList.add('border-blue-500', 'text-blue-500');
+    setActiveTab(tabName);
+}
+
+function setPoster(posterUrl, titleText) {
+    const poster = document.getElementById('request-details-poster');
+    const fallback = document.getElementById('request-details-poster-fallback');
+    if (!poster || !fallback) return;
+
+    poster.onerror = () => {
+        poster.classList.add('hidden');
+        poster.removeAttribute('src');
+        fallback.textContent = 'Poster could not be loaded';
+        fallback.classList.remove('hidden');
+    };
+
+    if (posterUrl) {
+        poster.src = posterUrl;
+        poster.alt = titleText;
+        poster.className = 'w-full rounded-lg bg-gray-800 border border-gray-700';
+        poster.classList.remove('hidden');
+        fallback.classList.add('hidden');
+        return;
+    }
+
+    poster.classList.add('hidden');
+    poster.removeAttribute('src');
+    poster.alt = 'No poster available';
+    fallback.textContent = 'No poster available';
+    fallback.classList.remove('hidden');
 }
 
 function filterTable() {
-    const input = document.getElementById('filter-input');
-    const filter = input.value.toLowerCase();
-    const tbody = document.getElementById('active-requests-body');
-    const rows = tbody.querySelectorAll('tr');
-
-    rows.forEach(row => {
-        const title = row.dataset.title;
-        const type = row.dataset.type;
-        const status = row.dataset.statusLow;
-        const requestedBy = row.dataset.requestedby;
-        const textContent = `${title} ${type} ${status} ${requestedBy}`;
-        row.style.display = textContent.includes(filter) ? '' : 'none';
+    const filterEl = document.getElementById('filter-input');
+    const statusEl = document.getElementById('overseerr-status-filter');
+    if (!filterEl || !statusEl) return;
+    const filter = filterEl.value.toLowerCase();
+    const selectedStatus = statusEl.value;
+    document.querySelectorAll('#active-requests-body tr').forEach(row => {
+        const textContent = `${row.dataset.title} ${row.dataset.type} ${row.dataset.statusLow} ${row.dataset.requestedby}`;
+        const ovStatus = row.dataset.ovstatus || '';
+        row.style.display = textContent.includes(filter) && (!selectedStatus || ovStatus === selectedStatus) ? '' : 'none';
     });
 }
 
-function sortTable(column, colIndex) {
-    const tbody = document.getElementById('active-requests-body');
-    const rows = Array.from(tbody.querySelectorAll('tr'));
-    
-    if (currentSort.column === column) {
-        currentSort.direction = currentSort.direction === 'asc' ? 'desc' : 'asc';
+function filterPendingTable() {
+    const filterEl = document.getElementById('pending-filter-input');
+    const statusEl = document.getElementById('pending-overseerr-filter');
+    if (!filterEl || !statusEl) return;
+    const filter = filterEl.value.toLowerCase();
+    const selectedStatus = statusEl.value;
+    document.querySelectorAll('#pending-requests-body tr').forEach(row => {
+        const textContent = `${row.dataset.title} ${row.dataset.type} ${row.dataset.requestedby} ${row.dataset.lasterror}`;
+        const ovStatus = row.dataset.ovstatus || '';
+        row.style.display = textContent.includes(filter) && (!selectedStatus || ovStatus === selectedStatus) ? '' : 'none';
+    });
+}
+
+function filterStagedTable() {
+    const filterEl = document.getElementById('staged-filter-input');
+    const statusEl = document.getElementById('staged-status-filter');
+    if (!filterEl || !statusEl) return;
+    const filter = filterEl.value.toLowerCase();
+    const selectedStatus = statusEl.value;
+    document.querySelectorAll('#staged-torrents-body tr').forEach(row => {
+        const textContent = `${row.dataset.title} ${row.dataset.indexer} ${row.dataset.state} ${row.dataset.requeststate}`;
+        const torrentState = row.dataset.state || '';
+        row.style.display = textContent.includes(filter) && (!selectedStatus || torrentState === selectedStatus) ? '' : 'none';
+    });
+}
+
+function sortTable(tableName, sortKey) {
+    const tableIdMap = {
+        active: 'active-requests-table',
+        pending: 'pending-requests-table',
+        staged: 'staged-torrents-table',
+    };
+    const bodyIdMap = {
+        active: 'active-requests-body',
+        pending: 'pending-requests-body',
+        staged: 'staged-torrents-body',
+    };
+    const numericKeys = new Set(['ovrank', 'retrycount', 'size', 'score']);
+    const state = tableSortState[tableName];
+    const tbody = document.getElementById(bodyIdMap[tableName]);
+    const table = document.getElementById(tableIdMap[tableName]);
+    if (!tbody || !table || !state) return;
+
+    if (state.column === sortKey) {
+        state.direction = state.direction === 'asc' ? 'desc' : 'asc';
     } else {
-        currentSort.column = column;
-        currentSort.direction = 'asc';
+        state.column = sortKey;
+        state.direction = 'asc';
     }
 
-    document.querySelectorAll('#active-requests-table .sort-indicator').forEach(el => el.textContent = '');
-    const activeHeader = document.querySelector(`#active-requests-table th[data-sort="${column}"] .sort-indicator`);
-    activeHeader.textContent = currentSort.direction === 'asc' ? ' ▲' : ' ▼';
+    table.querySelectorAll('.sort-indicator').forEach(el => {
+        el.textContent = '';
+    });
+    const indicator = table.querySelector(`th[data-table="${tableName}"][data-sort="${sortKey}"] .sort-indicator`);
+    if (indicator) {
+        indicator.textContent = state.direction === 'asc' ? ' \u25B2' : ' \u25BC';
+    }
 
+    const rows = Array.from(tbody.querySelectorAll('tr'));
     rows.sort((a, b) => {
-        let aVal, bVal;
-        
-        if (column === 'requested') {
-            aVal = a.querySelector(`td:nth-child(${colIndex + 1})`).dataset.sortValue;
-            bVal = b.querySelector(`td:nth-child(${colIndex + 1})`).dataset.sortValue;
-        } else {
-            aVal = a.dataset[column] || '';
-            bVal = b.dataset[column] || '';
+        const aVal = a.dataset[sortKey] || '';
+        const bVal = b.dataset[sortKey] || '';
+        if (numericKeys.has(sortKey)) {
+            const left = Number(aVal);
+            const right = Number(bVal);
+            return state.direction === 'asc' ? left - right : right - left;
         }
-
-        if (aVal < bVal) return currentSort.direction === 'asc' ? -1 : 1;
-        if (aVal > bVal) return currentSort.direction === 'asc' ? 1 : -1;
+        if (aVal < bVal) return state.direction === 'asc' ? -1 : 1;
+        if (aVal > bVal) return state.direction === 'asc' ? 1 : -1;
         return 0;
     });
-
     rows.forEach(row => tbody.appendChild(row));
 }
 
-document.getElementById('filter-input').addEventListener('input', filterTable);
+async function openRequestDetails(requestId) {
+    const modal = document.getElementById('request-details-modal');
+    const title = document.getElementById('request-details-title');
+    const meta = document.getElementById('request-details-meta');
+    const overview = document.getElementById('request-details-overview');
+    const releases = document.getElementById('request-details-releases');
 
-document.querySelectorAll('#active-requests-table th[data-sort]').forEach(th => {
+    title.textContent = 'Loading...';
+    meta.textContent = '';
+    overview.textContent = '';
+    setPoster(null, 'Loading poster');
+    releases.innerHTML = '<div class="text-gray-400">Loading matches...</div>';
+    modal.classList.remove('hidden');
+
+    try {
+        const response = await fetch(`/requests/${requestId}/details`);
+        if (!response.ok) {
+            throw new Error(`Server error: ${response.status}`);
+        }
+        const data = await response.json();
+
+        title.textContent = data.request.title;
+        meta.textContent = `${data.overseerr?.status || 'unknown'} status`;
+        overview.textContent = data.overseerr?.overview || 'No synopsis available.';
+        setPoster(data.overseerr?.poster, data.request.title);
+
+        releases.innerHTML = (data.releases || []).map(release => `<div class="bg-gray-800 border border-gray-700 rounded-lg p-4"><div class="flex items-center justify-between gap-4"><div><div class="font-medium text-white">${release.title}</div><div class="text-sm text-gray-400">Score: ${release.score} &bull; ${release.passed ? 'Passed' : 'Rejected'}</div></div></div><div class="mt-3 space-y-1 text-sm text-gray-300">${(release.matches || []).map(match => `<div>${match.matched ? '\u2713' : '\u2022'} ${match.rule_name}${match.score_delta ? ` (+${match.score_delta})` : ''}</div>`).join('')}</div></div>`).join('') || '<div class="text-gray-400">No release matches stored yet.</div>';
+    } catch (err) {
+        title.textContent = 'Error loading details';
+        meta.textContent = err.message || 'Unknown error';
+        overview.textContent = '';
+        setPoster(null, 'Poster unavailable');
+        releases.innerHTML = '<div class="text-red-400">Failed to load request details. Check that Overseerr is reachable.</div>';
+    }
+}
+
+function closeRequestDetails() { document.getElementById('request-details-modal').classList.add('hidden'); }
+
+const filterInput = document.getElementById('filter-input');
+const statusFilter = document.getElementById('overseerr-status-filter');
+const pendingFilterInput = document.getElementById('pending-filter-input');
+const pendingStatusFilter = document.getElementById('pending-overseerr-filter');
+const stagedFilterInput = document.getElementById('staged-filter-input');
+const stagedStatusFilter = document.getElementById('staged-status-filter');
+const pendingSelectAll = document.getElementById('pending-select-all');
+if (filterInput) filterInput.addEventListener('input', filterTable);
+if (statusFilter) statusFilter.addEventListener('change', filterTable);
+if (pendingFilterInput) pendingFilterInput.addEventListener('input', filterPendingTable);
+if (pendingStatusFilter) pendingStatusFilter.addEventListener('change', filterPendingTable);
+if (stagedFilterInput) stagedFilterInput.addEventListener('input', filterStagedTable);
+if (stagedStatusFilter) stagedStatusFilter.addEventListener('change', filterStagedTable);
+if (pendingSelectAll) {
+    pendingSelectAll.addEventListener('change', event => {
+        document.querySelectorAll('.pending-request-checkbox').forEach(checkbox => {
+            checkbox.checked = event.target.checked;
+        });
+    });
+}
+
+document.querySelectorAll('th[data-table][data-sort]').forEach(th => {
     th.addEventListener('click', () => {
-        sortTable(th.dataset.sort, parseInt(th.dataset.col));
+        const sortKey = th.dataset.sort === 'ovstatus' ? 'ovrank' : th.dataset.sort;
+        sortTable(th.dataset.table, sortKey);
     });
 });
+
+const initialTab = new URLSearchParams(window.location.search).get('tab');
+if (initialTab && document.getElementById('content-' + initialTab) && document.getElementById('tab-' + initialTab)) {
+    showTab(initialTab);
+}
 </script>
 {% endblock %}

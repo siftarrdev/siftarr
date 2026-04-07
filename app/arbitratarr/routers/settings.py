@@ -7,7 +7,7 @@ from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.arbitratarr.config import Settings, get_settings
+from app.arbitratarr.config import Settings
 from app.arbitratarr.database import get_db
 from app.arbitratarr.models.request import MediaType, RequestStatus
 from app.arbitratarr.models.request import Request as RequestModel
@@ -16,7 +16,7 @@ from app.arbitratarr.services.connection_tester import ConnectionTester, Connect
 from app.arbitratarr.services.overseerr_service import OverseerrService
 from app.arbitratarr.services.pending_queue_service import PendingQueueService
 from app.arbitratarr.services.rule_service import RuleService
-from app.arbitratarr.services.runtime_settings import get_db_setting, get_effective_settings
+from app.arbitratarr.services.runtime_settings import get_effective_settings
 
 router = APIRouter(prefix="/settings", tags=["settings"])
 templates = Jinja2Templates(directory="app/arbitratarr/templates")
@@ -96,6 +96,8 @@ async def get_settings_page(
     db: AsyncSession = Depends(get_db),
 ) -> HTMLResponse:
     """Display settings page."""
+    rule_service = RuleService(db)
+    await rule_service.ensure_default_rules()
     eff_settings = await _build_effective_settings(db)
 
     # Get staging mode setting
@@ -103,7 +105,7 @@ async def get_settings_page(
         select(DBSettings).where(DBSettings.key == "staging_mode_enabled"),
     )
     staging_setting = result.scalar_one_or_none()
-    staging_enabled = staging_setting.value == "true" if staging_setting else False
+    staging_enabled = staging_setting.value == "true" if staging_setting else True
 
     # Get pending queue count
     queue_service = PendingQueueService(db)
@@ -322,7 +324,7 @@ async def sync_overseerr(
         select(DBSettings).where(DBSettings.key == "staging_mode_enabled"),
     )
     staging_setting = result.scalar_one_or_none()
-    staging_enabled = staging_setting.value == "true" if staging_setting else False
+    staging_enabled = staging_setting.value == "true" if staging_setting else True
 
     # Get pending queue count
     queue_service = PendingQueueService(db)
@@ -511,15 +513,3 @@ async def reseed_rules(
             "message_type": "success",
         },
     )
-
-
-@router.post("/size-limits")
-async def update_size_limits(
-    request: Request,
-    min_size: float | None = Form(None),
-    max_size: float | None = Form(None),
-    db: AsyncSession = Depends(get_db),
-) -> RedirectResponse:
-    """Update size limit settings."""
-    # TODO: Implement size limit settings
-    return RedirectResponse(url="/settings", status_code=303)
