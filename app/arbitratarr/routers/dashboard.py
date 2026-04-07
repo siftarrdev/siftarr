@@ -241,6 +241,23 @@ async def dashboard(
             request_id: status.value for request_id, status in staged_request_result.all()
         }
 
+    # Get completed requests for the Finished tab
+    completed_requests = await lifecycle_service.get_requests_by_status(
+        RequestStatus.COMPLETED, limit=500
+    )
+
+    # Get rejected requests (failed with a rejection reason) for the Rejected tab
+    rejected_result = await db.execute(
+        select(RequestModel)
+        .where(
+            RequestModel.status == RequestStatus.FAILED,
+            RequestModel.rejection_reason.isnot(None),
+        )
+        .order_by(RequestModel.updated_at.desc())
+        .limit(500)
+    )
+    rejected_requests = list(rejected_result.scalars().all())
+
     # Get stats
     stats = await lifecycle_service.get_requests_stats()
 
@@ -258,11 +275,14 @@ async def dashboard(
             "pending_items_by_request_id": pending_items_by_request_id,
             "staged_torrents": staged_torrents,
             "staged_request_statuses": staged_request_statuses,
+            "completed_requests": completed_requests,
+            "rejected_requests": rejected_requests,
             "stats": {
                 "active": len(active_requests),
                 "pending": len(pending_requests),
                 "staged": len(staged_torrents),
                 "completed": stats["by_status"].get(RequestStatus.COMPLETED.value, 0),
+                "rejected": len(rejected_requests),
             },
         },
     )
