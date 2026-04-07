@@ -120,6 +120,68 @@ class TestOverseerrService:
             result = await service.get_requests()
 
             assert len(result) == 2
+            mock_client.get.assert_called_once_with(
+                "http://localhost:5055/api/v1/request",
+                params={"take": 100, "skip": 0, "filter": "approved"},
+            )
+
+    @pytest.mark.asyncio
+    async def test_get_requests_without_filter(self):
+        """Test get_requests omits filter when status is not provided."""
+        with patch("app.arbitratarr.services.overseerr_service.get_settings") as mock_get_settings:
+            mock_settings = MagicMock()
+            mock_settings.overseerr_url = "http://localhost:5055"
+            mock_settings.overseerr_api_key = "test"
+            mock_get_settings.return_value = mock_settings
+
+            service = OverseerrService()
+            mock_client = AsyncMock()
+            mock_response = MagicMock()
+            mock_response.status_code = 200
+            mock_response.json.return_value = {"results": []}
+            mock_client.get = AsyncMock(return_value=mock_response)
+            mock_client.is_closed = False
+            service._client = mock_client
+
+            await service.get_requests(status=None, limit=50, skip=100)
+
+            mock_client.get.assert_called_once_with(
+                "http://localhost:5055/api/v1/request",
+                params={"take": 50, "skip": 100},
+            )
+
+    @pytest.mark.asyncio
+    async def test_get_all_requests_paginates(self):
+        """Test get_all_requests aggregates paginated responses."""
+        with patch("app.arbitratarr.services.overseerr_service.get_settings") as mock_get_settings:
+            mock_settings = MagicMock()
+            mock_settings.overseerr_url = "http://localhost:5055"
+            mock_settings.overseerr_api_key = "test"
+            mock_get_settings.return_value = mock_settings
+
+            service = OverseerrService()
+
+            with patch.object(
+                service,
+                "get_requests",
+                new=AsyncMock(side_effect=[[{"id": 1}], [{"id": 2}], []]),
+            ) as mock_get_requests:
+                result = await service.get_all_requests(status=None, page_size=1)
+
+                assert result == [{"id": 1}, {"id": 2}]
+                assert mock_get_requests.await_count == 3
+
+    def test_normalize_media_status_numeric(self):
+        """Test numeric media statuses are normalized."""
+        assert OverseerrService.normalize_media_status(2) == "pending"
+        assert OverseerrService.normalize_media_status(4) == "partially_available"
+        assert OverseerrService.normalize_media_status(5) == "available"
+
+    def test_normalize_request_status_numeric(self):
+        """Test numeric request statuses are normalized."""
+        assert OverseerrService.normalize_request_status(1) == "pending"
+        assert OverseerrService.normalize_request_status(2) == "approved"
+        assert OverseerrService.normalize_request_status(5) == "completed"
 
     @pytest.mark.asyncio
     async def test_get_requests_unauthorized(self):

@@ -1,6 +1,5 @@
 """Settings page router for viewing and editing application settings."""
 
-
 from fastapi import APIRouter, Depends, Form, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
@@ -17,6 +16,7 @@ from app.arbitratarr.services.connection_tester import ConnectionTester, Connect
 from app.arbitratarr.services.overseerr_service import OverseerrService
 from app.arbitratarr.services.pending_queue_service import PendingQueueService
 from app.arbitratarr.services.rule_service import RuleService
+from app.arbitratarr.services.runtime_settings import get_db_setting, get_effective_settings
 
 router = APIRouter(prefix="/settings", tags=["settings"])
 templates = Jinja2Templates(directory="app/arbitratarr/templates")
@@ -45,14 +45,9 @@ class ConnectionTestResponse(BaseModel):
     details: str | None = None
 
 
-async def _get_db_setting(db: AsyncSession, key: str) -> str | None:
-    """Get a setting value from the database."""
-    result = await db.execute(select(DBSettings).where(DBSettings.key == key))
-    setting = result.scalar_one_or_none()
-    return setting.value if setting else None
-
-
-async def _set_db_setting(db: AsyncSession, key: str, value: str, description: str | None = None) -> None:
+async def _set_db_setting(
+    db: AsyncSession, key: str, value: str, description: str | None = None
+) -> None:
     """Set a setting value in the database."""
     result = await db.execute(select(DBSettings).where(DBSettings.key == key))
     setting = result.scalar_one_or_none()
@@ -63,32 +58,25 @@ async def _set_db_setting(db: AsyncSession, key: str, value: str, description: s
         db.add(setting)
 
 
-async def _build_effective_settings(db: AsyncSession, env_settings: Settings) -> dict:
+async def _build_effective_settings(db: AsyncSession) -> dict:
     """Build effective settings, preferring database values over environment variables."""
-    overseerr_url = await _get_db_setting(db, "overseerr_url")
-    overseerr_api_key = await _get_db_setting(db, "overseerr_api_key")
-    prowlarr_url = await _get_db_setting(db, "prowlarr_url")
-    prowlarr_api_key = await _get_db_setting(db, "prowlarr_api_key")
-    qbittorrent_url = await _get_db_setting(db, "qbittorrent_url")
-    qbittorrent_username = await _get_db_setting(db, "qbittorrent_username")
-    qbittorrent_password = await _get_db_setting(db, "qbittorrent_password")
-    tz = await _get_db_setting(db, "tz")
+    effective = await get_effective_settings(db)
 
     return {
-        "overseerr_url": overseerr_url if overseerr_url else str(env_settings.overseerr_url or ""),
-        "overseerr_api_key": overseerr_api_key if overseerr_api_key else str(env_settings.overseerr_api_key or ""),
-        "prowlarr_url": prowlarr_url if prowlarr_url else str(env_settings.prowlarr_url or ""),
-        "prowlarr_api_key": prowlarr_api_key if prowlarr_api_key else str(env_settings.prowlarr_api_key or ""),
-        "qbittorrent_url": qbittorrent_url if qbittorrent_url else str(env_settings.qbittorrent_url or ""),
-        "qbittorrent_username": qbittorrent_username if qbittorrent_username else env_settings.qbittorrent_username,
-        "qbittorrent_password": qbittorrent_password if qbittorrent_password else env_settings.qbittorrent_password,
-        "tz": tz if tz else env_settings.tz,
+        "overseerr_url": str(effective.overseerr_url or ""),
+        "overseerr_api_key": str(effective.overseerr_api_key or ""),
+        "prowlarr_url": str(effective.prowlarr_url or ""),
+        "prowlarr_api_key": str(effective.prowlarr_api_key or ""),
+        "qbittorrent_url": str(effective.qbittorrent_url or ""),
+        "qbittorrent_username": effective.qbittorrent_username,
+        "qbittorrent_password": effective.qbittorrent_password,
+        "tz": effective.tz,
     }
 
 
-async def _build_effective_settings_obj(db: AsyncSession, env_settings: Settings) -> Settings:
+async def _build_effective_settings_obj(db: AsyncSession) -> Settings:
     """Build effective Settings object, preferring database values over environment variables."""
-    eff = await _build_effective_settings(db, env_settings)
+    eff = await _build_effective_settings(db)
     # Create a new Settings object with effective values
     return Settings(
         overseerr_url=eff["overseerr_url"] or None,
@@ -108,8 +96,7 @@ async def get_settings_page(
     db: AsyncSession = Depends(get_db),
 ) -> HTMLResponse:
     """Display settings page."""
-    env_settings = get_settings()
-    eff_settings = await _build_effective_settings(db, env_settings)
+    eff_settings = await _build_effective_settings(db)
 
     # Get staging mode setting
     result = await db.execute(
@@ -169,8 +156,12 @@ async def save_connections(
     await _set_db_setting(db, "prowlarr_url", prowlarr_url or "", "Prowlarr URL")
     await _set_db_setting(db, "prowlarr_api_key", prowlarr_api_key or "", "Prowlarr API key")
     await _set_db_setting(db, "qbittorrent_url", qbittorrent_url or "", "qBittorrent URL")
-    await _set_db_setting(db, "qbittorrent_username", qbittorrent_username or "", "qBittorrent username")
-    await _set_db_setting(db, "qbittorrent_password", qbittorrent_password or "", "qBittorrent password")
+    await _set_db_setting(
+        db, "qbittorrent_username", qbittorrent_username or "", "qBittorrent username"
+    )
+    await _set_db_setting(
+        db, "qbittorrent_password", qbittorrent_password or "", "qBittorrent password"
+    )
     if tz:
         await _set_db_setting(db, "tz", tz, "Timezone")
 
@@ -192,8 +183,7 @@ async def reset_connections(
 @router.get("/api/connections", response_model=dict)
 async def get_connections_api(db: AsyncSession = Depends(get_db)) -> dict:
     """Get current connection settings (for API)."""
-    env_settings = get_settings()
-    eff = await _build_effective_settings(db, env_settings)
+    eff = await _build_effective_settings(db)
     return {
         "overseerr_url": eff["overseerr_url"],
         "overseerr_api_key": eff["overseerr_api_key"],
@@ -209,8 +199,7 @@ async def get_connections_api(db: AsyncSession = Depends(get_db)) -> dict:
 @router.post("/api/test/overseerr", response_model=ConnectionTestResponse)
 async def test_overseerr_connection(db: AsyncSession = Depends(get_db)) -> ConnectionTestResponse:
     """Test connection to Overseerr."""
-    env_settings = get_settings()
-    eff_settings = await _build_effective_settings_obj(db, env_settings)
+    eff_settings = await _build_effective_settings_obj(db)
     result: ConnectionTestResult = await ConnectionTester.test_overseerr(eff_settings)
     return ConnectionTestResponse(
         service="overseerr",
@@ -223,8 +212,7 @@ async def test_overseerr_connection(db: AsyncSession = Depends(get_db)) -> Conne
 @router.post("/api/test/prowlarr", response_model=ConnectionTestResponse)
 async def test_prowlarr_connection(db: AsyncSession = Depends(get_db)) -> ConnectionTestResponse:
     """Test connection to Prowlarr."""
-    env_settings = get_settings()
-    eff_settings = await _build_effective_settings_obj(db, env_settings)
+    eff_settings = await _build_effective_settings_obj(db)
     result: ConnectionTestResult = await ConnectionTester.test_prowlarr(eff_settings)
     return ConnectionTestResponse(
         service="prowlarr",
@@ -237,8 +225,7 @@ async def test_prowlarr_connection(db: AsyncSession = Depends(get_db)) -> Connec
 @router.post("/api/test/qbittorrent", response_model=ConnectionTestResponse)
 async def test_qbittorrent_connection(db: AsyncSession = Depends(get_db)) -> ConnectionTestResponse:
     """Test connection to qBittorrent."""
-    env_settings = get_settings()
-    eff_settings = await _build_effective_settings_obj(db, env_settings)
+    eff_settings = await _build_effective_settings_obj(db)
     result: ConnectionTestResult = await ConnectionTester.test_qbittorrent(eff_settings)
     return ConnectionTestResponse(
         service="qbittorrent",
@@ -251,8 +238,7 @@ async def test_qbittorrent_connection(db: AsyncSession = Depends(get_db)) -> Con
 @router.post("/api/test/all", response_model=list[ConnectionTestResponse])
 async def test_all_connections(db: AsyncSession = Depends(get_db)) -> list[ConnectionTestResponse]:
     """Test connections to all services."""
-    env_settings = get_settings()
-    eff_settings = await _build_effective_settings_obj(db, env_settings)
+    eff_settings = await _build_effective_settings_obj(db)
 
     results = []
     for service_name, tester in [
@@ -261,12 +247,14 @@ async def test_all_connections(db: AsyncSession = Depends(get_db)) -> list[Conne
         ("qbittorrent", ConnectionTester.test_qbittorrent),
     ]:
         result: ConnectionTestResult = await tester(eff_settings)
-        results.append(ConnectionTestResponse(
-            service=service_name,
-            success=result.success,
-            message=result.message,
-            details=result.details,
-        ))
+        results.append(
+            ConnectionTestResponse(
+                service=service_name,
+                success=result.success,
+                message=result.message,
+                details=result.details,
+            )
+        )
 
     return results
 
@@ -327,8 +315,7 @@ async def sync_overseerr(
     db: AsyncSession = Depends(get_db),
 ) -> HTMLResponse:
     """Sync with Overseerr for new requests."""
-    env_settings = get_settings()
-    eff_settings = await _build_effective_settings(db, env_settings)
+    eff_settings = await _build_effective_settings(db)
 
     # Get staging mode setting
     result = await db.execute(
@@ -362,32 +349,45 @@ async def sync_overseerr(
         message = "Overseerr is not configured. Please set URL and API key."
         message_type = "error"
     else:
-        overseerr_service = OverseerrService()
+        runtime_settings = await get_effective_settings(db)
+        overseerr_service = OverseerrService(settings=runtime_settings)
         try:
-            # Fetch approved requests from Overseerr
-            overseerr_requests = await overseerr_service.get_requests(status="approved", limit=100)
+            overseerr_requests = await overseerr_service.get_all_requests(status=None)
 
             if not overseerr_requests:
-                # Try with different filter - maybe Overseerr uses different status values
-                overseerr_requests_all = await overseerr_service.get_requests(status="all", limit=100)
-                if overseerr_requests_all:
-                    message = f"No approved requests found. Overseerr returned {len(overseerr_requests_all)} total requests. Check if requests exist with different status."
-                    message_type = "error"
-                else:
-                    message = "No approved requests found in Overseerr"
-                    message_type = "success"
+                message = "No requests found in Overseerr"
+                message_type = "success"
             else:
-                # Get existing external_ids from database
-                result = await db.execute(select(RequestModel.external_id))
-                existing_external_ids = {row[0] for row in result.fetchall()}
+                result = await db.execute(
+                    select(RequestModel.external_id, RequestModel.overseerr_request_id)
+                )
+                existing_rows = result.fetchall()
+                existing_external_ids = {row[0] for row in existing_rows}
+                existing_request_ids = {row[1] for row in existing_rows if row[1] is not None}
+
+                actionable_requests = []
+                for ov_req in overseerr_requests:
+                    media = ov_req.get("media") or {}
+                    request_status = overseerr_service.normalize_request_status(
+                        ov_req.get("status")
+                    )
+                    media_status = overseerr_service.normalize_media_status(media.get("status"))
+
+                    if request_status not in {"pending", "approved"}:
+                        continue
+                    if media_status == "available":
+                        continue
+
+                    actionable_requests.append(ov_req)
 
                 # Process each request
-                for ov_req in overseerr_requests:
+                for ov_req in actionable_requests:
                     try:
                         # Overseerr API returns media info nested under "media" key
                         media = ov_req.get("media") or {}
                         tmdb_id = media.get("tmdbId")
                         tvdb_id = media.get("tvdbId")
+                        overseerr_request_id = ov_req.get("id")
 
                         if tmdb_id is None and tvdb_id is None:
                             skipped_count += 1
@@ -396,7 +396,10 @@ async def sync_overseerr(
                         external_id = str(tmdb_id) if tmdb_id is not None else str(tvdb_id)
 
                         # Skip if already exists
-                        if external_id in existing_external_ids:
+                        if (
+                            external_id in existing_external_ids
+                            or overseerr_request_id in existing_request_ids
+                        ):
                             skipped_count += 1
                             continue
 
@@ -426,7 +429,9 @@ async def sync_overseerr(
                                 media_type_for_api, media_external_id
                             )
                             if media_details:
-                                title = media_details.get("title") or media_details.get("name") or ""
+                                title = (
+                                    media_details.get("title") or media_details.get("name") or ""
+                                )
 
                         # Create new request
                         new_request = RequestModel(
@@ -436,14 +441,18 @@ async def sync_overseerr(
                             tvdb_id=tvdb_id,
                             title=title,
                             requested_seasons=str(requested_seasons) if requested_seasons else None,
-                            requested_episodes=str(requested_episodes) if requested_episodes else None,
+                            requested_episodes=str(requested_episodes)
+                            if requested_episodes
+                            else None,
                             requester_username=username,
                             requester_email=email,
                             status=RequestStatus.PENDING,
-                            overseerr_request_id=ov_req.get("id"),
+                            overseerr_request_id=overseerr_request_id,
                         )
                         db.add(new_request)
                         existing_external_ids.add(external_id)  # Prevent duplicates in same sync
+                        if overseerr_request_id is not None:
+                            existing_request_ids.add(overseerr_request_id)
                         synced_count += 1
                     except Exception:
                         # Log individual request processing errors but continue
@@ -456,7 +465,7 @@ async def sync_overseerr(
                     message = f"Synced {synced_count} new request(s) from Overseerr"
                     message_type = "success"
                 else:
-                    message = f"No new requests to sync ({skipped_count} already existed)"
+                    message = f"No new actionable requests to sync ({skipped_count} already existed or were already available)"
                     message_type = "success"
         except Exception as e:
             message = f"Sync error: {str(e)}"

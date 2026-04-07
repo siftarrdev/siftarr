@@ -12,6 +12,7 @@ from app.arbitratarr.models.request import MediaType, Request
 from app.arbitratarr.models.staged_torrent import StagedTorrent
 from app.arbitratarr.services.lifecycle_service import LifecycleService
 from app.arbitratarr.services.qbittorrent_service import MediaCategory, QbittorrentService
+from app.arbitratarr.services.runtime_settings import get_effective_settings
 
 router = APIRouter(prefix="/staged", tags=["staged"])
 
@@ -40,7 +41,8 @@ async def approve_staged_torrent(
         category = MediaCategory.MOVIES
 
     # Add to qBittorrent
-    qbittorrent = QbittorrentService()
+    runtime_settings = await get_effective_settings(db)
+    qbittorrent = QbittorrentService(settings=runtime_settings)
     success = False
 
     if torrent.magnet_url:

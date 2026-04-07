@@ -9,7 +9,6 @@ services:
       - "8000:8000"
     volumes:
       - ./data:/data
-    user: "568:568"
     environment:
       - TZ=${TZ:-UTC}
       - OVERSEERR_URL=${OVERSEERR_URL}
@@ -26,43 +25,3 @@ services:
       retries: 3
       start_period: 10s
 
-  qbittorrent:
-    image: lscr.io/linuxserver/qbittorrent:latest
-    container_name: qbittorrent
-    environment:
-      - PUID=1000
-      - PGID=1000
-      - TZ=UTC
-      - WEBUI_PORT=8080
-    volumes:
-      - ./data/qbittorrent:/config
-      - ./data/downloads:/downloads
-    ports:
-      - "8080:8080"
-    restart: unless-stopped
-
-  overseerr:
-    image: lscr.io/linuxserver/overseerr:latest
-    container_name: overseerr
-    environment:
-      - PUID=1000
-      - PGID=1000
-      - TZ=UTC
-    volumes:
-      - ./data/overseerr:/config
-    ports:
-      - "5055:5055"
-    restart: unless-stopped
-
-  prowlarr:
-    image: lscr.io/linuxserver/prowlarr:latest
-    container_name: prowlarr
-    environment:
-      - PUID=1000
-      - PGID=1000
-      - TZ=UTC
-    volumes:
-      - ./data/prowlarr:/config
-    ports:
-      - "9696:9696"
-    restart: unless-stopped

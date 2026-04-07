@@ -26,8 +26,12 @@ COPY ty.toml ./
 RUN mkdir -p /data/db /data/staging && \
     chown -R appuser:appgroup /app /data
 
-# Switch to non-root user
-USER appuser
+# Add LinuxServer-style entrypoint
+COPY docker/entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
+
+# Run entrypoint as root so it can adjust ownership, then drop privileges
+USER root
 
 # Expose port
 EXPOSE 8000
@@ -37,4 +41,5 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=10s --retries=3 \
     CMD /app/.venv/bin/python -c "import httpx; httpx.get('http://localhost:8000/health')" || exit 1
 
 # Run the application
+ENTRYPOINT ["/entrypoint.sh"]
 CMD ["/app/.venv/bin/python", "-m", "uvicorn", "app.arbitratarr.main:app", "--host", "0.0.0.0", "--port", "8000"]

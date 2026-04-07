@@ -4,6 +4,8 @@ from datetime import datetime
 import httpx
 from pydantic import BaseModel
 
+from app.arbitratarr.config import Settings, get_settings
+
 
 class ProwlarrRelease(BaseModel):
     """Represents a release from Prowlarr."""
@@ -32,10 +34,8 @@ class ProwlarrSearchResult(BaseModel):
 class ProwlarrService:
     """Service for interacting with Prowlarr API."""
 
-    def __init__(self) -> None:
-        from app.arbitratarr.config import get_settings
-
-        self.settings = get_settings()
+    def __init__(self, settings: Settings | None = None) -> None:
+        self.settings = settings or get_settings()
         self.base_url = str(self.settings.prowlarr_url).rstrip("/")
         self.api_key = self.settings.prowlarr_api_key
 

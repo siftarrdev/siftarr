@@ -4,19 +4,54 @@ from typing import Any
 
 import httpx
 
-from app.arbitratarr.config import get_settings
+from app.arbitratarr.config import Settings, get_settings
 
 
 class OverseerrService:
     """Service for fetching media details from Overseerr."""
 
-    def __init__(self) -> None:
+    MEDIA_STATUS_MAP = {
+        1: "unknown",
+        2: "pending",
+        3: "processing",
+        4: "partially_available",
+        5: "available",
+        6: "deleted",
+    }
+
+    REQUEST_STATUS_MAP = {
+        1: "pending",
+        2: "approved",
+        3: "declined",
+        4: "failed",
+        5: "completed",
+    }
+
+    def __init__(self, settings: Settings | None = None) -> None:
         """Initialize the Overseerr service."""
-        self.settings = get_settings()
+        self.settings = settings or get_settings()
         # Strip trailing slash to avoid double slashes in API URL
         self.base_url = str(self.settings.overseerr_url).rstrip("/")
         self.api_key = self.settings.overseerr_api_key
         self._client: httpx.AsyncClient | None = None
+
+    @classmethod
+    def normalize_media_status(cls, status: Any) -> str:
+        """Normalize Overseerr media status to a string label."""
+        if isinstance(status, str):
+            return status.lower()
+        if isinstance(status, int):
+            return cls.MEDIA_STATUS_MAP.get(status, f"unknown_{status}")
+        return "unknown"
+
+    @classmethod
+    def normalize_request_status(cls, status: Any) -> str:
+        """Normalize Overseerr request status to a string label."""
+        if isinstance(status, str):
+            return status.lower()
+        if isinstance(status, int):
+            return cls.REQUEST_STATUS_MAP.get(status, f"unknown_{status}")
+        return "unknown"
 
     async def _get_client(self) -> httpx.AsyncClient:
         """Get or create an async HTTP client."""
@@ -35,8 +70,9 @@ class OverseerrService:
 
     async def get_requests(
         self,
-        status: str = "approved",
+        status: str | None = "approved",
         limit: int = 100,
+        skip: int = 0,
     ) -> list[dict[str, Any]]:
         """
         Fetch requests from Overseerr.
@@ -44,6 +80,7 @@ class OverseerrService:
         Args:
             status: Filter by request status ('approved', 'pending', etc.)
             limit: Maximum number of results to return
+            skip: Number of results to skip for pagination
 
         Returns:
             List of request dictionaries from Overseerr API.
@@ -53,11 +90,14 @@ class OverseerrService:
 
         endpoint = f"{self.base_url}/api/v1/request"
         client = await self._get_client()
+        params: dict[str, Any] = {"take": limit, "skip": skip}
+        if status and status != "all":
+            params["filter"] = status
 
         try:
             response = await client.get(
                 endpoint,
-                params={"take": limit, "filter": status},
+                params=params,
             )
             if response.status_code == 200:
                 data = response.json()
@@ -73,6 +113,30 @@ class OverseerrService:
             return []
         except httpx.RequestError:
             return []
+
+    async def get_all_requests(
+        self,
+        status: str | None = None,
+        page_size: int = 100,
+        max_pages: int = 20,
+    ) -> list[dict[str, Any]]:
+        """Fetch all requests across paginated Overseerr responses."""
+        all_requests: list[dict[str, Any]] = []
+
+        for page in range(max_pages):
+            batch = await self.get_requests(
+                status=status,
+                limit=page_size,
+                skip=page * page_size,
+            )
+            if not batch:
+                break
+
+            all_requests.extend(batch)
+            if len(batch) < page_size:
+                break
+
+        return all_requests
 
     async def get_request(self, request_id: int) -> dict[str, Any] | None:
         """Get full request details from Overseerr.

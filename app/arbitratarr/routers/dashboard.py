@@ -14,6 +14,7 @@ from app.arbitratarr.models.staged_torrent import StagedTorrent
 from app.arbitratarr.services.lifecycle_service import LifecycleService
 from app.arbitratarr.services.overseerr_service import OverseerrService
 from app.arbitratarr.services.pending_queue_service import PendingQueueService
+from app.arbitratarr.services.runtime_settings import get_effective_settings
 
 router = APIRouter(tags=["dashboard"])
 templates = Jinja2Templates(directory="app/arbitratarr/templates")
@@ -27,7 +28,8 @@ async def dashboard(
     """Display main dashboard."""
     lifecycle_service = LifecycleService(db)
     queue_service = PendingQueueService(db)
-    overseerr_service = OverseerrService()
+    effective_settings = await get_effective_settings(db)
+    overseerr_service = OverseerrService(settings=effective_settings)
 
     # Get active requests
     active_requests = await lifecycle_service.get_active_requests(limit=100)
@@ -40,7 +42,9 @@ async def dashboard(
                 ov_status = await overseerr_service.get_request_status(req.overseerr_request_id)
                 if ov_status and isinstance(ov_status, dict):
                     media = ov_status.get("media") or {}
-                    overseerr_statuses[req.id] = media.get("status", "unknown")
+                    overseerr_statuses[req.id] = overseerr_service.normalize_media_status(
+                        media.get("status")
+                    )
                 else:
                     overseerr_statuses[req.id] = "unknown"
             except Exception:
@@ -52,9 +56,10 @@ async def dashboard(
 
     # Filter active requests to only show Overseerr statuses we care about
     # These are the statuses that indicate the request needs action
-    SHOW_STATUSES = {"pending", "requested", "partially_available"}
+    SHOW_STATUSES = {"pending", "processing", "partially_available"}
     filtered_requests = [
-        req for req in active_requests
+        req
+        for req in active_requests
         if overseerr_statuses.get(req.id, "") in SHOW_STATUSES
         or overseerr_statuses.get(req.id, "") == ""  # Could not fetch status, show anyway
         or not req.overseerr_request_id  # Include requests without Overseerr ID
@@ -114,7 +119,8 @@ async def approve_request(
     if not request:
         raise HTTPException(status_code=404, detail="Request not found")
 
-    overseerr_service = OverseerrService()
+    effective_settings = await get_effective_settings(db)
+    overseerr_service = OverseerrService(settings=effective_settings)
     lifecycle_service = LifecycleService(db)
 
     if request.overseerr_request_id:
@@ -138,7 +144,8 @@ async def deny_request(
     if not request:
         raise HTTPException(status_code=404, detail="Request not found")
 
-    overseerr_service = OverseerrService()
+    effective_settings = await get_effective_settings(db)
+    overseerr_service = OverseerrService(settings=effective_settings)
     lifecycle_service = LifecycleService(db)
 
     if request.overseerr_request_id:

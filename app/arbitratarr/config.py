@@ -1,8 +1,9 @@
 """Application settings loaded from environment variables."""
 
+import os
 from functools import lru_cache
-from pathlib import Path
 
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -39,9 +40,11 @@ class Settings(BaseSettings):
     retry_interval_hours: int = 24
     max_retry_duration_days: int = 7
 
-    # Database path (relative to project root)
-    _database_path: Path = Path(__file__).parent.parent.parent / "data" / "db" / "arbitratarr.db"
-    database_url: str = f"sqlite+aiosqlite:///{_database_path}"
+    database_url: str = Field(
+        default_factory=lambda: (
+            f"sqlite+aiosqlite:///{os.getenv('ARBITRATARR_DB_PATH', '/data/db/arbitratarr.db')}"
+        )
+    )
 
 
 @lru_cache

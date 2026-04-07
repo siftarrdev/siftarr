@@ -10,7 +10,7 @@ from fastapi.staticfiles import StaticFiles
 
 from app.arbitratarr.config import get_settings
 from app.arbitratarr.database import async_session_maker, init_db
-from app.arbitratarr.routers import dashboard, rules, settings, webhooks
+from app.arbitratarr.routers import dashboard, rules, settings, staged, webhooks
 from app.arbitratarr.services.scheduler_service import SchedulerService
 
 scheduler_service: SchedulerService | None = None
@@ -64,6 +64,7 @@ def create_app() -> FastAPI:
     app.include_router(webhooks.router)
     app.include_router(rules.router)
     app.include_router(settings.router)
+    app.include_router(staged.router)
 
     @app.get("/")
     async def root() -> RedirectResponse:
