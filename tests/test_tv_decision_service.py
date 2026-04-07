@@ -4,8 +4,8 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from app.arbitratarr.models.request import MediaType, Request, RequestStatus
-from app.arbitratarr.services.tv_decision_service import TVDecisionService
+from app.siftarr.models.request import MediaType, Request, RequestStatus
+from app.siftarr.services.tv_decision_service import TVDecisionService
 
 
 class TestTVDecisionService:
@@ -27,7 +27,9 @@ class TestTVDecisionService:
         assert service._get_requested_episodes(request) == {8: [14, 15]}
 
     @pytest.mark.asyncio
-    async def test_process_request_logs_and_uses_episode_search(self, mock_db, service, monkeypatch):
+    async def test_process_request_logs_and_uses_episode_search(
+        self, mock_db, service, monkeypatch
+    ):
         request = MagicMock(spec=Request)
         request.id = 1
         request.media_type = MediaType.TV
@@ -52,13 +54,13 @@ class TestTVDecisionService:
 
         monkeypatch.setattr(service, "_get_rule_engine", AsyncMock(return_value=MagicMock()))
         monkeypatch.setattr(
-            "app.arbitratarr.services.tv_decision_service.store_search_results",
+            "app.siftarr.services.tv_decision_service.store_search_results",
             AsyncMock(),
         )
         pending_queue = MagicMock()
         pending_queue.add_to_queue = AsyncMock()
         monkeypatch.setattr(
-            "app.arbitratarr.services.tv_decision_service.PendingQueueService",
+            "app.siftarr.services.tv_decision_service.PendingQueueService",
             lambda db: pending_queue,
         )
 
