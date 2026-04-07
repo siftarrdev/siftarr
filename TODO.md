@@ -5,10 +5,11 @@
 - make the different sections in settings as collapsible sections to make it easier to navigate
 - harmonise the UI design of the dashboard and settings pages to make it more consistent and visually appealing. Include better use of spacing, typography, and color to improve readability and user experience.
 
-- add a tab in the dashboard to see finished requests. it will show requests that are completed and downlaoded.
-- add a tab in the dashboard to see rejected requests. it will show requests that have been rejected by the rules engine, along with the reason for rejection if provided.
-- when rejecting a torrent, add an option to provide a reason for the rejection that is then saved to the database and can be viewed in the dashboard
-- When searching for torrents with prowlarr we should make sure to add the movie year to the search query if we have it available from the media request, this should help improve the accuracy of search results and reduce the chances of incorrect matches being returned.
-- When doing multiple prowlarr searches at the same time we should run them concurrently to speed up the search process, we can use asyncio.gather to run multiple search tasks at the same time and then aggregate the results once they are all complete.
+## Project quality improvements
+- Refactor the codebase to improve readability and maintainability, including better separation of concerns and
+more consistent coding style
+- implement CI/CD pipeline to automate testing and deployment processes, ensuring that new features and bug fixes are delivered more quickly and reliably
+- Add logging and monitoring to the application to help identify and troubleshoot issues in production, including error tracking and performance monitoring tools
+- Implement a more robust error handling strategy to ensure that the application can gracefully handle unexpected errors and provide useful feedback to users when issues occur
 
 ## Bugs

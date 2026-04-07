@@ -8,7 +8,10 @@ from sqlalchemy import select
 
 from app.siftarr.models.pending_queue import PendingQueue
 from app.siftarr.models.request import MediaType, Request
+from app.siftarr.services.lifecycle_service import LifecycleService
+from app.siftarr.services.media_helpers import extract_media_title_and_year
 from app.siftarr.services.movie_decision_service import MovieDecisionService
+from app.siftarr.services.overseerr_service import OverseerrService
 from app.siftarr.services.pending_queue_service import PendingQueueService
 from app.siftarr.services.prowlarr_service import ProwlarrService
 from app.siftarr.services.qbittorrent_service import QbittorrentService
@@ -53,6 +56,24 @@ class SchedulerService:
             runtime_settings = await get_effective_settings(db)
             prowlarr = ProwlarrService(settings=runtime_settings)
             qbittorrent = QbittorrentService(settings=runtime_settings)
+
+            # Backfill year if missing (e.g. Overseerr was unreachable at creation time)
+            if request.year is None and (request.tmdb_id or request.tvdb_id):
+                overseerr = OverseerrService(settings=runtime_settings)
+                try:
+                    media_type_for_api = "movie" if request.media_type == MediaType.MOVIE else "tv"
+                    media_id = request.tmdb_id or request.tvdb_id
+                    title, year = await extract_media_title_and_year(
+                        overseerr, media_type_for_api, media_id
+                    )
+                    if year is not None:
+                        lifecycle = LifecycleService(db)
+                        await lifecycle.update_request_metadata(request.id, year=year)
+                        await db.refresh(request)
+                except Exception:
+                    pass
+                finally:
+                    await overseerr.close()
 
             # Create decision service based on media type
             if request.media_type == MediaType.TV:

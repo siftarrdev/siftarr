@@ -1,13 +1,12 @@
 """Overseerr webhook handler for receiving media requests."""
 
-import contextlib
-
 from fastapi import APIRouter, BackgroundTasks, Depends
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.siftarr.database import get_db
 from app.siftarr.models import MediaType, Request, RequestStatus
+from app.siftarr.services.media_helpers import extract_media_title_and_year
 from app.siftarr.services.overseerr_service import OverseerrService
 from app.siftarr.services.runtime_settings import get_effective_settings
 
@@ -75,29 +74,17 @@ async def receive_overseerr_webhook(
     # Fetch title and year from Overseerr media details
     title = ""
     year = None
-    try:
+    media_external_id = payload.media.tmdbid or payload.media.tvdbid
+    if media_external_id:
         settings = await get_effective_settings(db)
         overseerr_service = OverseerrService(settings=settings)
         try:
             media_type_for_api = "movie" if media_type == MediaType.MOVIE else "tv"
-            media_external_id = payload.media.tmdbid or payload.media.tvdbid
-            if media_external_id:
-                media_details = await overseerr_service.get_media_details(
-                    media_type_for_api, media_external_id
-                )
-                if media_details:
-                    title = media_details.get("title") or media_details.get("name") or ""
-                    date_str = (
-                        media_details.get("releaseDate") or media_details.get("firstAirDate") or ""
-                    )
-                    if date_str and len(date_str) >= 4:
-                        with contextlib.suppress(ValueError, TypeError):
-                            year = int(date_str[:4])
+            title, year = await extract_media_title_and_year(
+                overseerr_service, media_type_for_api, media_external_id
+            )
         finally:
             await overseerr_service.close()
-    except Exception:
-        # If Overseerr is unreachable, fall back to defaults
-        pass
 
     # Create request record
     request = Request(

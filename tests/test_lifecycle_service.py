@@ -36,6 +36,19 @@ class TestLifecycleService:
         assert service.can_transition(RequestStatus.DOWNLOADING, RequestStatus.COMPLETED)
         assert service.can_transition(RequestStatus.DOWNLOADING, RequestStatus.FAILED)
 
+    @pytest.mark.asyncio
+    async def test_get_active_requests_includes_searching(self, mock_db, service):
+        """Searching requests should be returned as active."""
+        mock_requests = [MagicMock(spec=Request, id=1, status=RequestStatus.SEARCHING)]
+        mock_result = MagicMock()
+        mock_result.scalars.return_value.all.return_value = mock_requests
+        mock_db.execute.return_value = mock_result
+
+        result = await service.get_active_requests()
+
+        assert len(result) == 1
+        assert result[0].status == RequestStatus.SEARCHING
+
     def test_can_transition_invalid(self, service):
         """Test invalid status transitions."""
         assert not service.can_transition(RequestStatus.RECEIVED, RequestStatus.COMPLETED)
