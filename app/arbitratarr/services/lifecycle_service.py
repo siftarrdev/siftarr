@@ -83,6 +83,8 @@ class LifecycleService:
             raise ValueError(f"Invalid transition from {request.status} to {new_status}")
 
         request.status = new_status
+        if reason is not None:
+            request.rejection_reason = reason
         request.updated_at = datetime.now(UTC)
         await self.db.commit()
         await self.db.refresh(request)
