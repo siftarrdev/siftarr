@@ -1,5 +1,7 @@
 """Settings page router for viewing and editing application settings."""
 
+import contextlib
+
 from fastapi import APIRouter, Depends, Form, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
@@ -424,6 +426,7 @@ async def sync_overseerr(
 
                         # Fetch title from Overseerr media details endpoint
                         title = ""
+                        year = None
                         media_external_id = tmdb_id if tmdb_id else tvdb_id
                         if media_external_id:
                             media_type_for_api = "movie" if media_type == MediaType.MOVIE else "tv"
@@ -434,6 +437,15 @@ async def sync_overseerr(
                                 title = (
                                     media_details.get("title") or media_details.get("name") or ""
                                 )
+                                # Extract year from release/air date
+                                date_str = (
+                                    media_details.get("releaseDate")
+                                    or media_details.get("firstAirDate")
+                                    or ""
+                                )
+                                if date_str and len(date_str) >= 4:
+                                    with contextlib.suppress(ValueError, TypeError):
+                                        year = int(date_str[:4])
 
                         # Create new request
                         new_request = RequestModel(
@@ -442,6 +454,7 @@ async def sync_overseerr(
                             tmdb_id=tmdb_id,
                             tvdb_id=tvdb_id,
                             title=title,
+                            year=year,
                             requested_seasons=str(requested_seasons) if requested_seasons else None,
                             requested_episodes=str(requested_episodes)
                             if requested_episodes

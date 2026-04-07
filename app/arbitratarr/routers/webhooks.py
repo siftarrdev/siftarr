@@ -1,11 +1,15 @@
 """Overseerr webhook handler for receiving media requests."""
 
+import contextlib
+
 from fastapi import APIRouter, BackgroundTasks, Depends
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.arbitratarr.database import get_db
 from app.arbitratarr.models import MediaType, Request, RequestStatus
+from app.arbitratarr.services.overseerr_service import OverseerrService
+from app.arbitratarr.services.runtime_settings import get_effective_settings
 
 router = APIRouter(prefix="/webhook", tags=["webhooks"])
 
@@ -68,13 +72,41 @@ async def receive_overseerr_webhook(
     # Use tmdbid or tvdbid as external_id
     external_id = str(payload.media.tmdbid or payload.media.tvdbid)
 
+    # Fetch title and year from Overseerr media details
+    title = ""
+    year = None
+    try:
+        settings = await get_effective_settings(db)
+        overseerr_service = OverseerrService(settings=settings)
+        try:
+            media_type_for_api = "movie" if media_type == MediaType.MOVIE else "tv"
+            media_external_id = payload.media.tmdbid or payload.media.tvdbid
+            if media_external_id:
+                media_details = await overseerr_service.get_media_details(
+                    media_type_for_api, media_external_id
+                )
+                if media_details:
+                    title = media_details.get("title") or media_details.get("name") or ""
+                    date_str = (
+                        media_details.get("releaseDate") or media_details.get("firstAirDate") or ""
+                    )
+                    if date_str and len(date_str) >= 4:
+                        with contextlib.suppress(ValueError, TypeError):
+                            year = int(date_str[:4])
+        finally:
+            await overseerr_service.close()
+    except Exception:
+        # If Overseerr is unreachable, fall back to defaults
+        pass
+
     # Create request record
     request = Request(
         external_id=external_id,
         media_type=media_type,
         tmdb_id=payload.media.tmdbid,
         tvdb_id=payload.media.tvdbid,
-        title="",  # Will be populated from Overseerr API
+        title=title,
+        year=year,
         requested_seasons=str(payload.media.requested_seasons)
         if payload.media.requested_seasons
         else None,
