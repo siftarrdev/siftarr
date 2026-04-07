@@ -1,5 +1,10 @@
 FROM python:3.12-slim
 
+ARG ARBITRATARR_VERSION=0.0.0
+LABEL org.opencontainers.image.title="arbitratarr"
+LABEL org.opencontainers.image.version="${ARBITRATARR_VERSION}"
+ENV ARBITRATARR_VERSION="${ARBITRATARR_VERSION}"
+
 # Install uv
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
 
@@ -13,7 +18,7 @@ RUN groupadd -g 568 appgroup && useradd -u 568 -g appgroup -m -s /bin/bash appus
 COPY pyproject.toml uv.lock* ./
 
 # Install dependencies
-RUN uv sync --frozen
+RUN SETUPTOOLS_SCM_PRETEND_VERSION_FOR_ARBITRATARR="${ARBITRATARR_VERSION#v}" uv sync --frozen
 
 # Copy application code
 COPY app/ ./app/

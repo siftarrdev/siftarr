@@ -22,6 +22,9 @@ uv run alembic upgrade head
 uv run uvicorn app.arbitratarr.main:app --reload
 ```
 
+Project versions come from git tags through `setuptools-scm`.
+Create release tags in the form `v1.2.3`.
+
 ## Development Workflow
 
 ### Running the App
@@ -33,6 +36,16 @@ uv run uvicorn app.arbitratarr.main:app --reload
 # Production
 uv run uvicorn app.arbitratarr.main:app
 ```
+
+### Versioned Docker Builds
+
+```bash
+./docker/rebuild-run-logs.sh
+```
+
+The helper script derives the current git version and passes it as a build arg.
+The Docker image uses `ARBITRATARR_VERSION` only at build time because `.git` is excluded from the Docker build context.
+Python package metadata is normalized from the tag for PEP 440 compatibility.
 
 ### Code Quality
 

@@ -14,6 +14,7 @@ from app.arbitratarr.config import get_settings
 from app.arbitratarr.database import async_session_maker, init_db
 from app.arbitratarr.routers import dashboard, rules, settings, staged, webhooks
 from app.arbitratarr.services.scheduler_service import SchedulerService
+from app.arbitratarr.version import __version__
 
 scheduler_service: SchedulerService | None = None
 INITIAL_MIGRATION_REVISION = "bc9c8cfbe08b"
@@ -114,7 +115,7 @@ def create_app() -> FastAPI:
     app = FastAPI(
         title="Arbitratarr",
         description="Media search and download decision middleware",
-        version="0.1.0",
+        version=__version__,
         lifespan=lifespan,
     )
 

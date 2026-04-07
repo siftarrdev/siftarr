@@ -47,6 +47,16 @@ services:
       - QBITTORRENT_PASSWORD=your_password
 ```
 
+Use `ghcr.io/yourusername/arbitratarr:latest` for the newest published image, or pin a release tag like `ghcr.io/yourusername/arbitratarr:v1.2.3`.
+
+For local source builds, use the helper script:
+
+```bash
+./docker/rebuild-run-logs.sh
+```
+
+It brings the container down, rebuilds from the latest git tag, starts the new container, and tails the logs.
+
 ### Required Environment Variables
 
 | Variable | Description |

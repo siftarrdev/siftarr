@@ -1,6 +1,6 @@
 [project]
 name = "arbitratarr"
-version = "0.1.0"
+dynamic = ["version"]
 description = "Media search and download decision middleware"
 requires-python = ">=3.12"
 dependencies = [
@@ -22,7 +22,25 @@ dev = [
     "ruff>=0.6.0",
     "pytest>=7.0.0",
     "pytest-asyncio>=0.21.0",
+    "setuptools-scm>=8.0.0",
 ]
+
+[build-system]
+requires = ["setuptools>=80.0.0", "setuptools-scm>=8.0.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+include-package-data = true
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["app*"]
+
+[tool.setuptools_scm]
+git_describe_command = "git describe --dirty --tags --long --match v*"
+fallback_version = "0.0.0"
+version_scheme = "guess-next-dev"
+local_scheme = "node-and-date"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

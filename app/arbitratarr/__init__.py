@@ -1,3 +1,5 @@
 """Arbitratarr - Media search and download decision middleware."""
 
-__version__ = "0.1.0"
+from app.arbitratarr.version import __version__
+
+__all__ = ["__version__"]

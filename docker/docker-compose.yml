@@ -1,8 +1,11 @@
 services:
   arbitratarr:
+    image: arbitratarr:latest
     build:
       context: ..
       dockerfile: docker/Dockerfile
+      args:
+        ARBITRATARR_VERSION: ${ARBITRATARR_VERSION:-0.0.0}
     container_name: arbitratarr
     restart: unless-stopped
     ports:
@@ -24,4 +27,3 @@ services:
       timeout: 10s
       retries: 3
       start_period: 10s
-
