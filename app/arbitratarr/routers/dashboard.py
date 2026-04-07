@@ -17,8 +17,9 @@ from app.arbitratarr.models.staged_torrent import StagedTorrent
 from app.arbitratarr.services.lifecycle_service import LifecycleService
 from app.arbitratarr.services.overseerr_service import OverseerrService
 from app.arbitratarr.services.pending_queue_service import PendingQueueService
-from app.arbitratarr.services.prowlarr_service import ProwlarrRelease, ProwlarrService
+from app.arbitratarr.services.prowlarr_service import ProwlarrService
 from app.arbitratarr.services.qbittorrent_service import QbittorrentService
+from app.arbitratarr.services.release_selection_service import build_prowlarr_release, use_releases
 from app.arbitratarr.services.rule_engine import RuleEngine
 from app.arbitratarr.services.runtime_settings import get_effective_settings
 
@@ -48,6 +49,25 @@ def _build_poster_url(overseerr_url: str | None, poster_path: object) -> str | N
         return f"https://image.tmdb.org/t/p/original{poster}"
 
     return poster
+
+
+def _build_overseerr_media_url(
+    overseerr_url: str | None,
+    media_type: str,
+    tmdb_id: int | None,
+) -> str | None:
+    """Build an Overseerr media URL for movie or TV pages."""
+    if not overseerr_url or not tmdb_id:
+        return None
+    return f"{str(overseerr_url).rstrip('/')}/{media_type}/{tmdb_id}"
+
+
+def _format_release_size(size_bytes: int) -> str:
+    """Format bytes as a compact human-readable size."""
+    if size_bytes <= 0:
+        return "Unknown"
+    gib = size_bytes / 1024 / 1024 / 1024
+    return f"{gib:.2f} GB"
 
 
 def _choose_overseerr_display_status(request_status: str, media_status: str) -> str:
@@ -316,6 +336,8 @@ async def request_details(
     request_id: int,
     db: AsyncSession = Depends(get_db),
 ) -> JSONResponse:
+    from app.arbitratarr.models.release import Release
+
     result = await db.execute(select(RequestModel).where(RequestModel.id == request_id))
     request = result.scalar_one_or_none()
     if not request:
@@ -323,7 +345,14 @@ async def request_details(
 
     effective_settings = await get_effective_settings(db)
     overseerr_service = OverseerrService(settings=effective_settings)
-    details: dict[str, object] = {"request": {"id": request.id, "title": request.title}}
+    details: dict[str, object] = {
+        "request": {
+            "id": request.id,
+            "title": request.title,
+            "status": request.status.value,
+            "media_type": request.media_type.value,
+        }
+    }
 
     try:
         if request.overseerr_request_id:
@@ -352,13 +381,20 @@ async def request_details(
                 "overview": merged_media.get("overview") or merged_media.get("summary") or "",
                 "poster": poster,
                 "status": request_status,
+                "url": _build_overseerr_media_url(
+                    effective_settings.overseerr_url,
+                    request.media_type.value,
+                    request.tmdb_id,
+                ),
             }
     finally:
         await overseerr_service.close()
 
-    from app.arbitratarr.models.release import Release
-
-    release_result = await db.execute(select(Release).where(Release.request_id == request_id))
+    release_result = await db.execute(
+        select(Release)
+        .where(Release.request_id == request_id)
+        .order_by(Release.score.desc(), Release.seeders.desc(), Release.created_at.desc())
+    )
     releases = list(release_result.scalars().all())
     rules = await db.execute(select(Rule))
     rule_list = list(rules.scalars().all())
@@ -366,27 +402,23 @@ async def request_details(
 
     matched = []
     for release in releases:
-        evaluation = engine.evaluate(
-            ProwlarrRelease(
-                title=release.title,
-                size=release.size,
-                seeders=release.seeders,
-                leechers=release.leechers,
-                download_url=release.download_url,
-                magnet_url=release.magnet_url,
-                info_hash=release.info_hash,
-                indexer=release.indexer,
-                publish_date=release.publish_date,
-                resolution=release.resolution,
-                codec=release.codec,
-                release_group=release.release_group,
-            )
-        )
+        evaluation = engine.evaluate(build_prowlarr_release(release))
         matched.append(
             {
+                "id": release.id,
                 "title": release.title,
                 "score": release.score,
                 "passed": release.passed_rules,
+                "size": _format_release_size(release.size),
+                "seeders": release.seeders,
+                "leechers": release.leechers,
+                "indexer": release.indexer,
+                "resolution": release.resolution,
+                "codec": release.codec,
+                "release_group": release.release_group,
+                "downloaded": release.is_downloaded,
+                "publish_date": release.publish_date.isoformat() if release.publish_date else None,
+                "rejection_reason": evaluation.rejection_reason,
                 "matches": [
                     {
                         "rule_name": m.rule_name,
@@ -400,6 +432,32 @@ async def request_details(
 
     details["releases"] = matched
     return JSONResponse(details)
+
+
+@router.post("/requests/{request_id}/releases/{release_id}/use")
+async def use_request_release(
+    request_id: int,
+    release_id: int,
+    redirect_to: str | None = Form(default=None),
+    db: AsyncSession = Depends(get_db),
+) -> RedirectResponse:
+    """Stage or send a selected stored release for a request."""
+    request_result = await db.execute(select(RequestModel).where(RequestModel.id == request_id))
+    request = request_result.scalar_one_or_none()
+    if not request:
+        raise HTTPException(status_code=404, detail="Request not found")
+
+    from app.arbitratarr.models.release import Release
+
+    release_result = await db.execute(
+        select(Release).where(Release.id == release_id, Release.request_id == request_id)
+    )
+    release = release_result.scalar_one_or_none()
+    if not release:
+        raise HTTPException(status_code=404, detail="Release not found")
+
+    await use_releases(db, request, [release], selection_source="manual")
+    return RedirectResponse(url=redirect_to or "/?tab=active", status_code=303)
 
 
 @router.post("/requests/{request_id}/deny")

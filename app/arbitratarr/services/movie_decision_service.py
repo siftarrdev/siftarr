@@ -7,6 +7,7 @@ from app.arbitratarr.models.rule import Rule
 from app.arbitratarr.services.pending_queue_service import PendingQueueService
 from app.arbitratarr.services.prowlarr_service import ProwlarrService
 from app.arbitratarr.services.qbittorrent_service import QbittorrentService
+from app.arbitratarr.services.release_selection_service import store_search_results, use_releases
 from app.arbitratarr.services.rule_engine import RuleEngine
 
 
@@ -71,6 +72,8 @@ class MovieDecisionService:
         # Search for movie
         search_result = await self.prowlarr.search_by_tmdbid(
             tmdbid=request.tmdb_id,
+            title=request.title,
+            year=request.year,
         )
 
         if not search_result.releases:
@@ -86,51 +89,29 @@ class MovieDecisionService:
                 "message": "No releases found in Prowlarr, added to pending queue",
             }
 
-        # Evaluate all releases
-        evaluated = rule_engine.evaluate_batch(search_result.releases)
+        all_evaluated = [rule_engine.evaluate(release) for release in search_result.releases]
+        await store_search_results(self.db, request.id, all_evaluated)
 
-        for result_item in evaluated:
-            existing = await self.db.execute(
-                select(Release).where(
-                    Release.request_id == request.id,
-                    Release.title == result_item.release.title,
-                )
-            )
-            release_record = existing.scalar_one_or_none()
-            if release_record is None:
-                release_record = Release(
-                    request_id=request.id,
-                    title=result_item.release.title,
-                    size=result_item.release.size,
-                    seeders=result_item.release.seeders,
-                    leechers=result_item.release.leechers,
-                    download_url=result_item.release.download_url,
-                    magnet_url=result_item.release.magnet_url,
-                    info_hash=result_item.release.info_hash,
-                    indexer=result_item.release.indexer,
-                    publish_date=result_item.release.publish_date,
-                    resolution=result_item.release.resolution,
-                    codec=result_item.release.codec,
-                    release_group=result_item.release.release_group,
-                    score=result_item.total_score,
-                    passed_rules=result_item.passed,
-                )
-                self.db.add(release_record)
-            else:
-                release_record.score = result_item.total_score
-                release_record.passed_rules = result_item.passed
-
-        await self.db.commit()
-
-        best = evaluated[0] if evaluated else None
+        passed_results = [evaluation for evaluation in all_evaluated if evaluation.passed]
+        best = passed_results[0] if passed_results else None
 
         if best:
-            # Found a passing release
-            request.status = RequestStatus.COMPLETED
-            await self.db.commit()
+            release_result = await self.db.execute(
+                select(Release).where(
+                    Release.request_id == request.id,
+                    Release.title == best.release.title,
+                )
+            )
+            stored_release = release_result.scalar_one_or_none()
+            action_result = await use_releases(
+                self.db,
+                request,
+                [stored_release] if stored_release else [],
+                selection_source="rule",
+            )
 
             return {
-                "status": "completed",
+                "status": action_result["status"],
                 "selected_release": {
                     "title": best.release.title,
                     "score": best.total_score,
@@ -139,17 +120,15 @@ class MovieDecisionService:
                     "download_url": best.release.download_url,
                     "magnet_url": best.release.magnet_url,
                 },
-                "message": f"Selected release with score {best.total_score}",
+                "message": action_result["message"],
             }
 
         # No releases passed rules - add to pending queue
         request.status = RequestStatus.PENDING
         await self.db.commit()
 
-        # Get rejection info
-        evaluated = rule_engine.evaluate_batch(search_result.releases)
         rejection_reasons = []
-        for e in evaluated:
+        for e in all_evaluated:
             if e.rejection_reason:
                 rejection_reasons.append(e.rejection_reason)
 

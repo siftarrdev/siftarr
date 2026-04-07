@@ -9,6 +9,7 @@ from app.arbitratarr.models.rule import Rule
 from app.arbitratarr.services.pending_queue_service import PendingQueueService
 from app.arbitratarr.services.prowlarr_service import ProwlarrService
 from app.arbitratarr.services.qbittorrent_service import QbittorrentService
+from app.arbitratarr.services.release_selection_service import store_search_results, use_releases
 from app.arbitratarr.services.rule_engine import ReleaseEvaluation, RuleEngine
 
 
@@ -103,6 +104,7 @@ class TVDecisionService:
         if not requested_seasons:
             return {"status": "error", "message": "No seasons specified"}
 
+        all_evaluated_releases: list[ReleaseEvaluation] = []
         all_selected_releases: list[ReleaseEvaluation] = []
         season_pack_selected = False
 
@@ -110,14 +112,18 @@ class TVDecisionService:
         for season in requested_seasons:
             search_result = await self.prowlarr.search_by_tvdbid(
                 tvdbid=request.tvdb_id,
+                title=request.title,
                 season=season,
+                year=request.year,
             )
 
             if not search_result.releases:
                 continue
 
-            # Evaluate season packs
-            best_pack = rule_engine.get_best_release(search_result.releases)
+            evaluated_packs = [rule_engine.evaluate(release) for release in search_result.releases]
+            all_evaluated_releases.extend(evaluated_packs)
+            passing_packs = [evaluation for evaluation in evaluated_packs if evaluation.passed]
+            best_pack = passing_packs[0] if passing_packs else None
 
             if best_pack and best_pack.passed:
                 all_selected_releases.append(best_pack)
@@ -134,75 +140,67 @@ class TVDecisionService:
                     # This is a simplification - real implementation would query Overseerr
                     search_result = await self.prowlarr.search_by_tvdbid(
                         tvdbid=request.tvdb_id,
+                        title=request.title,
                         season=season,
+                        year=request.year,
                     )
 
                     if not search_result.releases:
                         continue
 
-                        # Evaluate and collect passing releases
-                        evaluated = rule_engine.evaluate_batch(search_result.releases)
-                        all_selected_releases.extend(evaluated)
+                    evaluated = [
+                        rule_engine.evaluate(release) for release in search_result.releases
+                    ]
+                    all_evaluated_releases.extend(evaluated)
+                    all_selected_releases.extend(
+                        [result_item for result_item in evaluated if result_item.passed]
+                    )
                 else:
                     # Search for specific episodes
                     for episode in episodes_to_search:
                         search_result = await self.prowlarr.search_by_tvdbid(
                             tvdbid=request.tvdb_id,
+                            title=request.title,
                             season=season,
                             episode=episode,
+                            year=request.year,
                         )
 
                         if not search_result.releases:
                             continue
 
-                        best = rule_engine.get_best_release(search_result.releases)
+                        evaluated = [
+                            rule_engine.evaluate(release) for release in search_result.releases
+                        ]
+                        all_evaluated_releases.extend(evaluated)
+                        passing = [result_item for result_item in evaluated if result_item.passed]
+                        best = passing[0] if passing else None
                         if best:
                             all_selected_releases.append(best)
+
+        await store_search_results(self.db, request.id, all_evaluated_releases)
 
         # Step 3: If we have selected releases, send to qBittorrent
         if all_selected_releases:
             # Sort by score
             all_selected_releases.sort(key=lambda x: x.total_score, reverse=True)
 
-            for result_item in all_selected_releases:
-                existing = await self.db.execute(
-                    select(Release).where(
-                        Release.request_id == request.id,
-                        Release.title == result_item.release.title,
-                    )
+            selected_titles = {result_item.release.title for result_item in all_selected_releases}
+            stored_releases_result = await self.db.execute(
+                select(Release).where(
+                    Release.request_id == request.id, Release.title.in_(selected_titles)
                 )
-                release_record = existing.scalar_one_or_none()
-                if release_record is None:
-                    release_record = Release(
-                        request_id=request.id,
-                        title=result_item.release.title,
-                        size=result_item.release.size,
-                        seeders=result_item.release.seeders,
-                        leechers=result_item.release.leechers,
-                        download_url=result_item.release.download_url,
-                        magnet_url=result_item.release.magnet_url,
-                        info_hash=result_item.release.info_hash,
-                        indexer=result_item.release.indexer,
-                        publish_date=result_item.release.publish_date,
-                        resolution=result_item.release.resolution,
-                        codec=result_item.release.codec,
-                        release_group=result_item.release.release_group,
-                        score=result_item.total_score,
-                        passed_rules=result_item.passed,
-                    )
-                    self.db.add(release_record)
-                else:
-                    release_record.score = result_item.total_score
-                    release_record.passed_rules = result_item.passed
-
-            await self.db.commit()
-
-            # Mark request as completed
-            request.status = RequestStatus.COMPLETED
-            await self.db.commit()
+            )
+            stored_releases = list(stored_releases_result.scalars().all())
+            action_result = await use_releases(
+                self.db,
+                request,
+                stored_releases,
+                selection_source="rule",
+            )
 
             return {
-                "status": "completed",
+                "status": action_result["status"],
                 "selected_releases": [
                     {
                         "title": e.release.title,
@@ -212,7 +210,7 @@ class TVDecisionService:
                     }
                     for e in all_selected_releases
                 ],
-                "message": f"Found {len(all_selected_releases)} suitable release(s)",
+                "message": action_result["message"],
             }
 
         # Step 4: No releases passed - add to pending queue

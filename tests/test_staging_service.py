@@ -1,7 +1,5 @@
 """Tests for StagingService."""
 
-import json
-from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -78,7 +76,9 @@ class TestStagingServiceIntegration:
     @pytest.fixture
     def mock_db(self):
         """Create a mock database session."""
-        return AsyncMock()
+        db = AsyncMock()
+        db.add = MagicMock()
+        return db
 
     @pytest.fixture
     def service(self, mock_db):
@@ -156,8 +156,43 @@ class TestStagingServiceIntegration:
         mock_staged.torrent_path = str(tmp_path / "test.torrent")
         mock_staged.json_path = str(tmp_path / "test.json")
 
-        with patch("os.path.exists", return_value=True):
-            with patch("os.remove", side_effect=OSError("Permission denied")):
-                result = await service.delete_staged_files(mock_staged)
+        with patch("os.path.exists", return_value=True), patch(
+            "os.remove", side_effect=OSError("Permission denied")
+        ):
+            result = await service.delete_staged_files(mock_staged)
 
         assert result is False
+
+    @pytest.mark.asyncio
+    async def test_save_release_persists_selection_source(self, service, tmp_path):
+        """Saved staged torrents should retain whether selection was rule or manual."""
+        request = MagicMock(spec=Request)
+        request.id = 42
+        request.external_id = "ext-42"
+        request.media_type = MediaType.MOVIE
+        request.tmdb_id = 123
+        request.tvdb_id = None
+        request.title = "Example Movie"
+        request.year = 2024
+
+        release = ProwlarrRelease(
+            title="Example.Movie.2024.1080p",
+            size=1_500_000_000,
+            seeders=10,
+            leechers=2,
+            download_url="magnet:?xt=urn:btih:example",
+            magnet_url="magnet:?xt=urn:btih:example",
+            indexer="Indexer A",
+        )
+
+        with patch("app.arbitratarr.services.staging_service.STAGING_DIR", tmp_path):
+            saved = await service.save_release(
+                release,
+                request,
+                score=15,
+                selection_source="manual",
+            )
+
+        added_record = service.db.add.call_args.args[0]
+        assert added_record.selection_source == "manual"
+        assert saved is service.db.refresh.await_args_list[0].args[0]
