@@ -6,7 +6,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.arbitratarr.config import Settings, get_settings
 from app.arbitratarr.models.settings import Settings as DBSettings
 
-
 SETTING_KEYS = {
     "overseerr_url",
     "overseerr_api_key",
@@ -15,6 +14,7 @@ SETTING_KEYS = {
     "qbittorrent_url",
     "qbittorrent_username",
     "qbittorrent_password",
+    "staging_mode_enabled",
     "tz",
 }
 
@@ -35,6 +35,12 @@ async def get_effective_settings(db: AsyncSession | None = None) -> Settings:
             return fallback
         return value
 
+    def get_bool_value(key: str, fallback: bool) -> bool:
+        value = db_settings.get(key)
+        if value is None or value == "":
+            return fallback
+        return str(value).strip().lower() in {"1", "true", "yes", "on"}
+
     return Settings(
         overseerr_url=get_value("overseerr_url", env_settings.overseerr_url),
         overseerr_api_key=get_value("overseerr_api_key", env_settings.overseerr_api_key),
@@ -47,7 +53,9 @@ async def get_effective_settings(db: AsyncSession | None = None) -> Settings:
         or env_settings.qbittorrent_password,
         tz=get_value("tz", env_settings.tz) or env_settings.tz,
         database_url=env_settings.database_url,
-        staging_mode_enabled=env_settings.staging_mode_enabled,
+        staging_mode_enabled=get_bool_value(
+            "staging_mode_enabled", env_settings.staging_mode_enabled
+        ),
         retry_interval_hours=env_settings.retry_interval_hours,
         max_retry_duration_days=env_settings.max_retry_duration_days,
         puid=env_settings.puid,

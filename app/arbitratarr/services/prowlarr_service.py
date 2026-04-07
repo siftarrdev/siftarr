@@ -68,6 +68,112 @@ class ProwlarrService:
             release_group=release_group,
         )
 
+    @staticmethod
+    def _build_movie_query(title: str | None, tmdbid: int, year: int | None = None) -> str:
+        """Build a Prowlarr movie query with metadata tokens in the query string."""
+        parts = [title.strip() for title in [title] if title and title.strip()]
+        parts.append(f"{{tmdbid:{tmdbid}}}")
+        if year is not None:
+            parts.append(f"{{year:{year}}}")
+        return " ".join(parts)
+
+    @staticmethod
+    def _build_movie_title_query(title: str | None, year: int | None = None) -> str:
+        """Build a plain title-based movie query for fallback searches."""
+        parts = [title.strip() for title in [title] if title and title.strip()]
+        if year is not None:
+            parts.append(str(year))
+        return " ".join(parts)
+
+    @staticmethod
+    def _build_tv_query(
+        title: str | None,
+        tvdbid: int,
+        season: int | None = None,
+        episode: int | None = None,
+        year: int | None = None,
+    ) -> str:
+        """Build a Prowlarr TV query with metadata tokens in the query string."""
+        parts = [title.strip() for title in [title] if title and title.strip()]
+        parts.append(f"{{tvdbid:{tvdbid}}}")
+        if season is not None:
+            parts.append(f"{{season:{season}}}")
+        if episode is not None:
+            parts.append(f"{{episode:{episode}}}")
+        if year is not None:
+            parts.append(f"{{year:{year}}}")
+        return " ".join(parts)
+
+    @staticmethod
+    def _build_tv_title_query(
+        title: str | None,
+        season: int | None = None,
+        episode: int | None = None,
+        year: int | None = None,
+    ) -> str:
+        """Build a plain title-based TV query for fallback searches."""
+        parts = [title.strip() for title in [title] if title and title.strip()]
+        if season is not None and episode is not None:
+            parts.append(f"S{season:02d}E{episode:02d}")
+        elif season is not None:
+            parts.append(f"S{season:02d}")
+        if year is not None:
+            parts.append(str(year))
+        return " ".join(parts)
+
+    async def _search(
+        self,
+        params: dict,
+    ) -> ProwlarrSearchResult:
+        """Execute a Prowlarr search request and normalize results."""
+        import time
+
+        start_time = time.time()
+        endpoint = f"{self.base_url}/api/v1/search"
+        headers = self._get_headers()
+
+        releases = []
+        async with httpx.AsyncClient() as client:
+            try:
+                response = await client.get(
+                    endpoint,
+                    headers=headers,
+                    params=params,
+                    timeout=60.0,
+                )
+                if response.status_code == 200:
+                    results = response.json()
+                    for release_data in self._extract_release_items(results):
+                        releases.append(self._parse_release_info(release_data))
+            except httpx.RequestError:
+                pass
+
+        return ProwlarrSearchResult(
+            releases=releases,
+            query_time_ms=int((time.time() - start_time) * 1000),
+        )
+
+    @staticmethod
+    def _extract_release_items(payload: object) -> list[dict]:
+        """Normalize different Prowlarr search response shapes into release items."""
+        if not isinstance(payload, list):
+            return []
+
+        releases: list[dict] = []
+        for item in payload:
+            if not isinstance(item, dict):
+                continue
+            nested_releases = item.get("releases")
+            if isinstance(nested_releases, list):
+                releases.extend(r for r in nested_releases if isinstance(r, dict))
+                continue
+            if item.get("title") and (
+                item.get("downloadUrl") or item.get("guid") or item.get("magnetUrl")
+            ):
+                releases.append(item)
+
+        return releases
+
     def _extract_resolution(self, title: str) -> str | None:
         """Extract resolution from release title."""
         patterns = [
@@ -119,6 +225,8 @@ class ProwlarrService:
     async def search_by_tmdbid(
         self,
         tmdbid: int,
+        title: str | None = None,
+        year: int | None = None,
         categories: list[int] | None = None,
     ) -> ProwlarrSearchResult:
         """
@@ -131,48 +239,34 @@ class ProwlarrService:
         Returns:
             ProwlarrSearchResult with list of releases
         """
-        import time
-
-        start_time = time.time()
-
         if categories is None:
             categories = [2000]  # Movies
 
-        endpoint = f"{self.base_url}/api/v1/search"
-        headers = self._get_headers()
-
-        params = {
+        metadata_params = {
             "type": "movie",
-            "tmdbid": f"tmdb:{tmdbid}",
+            "query": self._build_movie_query(title, tmdbid, year),
+            "categories": categories,
         }
+        metadata_result = await self._search(metadata_params)
+        if metadata_result.releases or not title:
+            return metadata_result
 
-        releases = []
-        async with httpx.AsyncClient() as client:
-            try:
-                response = await client.get(
-                    endpoint,
-                    headers=headers,
-                    params=params,
-                    timeout=60.0,
-                )
-                if response.status_code == 200:
-                    results = response.json()
-                    for result in results:
-                        for release_data in result.get("releases", []):
-                            releases.append(self._parse_release_info(release_data))
-            except httpx.RequestError:
-                pass
-
-        return ProwlarrSearchResult(
-            releases=releases,
-            query_time_ms=int((time.time() - start_time) * 1000),
-        )
+        fallback_params = {
+            "type": "search",
+            "query": self._build_movie_title_query(title, year),
+            "categories": categories,
+        }
+        fallback_result = await self._search(fallback_params)
+        fallback_result.query_time_ms += metadata_result.query_time_ms
+        return fallback_result
 
     async def search_by_tvdbid(
         self,
         tvdbid: int,
+        title: str | None = None,
         season: int | None = None,
         episode: int | None = None,
+        year: int | None = None,
         categories: list[int] | None = None,
     ) -> ProwlarrSearchResult:
         """
@@ -187,57 +281,23 @@ class ProwlarrService:
         Returns:
             ProwlarrSearchResult with list of releases
         """
-        import time
-
-        start_time = time.time()
-
         if categories is None:
             categories = [5000]  # TV
 
-        endpoint = f"{self.base_url}/api/v1/search"
-        headers = self._get_headers()
+        metadata_params = {
+            "type": "tvsearch",
+            "query": self._build_tv_query(title, tvdbid, season, episode, year),
+            "categories": categories,
+        }
+        metadata_result = await self._search(metadata_params)
+        if metadata_result.releases or not title:
+            return metadata_result
 
-        # Build query based on what's specified
-        if episode is not None and season is not None:
-            # Single episode search
-            params = {
-                "type": "tv",
-                "tvdbid": f"tvdb:{tvdbid}",
-                "season": season,
-                "episode": episode,
-            }
-        elif season is not None:
-            # Season pack search
-            params = {
-                "type": "tv",
-                "tvdbid": f"tvdb:{tvdbid}",
-                "season": season,
-            }
-        else:
-            # Full series search
-            params = {
-                "type": "tv",
-                "tvdbid": f"tvdb:{tvdbid}",
-            }
-
-        releases = []
-        async with httpx.AsyncClient() as client:
-            try:
-                response = await client.get(
-                    endpoint,
-                    headers=headers,
-                    params=params,
-                    timeout=60.0,
-                )
-                if response.status_code == 200:
-                    results = response.json()
-                    for result in results:
-                        for release_data in result.get("releases", []):
-                            releases.append(self._parse_release_info(release_data))
-            except httpx.RequestError:
-                pass
-
-        return ProwlarrSearchResult(
-            releases=releases,
-            query_time_ms=int((time.time() - start_time) * 1000),
-        )
+        fallback_params = {
+            "type": "search",
+            "query": self._build_tv_title_query(title, season, episode, year),
+            "categories": categories,
+        }
+        fallback_result = await self._search(fallback_params)
+        fallback_result.query_time_ms += metadata_result.query_time_ms
+        return fallback_result
