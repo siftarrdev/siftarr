@@ -95,6 +95,8 @@ async def _process_request_search(
         try:
             media_type_for_api = "movie" if request.media_type == MediaType.MOVIE else "tv"
             media_id = request.tmdb_id or request.tvdb_id
+            if media_id is None:
+                return {}
             _, year = await extract_media_title_and_year(overseerr, media_type_for_api, media_id)
             if year is not None:
                 lifecycle = LifecycleService(db)
