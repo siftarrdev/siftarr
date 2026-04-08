@@ -69,7 +69,7 @@ class TVDecisionService:
                 if not episodes:
                     return {}
                 seasons = self._get_requested_seasons(request)
-                return {season: episodes for season in seasons}
+                return dict.fromkeys(seasons, episodes)
             return {}
         except (json.JSONDecodeError, TypeError, ValueError):
             return {}

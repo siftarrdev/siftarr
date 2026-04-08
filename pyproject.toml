@@ -17,11 +17,13 @@ dependencies = [
     "pydantic-settings>=2.0.0",
     "pytest>=7.0.0",
     "pytest-asyncio>=0.21.0",
+    "pytest-cov>=5.0.0",
 ]
 
 [project.optional-dependencies]
 dev = [
     "ruff>=0.6.0",
+    "ty>=0.0.29",
     "setuptools-scm>=8.0.0",
 ]
 
