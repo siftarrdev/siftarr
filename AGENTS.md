@@ -5,12 +5,7 @@ Media search and download decision middleware (FastAPI app).
 ## Dev Commands
 
 ```bash
-uv sync                    # Install dependencies
-uv run ruff format .       # Format code
-uv run ruff check .        # Lint code
-uv run ty check            # Type check
-uv run pytest              # Run tests
-
+uv sync -- extra dev       # Install dependencies
 uv run alembic upgrade head # Run database migrations
 uv run uvicorn app.siftarr.main:app --reload  # Dev server
 ```
@@ -38,14 +33,9 @@ uv run uvicorn app.siftarr.main:app --reload  # Dev server
 
 ## Docker Test Workflow
 
-When validating the app in Docker, prefer a full rebuild so code changes are definitely picked up:
-
 ```bash
-cd docker/
-docker compose down && docker compose build siftarr && docker compose up -d siftarr
+docker/rebuild-run-logs.sh
 ```
-
-This is the preferred way to run and test the app locally in Docker.
 
 ## Setup (Local)
 
@@ -53,10 +43,6 @@ This is the preferred way to run and test the app locally in Docker.
 mkdir -p data/db
 uv run alembic upgrade head
 ```
-
-## Git Workflow
-
-Always use feature branches and PRs — never push directly to `main`. All 3 CI quality gates must pass before merge.
 
 ## Quality Gates (in order)
 
@@ -66,3 +52,8 @@ uv run ruff check .
 uv run ty check
 uv run pytest
 ```
+
+## General Rules
+
+ALLWAYS use subagents where possible and practical.
+ALLWAYS use feature branches and PRs — never push directly to `main`. All 3 CI quality gates must pass before merge.
