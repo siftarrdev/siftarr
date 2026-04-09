@@ -90,11 +90,25 @@ class MovieDecisionService:
         )
 
         logger.info(
-            "Movie search response: request_id=%s total_releases=%s query_time_ms=%s",
+            "Movie search response: request_id=%s total_releases=%s query_time_ms=%s error=%s",
             request_id,
             len(search_result.releases),
             search_result.query_time_ms,
+            search_result.error,
         )
+
+        if search_result.error:
+            request.status = RequestStatus.PENDING
+            await self.db.commit()
+            queue_service = PendingQueueService(self.db)
+            await queue_service.add_to_queue(
+                request.id,
+                error_message=f"Prowlarr search failed: {search_result.error}",
+            )
+            return {
+                "status": "pending",
+                "message": f"Search failed: {search_result.error}, added to pending queue",
+            }
 
         if search_result.releases:
             indexer_counts: dict[str, int] = {}
