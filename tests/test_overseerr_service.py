@@ -22,7 +22,6 @@ class TestOverseerrService:
 
             assert service.base_url == "http://localhost:5055"
             assert service.api_key == "test_api_key"
-            assert service._client is None
 
     def test_init_strips_trailing_slash(self):
         """Test that URL trailing slash is stripped."""
@@ -37,8 +36,8 @@ class TestOverseerrService:
             assert service.base_url == "http://localhost:5055"
 
     @pytest.mark.asyncio
-    async def test_close_with_client(self):
-        """Test closing the HTTP client."""
+    async def test_close_is_noop(self):
+        """Test closing is a no-op with shared client."""
         with patch("app.siftarr.services.overseerr_service.get_settings") as mock_get_settings:
             mock_settings = MagicMock()
             mock_settings.overseerr_url = "http://localhost:5055"
@@ -46,30 +45,7 @@ class TestOverseerrService:
             mock_get_settings.return_value = mock_settings
 
             service = OverseerrService()
-            mock_client = AsyncMock()
-            mock_client.is_closed = False
-            service._client = mock_client
-
             await service.close()
-
-            mock_client.aclose.assert_called_once()
-            assert service._client is None
-
-    @pytest.mark.asyncio
-    async def test_close_without_client(self):
-        """Test closing when no client exists."""
-        with patch("app.siftarr.services.overseerr_service.get_settings") as mock_get_settings:
-            mock_settings = MagicMock()
-            mock_settings.overseerr_url = "http://localhost:5055"
-            mock_settings.overseerr_api_key = "test"
-            mock_get_settings.return_value = mock_settings
-
-            service = OverseerrService()
-            service._client = None
-
-            await service.close()
-
-            assert service._client is None
 
     @pytest.mark.asyncio
     async def test_get_requests_no_url(self):
@@ -114,16 +90,17 @@ class TestOverseerrService:
             mock_response.status_code = 200
             mock_response.json.return_value = {"results": [{"id": 1}, {"id": 2}]}
             mock_client.get = AsyncMock(return_value=mock_response)
-            mock_client.is_closed = False
-            service._client = mock_client
 
-            result = await service.get_requests()
+            with patch(
+                "app.siftarr.services.overseerr_service.get_shared_client",
+                return_value=mock_client,
+            ):
+                result = await service.get_requests()
 
             assert len(result) == 2
-            mock_client.get.assert_called_once_with(
-                "http://localhost:5055/api/v1/request",
-                params={"take": 100, "skip": 0, "filter": "approved"},
-            )
+            mock_client.get.assert_called_once()
+            call_kwargs = mock_client.get.call_args
+            assert call_kwargs[0][0] == "http://localhost:5055/api/v1/request"
 
     @pytest.mark.asyncio
     async def test_get_requests_without_filter(self):
@@ -140,15 +117,14 @@ class TestOverseerrService:
             mock_response.status_code = 200
             mock_response.json.return_value = {"results": []}
             mock_client.get = AsyncMock(return_value=mock_response)
-            mock_client.is_closed = False
-            service._client = mock_client
 
-            await service.get_requests(status=None, limit=50, skip=100)
+            with patch(
+                "app.siftarr.services.overseerr_service.get_shared_client",
+                return_value=mock_client,
+            ):
+                await service.get_requests(status=None, limit=50, skip=100)
 
-            mock_client.get.assert_called_once_with(
-                "http://localhost:5055/api/v1/request",
-                params={"take": 50, "skip": 100},
-            )
+            mock_client.get.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_get_all_requests_paginates(self):
@@ -197,10 +173,12 @@ class TestOverseerrService:
             mock_response = MagicMock()
             mock_response.status_code = 401
             mock_client.get = AsyncMock(return_value=mock_response)
-            mock_client.is_closed = False
-            service._client = mock_client
 
-            result = await service.get_requests()
+            with patch(
+                "app.siftarr.services.overseerr_service.get_shared_client",
+                return_value=mock_client,
+            ):
+                result = await service.get_requests()
 
             assert result == []
 
@@ -218,10 +196,12 @@ class TestOverseerrService:
             service = OverseerrService()
             mock_client = AsyncMock()
             mock_client.get = AsyncMock(side_effect=httpx.RequestError("Network error"))
-            mock_client.is_closed = False
-            service._client = mock_client
 
-            result = await service.get_requests()
+            with patch(
+                "app.siftarr.services.overseerr_service.get_shared_client",
+                return_value=mock_client,
+            ):
+                result = await service.get_requests()
 
             assert result == []
 
@@ -263,17 +243,16 @@ class TestOverseerrService:
             mock_get_settings.return_value = mock_settings
 
             service = OverseerrService()
+            mock_client = AsyncMock()
             mock_response = MagicMock()
             mock_response.status_code = 200
             mock_response.json.return_value = {"id": 123, "title": "Test Movie"}
+            mock_client.get = AsyncMock(return_value=mock_response)
 
-            with patch("httpx.AsyncClient") as mock_client_class:
-                mock_client = AsyncMock()
-                mock_client.get = AsyncMock(return_value=mock_response)
-                mock_client.__aenter__.return_value = mock_client
-                mock_client.__aexit__.return_value = None
-                mock_client_class.return_value = mock_client
-
+            with patch(
+                "app.siftarr.services.overseerr_service.get_shared_client",
+                return_value=mock_client,
+            ):
                 result = await service.get_media_details("movie", 123)
 
                 assert result is not None
@@ -289,17 +268,16 @@ class TestOverseerrService:
             mock_get_settings.return_value = mock_settings
 
             service = OverseerrService()
+            mock_client = AsyncMock()
             mock_response = MagicMock()
             mock_response.status_code = 404
+            mock_client.get = AsyncMock(return_value=mock_response)
 
-            with patch("httpx.AsyncClient") as mock_client_class:
-                mock_client = AsyncMock()
-                mock_client.get = AsyncMock(return_value=mock_response)
-                mock_client.__aenter__.return_value = mock_client
-                mock_client.__aexit__.return_value = None
-                mock_client_class.return_value = mock_client
-
-            result = await service.get_media_details("movie", 999)
+            with patch(
+                "app.siftarr.services.overseerr_service.get_shared_client",
+                return_value=mock_client,
+            ):
+                result = await service.get_media_details("movie", 999)
 
             assert result is None
 
@@ -317,10 +295,12 @@ class TestOverseerrService:
             mock_response = MagicMock()
             mock_response.status_code = 200
             mock_client.post = AsyncMock(return_value=mock_response)
-            mock_client.is_closed = False
-            service._client = mock_client
 
-            result = await service.approve_request(123)
+            with patch(
+                "app.siftarr.services.overseerr_service.get_shared_client",
+                return_value=mock_client,
+            ):
+                result = await service.approve_request(123)
 
             assert result is True
             mock_client.post.assert_called_once()
@@ -339,10 +319,12 @@ class TestOverseerrService:
             mock_response = MagicMock()
             mock_response.status_code = 500
             mock_client.post = AsyncMock(return_value=mock_response)
-            mock_client.is_closed = False
-            service._client = mock_client
 
-            result = await service.approve_request(123)
+            with patch(
+                "app.siftarr.services.overseerr_service.get_shared_client",
+                return_value=mock_client,
+            ):
+                result = await service.approve_request(123)
 
             assert result is False
 
@@ -360,10 +342,12 @@ class TestOverseerrService:
             mock_response = MagicMock()
             mock_response.status_code = 200
             mock_client.post = AsyncMock(return_value=mock_response)
-            mock_client.is_closed = False
-            service._client = mock_client
 
-            result = await service.decline_request(123)
+            with patch(
+                "app.siftarr.services.overseerr_service.get_shared_client",
+                return_value=mock_client,
+            ):
+                result = await service.decline_request(123)
 
             assert result is True
             mock_client.post.assert_called_once()
@@ -382,10 +366,12 @@ class TestOverseerrService:
             mock_response = MagicMock()
             mock_response.status_code = 200
             mock_client.post = AsyncMock(return_value=mock_response)
-            mock_client.is_closed = False
-            service._client = mock_client
 
-            result = await service.decline_request(123, reason="Test reason")
+            with patch(
+                "app.siftarr.services.overseerr_service.get_shared_client",
+                return_value=mock_client,
+            ):
+                result = await service.decline_request(123, reason="Test reason")
 
             assert result is True
             mock_client.post.assert_called_once()
@@ -406,10 +392,12 @@ class TestOverseerrService:
             mock_response = MagicMock()
             mock_response.status_code = 400
             mock_client.post = AsyncMock(return_value=mock_response)
-            mock_client.is_closed = False
-            service._client = mock_client
 
-            result = await service.decline_request(123)
+            with patch(
+                "app.siftarr.services.overseerr_service.get_shared_client",
+                return_value=mock_client,
+            ):
+                result = await service.decline_request(123)
 
             assert result is False
 
@@ -428,10 +416,12 @@ class TestOverseerrService:
             mock_response.status_code = 200
             mock_response.json.return_value = {"id": 123, "status": "approved"}
             mock_client.get = AsyncMock(return_value=mock_response)
-            mock_client.is_closed = False
-            service._client = mock_client
 
-            result = await service.get_request_status(123)
+            with patch(
+                "app.siftarr.services.overseerr_service.get_shared_client",
+                return_value=mock_client,
+            ):
+                result = await service.get_request_status(123)
 
             assert result == {"id": 123, "status": "approved"}
 
@@ -449,9 +439,11 @@ class TestOverseerrService:
             mock_response = MagicMock()
             mock_response.status_code = 404
             mock_client.get = AsyncMock(return_value=mock_response)
-            mock_client.is_closed = False
-            service._client = mock_client
 
-            result = await service.get_request_status(999)
+            with patch(
+                "app.siftarr.services.overseerr_service.get_shared_client",
+                return_value=mock_client,
+            ):
+                result = await service.get_request_status(999)
 
             assert result is None

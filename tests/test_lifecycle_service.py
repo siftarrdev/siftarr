@@ -152,15 +152,13 @@ class TestLifecycleService:
 
     @pytest.mark.asyncio
     async def test_get_requests_stats(self, mock_db, service):
-        """Test getting request statistics."""
-        mock_requests = [
-            MagicMock(spec=Request, status=RequestStatus.COMPLETED),
-            MagicMock(spec=Request, status=RequestStatus.COMPLETED),
-            MagicMock(spec=Request, status=RequestStatus.PENDING),
-            MagicMock(spec=Request, status=RequestStatus.FAILED),
-        ]
+        """Test getting request statistics using SQL aggregates."""
         mock_result = MagicMock()
-        mock_result.scalars.return_value.all.return_value = mock_requests
+        mock_result.all.return_value = [
+            (RequestStatus.COMPLETED, 2),
+            (RequestStatus.PENDING, 1),
+            (RequestStatus.FAILED, 1),
+        ]
         mock_db.execute.return_value = mock_result
 
         result = await service.get_requests_stats()

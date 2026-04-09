@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, Form, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.siftarr.config import Settings
@@ -113,14 +113,15 @@ async def get_settings_page(
     ready = await queue_service.get_ready_for_retry()
     pending_count = len(ready)
 
-    # Get request stats
-    result = await db.execute(select(RequestModel))
-    all_requests = list(result.scalars().all())
-
-    total_requests = len(all_requests)
-    completed = sum(1 for r in all_requests if r.status == RequestStatus.COMPLETED)
-    pending = sum(1 for r in all_requests if r.status == RequestStatus.PENDING)
-    failed = sum(1 for r in all_requests if r.status == RequestStatus.FAILED)
+    # Get request stats using SQL aggregates
+    status_counts = (
+        await db.execute(select(RequestModel.status, func.count()).group_by(RequestModel.status))
+    ).all()
+    stats_by_status = {s.value: c for s, c in status_counts}
+    total_requests = sum(stats_by_status.values())
+    completed = stats_by_status.get(RequestStatus.COMPLETED.value, 0)
+    pending = stats_by_status.get(RequestStatus.PENDING.value, 0)
+    failed = stats_by_status.get(RequestStatus.FAILED.value, 0)
 
     return templates.TemplateResponse(
         request,
@@ -332,14 +333,15 @@ async def sync_overseerr(
     ready = await queue_service.get_ready_for_retry()
     pending_count = len(ready)
 
-    # Get request stats
-    result = await db.execute(select(RequestModel))
-    all_requests = list(result.scalars().all())
-
-    total_requests = len(all_requests)
-    completed = sum(1 for r in all_requests if r.status == RequestStatus.COMPLETED)
-    pending = sum(1 for r in all_requests if r.status == RequestStatus.PENDING)
-    failed = sum(1 for r in all_requests if r.status == RequestStatus.FAILED)
+    # Get request stats using SQL aggregates
+    status_counts = (
+        await db.execute(select(RequestModel.status, func.count()).group_by(RequestModel.status))
+    ).all()
+    stats_by_status = {s.value: c for s, c in status_counts}
+    total_requests = sum(stats_by_status.values())
+    completed = stats_by_status.get(RequestStatus.COMPLETED.value, 0)
+    pending = stats_by_status.get(RequestStatus.PENDING.value, 0)
+    failed = stats_by_status.get(RequestStatus.FAILED.value, 0)
 
     # Sync logic
     message = "Overseerr sync completed"

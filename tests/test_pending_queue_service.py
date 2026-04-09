@@ -241,16 +241,16 @@ class TestPendingQueueService:
 
     @pytest.mark.asyncio
     async def test_get_queue_stats(self, mock_db, service):
-        """Test getting queue statistics."""
+        """Test getting queue statistics using SQL aggregates."""
         now = datetime.now(UTC)
-        mock_entries = [
-            MagicMock(spec=PendingQueue, next_retry_at=now - timedelta(hours=1)),
-            MagicMock(spec=PendingQueue, next_retry_at=now - timedelta(hours=2)),
-            MagicMock(spec=PendingQueue, next_retry_at=now + timedelta(hours=1)),
-        ]
-        mock_result = MagicMock()
-        mock_result.scalars.return_value.all.return_value = mock_entries
-        mock_db.execute.return_value = mock_result
+        total_result = MagicMock()
+        total_result.scalar.return_value = 3
+        ready_result = MagicMock()
+        ready_result.scalar.return_value = 2
+        oldest_result = MagicMock()
+        oldest_result.scalar.return_value = now - timedelta(hours=2)
+
+        mock_db.execute.side_effect = [total_result, ready_result, oldest_result]
 
         result = await service.get_queue_stats()
 
@@ -262,9 +262,14 @@ class TestPendingQueueService:
     @pytest.mark.asyncio
     async def test_get_queue_stats_empty(self, mock_db, service):
         """Test getting stats for empty queue."""
-        mock_result = MagicMock()
-        mock_result.scalars.return_value.all.return_value = []
-        mock_db.execute.return_value = mock_result
+        total_result = MagicMock()
+        total_result.scalar.return_value = 0
+        ready_result = MagicMock()
+        ready_result.scalar.return_value = 0
+        oldest_result = MagicMock()
+        oldest_result.scalar.return_value = None
+
+        mock_db.execute.side_effect = [total_result, ready_result, oldest_result]
 
         result = await service.get_queue_stats()
 

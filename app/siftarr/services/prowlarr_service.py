@@ -7,6 +7,7 @@ import httpx
 from pydantic import BaseModel
 
 from app.siftarr.config import Settings, get_settings
+from app.siftarr.services.http_client import get_shared_client
 
 logger = logging.getLogger(__name__)
 
@@ -146,40 +147,40 @@ class ProwlarrService:
 
         releases = []
         error_message = None
-        async with httpx.AsyncClient() as client:
-            try:
-                response = await client.get(
-                    endpoint,
-                    headers=headers,
-                    params=params,
-                    timeout=60.0,
-                )
-                if response.status_code == 200:
-                    results = response.json()
-                    for release_data in self._extract_release_items(results):
-                        releases.append(self._parse_release_info(release_data))
-                    logger.info(
-                        "Prowlarr search response: type=%s query=%s releases=%s elapsed_ms=%s",
-                        params.get("type"),
-                        params.get("query"),
-                        len(releases),
-                        int((time.time() - start_time) * 1000),
-                    )
-                else:
-                    error_message = f"HTTP {response.status_code}"
-                    logger.warning(
-                        "Prowlarr search failed: type=%s query=%s status_code=%s",
-                        params.get("type"),
-                        params.get("query"),
-                        response.status_code,
-                    )
-            except httpx.RequestError as e:
-                error_message = f"Request error: {e}"
-                logger.exception(
-                    "Prowlarr search request error: type=%s query=%s",
+        client = await get_shared_client()
+        try:
+            response = await client.get(
+                endpoint,
+                headers=headers,
+                params=params,
+                timeout=60.0,
+            )
+            if response.status_code == 200:
+                results = response.json()
+                for release_data in self._extract_release_items(results):
+                    releases.append(self._parse_release_info(release_data))
+                logger.info(
+                    "Prowlarr search response: type=%s query=%s releases=%s elapsed_ms=%s",
                     params.get("type"),
                     params.get("query"),
+                    len(releases),
+                    int((time.time() - start_time) * 1000),
                 )
+            else:
+                error_message = f"HTTP {response.status_code}"
+                logger.warning(
+                    "Prowlarr search failed: type=%s query=%s status_code=%s",
+                    params.get("type"),
+                    params.get("query"),
+                    response.status_code,
+                )
+        except httpx.RequestError as e:
+            error_message = f"Request error: {e}"
+            logger.exception(
+                "Prowlarr search request error: type=%s query=%s",
+                params.get("type"),
+                params.get("query"),
+            )
 
         return ProwlarrSearchResult(
             releases=releases,

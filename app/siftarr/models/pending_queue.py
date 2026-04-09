@@ -3,7 +3,7 @@
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
-from sqlalchemy import DateTime, ForeignKey, Integer, String
+from sqlalchemy import DateTime, ForeignKey, Index, Integer, String
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.siftarr.models._base import Base  # noqa: PLC0414
@@ -19,6 +19,7 @@ def _utc_now() -> datetime:
 
 class PendingQueue(Base):
     __tablename__ = "pending_queue"
+    __table_args__ = (Index("ix_pending_queue_next_retry_at", "next_retry_at"),)
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     request_id: Mapped[int] = mapped_column(

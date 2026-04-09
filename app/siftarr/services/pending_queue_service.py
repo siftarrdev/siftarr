@@ -1,6 +1,6 @@
 from datetime import UTC, datetime, timedelta
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.siftarr.models.pending_queue import PendingQueue
@@ -145,17 +145,22 @@ class PendingQueueService:
         return True
 
     async def get_queue_stats(self) -> dict:
-        """Get statistics about the pending queue."""
-        result = await self.db.execute(select(PendingQueue))
-        all_items = list(result.scalars().all())
+        """Get statistics about the pending queue using SQL aggregates."""
         now = datetime.now(UTC)
+        total_result = await self.db.execute(select(func.count()).select_from(PendingQueue))
+        total = total_result.scalar() or 0
 
-        ready = [i for i in all_items if i.next_retry_at <= now]
-        waiting = [i for i in all_items if i.next_retry_at > now]
+        ready_result = await self.db.execute(
+            select(func.count()).select_from(PendingQueue).where(PendingQueue.next_retry_at <= now)
+        )
+        ready = ready_result.scalar() or 0
+
+        oldest_result = await self.db.execute(select(func.min(PendingQueue.next_retry_at)))
+        oldest = oldest_result.scalar()
 
         return {
-            "total_pending": len(all_items),
-            "ready_for_retry": len(ready),
-            "waiting_for_retry": len(waiting),
-            "oldest_pending": min(i.next_retry_at for i in all_items) if all_items else None,
+            "total_pending": total,
+            "ready_for_retry": ready,
+            "waiting_for_retry": total - ready,
+            "oldest_pending": oldest,
         }

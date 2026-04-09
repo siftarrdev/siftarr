@@ -3,7 +3,7 @@
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
-from sqlalchemy import BigInteger, Boolean, DateTime, ForeignKey, Integer, String, Text
+from sqlalchemy import BigInteger, Boolean, DateTime, ForeignKey, Index, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.siftarr.models._base import Base  # noqa: PLC0414
@@ -19,6 +19,10 @@ def _utc_now() -> datetime:
 
 class Release(Base):
     __tablename__ = "releases"
+    __table_args__ = (
+        Index("ix_releases_request_id", "request_id"),
+        Index("ix_releases_score", "score"),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     request_id: Mapped[int] = mapped_column(ForeignKey("requests.id"), nullable=False)

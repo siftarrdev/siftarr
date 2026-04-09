@@ -1,4 +1,5 @@
 import re
+from contextlib import suppress
 from dataclasses import dataclass
 
 from app.siftarr.services.prowlarr_service import ProwlarrRelease
@@ -48,6 +49,28 @@ class RuleEngine:
         self.exclusion_patterns = exclusion_patterns or []
         self.requirement_patterns = requirement_patterns or []
         self.scorer_patterns = scorer_patterns or []
+
+        self._compiled_exclusion: list[tuple[int, str, re.Pattern[str]]] = []
+        self._compiled_requirement: list[tuple[int, str, re.Pattern[str]]] = []
+        self._compiled_scorer: list[tuple[int, str, re.Pattern[str], int]] = []
+
+        for rule_id, rule_name, pattern in self.exclusion_patterns:
+            with suppress(re.error):
+                self._compiled_exclusion.append(
+                    (rule_id, rule_name, re.compile(pattern, re.IGNORECASE))
+                )
+
+        for rule_id, rule_name, pattern in self.requirement_patterns:
+            with suppress(re.error):
+                self._compiled_requirement.append(
+                    (rule_id, rule_name, re.compile(pattern, re.IGNORECASE))
+                )
+
+        for rule_id, rule_name, pattern, score in self.scorer_patterns:
+            with suppress(re.error):
+                self._compiled_scorer.append(
+                    (rule_id, rule_name, re.compile(pattern, re.IGNORECASE), score)
+                )
 
     @staticmethod
     def _scope_matches(rule_scope: str, media_type: str | None) -> bool:
@@ -164,28 +187,19 @@ class RuleEngine:
             )
 
         # Check exclusion patterns (reject immediately)
-        for rule_id, rule_name, pattern in self.exclusion_patterns:
-            try:
-                if re.search(pattern, release.title, re.IGNORECASE):
-                    passed = False
-                    rejection_reason = f"Matched exclusion pattern: {rule_name}"
-                    matches.append(
-                        RuleMatch(
-                            rule_id=rule_id,
-                            rule_name=rule_name,
-                            matched=True,
-                        )
+        for rule_id, rule_name, compiled in self._compiled_exclusion:
+            if compiled.search(release.title):
+                passed = False
+                rejection_reason = f"Matched exclusion pattern: {rule_name}"
+                matches.append(
+                    RuleMatch(
+                        rule_id=rule_id,
+                        rule_name=rule_name,
+                        matched=True,
                     )
-                    break
-                else:
-                    matches.append(
-                        RuleMatch(
-                            rule_id=rule_id,
-                            rule_name=rule_name,
-                            matched=False,
-                        )
-                    )
-            except re.error:
+                )
+                break
+            else:
                 matches.append(
                     RuleMatch(
                         rule_id=rule_id,
@@ -195,28 +209,19 @@ class RuleEngine:
                 )
 
         # Check requirement patterns (all must match at least one)
-        if passed and self.requirement_patterns:
+        if passed and self._compiled_requirement:
             any_matched = False
-            for rule_id, rule_name, pattern in self.requirement_patterns:
-                try:
-                    if re.search(pattern, release.title, re.IGNORECASE):
-                        any_matched = True
-                        matches.append(
-                            RuleMatch(
-                                rule_id=rule_id,
-                                rule_name=rule_name,
-                                matched=True,
-                            )
+            for rule_id, rule_name, compiled in self._compiled_requirement:
+                if compiled.search(release.title):
+                    any_matched = True
+                    matches.append(
+                        RuleMatch(
+                            rule_id=rule_id,
+                            rule_name=rule_name,
+                            matched=True,
                         )
-                    else:
-                        matches.append(
-                            RuleMatch(
-                                rule_id=rule_id,
-                                rule_name=rule_name,
-                                matched=False,
-                            )
-                        )
-                except re.error:
+                    )
+                else:
                     matches.append(
                         RuleMatch(
                             rule_id=rule_id,
@@ -230,27 +235,18 @@ class RuleEngine:
                 rejection_reason = "No requirement patterns matched"
 
         # Calculate score for scorer patterns
-        for rule_id, rule_name, pattern, score in self.scorer_patterns:
-            try:
-                if re.search(pattern, release.title, re.IGNORECASE):
-                    total_score += score
-                    matches.append(
-                        RuleMatch(
-                            rule_id=rule_id,
-                            rule_name=rule_name,
-                            matched=True,
-                            score_delta=score,
-                        )
+        for rule_id, rule_name, compiled, score in self._compiled_scorer:
+            if compiled.search(release.title):
+                total_score += score
+                matches.append(
+                    RuleMatch(
+                        rule_id=rule_id,
+                        rule_name=rule_name,
+                        matched=True,
+                        score_delta=score,
                     )
-                else:
-                    matches.append(
-                        RuleMatch(
-                            rule_id=rule_id,
-                            rule_name=rule_name,
-                            matched=False,
-                        )
-                    )
-            except re.error:
+                )
+            else:
                 matches.append(
                     RuleMatch(
                         rule_id=rule_id,

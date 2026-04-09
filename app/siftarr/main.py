@@ -15,6 +15,7 @@ from fastapi.staticfiles import StaticFiles
 from app.siftarr.config import get_settings
 from app.siftarr.database import async_session_maker, init_db
 from app.siftarr.routers import dashboard, rules, settings, staged, webhooks
+from app.siftarr.services.http_client import close_shared_client
 from app.siftarr.services.scheduler_service import SchedulerService
 from app.siftarr.version import __version__
 
@@ -241,6 +242,7 @@ async def lifespan(app: FastAPI):
     scheduler_service = SchedulerService(async_session_maker, logger=logger)
     scheduler_service.start()
     yield
+    await close_shared_client()
     if scheduler_service:
         scheduler_service.stop()
         logger.info("Siftarr shutdown complete")
