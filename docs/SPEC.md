@@ -20,7 +20,7 @@ A single mount point `/data` must contain:
 
 ### 3.2 Environment Variables
 Configuration is handled strictly via environment variables. The app should read these on startup.
-* **System:** `TZ`, `PUID` (e.g., 568), `PGID` (e.g., 568) to ensure compatibility with file ACLs.
+* **System:** `TZ`, `PUID` (e.g., 1000), `PGID` (e.g., 1000) to ensure compatibility with file ACLs.
 * **Overseerr:** `OVERSEERR_URL`, `OVERSEERR_API_KEY`
 * **Prowlarr:** `PROWLARR_URL`, `PROWLARR_API_KEY`
 * **qBittorrent:** `QBITTORRENT_URL`, `QBITTORRENT_USERNAME`, `QBITTORRENT_PASSWORD`
