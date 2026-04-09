@@ -1,5 +1,6 @@
 """Helpers for persisting and using searched releases."""
 
+import logging
 from datetime import UTC, datetime
 
 from sqlalchemy import delete, select
@@ -14,6 +15,8 @@ from app.siftarr.services.qbittorrent_service import MediaCategory, QbittorrentS
 from app.siftarr.services.rule_engine import ReleaseEvaluation
 from app.siftarr.services.runtime_settings import get_effective_settings
 from app.siftarr.services.staging_service import StagingService
+
+logger = logging.getLogger(__name__)
 
 
 def build_prowlarr_release(release: Release) -> ProwlarrRelease:
@@ -106,6 +109,13 @@ async def use_releases(
     selection_source: str = "manual",
 ) -> dict[str, object]:
     """Stage or send one or more stored releases for a request."""
+    logger.info(
+        "use_releases called: request_id=%s release_count=%s selection_source=%s",
+        request.id,
+        len(releases),
+        selection_source,
+    )
+
     runtime_settings = await get_effective_settings(db)
     queue_service = PendingQueueService(db)
     usable_releases = [release for release in releases if release is not None]
@@ -135,9 +145,21 @@ async def use_releases(
                 selection_source=selection_source,
             )
             staged_ids.append(staged.id)
+            logger.info(
+                "Release staged: request_id=%s title=%s staged_id=%s score=%s",
+                request.id,
+                release.title,
+                staged.id,
+                release.score,
+            )
 
         await _set_request_status(db, request, RequestStatus.STAGED)
         await queue_service.remove_from_queue(request.id)
+        logger.info(
+            "Request staged: request_id=%s staged_count=%s",
+            request.id,
+            len(staged_ids),
+        )
         return {
             "status": "staged",
             "message": f"Staged {len(staged_ids)} release(s) for approval.",
@@ -161,10 +183,22 @@ async def use_releases(
         release.is_downloaded = True
         release.downloaded_at = datetime.now(UTC)
         added_hashes.append(torrent_hash)
+        logger.info(
+            "Torrent sent to qBittorrent: request_id=%s title=%s hash=%s category=%s",
+            request.id,
+            release.title,
+            torrent_hash,
+            _get_media_category(request).value,
+        )
 
     await db.commit()
     await _set_request_status(db, request, RequestStatus.DOWNLOADING)
     await queue_service.remove_from_queue(request.id)
+    logger.info(
+        "Request downloading: request_id=%s torrent_count=%s",
+        request.id,
+        len(added_hashes),
+    )
     return {
         "status": "downloading",
         "message": f"Sent {len(added_hashes)} release(s) to qBittorrent.",

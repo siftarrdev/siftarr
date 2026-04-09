@@ -8,8 +8,6 @@
 ## Project quality improvements
 - Refactor the codebase to improve readability and maintainability, including better separation of concerns and
 more consistent coding style
-- implement CI/CD pipeline to automate testing and deployment processes, ensuring that new features and bug fixes are delivered more quickly and reliably
-- Add logging and monitoring to the application to help identify and troubleshoot issues in production, including error tracking and performance monitoring tools
 - Implement a more robust error handling strategy to ensure that the application can gracefully handle unexpected errors and provide useful feedback to users when issues occur
 
 ## Bugs

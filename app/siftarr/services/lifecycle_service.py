@@ -1,9 +1,12 @@
+import logging
 from datetime import UTC, datetime
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.siftarr.models.request import Request, RequestStatus
+
+logger = logging.getLogger(__name__)
 
 
 class LifecycleService:
@@ -79,8 +82,9 @@ class LifecycleService:
         if not request:
             return None
 
-        if not self.can_transition(request.status, new_status):
-            raise ValueError(f"Invalid transition from {request.status} to {new_status}")
+        old_status = request.status
+        if not self.can_transition(old_status, new_status):
+            raise ValueError(f"Invalid transition from {old_status} to {new_status}")
 
         request.status = new_status
         if reason is not None:
@@ -88,6 +92,14 @@ class LifecycleService:
         request.updated_at = datetime.now(UTC)
         await self.db.commit()
         await self.db.refresh(request)
+
+        logger.info(
+            "Request state transition: request_id=%s %s -> %s%s",
+            request_id,
+            old_status.value,
+            new_status.value,
+            f" (reason: {reason})" if reason else "",
+        )
 
         return request
 
