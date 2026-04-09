@@ -7,29 +7,29 @@
 {% set is_size_limit = current_type == 'size_limit' %}
 <div class="max-w-2xl">
     <div class="mb-6">
-        <a href="/rules" class="text-gray-400 hover:text-white text-sm inline-flex items-center gap-1">
+        <a href="/rules" class="text-gray-500 hover:text-white text-sm inline-flex items-center gap-1 transition-colors">
             <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"></path></svg>
             Back to Rules
         </a>
-        <h1 class="text-2xl font-bold mt-2">{{ 'Edit' if rule else 'New' }} Rule</h1>
+        <h1 class="page-title mt-2">{{ 'Edit' if rule else 'New' }} Rule</h1>
     </div>
 
-    <form action="{{ action }}" method="post" class="space-y-6 bg-gray-800 rounded-lg border border-gray-700 p-6">
+    <form action="{{ action }}" method="post" class="space-y-6 card p-6">
         <div>
-            <label class="block text-sm font-medium text-gray-300">Rule Name</label>
-            <input type="text" name="name" value="{{ rule.name if rule else ('Size Limits' if is_size_limit else '') }}" required class="mt-1 bg-gray-700 border border-gray-600 rounded-md px-4 py-2 text-white w-full" placeholder="e.g., Reject Camera/TS, Prefer HEVC, TV Episode Sizes">
+            <label class="form-label">Rule Name</label>
+            <input type="text" name="name" value="{{ rule.name if rule else ('Size Limits' if is_size_limit else '') }}" required class="form-input" placeholder="e.g., Reject Camera/TS, Prefer HEVC, TV Episode Sizes">
         </div>
 
         {% if not rule %}
         <div>
-            <label class="block text-sm font-medium text-gray-300">Rule Type</label>
-            <select name="rule_type" required class="mt-1 bg-gray-700 border border-gray-600 rounded-md px-4 py-2 text-white w-full">
+            <label class="form-label">Rule Type</label>
+            <select name="rule_type" required class="form-select">
                 <option value="exclusion" {% if default_type == 'exclusion' %}selected{% endif %}>Exclusion (Auto-reject)</option>
                 <option value="requirement" {% if default_type == 'requirement' %}selected{% endif %}>Requirement (Must match)</option>
                 <option value="scorer" {% if default_type == 'scorer' %}selected{% endif %}>Scorer (Add points)</option>
                 <option value="size_limit" {% if default_type == 'size_limit' %}selected{% endif %}>Size Limit (Min/Max GB)</option>
             </select>
-            <p class="mt-1 text-xs text-gray-400">
+            <p class="mt-1.5 text-xs text-gray-500">
                 {% if default_type == 'exclusion' %}Releases matching this pattern will be rejected.
                 {% elif default_type == 'requirement' %}Releases must match this pattern to pass.
                 {% elif default_type == 'scorer' %}Matching releases get bonus points added to their score.
@@ -39,20 +39,20 @@
         </div>
         {% else %}
         <div>
-            <label class="block text-sm font-medium text-gray-300">Rule Type</label>
-            <div class="mt-1 px-4 py-2 bg-gray-700/50 border border-gray-600 rounded-md text-gray-300 capitalize">{{ rule.rule_type.value.replace('_', ' ') }}</div>
-            <p class="mt-1 text-xs text-gray-400">Rule type cannot be changed after creation.</p>
+            <label class="form-label">Rule Type</label>
+            <div class="mt-1 px-3.5 py-2 bg-surface-850 border border-gray-700/60 rounded-lg text-gray-400 text-sm capitalize">{{ rule.rule_type.value.replace('_', ' ') }}</div>
+            <p class="mt-1.5 text-xs text-gray-500">Rule type cannot be changed after creation.</p>
         </div>
         {% endif %}
 
         <div>
-            <label class="block text-sm font-medium text-gray-300">Applies To</label>
-            <select name="media_scope" required class="mt-1 bg-gray-700 border border-gray-600 rounded-md px-4 py-2 text-white w-full">
+            <label class="form-label">Applies To</label>
+            <select name="media_scope" required class="form-select">
                 <option value="both" {% if (rule and rule.media_scope == 'both') or (not rule) %}selected{% endif %}>Movies and TV</option>
                 <option value="movie" {% if rule and rule.media_scope == 'movie' %}selected{% endif %}>Movies only</option>
                 <option value="tv" {% if rule and rule.media_scope == 'tv' %}selected{% endif %}>TV only</option>
             </select>
-            <p class="mt-1 text-xs text-gray-400">Choose whether this rule applies to movies, TV shows, or both.</p>
+            <p class="mt-1.5 text-xs text-gray-500">Choose whether this rule applies to movies, TV shows, or both.</p>
         </div>
 
         {% if is_size_limit %}
@@ -60,38 +60,38 @@
         <input type="hidden" name="score" value="0">
         <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
-                <label class="block text-sm font-medium text-gray-300">Minimum Size (GB)</label>
-                <input type="number" name="min_size_gb" value="{{ rule.min_size_gb if rule and rule.min_size_gb is not none else '' }}" step="0.1" min="0" class="mt-1 bg-gray-700 border border-gray-600 rounded-md px-4 py-2 text-white w-full" placeholder="e.g. 1.5">
-                <p class="mt-1 text-xs text-gray-400">Optional. Leave blank for no minimum.</p>
+                <label class="form-label">Minimum Size (GB)</label>
+                <input type="number" name="min_size_gb" value="{{ rule.min_size_gb if rule and rule.min_size_gb is not none else '' }}" step="0.1" min="0" class="form-input" placeholder="e.g. 1.5">
+                <p class="mt-1.5 text-xs text-gray-500">Optional. Leave blank for no minimum.</p>
             </div>
             <div>
-                <label class="block text-sm font-medium text-gray-300">Maximum Size (GB)</label>
-                <input type="number" name="max_size_gb" value="{{ rule.max_size_gb if rule and rule.max_size_gb is not none else '' }}" step="0.1" min="0" class="mt-1 bg-gray-700 border border-gray-600 rounded-md px-4 py-2 text-white w-full" placeholder="e.g. 20">
-                <p class="mt-1 text-xs text-gray-400">Optional. Leave blank for no maximum.</p>
+                <label class="form-label">Maximum Size (GB)</label>
+                <input type="number" name="max_size_gb" value="{{ rule.max_size_gb if rule and rule.max_size_gb is not none else '' }}" step="0.1" min="0" class="form-input" placeholder="e.g. 20">
+                <p class="mt-1.5 text-xs text-gray-500">Optional. Leave blank for no maximum.</p>
             </div>
         </div>
         {% else %}
         <div>
-            <label class="block text-sm font-medium text-gray-300">Regex Pattern</label>
-            <input type="text" name="pattern" value="{{ rule.pattern if rule else '' }}" required placeholder="e.g., CAM|TS|HDCAM" class="mt-1 bg-gray-700 border border-gray-600 rounded-md px-4 py-2 text-white w-full font-mono">
-            <p class="mt-1 text-xs text-gray-400">Use | for OR, .* for wildcards. Case-insensitive matching.</p>
+            <label class="form-label">Regex Pattern</label>
+            <input type="text" name="pattern" value="{{ rule.pattern if rule else '' }}" required placeholder="e.g., CAM|TS|HDCAM" class="form-input font-mono">
+            <p class="mt-1.5 text-xs text-gray-500">Use | for OR, .* for wildcards. Case-insensitive matching.</p>
         </div>
 
         <div>
-            <label class="block text-sm font-medium text-gray-300">Score</label>
-            <input type="number" name="score" value="{{ rule.score if rule else 0 }}" min="0" class="mt-1 bg-gray-700 border border-gray-600 rounded-md px-4 py-2 text-white w-32">
-            <p class="mt-1 text-xs text-gray-400">Points added when this rule matches (used by scorer rules).</p>
+            <label class="form-label">Score</label>
+            <input type="number" name="score" value="{{ rule.score if rule else 0 }}" min="0" class="form-input w-32">
+            <p class="mt-1.5 text-xs text-gray-500">Points added when this rule matches (used by scorer rules).</p>
         </div>
         {% endif %}
 
         <div>
-            <label class="block text-sm font-medium text-gray-300">Description (optional)</label>
-            <textarea name="description" rows="2" placeholder="Explain what this rule does..." class="mt-1 bg-gray-700 border border-gray-600 rounded-md px-4 py-2 text-white w-full">{{ rule.description if rule else '' }}</textarea>
+            <label class="form-label">Description (optional)</label>
+            <textarea name="description" rows="2" placeholder="Explain what this rule does..." class="form-input">{{ rule.description if rule else '' }}</textarea>
         </div>
 
         <div class="flex gap-4 pt-2">
-            <button type="submit" class="bg-blue-600 hover:bg-blue-700 text-white px-6 py-2 rounded-md text-sm font-medium">{{ 'Update' if rule else 'Create' }} Rule</button>
-            <a href="/rules" class="bg-gray-700 hover:bg-gray-600 text-white px-6 py-2 rounded-md text-sm font-medium">Cancel</a>
+            <button type="submit" class="btn-primary">{{ 'Update' if rule else 'Create' }} Rule</button>
+            <a href="/rules" class="btn-ghost">Cancel</a>
         </div>
     </form>
 </div>
