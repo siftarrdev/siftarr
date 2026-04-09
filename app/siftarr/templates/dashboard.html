@@ -481,7 +481,22 @@ table.data-resizable td {
                 <h2 id="request-details-title" class="text-xl font-semibold text-white">Request Details</h2>
                 <p id="request-details-meta" class="text-sm text-gray-400 mt-0.5"></p>
             </div>
-            <button onclick="closeRequestDetails()" class="text-gray-500 hover:text-white text-2xl leading-none p-1 rounded-lg hover:bg-gray-700/50 transition-colors">&times;</button>
+            <div class="flex items-center gap-3">
+                <div class="flex items-center gap-1 mr-2">
+                    <button id="details-prev-btn" onclick="navigateDetails(-1)"
+                        class="px-3 py-1.5 text-sm text-gray-400 hover:text-white hover:bg-gray-700/50 rounded-lg transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+                        title="Previous title (← arrow key)">
+                        ← Prev
+                    </button>
+                    <span id="details-position" class="text-xs text-gray-500 px-2">- of -</span>
+                    <button id="details-next-btn" onclick="navigateDetails(1)"
+                        class="px-3 py-1.5 text-sm text-gray-400 hover:text-white hover:bg-gray-700/50 rounded-lg transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+                        title="Next title (→ arrow key)">
+                        Next →
+                    </button>
+                </div>
+                <button onclick="closeRequestDetails()" class="text-gray-500 hover:text-white text-2xl leading-none p-1 rounded-lg hover:bg-gray-700/50 transition-colors">&times;</button>
+            </div>
         </div>
         <div class="grid md:grid-cols-[240px_1fr] gap-6 p-6 overflow-y-auto flex-1">
             <div class="relative">
