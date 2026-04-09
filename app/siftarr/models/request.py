@@ -4,7 +4,7 @@ import enum
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
-from sqlalchemy import DateTime, Integer, String
+from sqlalchemy import DateTime, Index, Integer, String
 from sqlalchemy import Enum as SQLEnum
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -37,6 +37,11 @@ class RequestStatus(enum.StrEnum):
 
 class Request(Base):
     __tablename__ = "requests"
+    __table_args__ = (
+        Index("ix_requests_status", "status"),
+        Index("ix_requests_media_type", "media_type"),
+        Index("ix_requests_created_at", "created_at"),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     external_id: Mapped[str] = mapped_column(String(255), unique=True, nullable=False)
