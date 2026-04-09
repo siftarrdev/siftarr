@@ -95,17 +95,9 @@ class EpisodeSyncService:
 
             episodes_data = season_info.get("episodes", [])
             if not episodes_data:
-                episode_details = await self.overseerr.get_media_details(
-                    media_type_for_api, external_id
-                )
-                season_detail = None
-                if episode_details:
-                    for s in episode_details.get("seasons", []):
-                        if s.get("seasonNumber") == season_number:
-                            season_detail = s
-                            break
-                    if season_detail:
-                        episodes_data = season_detail.get("episodes", [])
+                season_detail = await self.overseerr.get_season_details(external_id, season_number)
+                if season_detail:
+                    episodes_data = season_detail.get("episodes", [])
 
             for episode_info in episodes_data:
                 episode_number = episode_info.get("episodeNumber")

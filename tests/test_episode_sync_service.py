@@ -42,6 +42,22 @@ def _make_episode(season_id=1, episode_number=1):
     return ep
 
 
+TV_DETAILS_NO_EPISODES = {
+    "seasons": [
+        {"seasonNumber": 0, "name": "Specials"},
+        {"seasonNumber": 1, "name": "Season 1"},
+    ]
+}
+
+SEASON_1_DETAILS = {
+    "seasonNumber": 1,
+    "episodes": [
+        {"episodeNumber": 1, "title": "Pilot", "airDate": "2024-01-01"},
+        {"episodeNumber": 2, "title": "Episode 2", "airDate": "2024-01-08"},
+    ],
+}
+
+
 class TestEpisodeSyncService:
     @pytest.fixture
     def mock_db(self):
@@ -49,8 +65,7 @@ class TestEpisodeSyncService:
 
     @pytest.fixture
     def mock_overseerr(self):
-        overseerr = AsyncMock()
-        return overseerr
+        return AsyncMock()
 
     @pytest.fixture
     def service(self, mock_db, mock_overseerr):
@@ -76,22 +91,14 @@ class TestEpisodeSyncService:
         mock_db.flush = AsyncMock()
         mock_db.commit = AsyncMock()
 
-        mock_overseerr.get_media_details.return_value = {
-            "seasons": [
-                {
-                    "seasonNumber": 1,
-                    "episodes": [
-                        {"episodeNumber": 1, "title": "Pilot", "airDate": "2024-01-01"},
-                        {"episodeNumber": 2, "title": "Episode 2", "airDate": "2024-01-08"},
-                    ],
-                }
-            ]
-        }
+        mock_overseerr.get_media_details.return_value = TV_DETAILS_NO_EPISODES
+        mock_overseerr.get_season_details.return_value = SEASON_1_DETAILS
 
         seasons = await service.sync_episodes(1)
 
         assert len(seasons) == 1
         assert mock_db.add.call_count == 3
+        mock_overseerr.get_season_details.assert_awaited_once_with(12345, 1)
         mock_db.commit.assert_awaited_once()
 
     @pytest.mark.asyncio
@@ -108,15 +115,12 @@ class TestEpisodeSyncService:
         mock_db.flush = AsyncMock()
         mock_db.commit = AsyncMock()
 
-        mock_overseerr.get_media_details.return_value = {
-            "seasons": [
-                {
-                    "seasonNumber": 1,
-                    "episodes": [
-                        {"episodeNumber": 1, "title": "Pilot", "airDate": "2024-01-01"},
-                    ],
-                }
-            ]
+        mock_overseerr.get_media_details.return_value = TV_DETAILS_NO_EPISODES
+        mock_overseerr.get_season_details.return_value = {
+            "seasonNumber": 1,
+            "episodes": [
+                {"episodeNumber": 1, "title": "Pilot", "airDate": "2024-01-01"},
+            ],
         }
 
         seasons = await service.sync_episodes(1)
@@ -129,31 +133,27 @@ class TestEpisodeSyncService:
     @pytest.mark.asyncio
     async def test_sync_skips_specials_season_zero(self, service, mock_db, mock_overseerr):
         request = _make_request(id=1, tvdb_id=12345)
-        mock_db.execute.return_value = MagicMock(scalar_one_or_none=MagicMock(return_value=request))
+
+        req_result = MagicMock()
+        req_result.scalar_one_or_none.return_value = request
+        season_result = MagicMock()
+        season_result.scalar_one_or_none.return_value = None
+        ep1_result = MagicMock()
+        ep1_result.scalar_one_or_none.return_value = None
+        ep2_result = MagicMock()
+        ep2_result.scalar_one_or_none.return_value = None
+        mock_db.execute.side_effect = [req_result, season_result, ep1_result, ep2_result]
         mock_db.flush = AsyncMock()
         mock_db.commit = AsyncMock()
 
-        mock_overseerr.get_media_details.return_value = {
-            "seasons": [
-                {"seasonNumber": 0, "episodes": [{"episodeNumber": 1, "title": "Special"}]},
-                {"seasonNumber": 1, "episodes": [{"episodeNumber": 1, "title": "Pilot"}]},
-            ]
-        }
-
-        seasons_result = MagicMock()
-        seasons_result.scalar_one_or_none.return_value = None
-        ep_result = MagicMock()
-        ep_result.scalar_one_or_none.return_value = None
-        mock_db.execute.side_effect = [
-            MagicMock(scalar_one_or_none=MagicMock(return_value=request)),
-            seasons_result,
-            ep_result,
-        ]
+        mock_overseerr.get_media_details.return_value = TV_DETAILS_NO_EPISODES
+        mock_overseerr.get_season_details.return_value = SEASON_1_DETAILS
 
         seasons = await service.sync_episodes(1)
 
         assert len(seasons) == 1
         assert seasons[0].season_number == 1
+        mock_overseerr.get_season_details.assert_awaited_once_with(12345, 1)
 
     @pytest.mark.asyncio
     async def test_sync_returns_empty_for_missing_request(self, service, mock_db):
@@ -174,6 +174,56 @@ class TestEpisodeSyncService:
         mock_db.execute.return_value = MagicMock(scalar_one_or_none=MagicMock(return_value=request))
         seasons = await service.sync_episodes(1)
         assert seasons == []
+
+    @pytest.mark.asyncio
+    async def test_sync_uses_get_season_details_for_episodes(
+        self, service, mock_db, mock_overseerr
+    ):
+        request = _make_request(id=1, tmdb_id=71527, tvdb_id=None)
+
+        req_result = MagicMock()
+        req_result.scalar_one_or_none.return_value = request
+        season_result = MagicMock()
+        season_result.scalar_one_or_none.return_value = None
+        ep1_result = MagicMock()
+        ep1_result.scalar_one_or_none.return_value = None
+        ep2_result = MagicMock()
+        ep2_result.scalar_one_or_none.return_value = None
+        mock_db.execute.side_effect = [req_result, season_result, ep1_result, ep2_result]
+        mock_db.flush = AsyncMock()
+        mock_db.commit = AsyncMock()
+
+        mock_overseerr.get_media_details.return_value = {
+            "seasons": [{"seasonNumber": 1, "name": "Season 1"}]
+        }
+        mock_overseerr.get_season_details.return_value = SEASON_1_DETAILS
+
+        seasons = await service.sync_episodes(1)
+
+        mock_overseerr.get_season_details.assert_awaited_once_with(71527, 1)
+        assert len(seasons) == 1
+
+    @pytest.mark.asyncio
+    async def test_sync_handles_missing_season_details_gracefully(
+        self, service, mock_db, mock_overseerr
+    ):
+        request = _make_request(id=1, tvdb_id=12345)
+
+        req_result = MagicMock()
+        req_result.scalar_one_or_none.return_value = request
+        season_result = MagicMock()
+        season_result.scalar_one_or_none.return_value = None
+        mock_db.execute.side_effect = [req_result, season_result]
+        mock_db.flush = AsyncMock()
+        mock_db.commit = AsyncMock()
+
+        mock_overseerr.get_media_details.return_value = TV_DETAILS_NO_EPISODES
+        mock_overseerr.get_season_details.return_value = None
+
+        seasons = await service.sync_episodes(1)
+
+        assert len(seasons) == 1
+        mock_db.commit.assert_awaited_once()
 
     @pytest.mark.asyncio
     async def test_refresh_if_stale_triggers_sync_when_no_seasons(self, service, mock_db):
