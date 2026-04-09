@@ -12,7 +12,7 @@ COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
 WORKDIR /app
 
 # Create non-root user
-RUN groupadd -g 568 appgroup && useradd -u 568 -g appgroup -m -s /bin/bash appuser
+RUN groupadd -g 1000 appgroup && useradd -u 1000 -g appgroup -m -s /bin/bash appuser
 
 # Copy project files
 COPY pyproject.toml uv.lock* ./

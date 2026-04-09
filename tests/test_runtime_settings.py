@@ -23,8 +23,8 @@ async def test_get_effective_settings_uses_db_staging_flag(monkeypatch):
         staging_mode_enabled=True,
         retry_interval_hours=24,
         max_retry_duration_days=7,
-        puid=568,
-        pgid=568,
+        puid=1000,
+        pgid=1000,
     )
     monkeypatch.setattr(runtime_settings, "get_settings", lambda: env_settings)
 

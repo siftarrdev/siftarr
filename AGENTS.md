@@ -32,7 +32,7 @@ uv run uvicorn app.siftarr.main:app --reload  # Dev server
 
 - Base image: `python:3.12-slim`
 - Installs `uv` at build time from ghcr.io/astral-sh/uv
-- Runs as non-root user `appuser:appgroup` (uid/gid 568)
+- Runs as non-root user `appuser:appgroup` (uid/gid 1000)
 - Port: 8000
 - Data volume: `/data/db` and `/data/staging`
 
@@ -53,6 +53,10 @@ This is the preferred way to run and test the app locally in Docker.
 mkdir -p data/db
 uv run alembic upgrade head
 ```
+
+## Git Workflow
+
+Always use feature branches and PRs — never push directly to `main`. All 3 CI quality gates must pass before merge.
 
 ## Quality Gates (in order)
 
