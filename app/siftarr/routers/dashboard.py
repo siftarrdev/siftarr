@@ -16,6 +16,7 @@ from app.siftarr.models.request import MediaType, RequestStatus
 from app.siftarr.models.request import Request as RequestModel
 from app.siftarr.models.rule import Rule
 from app.siftarr.models.staged_torrent import StagedTorrent
+from app.siftarr.services.http_client import get_shared_client
 from app.siftarr.services.lifecycle_service import LifecycleService
 from app.siftarr.services.media_helpers import extract_media_title_and_year
 from app.siftarr.services.overseerr_service import OverseerrService
@@ -30,6 +31,9 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["dashboard"])
 templates = Jinja2Templates(directory="app/siftarr/templates")
+
+
+_OVERSEERR_SEMAPHORE = asyncio.Semaphore(10)
 
 
 def _extract_poster_path(poster_path: object) -> str | None:
@@ -230,7 +234,10 @@ async def dashboard(
         if not req_obj.overseerr_request_id:
             return req_obj.id, "no_overseerr_id", "no_overseerr_id", "unknown"
         try:
-            ov_status = await overseerr_service.get_request_status(req_obj.overseerr_request_id)
+            async with _OVERSEERR_SEMAPHORE:
+                ov_status = await overseerr_service.get_request_status_cached(
+                    req_obj.overseerr_request_id
+                )
             if ov_status and isinstance(ov_status, dict):
                 media = ov_status.get("media") or {}
                 request_status = overseerr_service.normalize_request_status(ov_status.get("status"))
@@ -579,8 +586,8 @@ async def poster_proxy(
 
     url = f"{_TMDB_IMAGE_BASE}/{size}{path}"
     try:
-        async with httpx.AsyncClient(timeout=15.0) as client:
-            resp = await client.get(url)
+        client = await get_shared_client()
+        resp = await client.get(url)
     except httpx.RequestError as exc:
         raise HTTPException(status_code=502, detail="Failed to fetch poster from TMDB") from exc
 

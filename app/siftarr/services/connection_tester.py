@@ -3,6 +3,7 @@
 import httpx
 
 from app.siftarr.config import Settings
+from app.siftarr.services.http_client import get_shared_client
 
 
 class ConnectionTestResult:
@@ -43,27 +44,27 @@ class ConnectionTester:
         headers = {"X-Api-Key": settings.overseerr_api_key}
 
         try:
-            async with httpx.AsyncClient() as client:
-                response = await client.get(endpoint, headers=headers, timeout=10.0)
-                if response.status_code == 200:
-                    data = response.json()
-                    version = data.get("version", "unknown")
-                    return ConnectionTestResult(
-                        success=True,
-                        message="Successfully connected to Overseerr",
-                        details=f"Version: {version}",
-                    )
-                elif response.status_code == 401:
-                    return ConnectionTestResult(
-                        success=False,
-                        message="Authentication failed",
-                        details="Invalid API key",
-                    )
-                else:
-                    return ConnectionTestResult(
-                        success=False,
-                        message=f"HTTP Error: {response.status_code}",
-                    )
+            client = await get_shared_client()
+            response = await client.get(endpoint, headers=headers, timeout=10.0)
+            if response.status_code == 200:
+                data = response.json()
+                version = data.get("version", "unknown")
+                return ConnectionTestResult(
+                    success=True,
+                    message="Successfully connected to Overseerr",
+                    details=f"Version: {version}",
+                )
+            elif response.status_code == 401:
+                return ConnectionTestResult(
+                    success=False,
+                    message="Authentication failed",
+                    details="Invalid API key",
+                )
+            else:
+                return ConnectionTestResult(
+                    success=False,
+                    message=f"HTTP Error: {response.status_code}",
+                )
         except httpx.TimeoutException:
             return ConnectionTestResult(
                 success=False,
@@ -103,27 +104,27 @@ class ConnectionTester:
         headers = {"X-Api-Key": settings.prowlarr_api_key}
 
         try:
-            async with httpx.AsyncClient() as client:
-                response = await client.get(endpoint, headers=headers, timeout=10.0)
-                if response.status_code == 200:
-                    data = response.json()
-                    version = data.get("version", "unknown")
-                    return ConnectionTestResult(
-                        success=True,
-                        message="Successfully connected to Prowlarr",
-                        details=f"Version: {version}",
-                    )
-                elif response.status_code == 401:
-                    return ConnectionTestResult(
-                        success=False,
-                        message="Authentication failed",
-                        details="Invalid API key",
-                    )
-                else:
-                    return ConnectionTestResult(
-                        success=False,
-                        message=f"HTTP Error: {response.status_code}",
-                    )
+            client = await get_shared_client()
+            response = await client.get(endpoint, headers=headers, timeout=10.0)
+            if response.status_code == 200:
+                data = response.json()
+                version = data.get("version", "unknown")
+                return ConnectionTestResult(
+                    success=True,
+                    message="Successfully connected to Prowlarr",
+                    details=f"Version: {version}",
+                )
+            elif response.status_code == 401:
+                return ConnectionTestResult(
+                    success=False,
+                    message="Authentication failed",
+                    details="Invalid API key",
+                )
+            else:
+                return ConnectionTestResult(
+                    success=False,
+                    message=f"HTTP Error: {response.status_code}",
+                )
         except httpx.TimeoutException:
             return ConnectionTestResult(
                 success=False,

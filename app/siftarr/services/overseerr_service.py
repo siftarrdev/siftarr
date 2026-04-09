@@ -1,10 +1,15 @@
 """Service for interacting with Overseerr API."""
 
+import time
 from typing import Any
 
 import httpx
 
 from app.siftarr.config import Settings, get_settings
+from app.siftarr.services.http_client import get_shared_client
+
+_STATUS_CACHE: dict[int, tuple[float, dict]] = {}
+_STATUS_CACHE_TTL = 60.0
 
 
 class OverseerrService:
@@ -30,10 +35,8 @@ class OverseerrService:
     def __init__(self, settings: Settings | None = None) -> None:
         """Initialize the Overseerr service."""
         self.settings = settings or get_settings()
-        # Strip trailing slash to avoid double slashes in API URL
         self.base_url = str(self.settings.overseerr_url).rstrip("/")
         self.api_key = self.settings.overseerr_api_key
-        self._client: httpx.AsyncClient | None = None
 
     @classmethod
     def normalize_media_status(cls, status: Any) -> str:
@@ -53,20 +56,17 @@ class OverseerrService:
             return cls.REQUEST_STATUS_MAP.get(status, f"unknown_{status}")
         return "unknown"
 
+    def _get_headers(self) -> dict[str, str]:
+        api_key = self.api_key
+        if api_key is None:
+            api_key = ""
+        return {"X-Api-Key": api_key}
+
     async def _get_client(self) -> httpx.AsyncClient:
-        """Get or create an async HTTP client."""
-        if self._client is None or self._client.is_closed:
-            self._client = httpx.AsyncClient(
-                headers={"X-Api-Key": self.api_key or ""},
-                timeout=30.0,
-            )
-        return self._client
+        return await get_shared_client()
 
     async def close(self) -> None:
-        """Close the HTTP client."""
-        if self._client and not self._client.is_closed:
-            await self._client.aclose()
-            self._client = None
+        pass
 
     async def get_requests(
         self,
@@ -90,6 +90,7 @@ class OverseerrService:
 
         endpoint = f"{self.base_url}/api/v1/request"
         client = await self._get_client()
+        headers = self._get_headers()
         params: dict[str, Any] = {"take": limit, "skip": skip}
         if status and status != "all":
             params["filter"] = status
@@ -97,6 +98,7 @@ class OverseerrService:
         try:
             response = await client.get(
                 endpoint,
+                headers=headers,
                 params=params,
             )
             if response.status_code == 200:
@@ -152,9 +154,10 @@ class OverseerrService:
 
         endpoint = f"{self.base_url}/api/v1/request/{request_id}"
         client = await self._get_client()
+        headers = self._get_headers()
 
         try:
-            response = await client.get(endpoint)
+            response = await client.get(endpoint, headers=headers)
             if response.status_code == 200:
                 return response.json()
             return None
@@ -175,16 +178,16 @@ class OverseerrService:
             return None
 
         endpoint = f"{self.base_url}/api/v1/{media_type}/{external_id}"
-        headers = {"X-Api-Key": self.api_key}
+        client = await self._get_client()
+        headers = self._get_headers()
 
-        async with httpx.AsyncClient() as client:
-            try:
-                response = await client.get(endpoint, headers=headers, timeout=30.0)
-                if response.status_code == 200:
-                    return response.json()
-                return None
-            except httpx.RequestError:
-                return None
+        try:
+            response = await client.get(endpoint, headers=headers, timeout=30.0)
+            if response.status_code == 200:
+                return response.json()
+            return None
+        except httpx.RequestError:
+            return None
 
     async def approve_request(self, request_id: int) -> bool:
         """Approve a request in Overseerr via API."""
@@ -193,9 +196,10 @@ class OverseerrService:
 
         endpoint = f"{self.base_url}/api/v1/request/{request_id}/approve"
         client = await self._get_client()
+        headers = self._get_headers()
 
         try:
-            response = await client.post(endpoint)
+            response = await client.post(endpoint, headers=headers)
             return response.status_code == 200
         except httpx.RequestError:
             return False
@@ -207,10 +211,11 @@ class OverseerrService:
 
         endpoint = f"{self.base_url}/api/v1/request/{request_id}/decline"
         client = await self._get_client()
+        headers = self._get_headers()
 
         try:
             body = {"reason": reason} if reason else {}
-            response = await client.post(endpoint, json=body)
+            response = await client.post(endpoint, headers=headers, json=body)
             return response.status_code == 200
         except httpx.RequestError:
             return False
@@ -222,11 +227,26 @@ class OverseerrService:
 
         endpoint = f"{self.base_url}/api/v1/request/{request_id}"
         client = await self._get_client()
+        headers = self._get_headers()
 
         try:
-            response = await client.get(endpoint)
+            response = await client.get(endpoint, headers=headers)
             if response.status_code == 200:
                 return response.json()
             return None
         except httpx.RequestError:
             return None
+
+    async def get_request_status_cached(self, request_id: int) -> dict | None:
+        """Get request status with a 60-second in-memory TTL cache."""
+        now = time.monotonic()
+        cached = _STATUS_CACHE.get(request_id)
+        if cached is not None:
+            ts, data = cached
+            if now - ts < _STATUS_CACHE_TTL:
+                return data
+
+        data = await self.get_request_status(request_id)
+        if data is not None:
+            _STATUS_CACHE[request_id] = (now, data)
+        return data
