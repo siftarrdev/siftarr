@@ -6,6 +6,8 @@
 - Add indexer and release-source preferences, including allow/deny lists and weighted priorities
 - Make settings sections collapsible for easier navigation
 - Increase unit test coverage to 85% (currently at 47%; focus on router integration tests and complex async service tests)
+- Add a year column to all the tables in the dashboard for easier sorting and scanning of recent activity
+- make the search results in the request details view much more compact by optimising the use of space and removing redundant information, allowing more results to be visible at once without scrolling
 
 ## Project quality improvements
 - Refactor the codebase for better separation of concerns and more consistent coding style
@@ -17,8 +19,4 @@
 - Add structured decision logs/metrics for search latency, rule failures, pending retries, and qBit handoff
 
 ## Performance improvements
-- Precompile rule regexes once per rule set instead of recompiling on every release evaluation
-- Reuse a shared `httpx.AsyncClient` for Prowlarr/Overseerr instead of creating a new client per request
-- Replace Python-side full-table scans with SQL aggregates for settings stats and pending queue stats
-- Add DB indexes on hot filters like `requests.status`, `releases.request_id`, and `pending_queue.next_retry_at`
-- Avoid fetching Overseerr status for every active request on every dashboard load; cache or lazy-load those lookups
+
