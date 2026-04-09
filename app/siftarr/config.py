@@ -39,6 +39,7 @@ class Settings(BaseSettings):
     staging_mode_enabled: bool = True
     retry_interval_hours: int = 24
     max_retry_duration_days: int = 7
+    episode_sync_stale_hours: int = 24
 
     database_url: str = Field(
         default_factory=lambda: (
