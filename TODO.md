@@ -7,6 +7,7 @@
 - Make settings sections collapsible for easier navigation
 - Increase unit test coverage to 85% (currently at 47%; focus on router integration tests and complex async service tests)
 - Add an option to click to the previous or next title in the list when in the details view, so you can easily jump to the next request without going back to the main list
+- allow size rules to apply to tv seasons separately from individual episodes, since season packs can be much larger than single eps and it's reasonable to want different limits on those
 
 ## Project quality improvements
 - Refactor the codebase for better separation of concerns and more consistent coding style

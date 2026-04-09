@@ -23,6 +23,7 @@ from app.siftarr.services.overseerr_service import OverseerrService
 from app.siftarr.services.pending_queue_service import PendingQueueService
 from app.siftarr.services.prowlarr_service import ProwlarrService
 from app.siftarr.services.qbittorrent_service import QbittorrentService
+from app.siftarr.services.release_parser import parse_season_episode
 from app.siftarr.services.release_selection_service import build_prowlarr_release, use_releases
 from app.siftarr.services.rule_engine import RuleEngine
 from app.siftarr.services.runtime_settings import get_effective_settings
@@ -449,10 +450,8 @@ async def request_details(
             media_details = None
             if request.media_type.value == "movie" and request.tmdb_id:
                 media_details = await overseerr_service.get_media_details("movie", request.tmdb_id)
-            elif request.media_type.value == "tv":
-                tv_external_id = request.tmdb_id or request.tvdb_id
-                if tv_external_id:
-                    media_details = await overseerr_service.get_media_details("tv", tv_external_id)
+            elif request.media_type.value == "tv" and request.tmdb_id:
+                media_details = await overseerr_service.get_media_details("tv", request.tmdb_id)
 
             merged_media = {**media, **(media_details or {})}
             poster = _build_poster_url(
@@ -671,6 +670,11 @@ async def search_season_packs(
 
         releases = []
         for release in search_result.releases:
+            parsed = parse_season_episode(release.title)
+            if parsed.episode_number is not None:
+                continue
+            if parsed.season_number is not None and parsed.season_number != season_number:
+                continue
             evaluation = engine.evaluate(release)
             releases.append(
                 {
@@ -734,6 +738,11 @@ async def search_episode(
 
         releases = []
         for release in search_result.releases:
+            parsed = parse_season_episode(release.title)
+            if parsed.season_number is not None and parsed.season_number != season_number:
+                continue
+            if parsed.episode_number is not None and parsed.episode_number != episode_number:
+                continue
             evaluation = engine.evaluate(release)
             releases.append(
                 {

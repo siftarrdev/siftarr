@@ -42,9 +42,12 @@ class EpisodeSyncService:
             logger.warning("EpisodeSyncService: request %s is not TV type", request_id)
             return []
 
-        external_id = request.tmdb_id or request.tvdb_id
+        external_id = request.tmdb_id
         if not external_id:
-            logger.warning("EpisodeSyncService: request %s has no external ID", request_id)
+            logger.warning(
+                "EpisodeSyncService: request %s has no TMDB ID (required for Overseerr season API)",
+                request_id,
+            )
             return []
 
         media_type_for_api = "tv"

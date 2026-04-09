@@ -16,7 +16,7 @@ def _make_request(**overrides):
     req.id = overrides.get("id", 1)
     req.media_type = overrides.get("media_type", MediaType.TV)
     req.tvdb_id = overrides.get("tvdb_id", 12345)
-    req.tmdb_id = overrides.get("tmdb_id")
+    req.tmdb_id = overrides.get("tmdb_id", 79744)
     return req
 
 
@@ -98,7 +98,7 @@ class TestEpisodeSyncService:
 
         assert len(seasons) == 1
         assert mock_db.add.call_count == 3
-        mock_overseerr.get_season_details.assert_awaited_once_with(12345, 1)
+        mock_overseerr.get_season_details.assert_awaited_once_with(79744, 1)
         mock_db.commit.assert_awaited_once()
 
     @pytest.mark.asyncio
@@ -153,7 +153,7 @@ class TestEpisodeSyncService:
 
         assert len(seasons) == 1
         assert seasons[0].season_number == 1
-        mock_overseerr.get_season_details.assert_awaited_once_with(12345, 1)
+        mock_overseerr.get_season_details.assert_awaited_once_with(79744, 1)
 
     @pytest.mark.asyncio
     async def test_sync_returns_empty_for_missing_request(self, service, mock_db):
@@ -171,6 +171,13 @@ class TestEpisodeSyncService:
     @pytest.mark.asyncio
     async def test_sync_returns_empty_for_no_external_id(self, service, mock_db):
         request = _make_request(id=1, tvdb_id=None, tmdb_id=None)
+        mock_db.execute.return_value = MagicMock(scalar_one_or_none=MagicMock(return_value=request))
+        seasons = await service.sync_episodes(1)
+        assert seasons == []
+
+    @pytest.mark.asyncio
+    async def test_sync_returns_empty_for_tvdb_id_only(self, service, mock_db):
+        request = _make_request(id=1, tvdb_id=12345, tmdb_id=None)
         mock_db.execute.return_value = MagicMock(scalar_one_or_none=MagicMock(return_value=request))
         seasons = await service.sync_episodes(1)
         assert seasons == []
