@@ -41,6 +41,10 @@ table.data-resizable td {
     max-width: 500px;
     overflow: hidden;
 }
+details summary::-webkit-details-marker { display: none; }
+details summary { list-style: none; }
+details[open] summary .accordion-chevron { transform: rotate(90deg); }
+.accordion-chevron { transition: transform 0.15s ease; }
 </style>
 <div class="space-y-8">
     <div class="flex items-center justify-between">
@@ -512,7 +516,7 @@ table.data-resizable td {
                     <a id="request-details-overseerr-link" href="#" target="_blank" rel="noopener noreferrer" class="hidden shrink-0 btn-ghost btn-sm">Open in Overseerr</a>
                 </div>
                 <div>
-                    <div class="flex items-center justify-between gap-4">
+                    <div id="release-results-header" class="flex items-center justify-between gap-4">
                         <div>
                             <div class="form-label">Search Results</div>
                             <p class="mt-1 text-xs text-gray-500">Ranked from highest rule score to lowest, including rejected candidates so you can tune your filters.</p>
@@ -656,6 +660,112 @@ function renderReleaseCard(release, requestId) {
             </div>
         </div>
     `;
+}
+
+function episodeStatusBadge(status) {
+    const colors = {
+        'received': 'badge-gray',
+        'searching': 'badge-yellow',
+        'pending': 'badge-yellow',
+        'staged': 'badge-blue',
+        'downloading': 'badge-blue',
+        'completed': 'badge-green',
+        'failed': 'badge-red',
+    };
+    return colors[status] || 'badge-gray';
+}
+
+function renderSeasonAccordion(data) {
+    const tvInfo = data.tv_info;
+    const requestId = data.request.id;
+
+    if (!tvInfo.seasons || tvInfo.seasons.length === 0) {
+        return '<div class="text-gray-500 text-sm">No season information available.</div>';
+    }
+
+    return '<div class="space-y-3">' + tvInfo.seasons.map(function(season) {
+        var seasonKey = String(season.season_number);
+        var seasonBadgeClass = episodeStatusBadge(season.status);
+        var seasonReleases = (tvInfo.releases_by_season && tvInfo.releases_by_season[seasonKey]) || [];
+        var seasonReleasesHtml = seasonReleases.map(function(r) { return renderReleaseCard(r, requestId); }).join('');
+
+        var episodeHtml = (season.episodes || []).map(function(ep) {
+            var epKey = seasonKey + '-' + ep.episode_number;
+            var badgeClass = episodeStatusBadge(ep.status);
+            var episodeReleases = (tvInfo.releases_by_episode && tvInfo.releases_by_episode[epKey]) || [];
+            var episodeReleasesHtml = episodeReleases.map(function(r) { return renderReleaseCard(r, requestId); }).join('');
+
+            return '<div class="flex items-center justify-between rounded-lg border border-gray-700/40 bg-surface-800/50 px-3 py-2">' +
+                '<div class="flex items-center gap-3 min-w-0 flex-1">' +
+                    '<span class="text-gray-500 text-xs font-mono shrink-0">E' + String(ep.episode_number).padStart(2, '0') + '</span>' +
+                    '<span class="text-white text-sm truncate">' + escapeHtml(ep.title || 'Untitled') + '</span>' +
+                    (ep.air_date ? '<span class="text-gray-600 text-xs shrink-0">' + escapeHtml(ep.air_date) + '</span>' : '') +
+                    '<span class="badge ' + badgeClass + ' shrink-0">' + escapeHtml(ep.status || 'unknown') + '</span>' +
+                '</div>' +
+                '<button onclick="searchEpisode(' + requestId + ', ' + season.season_number + ', ' + ep.episode_number + ')" class="btn-ghost btn-sm ml-2 shrink-0">Search</button>' +
+            '</div>' +
+            '<div id="episode-search-' + requestId + '-' + season.season_number + '-' + ep.episode_number + '" class="ml-4 mt-1 space-y-1">' + episodeReleasesHtml + '</div>';
+        }).join('');
+
+        return '<details class="group" open>' +
+            '<summary class="flex items-center justify-between gap-3 cursor-pointer rounded-xl border border-gray-700/60 bg-surface-800 p-3 hover:bg-surface-850/80 transition-colors">' +
+                '<div class="flex items-center gap-3">' +
+                    '<svg class="accordion-chevron w-4 h-4 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>' +
+                    '<span class="text-white font-medium">Season ' + season.season_number + '</span>' +
+                    '<span class="badge ' + seasonBadgeClass + '">' + escapeHtml(season.status || 'unknown') + '</span>' +
+                '</div>' +
+                '<button onclick="searchSeasonPacks(' + requestId + ', ' + season.season_number + '); event.stopPropagation();" class="btn-primary btn-sm shrink-0">Search Season Packs</button>' +
+            '</summary>' +
+            '<div class="mt-2 ml-2 space-y-2">' +
+                '<div id="season-packs-' + requestId + '-' + season.season_number + '" class="space-y-1">' + seasonReleasesHtml + '</div>' +
+                episodeHtml +
+            '</div>' +
+        '</details>';
+    }).join('') + '</div>';
+}
+
+async function searchSeasonPacks(requestId, seasonNumber) {
+    var container = document.getElementById('season-packs-' + requestId + '-' + seasonNumber);
+    if (!container) return;
+    container.innerHTML = '<div class="flex items-center gap-2 text-gray-400 text-sm py-2">' +
+        '<svg class="animate-spin h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>' +
+        ' Searching season packs...</div>';
+
+    try {
+        var response = await fetch('/requests/' + requestId + '/seasons/' + seasonNumber + '/search', { method: 'POST' });
+        if (!response.ok) throw new Error('Server error: ' + response.status);
+        var data = await response.json();
+
+        if (data.releases && data.releases.length > 0) {
+            container.innerHTML = data.releases.map(function(r) { return renderReleaseCard(r, requestId); }).join('');
+        } else {
+            container.innerHTML = '<div class="text-gray-500 text-sm py-2">No season pack results found.</div>';
+        }
+    } catch (err) {
+        container.innerHTML = '<div class="text-red-400 text-sm py-2">Error: ' + escapeHtml(err.message) + '</div>';
+    }
+}
+
+async function searchEpisode(requestId, seasonNumber, episodeNumber) {
+    var container = document.getElementById('episode-search-' + requestId + '-' + seasonNumber + '-' + episodeNumber);
+    if (!container) return;
+    container.innerHTML = '<div class="flex items-center gap-2 text-gray-400 text-sm py-2">' +
+        '<svg class="animate-spin h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>' +
+        ' Searching episode...</div>';
+
+    try {
+        var response = await fetch('/requests/' + requestId + '/seasons/' + seasonNumber + '/episodes/' + episodeNumber + '/search', { method: 'POST' });
+        if (!response.ok) throw new Error('Server error: ' + response.status);
+        var data = await response.json();
+
+        if (data.releases && data.releases.length > 0) {
+            container.innerHTML = data.releases.map(function(r) { return renderReleaseCard(r, requestId); }).join('');
+        } else {
+            container.innerHTML = '<div class="text-gray-500 text-sm py-2">No results found for this episode.</div>';
+        }
+    } catch (err) {
+        container.innerHTML = '<div class="text-red-400 text-sm py-2">Error: ' + escapeHtml(err.message) + '</div>';
+    }
 }
 
 let currentReleases = [];
@@ -812,6 +922,8 @@ async function openRequestDetails(requestId, explicitIndex = null) {
         overseerrLink.removeAttribute('href');
     }
     setPoster(null, 'Loading poster');
+    document.getElementById('release-results-header').classList.remove('hidden');
+    document.getElementById('release-filter-input').classList.remove('hidden');
     releases.innerHTML = '<div class="text-gray-500 text-sm">Loading search results...</div>';
     if (filterInput) filterInput.value = '';
     modal.classList.remove('hidden');
@@ -834,7 +946,16 @@ async function openRequestDetails(requestId, explicitIndex = null) {
 
         currentReleases = data.releases || [];
         currentRequestId = data.request.id;
-        releases.innerHTML = currentReleases.map(release => renderReleaseCard(release, currentRequestId)).join('') || '<div class="text-gray-500 text-sm">No search results have been stored for this request yet. Run a search, then reopen details.</div>';
+
+        if (data.request.media_type === 'tv' && data.tv_info) {
+            document.getElementById('release-results-header').classList.add('hidden');
+            document.getElementById('release-filter-input').classList.add('hidden');
+            releases.innerHTML = renderSeasonAccordion(data);
+        } else {
+            document.getElementById('release-results-header').classList.remove('hidden');
+            document.getElementById('release-filter-input').classList.remove('hidden');
+            releases.innerHTML = currentReleases.map(release => renderReleaseCard(release, currentRequestId)).join('') || '<div class="text-gray-500 text-sm">No search results have been stored for this request yet. Run a search, then reopen details.</div>';
+        }
     } catch (err) {
         title.textContent = 'Error loading details';
         meta.textContent = err.message || 'Unknown error';
