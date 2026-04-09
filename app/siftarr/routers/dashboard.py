@@ -517,6 +517,14 @@ async def request_details(
     details["releases"] = matched
 
     if request.media_type == MediaType.TV:
+        from app.siftarr.services.episode_sync_service import EpisodeSyncService
+
+        episode_sync = EpisodeSyncService(db)
+        try:
+            await episode_sync.refresh_if_stale(request_id)
+        except Exception:
+            logger.exception("Episode sync failed for request_id=%s", request_id)
+
         seasons_result = await db.execute(
             select(Season).where(Season.request_id == request_id).order_by(Season.season_number)
         )
@@ -575,6 +583,7 @@ async def get_request_seasons(
     """Get seasons and episodes for a TV request."""
     from app.siftarr.models.episode import Episode
     from app.siftarr.models.season import Season
+    from app.siftarr.services.episode_sync_service import EpisodeSyncService
 
     result = await db.execute(select(RequestModel).where(RequestModel.id == request_id))
     request = result.scalar_one_or_none()
@@ -583,6 +592,12 @@ async def get_request_seasons(
 
     if request.media_type != MediaType.TV:
         return JSONResponse({"seasons": [], "message": "Request is not a TV show"})
+
+    episode_sync = EpisodeSyncService(db)
+    try:
+        await episode_sync.refresh_if_stale(request_id)
+    except Exception:
+        logger.exception("Episode sync failed for request_id=%s", request_id)
 
     seasons_result = await db.execute(
         select(Season).where(Season.request_id == request_id).order_by(Season.season_number)

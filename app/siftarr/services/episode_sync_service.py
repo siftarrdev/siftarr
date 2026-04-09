@@ -84,12 +84,12 @@ class EpisodeSyncService:
                     request_id=request_id,
                     season_number=season_number,
                     status=RequestStatus.RECEIVED,
-                    synced_at=datetime.now(UTC),
+                    synced_at=datetime.now(UTC).replace(tzinfo=None),
                 )
                 self.db.add(season)
                 await self.db.flush()
             else:
-                season.synced_at = datetime.now(UTC)
+                season.synced_at = datetime.now(UTC).replace(tzinfo=None)
 
             synced_seasons.append(season)
 
@@ -167,7 +167,9 @@ class EpisodeSyncService:
         if newest_synced is None:
             return await self.sync_episodes(request_id)
 
-        stale_threshold = datetime.now(UTC) - timedelta(hours=self._stale_hours)
+        stale_threshold = datetime.now(UTC).replace(tzinfo=None) - timedelta(
+            hours=self._stale_hours
+        )
         if newest_synced < stale_threshold:
             logger.info("EpisodeSyncService: stale sync for request %s, refreshing", request_id)
             return await self.sync_episodes(request_id)

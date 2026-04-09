@@ -1,6 +1,6 @@
 """Tests for EpisodeSyncService."""
 
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -97,7 +97,7 @@ class TestEpisodeSyncService:
     @pytest.mark.asyncio
     async def test_sync_is_idempotent(self, service, mock_db, mock_overseerr):
         request = _make_request(id=1, tvdb_id=12345)
-        existing_season = _make_season(request_id=1, season_number=1, synced_at=datetime.now(UTC))
+        existing_season = _make_season(request_id=1, season_number=1, synced_at=datetime.utcnow())
         existing_ep = _make_episode(season_id=1, episode_number=1)
 
         mock_db.execute.side_effect = [
@@ -189,7 +189,7 @@ class TestEpisodeSyncService:
 
     @pytest.mark.asyncio
     async def test_refresh_if_stale_skips_when_fresh(self, service, mock_db):
-        fresh_season = _make_season(synced_at=datetime.now(UTC))
+        fresh_season = _make_season(synced_at=datetime.utcnow())
         mock_db.execute.return_value = MagicMock(
             scalars=MagicMock(return_value=MagicMock(all=MagicMock(return_value=[fresh_season])))
         )
@@ -201,7 +201,7 @@ class TestEpisodeSyncService:
 
     @pytest.mark.asyncio
     async def test_refresh_if_stale_triggers_sync_when_stale(self, service, mock_db):
-        stale_time = datetime.now(UTC) - timedelta(hours=48)
+        stale_time = datetime.utcnow() - timedelta(hours=48)
         stale_season = _make_season(synced_at=stale_time)
         mock_db.execute.return_value = MagicMock(
             scalars=MagicMock(return_value=MagicMock(all=MagicMock(return_value=[stale_season])))
