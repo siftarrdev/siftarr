@@ -68,8 +68,11 @@ async def receive_overseerr_webhook(
     # Determine media type
     media_type = MediaType.MOVIE if payload.media.media_type == "movie" else MediaType.TV
 
-    # Use tmdbid or tvdbid as external_id
-    external_id = str(payload.media.tmdbid or payload.media.tvdbid)
+    base_external_id = str(payload.media.tmdbid or payload.media.tvdbid)
+    if payload.request and payload.request.id:
+        external_id = f"{base_external_id}-{payload.request.id}"
+    else:
+        external_id = base_external_id
 
     # Fetch title and year from Overseerr media details
     title = ""
