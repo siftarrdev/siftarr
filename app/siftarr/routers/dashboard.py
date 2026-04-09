@@ -417,7 +417,9 @@ async def request_details(
     request_id: int,
     db: AsyncSession = Depends(get_db),
 ) -> JSONResponse:
+    from app.siftarr.models.episode import Episode
     from app.siftarr.models.release import Release
+    from app.siftarr.models.season import Season
 
     result = await db.execute(select(RequestModel).where(RequestModel.id == request_id))
     request = result.scalar_one_or_none()
@@ -499,6 +501,8 @@ async def request_details(
                 "downloaded": release.is_downloaded,
                 "publish_date": release.publish_date.isoformat() if release.publish_date else None,
                 "rejection_reason": evaluation.rejection_reason,
+                "season_number": release.season_number,
+                "episode_number": release.episode_number,
                 "matches": [
                     {
                         "rule_name": m.rule_name,
@@ -511,7 +515,231 @@ async def request_details(
         )
 
     details["releases"] = matched
+
+    if request.media_type == MediaType.TV:
+        seasons_result = await db.execute(
+            select(Season).where(Season.request_id == request_id).order_by(Season.season_number)
+        )
+        seasons = list(seasons_result.scalars().all())
+
+        seasons_data = []
+        for season in seasons:
+            episodes_result = await db.execute(
+                select(Episode)
+                .where(Episode.season_id == season.id)
+                .order_by(Episode.episode_number)
+            )
+            episodes = list(episodes_result.scalars().all())
+            season_data = {
+                "id": season.id,
+                "season_number": season.season_number,
+                "status": season.status.value,
+                "episodes": [
+                    {
+                        "id": ep.id,
+                        "episode_number": ep.episode_number,
+                        "title": ep.title,
+                        "air_date": ep.air_date.isoformat() if ep.air_date else None,
+                        "status": ep.status.value,
+                        "release_id": ep.release_id,
+                    }
+                    for ep in episodes
+                ],
+            }
+            seasons_data.append(season_data)
+
+        releases_by_season: dict[int, list] = {}
+        releases_by_episode: dict[tuple[int, int], list] = {}
+        for r in matched:
+            sn = r.get("season_number")
+            en = r.get("episode_number")
+            if en is not None and sn is not None:
+                releases_by_episode.setdefault((sn, en), []).append(r)
+            elif sn is not None:
+                releases_by_season.setdefault(sn, []).append(r)
+
+        details["tv_info"] = {
+            "seasons": seasons_data,
+            "releases_by_season": {str(k): v for k, v in releases_by_season.items()},
+            "releases_by_episode": {f"{k[0]}-{k[1]}": v for k, v in releases_by_episode.items()},
+        }
+
     return JSONResponse(details)
+
+
+@router.get("/requests/{request_id}/seasons")
+async def get_request_seasons(
+    request_id: int,
+    db: AsyncSession = Depends(get_db),
+) -> JSONResponse:
+    """Get seasons and episodes for a TV request."""
+    from app.siftarr.models.episode import Episode
+    from app.siftarr.models.season import Season
+
+    result = await db.execute(select(RequestModel).where(RequestModel.id == request_id))
+    request = result.scalar_one_or_none()
+    if not request:
+        raise HTTPException(status_code=404, detail="Request not found")
+
+    if request.media_type != MediaType.TV:
+        return JSONResponse({"seasons": [], "message": "Request is not a TV show"})
+
+    seasons_result = await db.execute(
+        select(Season).where(Season.request_id == request_id).order_by(Season.season_number)
+    )
+    seasons = list(seasons_result.scalars().all())
+
+    seasons_data = []
+    for season in seasons:
+        episodes_result = await db.execute(
+            select(Episode).where(Episode.season_id == season.id).order_by(Episode.episode_number)
+        )
+        episodes = list(episodes_result.scalars().all())
+
+        season_data = {
+            "id": season.id,
+            "season_number": season.season_number,
+            "status": season.status.value,
+            "synced_at": season.synced_at.isoformat() if season.synced_at else None,
+            "episodes": [
+                {
+                    "id": ep.id,
+                    "episode_number": ep.episode_number,
+                    "title": ep.title,
+                    "air_date": ep.air_date.isoformat() if ep.air_date else None,
+                    "status": ep.status.value,
+                    "release_id": ep.release_id,
+                }
+                for ep in episodes
+            ],
+        }
+        seasons_data.append(season_data)
+
+    return JSONResponse({"seasons": seasons_data})
+
+
+@router.post("/requests/{request_id}/seasons/{season_number}/search")
+async def search_season_packs(
+    request_id: int,
+    season_number: int,
+    db: AsyncSession = Depends(get_db),
+) -> JSONResponse:
+    """Search for season packs for a specific season."""
+    result = await db.execute(select(RequestModel).where(RequestModel.id == request_id))
+    request = result.scalar_one_or_none()
+    if not request:
+        raise HTTPException(status_code=404, detail="Request not found")
+
+    if request.media_type != MediaType.TV:
+        raise HTTPException(status_code=400, detail="Request is not a TV show")
+
+    if not request.tvdb_id:
+        raise HTTPException(status_code=400, detail="No TVDB ID available")
+
+    runtime_settings = await get_effective_settings(db)
+    prowlarr = ProwlarrService(settings=runtime_settings)
+
+    try:
+        search_result = await prowlarr.search_by_tvdbid(
+            tvdbid=request.tvdb_id,
+            title=request.title,
+            season=season_number,
+            year=request.year,
+        )
+
+        if search_result.error:
+            return JSONResponse({"error": search_result.error, "releases": []})
+
+        rules_result = await db.execute(select(Rule))
+        rules = list(rules_result.scalars().all())
+        engine = RuleEngine.from_db_rules(rules=rules, media_type="tv")
+
+        releases = []
+        for release in search_result.releases:
+            evaluation = engine.evaluate(release)
+            releases.append(
+                {
+                    "title": release.title,
+                    "size": _format_release_size(release.size),
+                    "seeders": release.seeders,
+                    "leechers": release.leechers,
+                    "indexer": release.indexer,
+                    "resolution": release.resolution,
+                    "codec": release.codec,
+                    "release_group": release.release_group,
+                    "score": evaluation.total_score,
+                    "passed": evaluation.passed,
+                    "download_url": release.download_url,
+                    "magnet_url": release.magnet_url,
+                }
+            )
+
+        return JSONResponse({"releases": releases})
+    finally:
+        pass
+
+
+@router.post("/requests/{request_id}/seasons/{season_number}/episodes/{episode_number}/search")
+async def search_episode(
+    request_id: int,
+    season_number: int,
+    episode_number: int,
+    db: AsyncSession = Depends(get_db),
+) -> JSONResponse:
+    """Search for a specific episode."""
+    result = await db.execute(select(RequestModel).where(RequestModel.id == request_id))
+    request = result.scalar_one_or_none()
+    if not request:
+        raise HTTPException(status_code=404, detail="Request not found")
+
+    if request.media_type != MediaType.TV:
+        raise HTTPException(status_code=400, detail="Request is not a TV show")
+
+    if not request.tvdb_id:
+        raise HTTPException(status_code=400, detail="No TVDB ID available")
+
+    runtime_settings = await get_effective_settings(db)
+    prowlarr = ProwlarrService(settings=runtime_settings)
+
+    try:
+        search_result = await prowlarr.search_by_tvdbid(
+            tvdbid=request.tvdb_id,
+            title=request.title,
+            season=season_number,
+            episode=episode_number,
+            year=request.year,
+        )
+
+        if search_result.error:
+            return JSONResponse({"error": search_result.error, "releases": []})
+
+        rules_result = await db.execute(select(Rule))
+        rules = list(rules_result.scalars().all())
+        engine = RuleEngine.from_db_rules(rules=rules, media_type="tv")
+
+        releases = []
+        for release in search_result.releases:
+            evaluation = engine.evaluate(release)
+            releases.append(
+                {
+                    "title": release.title,
+                    "size": _format_release_size(release.size),
+                    "seeders": release.seeders,
+                    "leechers": release.leechers,
+                    "indexer": release.indexer,
+                    "resolution": release.resolution,
+                    "codec": release.codec,
+                    "release_group": release.release_group,
+                    "score": evaluation.total_score,
+                    "passed": evaluation.passed,
+                    "download_url": release.download_url,
+                    "magnet_url": release.magnet_url,
+                }
+            )
+
+        return JSONResponse({"releases": releases})
+    finally:
+        pass
 
 
 @router.post("/requests/{request_id}/releases/{release_id}/use")
