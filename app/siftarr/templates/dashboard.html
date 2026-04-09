@@ -161,7 +161,7 @@ table.data-resizable td {
                     </thead>
                     <tbody class="divide-y divide-gray-700/40" id="active-requests-body">
                         {% for req in active_requests %}
-                        <tr class="hover:bg-surface-850/80 cursor-pointer transition-colors" onclick="openRequestDetails({{ req.id }})" data-overseerr="{{ 'true' if req.overseerr_request_id else 'false' }}" data-status="{{ req.status.value }}" data-title="{{ req.title|lower }}" data-type="{{ req.media_type.value|lower }}" data-status-low="{{ req.status.value|lower }}" data-requestedby="{{ req.requester_username|default('Unknown')|lower }}" data-requested="{{ req.created_at.strftime('%Y-%m-%d %H:%M') }}" data-ovstatus="{{ overseerr_statuses.get(req.id, 'unknown') }}" data-ovrank="{{ {'approved':0,'pending':1,'processing':2,'partially_available':3,'available':4,'completed':5,'declined':6,'deleted':7}.get(overseerr_statuses.get(req.id, 'unknown'), 99) }}" data-year="{{ req.year or 0 }}">
+                        <tr class="hover:bg-surface-850/80 cursor-pointer transition-colors" onclick="openRequestDetails({{ req.id }})" data-request-id="{{ req.id }}" data-overseerr="{{ 'true' if req.overseerr_request_id else 'false' }}" data-status="{{ req.status.value }}" data-title="{{ req.title|lower }}" data-type="{{ req.media_type.value|lower }}" data-status-low="{{ req.status.value|lower }}" data-requestedby="{{ req.requester_username|default('Unknown')|lower }}" data-requested="{{ req.created_at.strftime('%Y-%m-%d %H:%M') }}" data-ovstatus="{{ overseerr_statuses.get(req.id, 'unknown') }}" data-ovrank="{{ {'approved':0,'pending':1,'processing':2,'partially_available':3,'available':4,'completed':5,'declined':6,'deleted':7}.get(overseerr_statuses.get(req.id, 'unknown'), 99) }}" data-year="{{ req.year or 0 }}">
                             <td class="px-5 py-3.5 whitespace-nowrap text-sm" onclick="event.stopPropagation()">
                                 <input name="request_ids" value="{{ req.id }}" type="checkbox" class="active-request-checkbox rounded border-gray-600 bg-surface-900 text-brand-500 focus:ring-brand-500">
                             </td>
@@ -260,7 +260,7 @@ table.data-resizable td {
                             {% for req in pending_requests %}
                             {% set pending_item = pending_items_by_request_id.get(req.id) %}
                             {% set pending_ov_status = overseerr_statuses.get(req.id, 'unknown') %}
-                            <tr class="hover:bg-surface-850/80 cursor-pointer transition-colors" onclick="openRequestDetails({{ req.id }})" data-title="{{ req.title|lower }}" data-type="{{ req.media_type.value|lower }}" data-requestedby="{{ req.requester_username|default('Unknown')|lower }}" data-ovstatus="{{ pending_ov_status }}" data-ovrank="{{ {'approved':0,'partially_available':1}.get(pending_ov_status, 99) }}" data-nextretry="{{ pending_item.next_retry_at.strftime('%Y-%m-%d %H:%M') if pending_item and pending_item.next_retry_at else '0000-00-00 00:00' }}" data-lasterror="{{ (pending_item.last_error or '-')|lower if pending_item else '-' }}" data-year="{{ req.year or 0 }}">
+                            <tr class="hover:bg-surface-850/80 cursor-pointer transition-colors" onclick="openRequestDetails({{ req.id }})" data-request-id="{{ req.id }}" data-title="{{ req.title|lower }}" data-type="{{ req.media_type.value|lower }}" data-requestedby="{{ req.requester_username|default('Unknown')|lower }}" data-ovstatus="{{ pending_ov_status }}" data-ovrank="{{ {'approved':0,'partially_available':1}.get(pending_ov_status, 99) }}" data-nextretry="{{ pending_item.next_retry_at.strftime('%Y-%m-%d %H:%M') if pending_item and pending_item.next_retry_at else '0000-00-00 00:00' }}" data-lasterror="{{ (pending_item.last_error or '-')|lower if pending_item else '-' }}" data-year="{{ req.year or 0 }}">
                                 <td class="px-4 py-3.5 whitespace-nowrap text-sm" onclick="event.stopPropagation()">
                                     <input name="request_ids" value="{{ req.id }}" type="checkbox" class="pending-request-checkbox rounded border-gray-600 bg-surface-900 text-brand-500 focus:ring-brand-500">
                                 </td>
@@ -334,7 +334,7 @@ table.data-resizable td {
                     <tbody class="divide-y divide-gray-700/40" id="staged-torrents-body">
                         {% for torrent in staged_torrents %}
                         {% set request_state = staged_request_statuses.get(torrent.request_id, 'unknown') %}
-                        <tr class="hover:bg-surface-850/80 cursor-pointer transition-colors" onclick="{% if torrent.request_id %}openRequestDetails({{ torrent.request_id }}){% endif %}" data-title="{{ torrent.title|lower }}" data-state="{{ torrent.status|lower }}" data-requeststate="{{ request_state|lower }}" data-size="{{ torrent.size }}" data-indexer="{{ torrent.indexer|lower }}" data-score="{{ torrent.score }}">
+                        <tr class="hover:bg-surface-850/80 cursor-pointer transition-colors" onclick="{% if torrent.request_id %}openRequestDetails({{ torrent.request_id }}){% endif %}" data-request-id="{{ torrent.request_id }}" data-title="{{ torrent.title|lower }}" data-state="{{ torrent.status|lower }}" data-requeststate="{{ request_state|lower }}" data-size="{{ torrent.size }}" data-indexer="{{ torrent.indexer|lower }}" data-score="{{ torrent.score }}">
                             <td class="px-5 py-3.5 text-sm font-medium text-white">{{ torrent.title }}</td>
                             <td class="px-5 py-3.5 whitespace-nowrap text-sm"><span class="badge {% if torrent.status == 'staged' %}badge-yellow{% elif torrent.status == 'approved' %}badge-blue{% else %}badge-gray{% endif %}">{{ 'sent to qBittorrent' if torrent.status == 'approved' else torrent.status }}</span></td>
                             <td class="px-5 py-3.5 whitespace-nowrap text-sm"><span class="badge {% if request_state == 'downloading' %}badge-blue{% elif request_state == 'staged' %}badge-yellow{% else %}badge-gray{% endif %}">{{ request_state }}</span></td>
@@ -398,7 +398,7 @@ table.data-resizable td {
                     </thead>
                     <tbody class="divide-y divide-gray-700/40" id="finished-requests-body">
                         {% for req in completed_requests %}
-                        <tr class="hover:bg-surface-850/80 cursor-pointer transition-colors" onclick="openRequestDetails({{ req.id }})" data-title="{{ req.title|lower }}" data-type="{{ req.media_type.value|lower }}" data-requestedby="{{ req.requester_username|default('Unknown')|lower }}" data-requested="{{ req.created_at.strftime('%Y-%m-%d %H:%M') }}" data-completed="{{ req.updated_at.strftime('%Y-%m-%d %H:%M') }}" data-year="{{ req.year or 0 }}">
+                        <tr class="hover:bg-surface-850/80 cursor-pointer transition-colors" onclick="openRequestDetails({{ req.id }})" data-request-id="{{ req.id }}" data-title="{{ req.title|lower }}" data-type="{{ req.media_type.value|lower }}" data-requestedby="{{ req.requester_username|default('Unknown')|lower }}" data-requested="{{ req.created_at.strftime('%Y-%m-%d %H:%M') }}" data-completed="{{ req.updated_at.strftime('%Y-%m-%d %H:%M') }}" data-year="{{ req.year or 0 }}">
                             <td class="px-5 py-3.5 whitespace-nowrap text-sm font-medium text-white">{{ req.title }}</td>
                             <td class="px-5 py-3.5 whitespace-nowrap text-sm text-gray-500 tabular-nums" data-sort-value="{{ req.year or 0 }}">{{ req.year or '-' }}</td>
                             <td class="px-5 py-3.5 whitespace-nowrap text-sm capitalize text-gray-400">{{ req.media_type.value }}</td>
@@ -452,7 +452,7 @@ table.data-resizable td {
                     </thead>
                     <tbody class="divide-y divide-gray-700/40" id="rejected-requests-body">
                         {% for req in rejected_requests %}
-                        <tr class="hover:bg-surface-850/80 cursor-pointer transition-colors" onclick="openRequestDetails({{ req.id }})" data-title="{{ req.title|lower }}" data-type="{{ req.media_type.value|lower }}" data-requestedby="{{ req.requester_username|default('Unknown')|lower }}" data-reason="{{ (req.rejection_reason or '')|lower }}" data-rejectedat="{{ req.updated_at.strftime('%Y-%m-%d %H:%M') }}" data-year="{{ req.year or 0 }}">
+                        <tr class="hover:bg-surface-850/80 cursor-pointer transition-colors" onclick="openRequestDetails({{ req.id }})" data-request-id="{{ req.id }}" data-title="{{ req.title|lower }}" data-type="{{ req.media_type.value|lower }}" data-requestedby="{{ req.requester_username|default('Unknown')|lower }}" data-reason="{{ (req.rejection_reason or '')|lower }}" data-rejectedat="{{ req.updated_at.strftime('%Y-%m-%d %H:%M') }}" data-year="{{ req.year or 0 }}">
                             <td class="px-5 py-3.5 whitespace-nowrap text-sm font-medium text-white">{{ req.title }}</td>
                             <td class="px-5 py-3.5 whitespace-nowrap text-sm text-gray-500 tabular-nums" data-sort-value="{{ req.year or 0 }}">{{ req.year or '-' }}</td>
                             <td class="px-5 py-3.5 whitespace-nowrap text-sm capitalize text-gray-400">{{ req.media_type.value }}</td>
@@ -481,7 +481,22 @@ table.data-resizable td {
                 <h2 id="request-details-title" class="text-xl font-semibold text-white">Request Details</h2>
                 <p id="request-details-meta" class="text-sm text-gray-400 mt-0.5"></p>
             </div>
-            <button onclick="closeRequestDetails()" class="text-gray-500 hover:text-white text-2xl leading-none p-1 rounded-lg hover:bg-gray-700/50 transition-colors">&times;</button>
+            <div class="flex items-center gap-3">
+                <div class="flex items-center gap-1 mr-2">
+                    <button id="details-prev-btn" onclick="navigateDetails(-1)"
+                        class="px-3 py-1.5 text-sm text-gray-400 hover:text-white hover:bg-gray-700/50 rounded-lg transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+                        title="Previous title (← arrow key)">
+                        ← Prev
+                    </button>
+                    <span id="details-position" class="text-xs text-gray-500 px-2">- of -</span>
+                    <button id="details-next-btn" onclick="navigateDetails(1)"
+                        class="px-3 py-1.5 text-sm text-gray-400 hover:text-white hover:bg-gray-700/50 rounded-lg transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+                        title="Next title (→ arrow key)">
+                        Next →
+                    </button>
+                </div>
+                <button onclick="closeRequestDetails()" class="text-gray-500 hover:text-white text-2xl leading-none p-1 rounded-lg hover:bg-gray-700/50 transition-colors">&times;</button>
+            </div>
         </div>
         <div class="grid md:grid-cols-[240px_1fr] gap-6 p-6 overflow-y-auto flex-1">
             <div class="relative">
@@ -544,6 +559,7 @@ function setActiveTab(tabName) {
 }
 
 function showTab(tabName) {
+    closeRequestDetails();
     document.querySelectorAll('.tab-content').forEach(el => el.classList.add('hidden'));
     document.querySelectorAll('.tab-button').forEach(el => {
         el.classList.remove('border-brand-500', 'text-brand-400');
@@ -767,7 +783,7 @@ function sortTable(tableName, sortKey) {
     rows.forEach(row => tbody.appendChild(row));
 }
 
-async function openRequestDetails(requestId) {
+async function openRequestDetails(requestId, explicitIndex = null) {
     const modal = document.getElementById('request-details-modal');
     const title = document.getElementById('request-details-title');
     const meta = document.getElementById('request-details-meta');
@@ -775,6 +791,18 @@ async function openRequestDetails(requestId) {
     const releases = document.getElementById('request-details-releases');
     const overseerrLink = document.getElementById('request-details-overseerr-link');
     const filterInput = document.getElementById('release-filter-input');
+
+    // Build navigation context from currently visible rows
+    if (explicitIndex !== null) {
+        currentDetailsIndex = explicitIndex;
+    } else {
+        visibleRequests = getVisibleRequests();
+        currentDetailsIndex = visibleRequests.findIndex(r => r.id === requestId);
+        if (currentDetailsIndex === -1) {
+            currentDetailsIndex = 0;
+        }
+    }
+    updateNavigationButtons();
 
     title.textContent = 'Loading...';
     meta.textContent = '';
@@ -817,6 +845,58 @@ async function openRequestDetails(requestId) {
 }
 
 function closeRequestDetails() { document.getElementById('request-details-modal').classList.add('hidden'); }
+
+// Navigation state for prev/next in details modal
+let visibleRequests = []; // Array of {id, title} objects for current view
+let currentDetailsIndex = -1;
+
+function getVisibleRequests() {
+    const activeTabContent = document.querySelector('.tab-content:not(.hidden)');
+    if (!activeTabContent) return [];
+    const rows = activeTabContent.querySelectorAll('tbody tr[data-request-id]');
+    return Array.from(rows).map(row => ({
+        id: parseInt(row.getAttribute('data-request-id')),
+        title: row.querySelector('td:nth-child(2)')?.textContent?.trim() || 'Unknown'
+    })).filter(r => r.id);
+}
+
+function updateNavigationButtons() {
+    const prevBtn = document.getElementById('details-prev-btn');
+    const nextBtn = document.getElementById('details-next-btn');
+    const position = document.getElementById('details-position');
+    if (!prevBtn || !nextBtn || !position) return;
+
+    const total = visibleRequests.length;
+    if (total === 0) {
+        position.textContent = '- of -';
+        prevBtn.disabled = true;
+        nextBtn.disabled = true;
+        prevBtn.title = 'No items';
+        nextBtn.title = 'No items';
+        return;
+    }
+
+    position.textContent = `${currentDetailsIndex + 1} of ${total}`;
+
+    const prevIndex = (currentDetailsIndex - 1 + total) % total;
+    const nextIndex = (currentDetailsIndex + 1) % total;
+
+    prevBtn.disabled = false;
+    nextBtn.disabled = false;
+    prevBtn.title = `← ${visibleRequests[prevIndex].title} (wraps around)`;
+    nextBtn.title = `${visibleRequests[nextIndex].title} → (wraps around)`;
+}
+
+function navigateDetails(direction) {
+    const total = visibleRequests.length;
+    if (total === 0) return;
+
+    currentDetailsIndex = (currentDetailsIndex + direction + total) % total;
+    const targetRequest = visibleRequests[currentDetailsIndex];
+    if (targetRequest) {
+        openRequestDetails(targetRequest.id, currentDetailsIndex);
+    }
+}
 
 const filterInput = document.getElementById('filter-input');
 const statusFilter = document.getElementById('overseerr-status-filter');
@@ -973,5 +1053,20 @@ const initialTab = new URLSearchParams(window.location.search).get('tab');
 if (initialTab && document.getElementById('content-' + initialTab) && document.getElementById('tab-' + initialTab)) {
     showTab(initialTab);
 }
+
+// Keyboard navigation for details modal
+document.addEventListener('keydown', (e) => {
+    const modal = document.getElementById('request-details-modal');
+    if (modal.classList.contains('hidden')) return;
+    if (e.key === 'ArrowLeft') {
+        e.preventDefault();
+        navigateDetails(-1);
+    } else if (e.key === 'ArrowRight') {
+        e.preventDefault();
+        navigateDetails(1);
+    } else if (e.key === 'Escape') {
+        closeRequestDetails();
+    }
+});
 </script>
 {% endblock %}
