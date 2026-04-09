@@ -33,6 +33,7 @@ class ProwlarrSearchResult(BaseModel):
 
     releases: list[ProwlarrRelease]
     query_time_ms: int
+    error: str | None = None
 
 
 class ProwlarrService:
@@ -144,6 +145,7 @@ class ProwlarrService:
         )
 
         releases = []
+        error_message = None
         async with httpx.AsyncClient() as client:
             try:
                 response = await client.get(
@@ -164,13 +166,15 @@ class ProwlarrService:
                         int((time.time() - start_time) * 1000),
                     )
                 else:
+                    error_message = f"HTTP {response.status_code}"
                     logger.warning(
                         "Prowlarr search failed: type=%s query=%s status_code=%s",
                         params.get("type"),
                         params.get("query"),
                         response.status_code,
                     )
-            except httpx.RequestError:
+            except httpx.RequestError as e:
+                error_message = f"Request error: {e}"
                 logger.exception(
                     "Prowlarr search request error: type=%s query=%s",
                     params.get("type"),
@@ -180,6 +184,7 @@ class ProwlarrService:
         return ProwlarrSearchResult(
             releases=releases,
             query_time_ms=int((time.time() - start_time) * 1000),
+            error=error_message,
         )
 
     @staticmethod

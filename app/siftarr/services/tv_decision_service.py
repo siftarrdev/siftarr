@@ -139,6 +139,7 @@ class TVDecisionService:
         season_results = await asyncio.gather(*season_search_coros, return_exceptions=True)
 
         season_search_successes = []
+        season_search_errors: list[str] = []
         for i, sr in enumerate(season_results):
             if isinstance(sr, Exception):
                 logger.warning(
@@ -147,17 +148,29 @@ class TVDecisionService:
                     requested_seasons[i],
                     sr,
                 )
+                season_search_errors.append(str(sr))
             elif isinstance(sr, ProwlarrSearchResult):
-                season_search_successes.append(sr)
+                if sr.error:
+                    logger.warning(
+                        "TV season search error: request_id=%s season=%s error=%s",
+                        request.id,
+                        requested_seasons[i],
+                        sr.error,
+                    )
+                    season_search_errors.append(sr.error)
+                else:
+                    season_search_successes.append(sr)
 
         logger.info(
-            "TV season search completed: request_id=%s queries=%s results=%s",
+            "TV season search completed: request_id=%s queries=%s results=%s errors=%s",
             request.id,
             len(season_search_coros),
             [len(sr.releases) for sr in season_search_successes],
+            len(season_search_errors),
         )
 
         all_passing_packs: list[ReleaseEvaluation] = []
+        episode_search_errors: list[str] = []
         for search_result in season_search_successes:
             if not search_result.releases:
                 continue
@@ -214,14 +227,24 @@ class TVDecisionService:
                         request.id,
                         er,
                     )
+                    episode_search_errors.append(str(er))
                 elif isinstance(er, ProwlarrSearchResult):
-                    episode_search_successes.append(er)
+                    if er.error:
+                        logger.warning(
+                            "TV episode search error: request_id=%s error=%s",
+                            request.id,
+                            er.error,
+                        )
+                        episode_search_errors.append(er.error)
+                    else:
+                        episode_search_successes.append(er)
 
             logger.info(
-                "TV episode search completed: request_id=%s queries=%s results=%s",
+                "TV episode search completed: request_id=%s queries=%s results=%s errors=%s",
                 request.id,
                 len(episode_search_coros),
                 [len(er.releases) for er in episode_search_successes],
+                len(episode_search_errors),
             )
 
             for search_result in episode_search_successes:
@@ -231,6 +254,8 @@ class TVDecisionService:
                 evaluated = [rule_engine.evaluate(release) for release in search_result.releases]
                 all_evaluated_releases.extend(evaluated)
                 passing = [e for e in evaluated if e.passed]
+                if passing:
+                    passing.sort(key=lambda e: e.total_score, reverse=True)
                 best = passing[0] if passing else None
                 if best:
                     all_selected_releases.append(best)
@@ -286,23 +311,32 @@ class TVDecisionService:
             if e.rejection_reason:
                 rejection_reasons.append(e.rejection_reason)
 
+        all_errors = list(set(season_search_errors + episode_search_errors))
+        error_msg = (
+            "; ".join(set(rejection_reasons))[:500]
+            if rejection_reasons
+            else "All releases rejected by rules"
+        )
+        if all_errors:
+            error_msg = f"Search errors: {'; '.join(all_errors)[:200]}. {error_msg}"
+
         logger.info(
-            "TV search rejected all releases: request_id=%s evaluated=%s rejection_reasons=%s",
+            "TV search rejected all releases: request_id=%s evaluated=%s rejection_reasons=%s search_errors=%s",
             request.id,
             len(all_evaluated_releases),
             list(set(rejection_reasons))[:5],
+            len(all_errors),
         )
 
         queue_service = PendingQueueService(self.db)
         await queue_service.add_to_queue(
             request.id,
-            error_message="; ".join(set(rejection_reasons))[:500]
-            if rejection_reasons
-            else "All releases rejected by rules",
+            error_message=error_msg,
         )
 
         return {
             "status": "pending",
             "message": f"No releases passed rules. {len(all_evaluated_releases)} releases evaluated.",
             "rejection_reasons": list(set(rejection_reasons))[:5],
+            "search_errors": all_errors,
         }

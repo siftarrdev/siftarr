@@ -1,14 +1,23 @@
 """Overseerr webhook handler for receiving media requests."""
 
+import logging
+
 from fastapi import APIRouter, BackgroundTasks, Depends
 from pydantic import BaseModel, Field
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.siftarr.database import get_db
+from app.siftarr.database import async_session_maker, get_db
 from app.siftarr.models import MediaType, Request, RequestStatus
 from app.siftarr.services.media_helpers import extract_media_title_and_year
+from app.siftarr.services.movie_decision_service import MovieDecisionService
 from app.siftarr.services.overseerr_service import OverseerrService
+from app.siftarr.services.prowlarr_service import ProwlarrService
+from app.siftarr.services.qbittorrent_service import QbittorrentService
 from app.siftarr.services.runtime_settings import get_effective_settings
+from app.siftarr.services.tv_decision_service import TVDecisionService
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/webhook", tags=["webhooks"])
 
@@ -68,8 +77,11 @@ async def receive_overseerr_webhook(
     # Determine media type
     media_type = MediaType.MOVIE if payload.media.media_type == "movie" else MediaType.TV
 
-    # Use tmdbid or tvdbid as external_id
-    external_id = str(payload.media.tmdbid or payload.media.tvdbid)
+    base_external_id = str(payload.media.tmdbid or payload.media.tvdbid)
+    if payload.request and payload.request.id:
+        external_id = f"{base_external_id}-{payload.request.id}"
+    else:
+        external_id = base_external_id
 
     # Fetch title and year from Overseerr media details
     title = ""
@@ -118,10 +130,42 @@ async def receive_overseerr_webhook(
 async def process_request_background(request_id: int) -> None:
     """Background task to process a request.
 
-    This is a placeholder that will be implemented in a later phase.
-
     Args:
         request_id: The ID of the request to process.
     """
-    # TODO: Implement request processing logic in Phase 2.2+
-    pass
+    async with async_session_maker() as db:
+        try:
+            result = await db.execute(select(Request).where(Request.id == request_id))
+            request = result.scalar_one_or_none()
+
+            if not request:
+                logger.error("process_request_background: request %s not found", request_id)
+                return
+
+            logger.info(
+                "Processing request: request_id=%s media_type=%s title=%s",
+                request_id,
+                request.media_type,
+                request.title,
+            )
+
+            settings = await get_effective_settings(db)
+            prowlarr = ProwlarrService(settings=settings)
+            qbittorrent = QbittorrentService(settings=settings)
+
+            try:
+                if request.media_type == MediaType.MOVIE:
+                    decision_service = MovieDecisionService(db, prowlarr, qbittorrent)
+                else:
+                    decision_service = TVDecisionService(db, prowlarr, qbittorrent)
+
+                result = await decision_service.process_request(request_id)
+                logger.info(
+                    "Request processing complete: request_id=%s status=%s",
+                    request_id,
+                    result.get("status"),
+                )
+            finally:
+                pass
+        except Exception:
+            logger.exception("Error processing request: request_id=%s", request_id)

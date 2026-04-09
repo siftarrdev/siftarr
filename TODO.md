@@ -11,3 +11,8 @@ more consistent coding style
 - Implement a more robust error handling strategy to ensure that the application can gracefully handle unexpected errors and provide useful feedback to users when issues occur
 
 ## Bugs
+- [x] Overseerr webhook creates requests with non-unique external IDs for duplicate titles
+- [x] Webhook processing is still a no-op placeholder and does not auto-process requests
+- [x] Movie and TV fallback selection pick the first passing release instead of the highest-scoring one
+- [x] Malformed regex rules are not safely handled during evaluation and can crash processing
+- [x] Prowlarr search failures are swallowed and treated as empty results
