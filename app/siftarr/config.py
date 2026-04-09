@@ -40,6 +40,7 @@ class Settings(BaseSettings):
     retry_interval_hours: int = 24
     max_retry_duration_days: int = 7
     episode_sync_stale_hours: int = 24
+    max_episode_discovery: int = 30
 
     database_url: str = Field(
         default_factory=lambda: (

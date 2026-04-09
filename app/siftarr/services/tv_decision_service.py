@@ -5,9 +5,12 @@ import logging
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.siftarr.config import get_settings
+from app.siftarr.models.episode import Episode
 from app.siftarr.models.release import Release
 from app.siftarr.models.request import MediaType, Request, RequestStatus
 from app.siftarr.models.rule import Rule
+from app.siftarr.models.season import Season
 from app.siftarr.services.pending_queue_service import PendingQueueService
 from app.siftarr.services.prowlarr_service import ProwlarrSearchResult, ProwlarrService
 from app.siftarr.services.qbittorrent_service import QbittorrentService
@@ -23,14 +26,13 @@ class TVDecisionService:
     """
     Service for making download decisions for TV requests.
 
-    Workflow (Season-First):
-    1. Search for season pack via Prowlarr
-    2. Evaluate all packs through RuleEngine
-    3. If a pack passes all filters and has highest score → send to qBit (or staging)
-    4. If no season pack passes → search individual episodes
-    5. Evaluate episodes one by one
-    6. Send passing episodes to qBit (or staging)
-    7. If nothing passes → add to pending queue
+    Workflow (Parallel Search):
+    1. Search for season packs AND individual episodes in parallel
+    2. Evaluate all releases through RuleEngine
+    3. Prefer season packs over episode releases when both pass
+    4. Send best matches to qBit (or staging)
+    5. Update Episode statuses accordingly
+    6. If nothing passes → add to pending queue
     """
 
     def __init__(
@@ -39,10 +41,11 @@ class TVDecisionService:
         prowlarr: ProwlarrService,
         qbittorrent: QbittorrentService,
     ):
-        self.db = db
+        self.db: AsyncSession = db
         self.prowlarr = prowlarr
         self.qbittorrent = qbittorrent
         self._search_semaphore = asyncio.Semaphore(MAX_CONCURRENT_SEARCHES)
+        self._settings = get_settings()
 
     async def _get_rule_engine(self) -> RuleEngine:
         result = await self.db.execute(select(Rule))
@@ -77,6 +80,53 @@ class TVDecisionService:
     async def _limited_search(self, coro):
         async with self._search_semaphore:
             return await coro
+
+    async def _get_db_episodes_for_season(self, request_id: int, season_number: int) -> list[int]:
+        result = await self.db.execute(
+            select(Episode.episode_number)
+            .join(Season, Episode.season_id == Season.id)
+            .where(Season.request_id == request_id, Season.season_number == season_number)
+            .order_by(Episode.episode_number)
+        )
+        return [row[0] for row in result.all()]
+
+    async def _update_episode_status(
+        self, request_id: int, season_number: int, episode_number: int | None, status: RequestStatus
+    ) -> None:
+        if episode_number is not None:
+            result = await self.db.execute(
+                select(Episode)
+                .join(Season, Episode.season_id == Season.id)
+                .where(
+                    Season.request_id == request_id,
+                    Season.season_number == season_number,
+                    Episode.episode_number == episode_number,
+                )
+            )
+        else:
+            result = await self.db.execute(
+                select(Episode)
+                .join(Season, Episode.season_id == Season.id)
+                .where(Season.request_id == request_id, Season.season_number == season_number)
+            )
+        episodes = list(result.scalars().all())
+        for ep in episodes:
+            ep.status = status
+        if episodes:
+            await self.db.flush()
+
+    async def _update_season_status(
+        self, request_id: int, season_number: int, status: RequestStatus
+    ) -> None:
+        result = await self.db.execute(
+            select(Season).where(
+                Season.request_id == request_id, Season.season_number == season_number
+            )
+        )
+        season = result.scalar_one_or_none()
+        if season:
+            season.status = status
+            await self.db.flush()
 
     async def process_request(self, request_id: int) -> dict:
         result = await self.db.execute(select(Request).where(Request.id == request_id))
@@ -120,149 +170,132 @@ class TVDecisionService:
         if not requested_seasons:
             return {"status": "error", "message": "No seasons specified"}
 
-        all_evaluated_releases: list[ReleaseEvaluation] = []
-        all_selected_releases: list[ReleaseEvaluation] = []
-        season_pack_selected = False
+        search_tasks: list[tuple[str, int, int | None]] = []
 
-        # Step 1: Try season packs - search all seasons concurrently
-        season_search_coros = [
-            self._limited_search(
-                self.prowlarr.search_by_tvdbid(
-                    tvdbid=request.tvdb_id,
-                    title=request.title,
-                    season=season,
-                    year=request.year,
+        for season in requested_seasons:
+            search_tasks.append(("season_pack", season, None))
+            episodes_in_season = requested_episodes.get(season, [])
+            if not episodes_in_season:
+                db_episodes = await self._get_db_episodes_for_season(request.id, season)
+                if db_episodes:
+                    episodes_in_season = db_episodes[: self._settings.max_episode_discovery]
+                else:
+                    episodes_in_season = list(range(1, self._settings.max_episode_discovery + 1))
+            for ep in episodes_in_season:
+                search_tasks.append(("episode", season, ep))
+
+        search_coros = []
+        for task_type, season, episode in search_tasks:
+            if task_type == "season_pack":
+                search_coros.append(
+                    self._limited_search(
+                        self.prowlarr.search_by_tvdbid(
+                            tvdbid=request.tvdb_id,
+                            title=request.title,
+                            season=season,
+                            year=request.year,
+                        )
+                    )
                 )
-            )
-            for season in requested_seasons
-        ]
-        season_results = await asyncio.gather(*season_search_coros, return_exceptions=True)
+            else:
+                search_coros.append(
+                    self._limited_search(
+                        self.prowlarr.search_by_tvdbid(
+                            tvdbid=request.tvdb_id,
+                            title=request.title,
+                            season=season,
+                            episode=episode,
+                            year=request.year,
+                        )
+                    )
+                )
 
-        season_search_successes = []
-        season_search_errors: list[str] = []
-        for i, sr in enumerate(season_results):
+        all_results = await asyncio.gather(*search_coros, return_exceptions=True)
+
+        all_evaluated_releases: list[ReleaseEvaluation] = []
+        all_search_errors: list[str] = []
+        pack_evaluations: list[tuple[int, ReleaseEvaluation]] = []
+        episode_evaluations: list[tuple[int, int, ReleaseEvaluation]] = []
+
+        for i, sr in enumerate(all_results):
+            task_type, season, episode = search_tasks[i]
             if isinstance(sr, Exception):
                 logger.warning(
-                    "TV season search failed: request_id=%s season=%s error=%s",
+                    "TV search failed: request_id=%s type=%s season=%s episode=%s error=%s",
                     request.id,
-                    requested_seasons[i],
+                    task_type,
+                    season,
+                    episode,
                     sr,
                 )
-                season_search_errors.append(str(sr))
-            elif isinstance(sr, ProwlarrSearchResult):
-                if sr.error:
-                    logger.warning(
-                        "TV season search error: request_id=%s season=%s error=%s",
-                        request.id,
-                        requested_seasons[i],
-                        sr.error,
-                    )
-                    season_search_errors.append(sr.error)
-                else:
-                    season_search_successes.append(sr)
-
-        logger.info(
-            "TV season search completed: request_id=%s queries=%s results=%s errors=%s",
-            request.id,
-            len(season_search_coros),
-            [len(sr.releases) for sr in season_search_successes],
-            len(season_search_errors),
-        )
-
-        all_passing_packs: list[ReleaseEvaluation] = []
-        episode_search_errors: list[str] = []
-        for search_result in season_search_successes:
-            if not search_result.releases:
+                all_search_errors.append(str(sr))
+                continue
+            if not isinstance(sr, ProwlarrSearchResult):
+                all_search_errors.append("Unexpected search result type")
+                continue
+            if sr.error:
+                logger.warning(
+                    "TV search error: request_id=%s type=%s season=%s episode=%s error=%s",
+                    request.id,
+                    task_type,
+                    season,
+                    episode,
+                    sr.error,
+                )
+                all_search_errors.append(sr.error)
                 continue
 
-            evaluated_packs = [rule_engine.evaluate(release) for release in search_result.releases]
-            all_evaluated_releases.extend(evaluated_packs)
-            passing_packs = [e for e in evaluated_packs if e.passed]
-            all_passing_packs.extend(passing_packs)
-
-        if all_passing_packs:
-            all_passing_packs.sort(key=lambda e: e.total_score, reverse=True)
-            best_pack = all_passing_packs[0]
-            all_selected_releases.append(best_pack)
-            season_pack_selected = True
-
-        # Step 2: If no season pack, try individual episodes
-        if not season_pack_selected:
-            episode_search_coros = []
-            for season in requested_seasons:
-                episodes_to_search = requested_episodes.get(season, [])
-
-                if not episodes_to_search:
-                    episode_search_coros.append(
-                        self._limited_search(
-                            self.prowlarr.search_by_tvdbid(
-                                tvdbid=request.tvdb_id,
-                                title=request.title,
-                                season=season,
-                                year=request.year,
-                            )
-                        )
-                    )
-                else:
-                    for episode in episodes_to_search:
-                        episode_search_coros.append(
-                            self._limited_search(
-                                self.prowlarr.search_by_tvdbid(
-                                    tvdbid=request.tvdb_id,
-                                    title=request.title,
-                                    season=season,
-                                    episode=episode,
-                                    year=request.year,
-                                )
-                            )
-                        )
-
-            episode_results = await asyncio.gather(*episode_search_coros, return_exceptions=True)
-
-            episode_search_successes = []
-            for er in episode_results:
-                if isinstance(er, Exception):
-                    logger.warning(
-                        "TV episode search failed: request_id=%s error=%s",
-                        request.id,
-                        er,
-                    )
-                    episode_search_errors.append(str(er))
-                elif isinstance(er, ProwlarrSearchResult):
-                    if er.error:
-                        logger.warning(
-                            "TV episode search error: request_id=%s error=%s",
-                            request.id,
-                            er.error,
-                        )
-                        episode_search_errors.append(er.error)
+            for release in sr.releases:
+                evaluation = rule_engine.evaluate(release)
+                all_evaluated_releases.append(evaluation)
+                if evaluation.passed:
+                    if task_type == "season_pack":
+                        pack_evaluations.append((season, evaluation))
                     else:
-                        episode_search_successes.append(er)
+                        assert episode is not None
+                        episode_evaluations.append((season, episode, evaluation))
 
-            logger.info(
-                "TV episode search completed: request_id=%s queries=%s results=%s errors=%s",
-                request.id,
-                len(episode_search_coros),
-                [len(er.releases) for er in episode_search_successes],
-                len(episode_search_errors),
-            )
+        logger.info(
+            "TV search completed: request_id=%s total_results=%s passing_packs=%s passing_episodes=%s errors=%s",
+            request.id,
+            len(all_evaluated_releases),
+            len(pack_evaluations),
+            len(episode_evaluations),
+            len(all_search_errors),
+        )
 
-            for search_result in episode_search_successes:
-                if not search_result.releases:
-                    continue
+        all_selected_releases: list[ReleaseEvaluation] = []
 
-                evaluated = [rule_engine.evaluate(release) for release in search_result.releases]
-                all_evaluated_releases.extend(evaluated)
-                passing = [e for e in evaluated if e.passed]
-                if passing:
-                    passing.sort(key=lambda e: e.total_score, reverse=True)
-                best = passing[0] if passing else None
-                if best:
-                    all_selected_releases.append(best)
+        best_packs_by_season: dict[int, ReleaseEvaluation] = {}
+        for season, pack_eval in pack_evaluations:
+            if (
+                season not in best_packs_by_season
+                or pack_eval.total_score > best_packs_by_season[season].total_score
+            ):
+                best_packs_by_season[season] = pack_eval
+
+        seasons_with_packs: set[int] = set(best_packs_by_season.keys())
+
+        for season, best_pack in best_packs_by_season.items():
+            all_selected_releases.append(best_pack)
+            await self._update_episode_status(request.id, season, None, RequestStatus.SEARCHING)
+            await self._update_season_status(request.id, season, RequestStatus.SEARCHING)
+
+        episodes_by_key: dict[tuple[int, int], ReleaseEvaluation] = {}
+        for season, episode, ep_eval in episode_evaluations:
+            key = (season, episode)
+            if key not in episodes_by_key or ep_eval.total_score > episodes_by_key[key].total_score:
+                episodes_by_key[key] = ep_eval
+
+        for (season, episode), ep_eval in episodes_by_key.items():
+            if season not in seasons_with_packs:
+                all_selected_releases.append(ep_eval)
+                await self._update_episode_status(
+                    request.id, season, episode, RequestStatus.SEARCHING
+                )
 
         await store_search_results(self.db, request.id, all_evaluated_releases)
 
-        # Step 3: If we have selected releases, send to qBittorrent
         if all_selected_releases:
             all_selected_releases.sort(key=lambda x: x.total_score, reverse=True)
 
@@ -288,6 +321,22 @@ class TVDecisionService:
                 selection_source="rule",
             )
 
+            if action_result.get("status") in ("completed", "downloading", "staged"):
+                status_map = {
+                    "completed": RequestStatus.COMPLETED,
+                    "downloading": RequestStatus.DOWNLOADING,
+                    "staged": RequestStatus.STAGED,
+                }
+                action_status: str = str(action_result.get("status", ""))
+                new_status = status_map[action_status]
+                for season in seasons_with_packs:
+                    await self._update_episode_status(request.id, season, None, new_status)
+                    await self._update_season_status(request.id, season, new_status)
+                for season, episode in episodes_by_key:
+                    if season not in seasons_with_packs:
+                        await self._update_episode_status(request.id, season, episode, new_status)
+                await self.db.flush()
+
             return {
                 "status": action_result["status"],
                 "selected_releases": [
@@ -302,7 +351,6 @@ class TVDecisionService:
                 "message": action_result["message"],
             }
 
-        # Step 4: No releases passed - add to pending queue
         request.status = RequestStatus.PENDING
         await self.db.commit()
 
@@ -311,7 +359,7 @@ class TVDecisionService:
             if e.rejection_reason:
                 rejection_reasons.append(e.rejection_reason)
 
-        all_errors = list(set(season_search_errors + episode_search_errors))
+        all_errors = list(set(all_search_errors))
         error_msg = (
             "; ".join(set(rejection_reasons))[:500]
             if rejection_reasons
