@@ -6,8 +6,7 @@
 - Add indexer and release-source preferences, including allow/deny lists and weighted priorities
 - Make settings sections collapsible for easier navigation
 - Increase unit test coverage to 85% (currently at 47%; focus on router integration tests and complex async service tests)
-- Add a year column to all the tables in the dashboard for easier sorting and scanning of recent activity
-- make the search results in the request details view much more compact by optimising the use of space and removing redundant information, allowing more results to be visible at once without scrolling
+- Add an option to click to the previous or next title in the list when in the details view, so you can easily jump to the next request without going back to the main list
 
 ## Project quality improvements
 - Refactor the codebase for better separation of concerns and more consistent coding style
@@ -18,5 +17,6 @@
 - Add integration tests for the full webhook -> search -> rule evaluation -> staging/qBit flow
 - Add structured decision logs/metrics for search latency, rule failures, pending retries, and qBit handoff
 
-## Performance improvements
+## Bugs
+- Searching for tv shows that don't have full seasons is not showing any results because the search is only looking for season packs; need to also search for individual episodes and allow rules to match on those
 

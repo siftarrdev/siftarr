@@ -5,6 +5,11 @@ set -eu
 SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 REPO_ROOT=$(CDPATH= cd -- "$SCRIPT_DIR/.." && pwd)
 
+SHOW_LOGS=0
+if [ "${1:-}" = "--logs" ]; then
+    SHOW_LOGS=1
+fi
+
 RAW_VERSION=$(git -C "$REPO_ROOT" describe --dirty --tags --always 2>/dev/null || printf '0.0.0')
 VERSION=$(printf '%s' "$RAW_VERSION" | python -c 'import re, sys
 version = sys.stdin.read().strip()
@@ -26,4 +31,7 @@ printf 'Using build version: %s\n' "$VERSION"
 SIFTARR_VERSION="$VERSION" docker compose -f "$SCRIPT_DIR/docker-compose.yml" down
 SIFTARR_VERSION="$VERSION" docker compose -f "$SCRIPT_DIR/docker-compose.yml" build siftarr
 SIFTARR_VERSION="$VERSION" docker compose -f "$SCRIPT_DIR/docker-compose.yml" up -d siftarr
-docker compose -f "$SCRIPT_DIR/docker-compose.yml" logs -f siftarr
+
+if [ "$SHOW_LOGS" = 1 ]; then
+    docker compose -f "$SCRIPT_DIR/docker-compose.yml" logs -f siftarr
+fi
