@@ -22,6 +22,9 @@ class Release(Base):
     __table_args__ = (
         Index("ix_releases_request_id", "request_id"),
         Index("ix_releases_score", "score"),
+        Index(
+            "ix_releases_request_season_episode", "request_id", "season_number", "episode_number"
+        ),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
@@ -44,6 +47,8 @@ class Release(Base):
     )  # e.g., "1080p", "2160p"
     codec: Mapped[str | None] = mapped_column(String(50), nullable=True)  # e.g., "x265", "H.264"
     release_group: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    season_number: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    episode_number: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
     # Scoring
     score: Mapped[int] = mapped_column(Integer, default=0)
