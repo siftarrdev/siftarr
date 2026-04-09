@@ -1,7 +1,9 @@
 """FastAPI application for Siftarr."""
 
+import logging
 import sqlite3
 import subprocess
+import sys
 from contextlib import asynccontextmanager
 from pathlib import Path
 from urllib.parse import urlparse
@@ -19,6 +21,23 @@ from app.siftarr.version import __version__
 scheduler_service: SchedulerService | None = None
 INITIAL_MIGRATION_REVISION = "bc9c8cfbe08b"
 LATEST_KNOWN_MIGRATION_REVISION = "add_rejection_reason_to_requests"
+
+
+def _configure_logging() -> None:
+    """Configure application logging with structured output."""
+    log_format = "%(asctime)s %(levelname)s [%(name)s] %(message)s"
+    date_format = "%Y-%m-%d %H:%M:%S"
+
+    handler = logging.StreamHandler(sys.stdout)
+    handler.setFormatter(logging.Formatter(log_format, date_format))
+
+    root_logger = logging.getLogger()
+    root_logger.setLevel(logging.INFO)
+    root_logger.addHandler(handler)
+
+    logging.getLogger("httpx").setLevel(logging.WARNING)
+    logging.getLogger("httpcore").setLevel(logging.WARNING)
+    logging.getLogger("apscheduler").setLevel(logging.WARNING)
 
 
 def _ensure_db_directory():
@@ -164,6 +183,42 @@ async def lifespan(app: FastAPI):
     """Application lifespan manager for startup/shutdown events."""
     global scheduler_service
 
+    logger = logging.getLogger(__name__)
+
+    logger.info("Starting Siftarr v%s", __version__)
+
+    settings = get_settings()
+    if not settings.prowlarr_url:
+        logger.warning(
+            "Prowlarr URL not configured. Set PROWLARR_URL environment variable. "
+            "Torrent search functionality will not work."
+        )
+    if not settings.prowlarr_api_key:
+        logger.warning(
+            "Prowlarr API key not configured. Set PROWLARR_API_KEY environment variable. "
+            "Torrent search functionality will not work."
+        )
+    if not settings.overseerr_url:
+        logger.warning(
+            "Overseerr URL not configured. Set OVERSEERR_URL environment variable. "
+            "Webhook functionality may be limited."
+        )
+    if not settings.overseerr_api_key:
+        logger.warning(
+            "Overseerr API key not configured. Set OVERSEERR_API_KEY environment variable. "
+            "Webhook functionality may be limited."
+        )
+    if not settings.qbittorrent_url:
+        logger.warning(
+            "qBittorrent URL not configured. Set QBITTORRENT_URL environment variable. "
+            "Download functionality will not work."
+        )
+
+    if settings.staging_mode_enabled:
+        logger.info("Staging mode is ENABLED - torrents will be held for approval")
+    else:
+        logger.info("Staging mode is DISABLED - torrents will be sent directly to qBittorrent")
+
     # Ensure database directory exists
     _ensure_db_directory()
 
@@ -183,11 +238,12 @@ async def lifespan(app: FastAPI):
     # Initialize database tables
     await init_db()
 
-    scheduler_service = SchedulerService(async_session_maker)
+    scheduler_service = SchedulerService(async_session_maker, logger=logger)
     scheduler_service.start()
     yield
     if scheduler_service:
         scheduler_service.stop()
+        logger.info("Siftarr shutdown complete")
 
 
 def create_app() -> FastAPI:

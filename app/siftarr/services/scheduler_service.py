@@ -1,5 +1,6 @@
 """Background task scheduler using APScheduler."""
 
+import logging
 from contextlib import suppress
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
@@ -28,36 +29,46 @@ class SchedulerService:
     - Polling Overseerr for new approved requests
     """
 
-    def __init__(self, db_session_factory) -> None:
+    def __init__(self, db_session_factory, logger: logging.Logger | None = None) -> None:
         """
         Initialize scheduler service.
 
         Args:
             db_session_factory: Callable that returns an AsyncSession
+            logger: Optional logger instance
         """
         self.db_session_factory = db_session_factory
         self.scheduler: AsyncIOScheduler | None = None
+        self._logger = logger or logging.getLogger(__name__)
 
     async def _process_pending_item(self, pending_item: PendingQueue) -> None:
         """Process a single pending item."""
+        logger = self._logger
         async with self.db_session_factory() as db:
-            # Get the request
             result = await db.execute(
                 select(Request).where(Request.id == pending_item.request_id),
             )
             request = result.scalar_one_or_none()
 
             if not request:
-                # Request was deleted, remove from queue
+                logger.debug(
+                    "Request %s not found, removing from pending queue", pending_item.request_id
+                )
                 await db.delete(pending_item)
                 await db.commit()
                 return
+
+            logger.info(
+                "Processing pending request: request_id=%s title=%s media_type=%s",
+                request.id,
+                request.title,
+                request.media_type.value,
+            )
 
             runtime_settings = await get_effective_settings(db)
             prowlarr = ProwlarrService(settings=runtime_settings)
             qbittorrent = QbittorrentService(settings=runtime_settings)
 
-            # Backfill year if missing (e.g. Overseerr was unreachable at creation time)
             if request.year is None and (request.tmdb_id or request.tvdb_id):
                 media_id = request.tmdb_id or request.tvdb_id
                 if media_id is None:
@@ -72,12 +83,12 @@ class SchedulerService:
                         lifecycle = LifecycleService(db)
                         await lifecycle.update_request_metadata(request.id, year=year)
                         await db.refresh(request)
+                        logger.info("Backfilled year=%s for request_id=%s", year, request.id)
                 except Exception:
                     pass
                 finally:
                     await overseerr.close()
 
-            # Create decision service based on media type
             if request.media_type == MediaType.TV:
                 decision_service = TVDecisionService(db, prowlarr, qbittorrent)
             else:
@@ -87,23 +98,28 @@ class SchedulerService:
                 result = await decision_service.process_request(request.id)
 
                 if result["status"] == "completed":
-                    # Success - remove from pending queue
                     queue_service = PendingQueueService(db)
                     await queue_service.remove_from_queue(request.id)
+                    logger.info("Request %s completed successfully", request.id)
                 else:
-                    # Still pending - update retry info
                     queue_service = PendingQueueService(db)
                     await queue_service.update_error(
                         request.id,
                         result.get("message", "Unknown error"),
                     )
+                    logger.info(
+                        "Request %s still pending: %s",
+                        request.id,
+                        result.get("message", "Unknown error"),
+                    )
             except Exception as e:
-                # Error during processing
+                logger.error("Error processing request %s: %s", request.id, e)
                 queue_service = PendingQueueService(db)
                 await queue_service.update_error(request.id, str(e))
 
     async def _retry_pending_jobs(self) -> None:
         """Daily job to retry pending items."""
+        logger = self._logger
         async with self.db_session_factory() as db:
             queue_service = PendingQueueService(db)
             pending_items = await queue_service.get_ready_for_retry()
@@ -111,13 +127,13 @@ class SchedulerService:
             if not pending_items:
                 return
 
-            print(f"Processing {len(pending_items)} pending items...")
+            logger.info("Daily pending queue retry: processing %s items", len(pending_items))
 
             for item in pending_items:
                 try:
                     await self._process_pending_item(item)
                 except Exception as e:
-                    print(f"Error processing pending item {item.request_id}: {e}")
+                    logger.error("Error processing pending item %s: %s", item.request_id, e)
 
     async def _poll_overseerr(self) -> None:
         """
@@ -136,12 +152,12 @@ class SchedulerService:
 
     def start(self) -> None:
         """Start the background scheduler."""
+        logger = self._logger
         if self.scheduler is not None:
             return
 
         self.scheduler = AsyncIOScheduler()
 
-        # Daily retry job (every 24 hours)
         self.scheduler.add_job(
             self._retry_pending_jobs,
             trigger=IntervalTrigger(hours=24),
@@ -150,7 +166,6 @@ class SchedulerService:
             replace_existing=True,
         )
 
-        # Overseerr polling (every hour)
         self.scheduler.add_job(
             self._poll_overseerr,
             trigger=IntervalTrigger(hours=1),
@@ -160,14 +175,15 @@ class SchedulerService:
         )
 
         self.scheduler.start()
-        print("Background scheduler started")
+        logger.info("Background scheduler started")
 
     def stop(self) -> None:
         """Stop the background scheduler."""
+        logger = self._logger
         if self.scheduler is not None:
             self.scheduler.shutdown()
             self.scheduler = None
-            print("Background scheduler stopped")
+            logger.info("Background scheduler stopped")
 
     async def trigger_retry_now(self) -> int:
         """

@@ -1,6 +1,7 @@
 """Service for managing staged torrents."""
 
 import json
+import logging
 import os
 import re
 from datetime import UTC, datetime
@@ -15,6 +16,8 @@ from app.siftarr.models.staged_torrent import StagedTorrent
 from app.siftarr.services.prowlarr_service import ProwlarrRelease
 
 STAGING_DIR = Path("/data/staging")
+
+logger = logging.getLogger(__name__)
 
 
 class StagingService:
@@ -82,7 +85,15 @@ class StagingService:
         """
         if self.db is None:
             raise RuntimeError("Database session is required for save_release")
-        # Generate filename
+
+        logger.info(
+            "Saving release to staging: title=%s request_id=%s size=%s indexer=%s",
+            release.title,
+            request.id,
+            release.size,
+            release.indexer,
+        )
+
         filename = self._generate_filename(
             title=release.title,
             release_group=release.release_group,
@@ -92,20 +103,17 @@ class StagingService:
         torrent_path = STAGING_DIR / f"{filename}.torrent"
         json_path = STAGING_DIR / f"{filename}.json"
 
-        # Ensure staging directory exists
         STAGING_DIR.mkdir(parents=True, exist_ok=True)
 
-        # Download torrent file if it's a URL
         if release.download_url.startswith("http"):
             async with httpx.AsyncClient() as client:
                 response = await client.get(release.download_url, timeout=60.0)
                 response.raise_for_status()
                 with open(torrent_path, "wb") as f:
                     f.write(response.content)
+            logger.debug("Downloaded torrent file: %s", torrent_path)
         else:
-            # It's already a magnet URI or something else
-            # We'll store the magnet in the JSON
-            pass
+            logger.debug("Using magnet URI (no torrent file download): %s", release.title)
 
         # Create metadata JSON
         metadata = {

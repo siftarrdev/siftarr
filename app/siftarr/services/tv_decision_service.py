@@ -248,6 +248,14 @@ class TVDecisionService:
                 )
             )
             stored_releases = list(stored_releases_result.scalars().all())
+
+            logger.info(
+                "TV selected releases: request_id=%s count=%s releases=%s",
+                request.id,
+                len(all_selected_releases),
+                [e.release.title for e in all_selected_releases],
+            )
+
             action_result = await use_releases(
                 self.db,
                 request,
@@ -279,9 +287,10 @@ class TVDecisionService:
                 rejection_reasons.append(e.rejection_reason)
 
         logger.info(
-            "TV search produced no passing releases: request_id=%s evaluated=%s",
+            "TV search rejected all releases: request_id=%s evaluated=%s rejection_reasons=%s",
             request.id,
             len(all_evaluated_releases),
+            list(set(rejection_reasons))[:5],
         )
 
         queue_service = PendingQueueService(self.db)

@@ -1,11 +1,14 @@
 """Service for interacting with qBittorrent API."""
 
 import asyncio
+import logging
 from enum import StrEnum
 
 import qbittorrentapi
 
 from app.siftarr.config import Settings, get_settings
+
+logger = logging.getLogger(__name__)
 
 
 class MediaCategory(StrEnum):
@@ -133,7 +136,7 @@ class QbittorrentService:
                 return str(result) if result == "Ok." else None
             return None
         except Exception as e:
-            print(f"Error adding torrent: {e}")
+            logger.error("Error adding torrent: %s", e)
             return None
 
     async def get_torrent_info(self, torrent_hash: str) -> dict | None:

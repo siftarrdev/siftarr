@@ -1,3 +1,5 @@
+import logging
+
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -9,6 +11,8 @@ from app.siftarr.services.prowlarr_service import ProwlarrService
 from app.siftarr.services.qbittorrent_service import QbittorrentService
 from app.siftarr.services.release_selection_service import store_search_results, use_releases
 from app.siftarr.services.rule_engine import RuleEngine
+
+logger = logging.getLogger(__name__)
 
 
 class MovieDecisionService:
@@ -47,43 +51,72 @@ class MovieDecisionService:
         Returns:
             Dict with status, selected release, and any errors
         """
+        logger.info("Processing movie request: request_id=%s", request_id)
+
         result = await self.db.execute(select(Request).where(Request.id == request_id))
         request = result.scalar_one_or_none()
 
         if not request:
+            logger.warning("Movie request not found: request_id=%s", request_id)
             return {"status": "error", "message": "Request not found"}
 
         if request.media_type != MediaType.MOVIE:
+            logger.warning("Request %s is not movie type", request_id)
             return {"status": "error", "message": "Request is not movie type"}
 
-        # Update status to searching
         request.status = RequestStatus.SEARCHING
         await self.db.commit()
 
-        # Get rule engine
+        logger.info(
+            "Movie search started: request_id=%s title=%s tmdb_id=%s year=%s",
+            request.id,
+            request.title,
+            request.tmdb_id,
+            request.year,
+        )
+
         rule_engine = await self._get_rule_engine()
 
-        # Check we have a valid TMDB ID
         if request.tmdb_id is None:
             request.status = RequestStatus.FAILED
             await self.db.commit()
+            logger.warning("Movie request %s has no TMDB ID", request_id)
             return {"status": "error", "message": "No TMDB ID available for movie"}
 
-        # Search for movie
         search_result = await self.prowlarr.search_by_tmdbid(
             tmdbid=request.tmdb_id,
             title=request.title,
             year=request.year,
         )
 
+        logger.info(
+            "Movie search response: request_id=%s total_releases=%s query_time_ms=%s",
+            request_id,
+            len(search_result.releases),
+            search_result.query_time_ms,
+        )
+
+        if search_result.releases:
+            indexer_counts: dict[str, int] = {}
+            for r in search_result.releases:
+                indexer_counts[r.indexer] = indexer_counts.get(r.indexer, 0) + 1
+            logger.debug(
+                "Movie search release breakdown: request_id=%s indexers=%s",
+                request_id,
+                indexer_counts,
+            )
+
         if not search_result.releases:
-            # No results - add to pending queue
             request.status = RequestStatus.PENDING
             await self.db.commit()
 
             queue_service = PendingQueueService(self.db)
             await queue_service.add_to_queue(request.id)
 
+            logger.info(
+                "Movie search found no releases: request_id=%s added_to_pending_queue",
+                request_id,
+            )
             return {
                 "status": "pending",
                 "message": "No releases found in Prowlarr, added to pending queue",
@@ -95,7 +128,23 @@ class MovieDecisionService:
         passed_results = [evaluation for evaluation in all_evaluated if evaluation.passed]
         best = passed_results[0] if passed_results else None
 
+        logger.info(
+            "Movie rule evaluation: request_id=%s evaluated=%s passed=%s",
+            request_id,
+            len(all_evaluated),
+            len(passed_results),
+        )
+
         if best:
+            logger.info(
+                "Movie selected release: request_id=%s title=%s score=%s indexer=%s size=%s",
+                request_id,
+                best.release.title,
+                best.total_score,
+                best.release.indexer,
+                best.release.size,
+            )
+
             release_result = await self.db.execute(
                 select(Release).where(
                     Release.request_id == request.id,
@@ -123,7 +172,6 @@ class MovieDecisionService:
                 "message": action_result["message"],
             }
 
-        # No releases passed rules - add to pending queue
         request.status = RequestStatus.PENDING
         await self.db.commit()
 
@@ -138,6 +186,13 @@ class MovieDecisionService:
             error_message="; ".join(set(rejection_reasons))[:500]
             if rejection_reasons
             else "All releases rejected by rules",
+        )
+
+        logger.info(
+            "Movie search rejected all releases: request_id=%s evaluated=%s rejection_reasons=%s",
+            request_id,
+            len(all_evaluated),
+            list(set(rejection_reasons))[:5],
         )
 
         return {
