@@ -413,7 +413,8 @@
                             <p class="mt-1 text-xs text-gray-500">Ranked from highest rule score to lowest, including rejected candidates so you can tune your filters.</p>
                         </div>
                     </div>
-                    <div id="request-details-releases" class="mt-2 space-y-1"></div>
+                    <input type="text" id="release-filter-input" placeholder="Filter results by title..." class="form-input mt-2 mb-2 w-full lg:w-64">
+                    <div id="request-details-releases" class="mt-1 space-y-1"></div>
                 </div>
             </div>
         </div>
@@ -551,6 +552,20 @@ function renderReleaseCard(release, requestId) {
     `;
 }
 
+let currentReleases = [];
+let currentRequestId = null;
+
+function filterReleaseCards() {
+    const filterEl = document.getElementById('release-filter-input');
+    const releasesContainer = document.getElementById('request-details-releases');
+    if (!filterEl || !releasesContainer) return;
+    const filter = filterEl.value.toLowerCase();
+    releasesContainer.innerHTML = currentReleases
+        .filter(r => !filter || r.title.toLowerCase().includes(filter))
+        .map(release => renderReleaseCard(release, currentRequestId))
+        .join('');
+}
+
 function filterTable() {
     const filterEl = document.getElementById('filter-input');
     const statusEl = document.getElementById('overseerr-status-filter');
@@ -669,6 +684,7 @@ async function openRequestDetails(requestId) {
     const overview = document.getElementById('request-details-overview');
     const releases = document.getElementById('request-details-releases');
     const overseerrLink = document.getElementById('request-details-overseerr-link');
+    const filterInput = document.getElementById('release-filter-input');
 
     title.textContent = 'Loading...';
     meta.textContent = '';
@@ -679,6 +695,7 @@ async function openRequestDetails(requestId) {
     }
     setPoster(null, 'Loading poster');
     releases.innerHTML = '<div class="text-gray-500 text-sm">Loading search results...</div>';
+    if (filterInput) filterInput.value = '';
     modal.classList.remove('hidden');
 
     try {
@@ -697,7 +714,9 @@ async function openRequestDetails(requestId) {
             overseerrLink.classList.remove('hidden');
         }
 
-        releases.innerHTML = (data.releases || []).map(release => renderReleaseCard(release, data.request.id)).join('') || '<div class="text-gray-500 text-sm">No search results have been stored for this request yet. Run a search, then reopen details.</div>';
+        currentReleases = data.releases || [];
+        currentRequestId = data.request.id;
+        releases.innerHTML = currentReleases.map(release => renderReleaseCard(release, currentRequestId)).join('') || '<div class="text-gray-500 text-sm">No search results have been stored for this request yet. Run a search, then reopen details.</div>';
     } catch (err) {
         title.textContent = 'Error loading details';
         meta.textContent = err.message || 'Unknown error';
@@ -727,6 +746,8 @@ if (stagedFilterInput) stagedFilterInput.addEventListener('input', filterStagedT
 if (stagedStatusFilter) stagedStatusFilter.addEventListener('change', filterStagedTable);
 if (finishedFilterInput) finishedFilterInput.addEventListener('input', filterFinishedTable);
 if (rejectedFilterInput) rejectedFilterInput.addEventListener('input', filterRejectedTable);
+const releaseFilterInput = document.getElementById('release-filter-input');
+if (releaseFilterInput) releaseFilterInput.addEventListener('input', filterReleaseCards);
 function bindSelectAll(toggle, checkboxSelector) {
     if (!toggle) return;
     toggle.addEventListener('change', event => {
