@@ -198,16 +198,25 @@ class RuleEngine:
         if passed and self.requirement_patterns:
             any_matched = False
             for rule_id, rule_name, pattern in self.requirement_patterns:
-                if re.search(pattern, release.title, re.IGNORECASE):
-                    any_matched = True
-                    matches.append(
-                        RuleMatch(
-                            rule_id=rule_id,
-                            rule_name=rule_name,
-                            matched=True,
+                try:
+                    if re.search(pattern, release.title, re.IGNORECASE):
+                        any_matched = True
+                        matches.append(
+                            RuleMatch(
+                                rule_id=rule_id,
+                                rule_name=rule_name,
+                                matched=True,
+                            )
                         )
-                    )
-                else:
+                    else:
+                        matches.append(
+                            RuleMatch(
+                                rule_id=rule_id,
+                                rule_name=rule_name,
+                                matched=False,
+                            )
+                        )
+                except re.error:
                     matches.append(
                         RuleMatch(
                             rule_id=rule_id,
@@ -222,17 +231,26 @@ class RuleEngine:
 
         # Calculate score for scorer patterns
         for rule_id, rule_name, pattern, score in self.scorer_patterns:
-            if re.search(pattern, release.title, re.IGNORECASE):
-                total_score += score
-                matches.append(
-                    RuleMatch(
-                        rule_id=rule_id,
-                        rule_name=rule_name,
-                        matched=True,
-                        score_delta=score,
+            try:
+                if re.search(pattern, release.title, re.IGNORECASE):
+                    total_score += score
+                    matches.append(
+                        RuleMatch(
+                            rule_id=rule_id,
+                            rule_name=rule_name,
+                            matched=True,
+                            score_delta=score,
+                        )
                     )
-                )
-            else:
+                else:
+                    matches.append(
+                        RuleMatch(
+                            rule_id=rule_id,
+                            rule_name=rule_name,
+                            matched=False,
+                        )
+                    )
+            except re.error:
                 matches.append(
                     RuleMatch(
                         rule_id=rule_id,

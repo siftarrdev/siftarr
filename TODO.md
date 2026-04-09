@@ -13,6 +13,6 @@ more consistent coding style
 ## Bugs
 - [x] Overseerr webhook creates requests with non-unique external IDs for duplicate titles
 - [x] Webhook processing is still a no-op placeholder and does not auto-process requests
-- Movie and TV fallback selection pick the first passing release instead of the highest-scoring one
+- [x] Movie and TV fallback selection pick the first passing release instead of the highest-scoring one
 - Malformed regex rules are not safely handled during evaluation and can crash processing
 - Prowlarr search failures are swallowed and treated as empty results
