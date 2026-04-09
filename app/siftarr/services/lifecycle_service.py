@@ -1,7 +1,7 @@
 import logging
 from datetime import UTC, datetime
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.siftarr.models.request import Request, RequestStatus
@@ -146,19 +146,21 @@ class LifecycleService:
         return list(result.scalars().all())
 
     async def get_requests_stats(self) -> dict:
-        """Get statistics about all requests."""
-        result = await self.db.execute(select(Request))
-        requests = list(result.scalars().all())
+        """Get statistics about all requests using SQL aggregates."""
+        result = await self.db.execute(
+            select(Request.status, func.count()).group_by(Request.status)
+        )
+        rows = result.all()
+        by_status = {status.value: 0 for status in RequestStatus}
+        total = 0
+        for status, count in rows:
+            by_status[status.value] = count
+            total += count
 
-        stats = {
-            "total": len(requests),
-            "by_status": {},
+        return {
+            "total": total,
+            "by_status": by_status,
         }
-
-        for status in RequestStatus:
-            stats["by_status"][status.value] = sum(1 for r in requests if r.status == status)
-
-        return stats
 
     async def update_request_metadata(
         self,
