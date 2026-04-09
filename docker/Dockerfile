@@ -24,8 +24,6 @@ RUN SETUPTOOLS_SCM_PRETEND_VERSION_FOR_SIFTARR="${SIFTARR_VERSION#v}" uv sync --
 COPY app/ ./app/
 COPY db/alembic/ ./alembic/
 COPY db/alembic.ini ./
-COPY ruff.toml ./
-COPY ty.toml ./
 
 # Create data directories
 RUN mkdir -p /data/db /data/staging && \
