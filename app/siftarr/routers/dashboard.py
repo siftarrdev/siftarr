@@ -1,10 +1,12 @@
 """Dashboard router for main UI."""
 
 import asyncio
+import logging
 
-from fastapi import APIRouter, Depends, Form, HTTPException
+import httpx
+from fastapi import APIRouter, Depends, Form, HTTPException, Query
 from fastapi import Request as FastAPIRequest
-from fastapi.responses import JSONResponse, RedirectResponse
+from fastapi.responses import JSONResponse, RedirectResponse, Response
 from fastapi.templating import Jinja2Templates
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -24,12 +26,17 @@ from app.siftarr.services.release_selection_service import build_prowlarr_releas
 from app.siftarr.services.rule_engine import RuleEngine
 from app.siftarr.services.runtime_settings import get_effective_settings
 
+logger = logging.getLogger(__name__)
+
 router = APIRouter(tags=["dashboard"])
 templates = Jinja2Templates(directory="app/siftarr/templates")
 
 
-def _build_poster_url(overseerr_url: str | None, poster_path: object) -> str | None:
-    """Build a usable poster URL from Overseerr or TMDB-style paths."""
+def _extract_poster_path(poster_path: object) -> str | None:
+    """Extract a clean TMDB poster path from various Overseerr response formats.
+
+    Returns a TMDB-relative path like ``/abc123.jpg`` or *None*.
+    """
     if not poster_path:
         return None
 
@@ -37,19 +44,46 @@ def _build_poster_url(overseerr_url: str | None, poster_path: object) -> str | N
     if not poster:
         return None
 
-    if poster.startswith(("http://", "https://")):
+    # Already a bare TMDB path, e.g. "/kSf9svfD2WiLhrs9AP2Uih2Wq3T.jpg"
+    if poster.startswith("/") and not poster.startswith("/images"):
         return poster
 
-    base_url = str(overseerr_url or "").rstrip("/")
+    # Overseerr proxied form: "/images/original/kSf9sv...jpg"
     if poster.startswith("/images/"):
-        return f"{base_url}{poster}" if base_url else None
+        # Strip the /images/<size> prefix
+        parts = poster.split("/", 3)  # ['', 'images', 'original', 'rest.jpg']
+        if len(parts) >= 4:
+            return f"/{parts[3]}"
+        return None
 
-    if poster.startswith("/"):
-        if base_url:
-            return f"{base_url}/images/original{poster}"
-        return f"https://image.tmdb.org/t/p/original{poster}"
+    # Full URL pointing to TMDB
+    if "image.tmdb.org" in poster:
+        # e.g. https://image.tmdb.org/t/p/original/abc.jpg -> /abc.jpg
+        idx = poster.find("/t/p/")
+        if idx != -1:
+            after = poster[idx + 4 :]  # "/original/abc.jpg"
+            parts = after.split("/", 2)  # ['', 'original', 'abc.jpg']
+            if len(parts) >= 3:
+                return f"/{parts[2]}"
+        return None
 
-    return poster
+    # Full URL pointing to Overseerr instance – extract the TMDB portion
+    if poster.startswith(("http://", "https://")) and "/images/" in poster:
+        idx = poster.find("/images/")
+        return _extract_poster_path(poster[idx:])
+
+    return None
+
+
+def _build_poster_url(poster_path: object) -> str | None:
+    """Build a proxied poster URL that the browser can always reach."""
+    tmdb_path = _extract_poster_path(poster_path)
+    if not tmdb_path:
+        return None
+    # URL-encode the path portion for the query parameter
+    from urllib.parse import quote
+
+    return f"/api/poster?path={quote(tmdb_path, safe='')}"
 
 
 def _build_overseerr_media_url(
@@ -413,7 +447,6 @@ async def request_details(
 
             merged_media = {**media, **(media_details or {})}
             poster = _build_poster_url(
-                effective_settings.overseerr_url,
                 merged_media.get("posterPath") or merged_media.get("poster"),
             )
 
@@ -516,3 +549,52 @@ async def deny_request(
 
     await _deny_request_record(request, db, reason=reason)
     return RedirectResponse(url=redirect_to or "/", status_code=303)
+
+
+# ---------------------------------------------------------------------------
+# Image proxy – fetches posters via TMDB so the browser never needs direct
+# access to TMDB or to the (possibly Docker-internal) Overseerr host.
+# ---------------------------------------------------------------------------
+
+_TMDB_IMAGE_BASE = "https://image.tmdb.org/t/p"
+_ALLOWED_SIZES = {"w92", "w154", "w185", "w342", "w500", "w780", "original"}
+
+
+@router.get("/api/poster")
+async def poster_proxy(
+    path: str = Query(..., description="TMDB poster path, e.g. /abc123.jpg"),
+    size: str = Query("w500", description="TMDB image size"),
+) -> Response:
+    """Proxy a TMDB poster image through the Siftarr backend.
+
+    This avoids CORS / mixed-content issues and prevents leaking
+    Overseerr internal hostnames to the browser.
+    """
+    if size not in _ALLOWED_SIZES:
+        size = "w500"
+
+    # Basic safety: the path must start with / and have no directory traversal
+    if not path.startswith("/") or ".." in path:
+        raise HTTPException(status_code=400, detail="Invalid poster path")
+
+    url = f"{_TMDB_IMAGE_BASE}/{size}{path}"
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            resp = await client.get(url)
+    except httpx.RequestError as exc:
+        raise HTTPException(status_code=502, detail="Failed to fetch poster from TMDB") from exc
+
+    if resp.status_code != 200:
+        raise HTTPException(
+            status_code=resp.status_code,
+            detail="TMDB returned an error",
+        )
+
+    content_type = resp.headers.get("content-type", "image/jpeg")
+    return Response(
+        content=resp.content,
+        media_type=content_type,
+        headers={
+            "Cache-Control": "public, max-age=86400",
+        },
+    )
