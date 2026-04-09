@@ -3,6 +3,45 @@
 {% block title %}Dashboard - Siftarr{% endblock %}
 
 {% block content %}
+<style>
+.resize-handle {
+    position: absolute;
+    right: 0;
+    top: 25%;
+    bottom: 25%;
+    width: 5px;
+    cursor: col-resize;
+    opacity: 0;
+    transition: opacity 0.15s ease;
+    background: rgba(59, 130, 246, 0.6);
+    border-radius: 2px;
+    z-index: 10;
+}
+.resize-handle:hover,
+.resize-handle.dragging {
+    opacity: 1;
+}
+th:hover .resize-handle {
+    opacity: 0.5;
+}
+th .resize-handle.dragging {
+    opacity: 1;
+}
+.resizing * {
+    user-select: none;
+}
+table.data-resizable {
+    table-layout: fixed;
+    width: 100%;
+}
+table.data-resizable th,
+table.data-resizable td {
+    width: auto;
+    min-width: 60px;
+    max-width: 500px;
+    overflow: hidden;
+}
+</style>
 <div class="space-y-8">
     <div class="flex items-center justify-between">
         <h1 class="page-title">Dashboard</h1>
@@ -92,20 +131,32 @@
                     </div>
                 </div>
                 <div class="overflow-x-auto">
-                    <table class="min-w-full divide-y divide-gray-700/60" id="active-requests-table">
+                    <table class="min-w-full divide-y divide-gray-700/60 data-resizable" id="active-requests-table">
+                    <colgroup>
+                        <col data-col-key="selectbox" style="width: 48px;">
+                        <col data-col-key="title" style="width: 200px;">
+                        <col data-col-key="year" style="width: 70px;">
+                        <col data-col-key="type" style="width: 80px;">
+                        <col data-col-key="status" style="width: 100px;">
+                        <col data-col-key="requested" style="width: 140px;">
+                        <col data-col-key="requestedby" style="width: 120px;">
+                        <col data-col-key="ovstatus" style="width: 120px;">
+                        <col data-col-key="actions" style="width: 120px;">
+                    </colgroup>
                     <thead>
                         <tr class="bg-surface-850">
-                            <th class="px-5 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 w-12">
+                            <th class="px-5 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 w-12" style="position: relative;" data-col-key="selectbox">
                                 <input id="active-select-all" type="checkbox" class="rounded border-gray-600 bg-surface-900 text-brand-500 focus:ring-brand-500">
+                                <div class="resize-handle"></div>
                             </th>
-                            <th class="px-5 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 cursor-pointer hover:text-gray-300" data-table="active" data-sort="title">Title <span class="sort-indicator"></span></th>
-                            <th class="px-5 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 cursor-pointer hover:text-gray-300" data-table="active" data-sort="type">Type <span class="sort-indicator"></span></th>
-                            <th class="px-5 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 cursor-pointer hover:text-gray-300" data-table="active" data-sort="status">Status <span class="sort-indicator"></span></th>
-                            <th class="px-5 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 cursor-pointer hover:text-gray-300" data-table="active" data-sort="year">Year <span class="sort-indicator"></span></th>
-                            <th class="px-5 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 cursor-pointer hover:text-gray-300" data-table="active" data-sort="requested">Requested <span class="sort-indicator"></span></th>
-                            <th class="px-5 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 cursor-pointer hover:text-gray-300" data-table="active" data-sort="requestedby">Requested By <span class="sort-indicator"></span></th>
-                            <th class="px-5 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 cursor-pointer hover:text-gray-300" data-table="active" data-sort="ovstatus">Overseerr <span class="sort-indicator"></span></th>
-                            <th class="px-5 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500">Actions</th>
+                            <th class="px-5 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500" data-table="active" data-sort="title" data-col-key="title" style="position: relative;"><span class="sort-title cursor-pointer hover:text-gray-300">Title <span class="sort-indicator"></span></span><div class="resize-handle"></div></th>
+                            <th class="px-5 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500" data-table="active" data-sort="year" data-col-key="year" style="position: relative;"><span class="sort-title cursor-pointer hover:text-gray-300">Year <span class="sort-indicator"></span></span><div class="resize-handle"></div></th>
+                            <th class="px-5 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500" data-table="active" data-sort="type" data-col-key="type" style="position: relative;"><span class="sort-title cursor-pointer hover:text-gray-300">Type <span class="sort-indicator"></span></span><div class="resize-handle"></div></th>
+                            <th class="px-5 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500" data-table="active" data-sort="status" data-col-key="status" style="position: relative;"><span class="sort-title cursor-pointer hover:text-gray-300">Status <span class="sort-indicator"></span></span><div class="resize-handle"></div></th>
+                            <th class="px-5 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500" data-table="active" data-sort="requested" data-col-key="requested" style="position: relative;"><span class="sort-title cursor-pointer hover:text-gray-300">Requested <span class="sort-indicator"></span></span><div class="resize-handle"></div></th>
+                            <th class="px-5 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500" data-table="active" data-sort="requestedby" data-col-key="requestedby" style="position: relative;"><span class="sort-title cursor-pointer hover:text-gray-300">Requested By <span class="sort-indicator"></span></span><div class="resize-handle"></div></th>
+                            <th class="px-5 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500" data-table="active" data-sort="ovstatus" data-col-key="ovstatus" style="position: relative;"><span class="sort-title cursor-pointer hover:text-gray-300">Overseerr <span class="sort-indicator"></span></span><div class="resize-handle"></div></th>
+                            <th class="px-5 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500" data-col-key="actions" style="position: relative;"><span class="sort-title">Actions</span><div class="resize-handle"></div></th>
                         </tr>
                     </thead>
                     <tbody class="divide-y divide-gray-700/40" id="active-requests-body">
@@ -115,9 +166,9 @@
                                 <input name="request_ids" value="{{ req.id }}" type="checkbox" class="active-request-checkbox rounded border-gray-600 bg-surface-900 text-brand-500 focus:ring-brand-500">
                             </td>
                             <td class="px-5 py-3.5 whitespace-nowrap text-sm font-medium text-white">{{ req.title }}</td>
+                            <td class="px-5 py-3.5 whitespace-nowrap text-sm text-gray-400 tabular-nums" data-sort-value="{{ req.year or 0 }}">{{ req.year or '-' }}</td>
                             <td class="px-5 py-3.5 whitespace-nowrap text-sm capitalize text-gray-400">{{ req.media_type.value }}</td>
                             <td class="px-5 py-3.5 whitespace-nowrap text-sm"><span class="badge {% if req.status.value == 'searching' %}badge-yellow{% elif req.status.value == 'downloading' %}badge-blue{% else %}badge-gray{% endif %}">{{ req.status.value }}</span></td>
-                            <td class="px-5 py-3.5 whitespace-nowrap text-sm text-gray-400 tabular-nums" data-sort-value="{{ req.year or 0 }}">{{ req.year or '-' }}</td>
                             <td class="px-5 py-3.5 whitespace-nowrap text-sm text-gray-500 tabular-nums" data-sort-value="{{ req.created_at.strftime('%Y-%m-%d %H:%M') }}">{{ req.created_at.strftime('%Y-%m-%d %H:%M') }}</td>
                             <td class="px-5 py-3.5 whitespace-nowrap text-sm text-gray-400">{{ req.requester_username or 'Unknown' }}</td>
                             <td class="px-5 py-3.5 whitespace-nowrap text-sm" onclick="event.stopPropagation()">
@@ -139,7 +190,7 @@
                                     {% endif %}
                                 </div>
                              </td>
-                         </tr>
+                          </tr>
                          {% endfor %}
                     </tbody>
                     </table>
@@ -177,20 +228,32 @@
                     </div>
                 </div>
                 <div class="overflow-x-auto">
-                    <table class="min-w-full divide-y divide-gray-700/60" id="pending-requests-table">
+                    <table class="min-w-full divide-y divide-gray-700/60 data-resizable" id="pending-requests-table">
+                        <colgroup>
+                            <col data-col-key="selectbox" style="width: 48px;">
+                            <col data-col-key="title" style="width: 200px;">
+                            <col data-col-key="year" style="width: 70px;">
+                            <col data-col-key="type" style="width: 80px;">
+                            <col data-col-key="requestedby" style="width: 120px;">
+                            <col data-col-key="ovstatus" style="width: 130px;">
+                            <col data-col-key="nextretry" style="width: 140px;">
+                            <col data-col-key="lasterror" style="width: 192px;">
+                            <col data-col-key="actions" style="width: 256px;">
+                        </colgroup>
                         <thead>
                             <tr class="bg-surface-850">
-                                <th class="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 w-12">
+                                <th class="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 w-12" style="position: relative;" data-col-key="selectbox">
                                     <input id="pending-select-all" type="checkbox" class="rounded border-gray-600 bg-surface-900 text-brand-500 focus:ring-brand-500">
+                                    <div class="resize-handle"></div>
                                 </th>
-                                <th class="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 cursor-pointer hover:text-gray-300" data-table="pending" data-sort="title">Title <span class="sort-indicator"></span></th>
-                                <th class="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 cursor-pointer hover:text-gray-300" data-table="pending" data-sort="type">Type <span class="sort-indicator"></span></th>
-                                <th class="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 cursor-pointer hover:text-gray-300" data-table="pending" data-sort="requestedby">Requested By <span class="sort-indicator"></span></th>
-                                <th class="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 cursor-pointer hover:text-gray-300" data-table="pending" data-sort="year">Year <span class="sort-indicator"></span></th>
-                                <th class="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 cursor-pointer hover:text-gray-300" data-table="pending" data-sort="ovstatus">Overseerr <span class="sort-indicator"></span></th>
-                                <th class="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 cursor-pointer hover:text-gray-300" data-table="pending" data-sort="nextretry">Next Retry <span class="sort-indicator"></span></th>
-                                <th class="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 cursor-pointer hover:text-gray-300 w-48" data-table="pending" data-sort="lasterror">Last Error <span class="sort-indicator"></span></th>
-                                <th class="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 w-64">Actions</th>
+                                <th class="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500" data-table="pending" data-sort="title" data-col-key="title" style="position: relative;"><span class="sort-title cursor-pointer hover:text-gray-300">Title <span class="sort-indicator"></span></span><div class="resize-handle"></div></th>
+                                <th class="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500" data-table="pending" data-sort="year" data-col-key="year" style="position: relative;"><span class="sort-title cursor-pointer hover:text-gray-300">Year <span class="sort-indicator"></span></span><div class="resize-handle"></div></th>
+                                <th class="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500" data-table="pending" data-sort="type" data-col-key="type" style="position: relative;"><span class="sort-title cursor-pointer hover:text-gray-300">Type <span class="sort-indicator"></span></span><div class="resize-handle"></div></th>
+                                <th class="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500" data-table="pending" data-sort="requestedby" data-col-key="requestedby" style="position: relative;"><span class="sort-title cursor-pointer hover:text-gray-300">Requested By <span class="sort-indicator"></span></span><div class="resize-handle"></div></th>
+                                <th class="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500" data-table="pending" data-sort="ovstatus" data-col-key="ovstatus" style="position: relative;"><span class="sort-title cursor-pointer hover:text-gray-300">Overseerr <span class="sort-indicator"></span></span><div class="resize-handle"></div></th>
+                                <th class="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500" data-table="pending" data-sort="nextretry" data-col-key="nextretry" style="position: relative;"><span class="sort-title cursor-pointer hover:text-gray-300">Next Retry <span class="sort-indicator"></span></span><div class="resize-handle"></div></th>
+                                <th class="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 w-48" data-table="pending" data-sort="lasterror" data-col-key="lasterror" style="position: relative;"><span class="sort-title cursor-pointer hover:text-gray-300">Last Error <span class="sort-indicator"></span></span><div class="resize-handle"></div></th>
+                                <th class="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 w-64" data-col-key="actions" style="position: relative;"><span class="sort-title">Actions</span><div class="resize-handle"></div></th>
                             </tr>
                         </thead>
                         <tbody class="divide-y divide-gray-700/40" id="pending-requests-body">
@@ -202,9 +265,9 @@
                                     <input name="request_ids" value="{{ req.id }}" type="checkbox" class="pending-request-checkbox rounded border-gray-600 bg-surface-900 text-brand-500 focus:ring-brand-500">
                                 </td>
                                 <td class="px-4 py-3.5 whitespace-nowrap text-sm font-medium text-white max-w-sm overflow-hidden text-ellipsis">{{ req.title }}</td>
+                                <td class="px-4 py-3.5 whitespace-nowrap text-sm text-gray-500 tabular-nums" data-sort-value="{{ req.year or 0 }}">{{ req.year or '-' }}</td>
                                 <td class="px-4 py-3.5 whitespace-nowrap text-sm capitalize text-gray-400">{{ req.media_type.value }}</td>
                                 <td class="px-4 py-3.5 whitespace-nowrap text-sm text-gray-400">{{ req.requester_username or 'Unknown' }}</td>
-                                <td class="px-4 py-3.5 whitespace-nowrap text-sm text-gray-500 tabular-nums" data-sort-value="{{ req.year or 0 }}">{{ req.year or '-' }}</td>
                                 <td class="px-4 py-3.5 whitespace-nowrap text-sm" onclick="event.stopPropagation()">
                                     {% if overseerr_url and req.tmdb_id %}
                                     <a href="{{ overseerr_url }}/{{ req.media_type.value }}/{{ req.tmdb_id }}" target="_blank" rel="noopener noreferrer" class="badge hover:opacity-80 transition-opacity {% if pending_ov_status == 'approved' %}badge-green{% elif pending_ov_status == 'partially_available' %}badge-green{% else %}badge-gray{% endif %}">{{ pending_ov_status }} &#8599;</a>
@@ -247,16 +310,25 @@
                 </select>
             </div>
             <div class="overflow-x-auto">
-                <table class="min-w-full divide-y divide-gray-700/60" id="staged-torrents-table">
+                <table class="min-w-full divide-y divide-gray-700/60 data-resizable" id="staged-torrents-table">
+                    <colgroup>
+                        <col data-col-key="title" style="width: 200px;">
+                        <col data-col-key="state" style="width: 140px;">
+                        <col data-col-key="requeststate" style="width: 130px;">
+                        <col data-col-key="size" style="width: 100px;">
+                        <col data-col-key="indexer" style="width: 100px;">
+                        <col data-col-key="score" style="width: 70px;">
+                        <col data-col-key="actions" style="width: 120px;">
+                    </colgroup>
                     <thead>
                         <tr class="bg-surface-850">
-                            <th class="px-5 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 cursor-pointer hover:text-gray-300" data-table="staged" data-sort="title">Title <span class="sort-indicator"></span></th>
-                            <th class="px-5 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 cursor-pointer hover:text-gray-300" data-table="staged" data-sort="state">Torrent State <span class="sort-indicator"></span></th>
-                            <th class="px-5 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 cursor-pointer hover:text-gray-300" data-table="staged" data-sort="requeststate">Request State <span class="sort-indicator"></span></th>
-                            <th class="px-5 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 cursor-pointer hover:text-gray-300" data-table="staged" data-sort="size">Size <span class="sort-indicator"></span></th>
-                            <th class="px-5 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 cursor-pointer hover:text-gray-300" data-table="staged" data-sort="indexer">Indexer <span class="sort-indicator"></span></th>
-                            <th class="px-5 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 cursor-pointer hover:text-gray-300" data-table="staged" data-sort="score">Score <span class="sort-indicator"></span></th>
-                            <th class="px-5 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500">Actions</th>
+                            <th class="px-5 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 cursor-pointer hover:text-gray-300" data-table="staged" data-sort="title" data-col-key="title" style="position: relative;"><span class="sort-title">Title <span class="sort-indicator"></span></span><div class="resize-handle"></div></th>
+                            <th class="px-5 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 cursor-pointer hover:text-gray-300" data-table="staged" data-sort="state" data-col-key="state" style="position: relative;"><span class="sort-title">Torrent State <span class="sort-indicator"></span></span><div class="resize-handle"></div></th>
+                            <th class="px-5 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 cursor-pointer hover:text-gray-300" data-table="staged" data-sort="requeststate" data-col-key="requeststate" style="position: relative;"><span class="sort-title">Request State <span class="sort-indicator"></span></span><div class="resize-handle"></div></th>
+                            <th class="px-5 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 cursor-pointer hover:text-gray-300" data-table="staged" data-sort="size" data-col-key="size" style="position: relative;"><span class="sort-title">Size <span class="sort-indicator"></span></span><div class="resize-handle"></div></th>
+                            <th class="px-5 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 cursor-pointer hover:text-gray-300" data-table="staged" data-sort="indexer" data-col-key="indexer" style="position: relative;"><span class="sort-title">Indexer <span class="sort-indicator"></span></span><div class="resize-handle"></div></th>
+                            <th class="px-5 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 cursor-pointer hover:text-gray-300" data-table="staged" data-sort="score" data-col-key="score" style="position: relative;"><span class="sort-title">Score <span class="sort-indicator"></span></span><div class="resize-handle"></div></th>
+                            <th class="px-5 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500" data-col-key="actions" style="position: relative;"><span class="sort-title">Actions</span><div class="resize-handle"></div></th>
                         </tr>
                     </thead>
                     <tbody class="divide-y divide-gray-700/40" id="staged-torrents-body">
@@ -303,25 +375,34 @@
                 </div>
             </div>
             <div class="overflow-x-auto">
-                <table class="min-w-full divide-y divide-gray-700/60" id="finished-requests-table">
+                <table class="min-w-full divide-y divide-gray-700/60 data-resizable" id="finished-requests-table">
+                    <colgroup>
+                        <col data-col-key="title" style="width: 200px;">
+                        <col data-col-key="type" style="width: 80px;">
+                        <col data-col-key="requestedby" style="width: 120px;">
+                        <col data-col-key="year" style="width: 70px;">
+                        <col data-col-key="requested" style="width: 140px;">
+                        <col data-col-key="completed" style="width: 140px;">
+                        <col data-col-key="actions" style="width: 100px;">
+                    </colgroup>
                     <thead>
                         <tr class="bg-surface-850">
-                            <th class="px-5 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 cursor-pointer hover:text-gray-300" data-table="finished" data-sort="title">Title <span class="sort-indicator"></span></th>
-                            <th class="px-5 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 cursor-pointer hover:text-gray-300" data-table="finished" data-sort="type">Type <span class="sort-indicator"></span></th>
-                            <th class="px-5 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 cursor-pointer hover:text-gray-300" data-table="finished" data-sort="requestedby">Requested By <span class="sort-indicator"></span></th>
-                            <th class="px-5 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 cursor-pointer hover:text-gray-300" data-table="finished" data-sort="year">Year <span class="sort-indicator"></span></th>
-                            <th class="px-5 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 cursor-pointer hover:text-gray-300" data-table="finished" data-sort="requested">Requested <span class="sort-indicator"></span></th>
-                            <th class="px-5 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 cursor-pointer hover:text-gray-300" data-table="finished" data-sort="completed">Completed <span class="sort-indicator"></span></th>
-                            <th class="px-5 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500">Actions</th>
+                            <th class="px-5 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 cursor-pointer hover:text-gray-300" data-table="finished" data-sort="title" data-col-key="title" style="position: relative;"><span class="sort-title">Title <span class="sort-indicator"></span></span><div class="resize-handle"></div></th>
+                            <th class="px-5 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 cursor-pointer hover:text-gray-300" data-table="finished" data-sort="year" data-col-key="year" style="position: relative;"><span class="sort-title">Year <span class="sort-indicator"></span></span><div class="resize-handle"></div></th>
+                            <th class="px-5 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 cursor-pointer hover:text-gray-300" data-table="finished" data-sort="type" data-col-key="type" style="position: relative;"><span class="sort-title">Type <span class="sort-indicator"></span></span><div class="resize-handle"></div></th>
+                            <th class="px-5 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 cursor-pointer hover:text-gray-300" data-table="finished" data-sort="requestedby" data-col-key="requestedby" style="position: relative;"><span class="sort-title">Requested By <span class="sort-indicator"></span></span><div class="resize-handle"></div></th>
+                            <th class="px-5 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 cursor-pointer hover:text-gray-300" data-table="finished" data-sort="requested" data-col-key="requested" style="position: relative;"><span class="sort-title">Requested <span class="sort-indicator"></span></span><div class="resize-handle"></div></th>
+                            <th class="px-5 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 cursor-pointer hover:text-gray-300" data-table="finished" data-sort="completed" data-col-key="completed" style="position: relative;"><span class="sort-title">Completed <span class="sort-indicator"></span></span><div class="resize-handle"></div></th>
+                            <th class="px-5 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500" data-col-key="actions" style="position: relative;"><span class="sort-title">Actions</span><div class="resize-handle"></div></th>
                         </tr>
                     </thead>
                     <tbody class="divide-y divide-gray-700/40" id="finished-requests-body">
                         {% for req in completed_requests %}
                         <tr class="hover:bg-surface-850/80 cursor-pointer transition-colors" onclick="openRequestDetails({{ req.id }})" data-title="{{ req.title|lower }}" data-type="{{ req.media_type.value|lower }}" data-requestedby="{{ req.requester_username|default('Unknown')|lower }}" data-requested="{{ req.created_at.strftime('%Y-%m-%d %H:%M') }}" data-completed="{{ req.updated_at.strftime('%Y-%m-%d %H:%M') }}" data-year="{{ req.year or 0 }}">
                             <td class="px-5 py-3.5 whitespace-nowrap text-sm font-medium text-white">{{ req.title }}</td>
+                            <td class="px-5 py-3.5 whitespace-nowrap text-sm text-gray-500 tabular-nums" data-sort-value="{{ req.year or 0 }}">{{ req.year or '-' }}</td>
                             <td class="px-5 py-3.5 whitespace-nowrap text-sm capitalize text-gray-400">{{ req.media_type.value }}</td>
                             <td class="px-5 py-3.5 whitespace-nowrap text-sm text-gray-400">{{ req.requester_username or 'Unknown' }}</td>
-                            <td class="px-5 py-3.5 whitespace-nowrap text-sm text-gray-500 tabular-nums" data-sort-value="{{ req.year or 0 }}">{{ req.year or '-' }}</td>
                             <td class="px-5 py-3.5 whitespace-nowrap text-sm text-gray-500 tabular-nums">{{ req.created_at.strftime('%Y-%m-%d %H:%M') }}</td>
                             <td class="px-5 py-3.5 whitespace-nowrap text-sm text-emerald-400 tabular-nums">{{ req.updated_at.strftime('%Y-%m-%d %H:%M') }}</td>
                             <td class="px-5 py-3.5 whitespace-nowrap text-sm" onclick="event.stopPropagation()">
@@ -348,26 +429,35 @@
                 </div>
             </div>
             <div class="overflow-x-auto">
-                <table class="min-w-full divide-y divide-gray-700/60" id="rejected-requests-table">
+                <table class="min-w-full divide-y divide-gray-700/60 data-resizable" id="rejected-requests-table">
+                    <colgroup>
+                        <col data-col-key="title" style="width: 200px;">
+                        <col data-col-key="year" style="width: 70px;">
+                        <col data-col-key="type" style="width: 80px;">
+                        <col data-col-key="requestedby" style="width: 120px;">
+                        <col data-col-key="reason" style="width: 200px;">
+                        <col data-col-key="rejectedat" style="width: 140px;">
+                        <col data-col-key="actions" style="width: 100px;">
+                    </colgroup>
                     <thead>
                         <tr class="bg-surface-850">
-                            <th class="px-5 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 cursor-pointer hover:text-gray-300" data-table="rejected" data-sort="title">Title <span class="sort-indicator"></span></th>
-                            <th class="px-5 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 cursor-pointer hover:text-gray-300" data-table="rejected" data-sort="type">Type <span class="sort-indicator"></span></th>
-                            <th class="px-5 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 cursor-pointer hover:text-gray-300" data-table="rejected" data-sort="requestedby">Requested By <span class="sort-indicator"></span></th>
-                            <th class="px-5 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 cursor-pointer hover:text-gray-300" data-table="rejected" data-sort="reason">Reason <span class="sort-indicator"></span></th>
-                            <th class="px-5 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 cursor-pointer hover:text-gray-300" data-table="rejected" data-sort="year">Year <span class="sort-indicator"></span></th>
-                            <th class="px-5 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 cursor-pointer hover:text-gray-300" data-table="rejected" data-sort="rejectedat">Rejected <span class="sort-indicator"></span></th>
-                            <th class="px-5 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500">Actions</th>
+                            <th class="px-5 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 cursor-pointer hover:text-gray-300" data-table="rejected" data-sort="title" data-col-key="title" style="position: relative;"><span class="sort-title">Title <span class="sort-indicator"></span></span><div class="resize-handle"></div></th>
+                            <th class="px-5 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 cursor-pointer hover:text-gray-300" data-table="rejected" data-sort="year" data-col-key="year" style="position: relative;"><span class="sort-title">Year <span class="sort-indicator"></span></span><div class="resize-handle"></div></th>
+                            <th class="px-5 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 cursor-pointer hover:text-gray-300" data-table="rejected" data-sort="type" data-col-key="type" style="position: relative;"><span class="sort-title">Type <span class="sort-indicator"></span></span><div class="resize-handle"></div></th>
+                            <th class="px-5 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 cursor-pointer hover:text-gray-300" data-table="rejected" data-sort="requestedby" data-col-key="requestedby" style="position: relative;"><span class="sort-title">Requested By <span class="sort-indicator"></span></span><div class="resize-handle"></div></th>
+                            <th class="px-5 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 cursor-pointer hover:text-gray-300" data-table="rejected" data-sort="reason" data-col-key="reason" style="position: relative;"><span class="sort-title">Reason <span class="sort-indicator"></span></span><div class="resize-handle"></div></th>
+                            <th class="px-5 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 cursor-pointer hover:text-gray-300" data-table="rejected" data-sort="rejectedat" data-col-key="rejectedat" style="position: relative;"><span class="sort-title">Rejected <span class="sort-indicator"></span></span><div class="resize-handle"></div></th>
+                            <th class="px-5 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500" data-col-key="actions" style="position: relative;"><span class="sort-title">Actions</span><div class="resize-handle"></div></th>
                         </tr>
                     </thead>
                     <tbody class="divide-y divide-gray-700/40" id="rejected-requests-body">
                         {% for req in rejected_requests %}
                         <tr class="hover:bg-surface-850/80 cursor-pointer transition-colors" onclick="openRequestDetails({{ req.id }})" data-title="{{ req.title|lower }}" data-type="{{ req.media_type.value|lower }}" data-requestedby="{{ req.requester_username|default('Unknown')|lower }}" data-reason="{{ (req.rejection_reason or '')|lower }}" data-rejectedat="{{ req.updated_at.strftime('%Y-%m-%d %H:%M') }}" data-year="{{ req.year or 0 }}">
                             <td class="px-5 py-3.5 whitespace-nowrap text-sm font-medium text-white">{{ req.title }}</td>
+                            <td class="px-5 py-3.5 whitespace-nowrap text-sm text-gray-500 tabular-nums" data-sort-value="{{ req.year or 0 }}">{{ req.year or '-' }}</td>
                             <td class="px-5 py-3.5 whitespace-nowrap text-sm capitalize text-gray-400">{{ req.media_type.value }}</td>
                             <td class="px-5 py-3.5 whitespace-nowrap text-sm text-gray-400">{{ req.requester_username or 'Unknown' }}</td>
                             <td class="px-5 py-3.5 text-sm text-red-400 max-w-xs overflow-hidden text-ellipsis">{{ req.rejection_reason or '-' }}</td>
-                            <td class="px-5 py-3.5 whitespace-nowrap text-sm text-gray-500 tabular-nums" data-sort-value="{{ req.year or 0 }}">{{ req.year or '-' }}</td>
                             <td class="px-5 py-3.5 whitespace-nowrap text-sm text-gray-500 tabular-nums">{{ req.updated_at.strftime('%Y-%m-%d %H:%M') }}</td>
                             <td class="px-5 py-3.5 whitespace-nowrap text-sm" onclick="event.stopPropagation()">
                                 <button type="button" onclick="openRequestDetails({{ req.id }})" class="text-brand-400 hover:text-brand-300 font-medium">Details</button>
@@ -760,8 +850,10 @@ function bindSelectAll(toggle, checkboxSelector) {
 bindSelectAll(activeSelectAll, '.active-request-checkbox');
 bindSelectAll(pendingSelectAll, '.pending-request-checkbox');
 
-document.querySelectorAll('th[data-table][data-sort]').forEach(th => {
-    th.addEventListener('click', () => {
+document.querySelectorAll('.sort-title').forEach(el => {
+    el.addEventListener('click', (e) => {
+        const th = el.closest('th');
+        if (!th || !th.dataset.sort) return;
         const sortKey = th.dataset.sort === 'ovstatus' ? 'ovrank' : th.dataset.sort;
         sortTable(th.dataset.table, sortKey);
     });
@@ -781,6 +873,101 @@ function openDenyModal(requestId, redirectTo) {
 function closeDenyModal() {
     document.getElementById('deny-modal').classList.add('hidden');
 }
+
+class ColumnResizer {
+    constructor() {
+        this.tables = document.querySelectorAll('table.data-resizable');
+        this.storageKey = 'siftarr_col_widths';
+        this.savedWidths = this.loadWidths();
+        this.activeHandle = null;
+        this.activeCol = null;
+        this.startX = 0;
+        this.startWidth = 0;
+        this.minWidth = 60;
+        this.init();
+    }
+
+    loadWidths() {
+        try {
+            return JSON.parse(localStorage.getItem(this.storageKey)) || {};
+        } catch {
+            return {};
+        }
+    }
+
+    saveWidths() {
+        localStorage.setItem(this.storageKey, JSON.stringify(this.savedWidths));
+    }
+
+    init() {
+        this.tables.forEach(table => {
+            const tableId = table.id;
+            if (!this.savedWidths[tableId]) {
+                this.savedWidths[tableId] = {};
+            }
+            const tableWidths = this.savedWidths[tableId];
+
+            table.querySelectorAll('th[data-col-key]').forEach(th => {
+                const colKey = th.dataset.colKey;
+                const col = table.querySelector(`col[data-col-key="${colKey}"]`);
+                if (!col) return;
+
+                if (tableWidths[colKey]) {
+                    col.style.width = tableWidths[colKey] + 'px';
+                }
+                const handle = th.querySelector('.resize-handle');
+                if (handle) {
+                    handle.addEventListener('mousedown', (e) => this.startResize(e, col));
+                }
+            });
+        });
+
+        document.addEventListener('mousemove', (e) => this.onMouseMove(e));
+        document.addEventListener('mouseup', (e) => this.endResize(e));
+        document.addEventListener('mouseleave', (e) => this.endResize(e));
+    }
+
+    startResize(e, col) {
+        e.preventDefault();
+        e.stopPropagation();
+        this.activeHandle = e.target;
+        this.activeCol = col;
+        this.startX = e.clientX;
+        this.startWidth = parseInt(col.style.width) || col.offsetWidth || 100;
+        this.activeHandle.classList.add('dragging');
+        document.body.classList.add('resizing');
+    }
+
+    onMouseMove(e) {
+        if (!this.activeHandle || !this.activeCol) return;
+        const dx = e.clientX - this.startX;
+        const newWidth = Math.max(this.minWidth, this.startWidth + dx);
+        this.activeCol.style.width = newWidth + 'px';
+    }
+
+    endResize(e) {
+        if (!this.activeHandle || !this.activeCol) return;
+
+        const tableId = this.activeCol.closest('table').id;
+        const colKey = this.activeCol.dataset.colKey;
+        const finalWidth = parseInt(this.activeCol.style.width) || this.activeCol.offsetWidth;
+
+        if (!this.savedWidths[tableId]) {
+            this.savedWidths[tableId] = {};
+        }
+        this.savedWidths[tableId][colKey] = finalWidth;
+        this.saveWidths();
+
+        this.activeHandle.classList.remove('dragging');
+        document.body.classList.remove('resizing');
+        this.activeHandle = null;
+        this.activeCol = null;
+    }
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+    new ColumnResizer();
+});
 
 const initialTab = new URLSearchParams(window.location.search).get('tab');
 if (initialTab && document.getElementById('content-' + initialTab) && document.getElementById('tab-' + initialTab)) {
