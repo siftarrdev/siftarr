@@ -55,6 +55,8 @@ data/
 
 # Plans and documentation (if not tracked)
 .plans/
+plan.md
+.ignore
 
 # Temporary files
 *.tmp
