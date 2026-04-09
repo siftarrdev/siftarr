@@ -19,4 +19,5 @@
 
 ## Bugs
 - Searching for tv shows that don't have full seasons is not showing any results because the search is only looking for season packs; need to also search for individual episodes and allow rules to match on those
+- exclusion pattern matches shouldn't report as an error in the dashboard
 

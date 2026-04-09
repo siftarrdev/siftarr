@@ -42,8 +42,8 @@ async def get_db() -> AsyncGenerator[AsyncSession, None]:
 
 
 async def init_db() -> None:
-    """Initialize the database by creating all tables."""
-    from app.siftarr.models import Base
+    """Initialize the database.
 
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
+    Schema management is handled by Alembic migrations; this is a no-op
+    kept for backward compatibility so callers don't need updating.
+    """
