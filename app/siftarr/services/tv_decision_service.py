@@ -231,6 +231,8 @@ class TVDecisionService:
                 evaluated = [rule_engine.evaluate(release) for release in search_result.releases]
                 all_evaluated_releases.extend(evaluated)
                 passing = [e for e in evaluated if e.passed]
+                if passing:
+                    passing.sort(key=lambda e: e.total_score, reverse=True)
                 best = passing[0] if passing else None
                 if best:
                     all_selected_releases.append(best)

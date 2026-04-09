@@ -126,6 +126,8 @@ class MovieDecisionService:
         await store_search_results(self.db, request.id, all_evaluated)
 
         passed_results = [evaluation for evaluation in all_evaluated if evaluation.passed]
+        if passed_results:
+            passed_results.sort(key=lambda e: e.total_score, reverse=True)
         best = passed_results[0] if passed_results else None
 
         logger.info(
