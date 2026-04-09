@@ -782,7 +782,7 @@ function sortTable(tableName, sortKey) {
     rows.forEach(row => tbody.appendChild(row));
 }
 
-async function openRequestDetails(requestId) {
+async function openRequestDetails(requestId, explicitIndex = null) {
     const modal = document.getElementById('request-details-modal');
     const title = document.getElementById('request-details-title');
     const meta = document.getElementById('request-details-meta');
@@ -790,6 +790,18 @@ async function openRequestDetails(requestId) {
     const releases = document.getElementById('request-details-releases');
     const overseerrLink = document.getElementById('request-details-overseerr-link');
     const filterInput = document.getElementById('release-filter-input');
+
+    // Build navigation context from currently visible rows
+    if (explicitIndex !== null) {
+        currentDetailsIndex = explicitIndex;
+    } else {
+        visibleRequests = getVisibleRequests();
+        currentDetailsIndex = visibleRequests.findIndex(r => r.id === requestId);
+        if (currentDetailsIndex === -1) {
+            currentDetailsIndex = 0;
+        }
+    }
+    updateNavigationButtons();
 
     title.textContent = 'Loading...';
     meta.textContent = '';
@@ -832,6 +844,58 @@ async function openRequestDetails(requestId) {
 }
 
 function closeRequestDetails() { document.getElementById('request-details-modal').classList.add('hidden'); }
+
+// Navigation state for prev/next in details modal
+let visibleRequests = []; // Array of {id, title} objects for current view
+let currentDetailsIndex = -1;
+
+function getVisibleRequests() {
+    const activeTabContent = document.querySelector('.tab-content:not(.hidden)');
+    if (!activeTabContent) return [];
+    const rows = activeTabContent.querySelectorAll('tbody tr[data-request-id]');
+    return Array.from(rows).map(row => ({
+        id: parseInt(row.getAttribute('data-request-id')),
+        title: row.querySelector('td:nth-child(2)')?.textContent?.trim() || 'Unknown'
+    })).filter(r => r.id);
+}
+
+function updateNavigationButtons() {
+    const prevBtn = document.getElementById('details-prev-btn');
+    const nextBtn = document.getElementById('details-next-btn');
+    const position = document.getElementById('details-position');
+    if (!prevBtn || !nextBtn || !position) return;
+
+    const total = visibleRequests.length;
+    if (total === 0) {
+        position.textContent = '- of -';
+        prevBtn.disabled = true;
+        nextBtn.disabled = true;
+        prevBtn.title = 'No items';
+        nextBtn.title = 'No items';
+        return;
+    }
+
+    position.textContent = `${currentDetailsIndex + 1} of ${total}`;
+
+    const prevIndex = (currentDetailsIndex - 1 + total) % total;
+    const nextIndex = (currentDetailsIndex + 1) % total;
+
+    prevBtn.disabled = false;
+    nextBtn.disabled = false;
+    prevBtn.title = `← ${visibleRequests[prevIndex].title} (wraps around)`;
+    nextBtn.title = `${visibleRequests[nextIndex].title} → (wraps around)`;
+}
+
+function navigateDetails(direction) {
+    const total = visibleRequests.length;
+    if (total === 0) return;
+
+    currentDetailsIndex = (currentDetailsIndex + direction + total) % total;
+    const targetRequest = visibleRequests[currentDetailsIndex];
+    if (targetRequest) {
+        openRequestDetails(targetRequest.id, currentDetailsIndex);
+    }
+}
 
 const filterInput = document.getElementById('filter-input');
 const statusFilter = document.getElementById('overseerr-status-filter');
