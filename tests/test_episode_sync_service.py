@@ -17,6 +17,7 @@ def _make_request(**overrides):
     req.media_type = overrides.get("media_type", MediaType.TV)
     req.tvdb_id = overrides.get("tvdb_id", 12345)
     req.tmdb_id = overrides.get("tmdb_id", 79744)
+    req.overseerr_request_id = overrides.get("overseerr_request_id")
     return req
 
 

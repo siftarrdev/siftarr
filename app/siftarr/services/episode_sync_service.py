@@ -15,6 +15,15 @@ from app.siftarr.services.overseerr_service import OverseerrService
 
 logger = logging.getLogger(__name__)
 
+OVERSEERR_MEDIA_STATUS_MAP = {
+    1: "unknown",
+    2: "pending",
+    3: "processing",
+    4: "partially_available",
+    5: "available",
+    6: "deleted",
+}
+
 
 class EpisodeSyncService:
     """Sync seasons and episodes from Overseerr into local DB."""
@@ -23,6 +32,18 @@ class EpisodeSyncService:
         self.db = db
         self._overseerr = overseerr
         self._stale_hours = get_settings().episode_sync_stale_hours
+
+    def _overseerr_status_to_request_status(self, status: int | None) -> RequestStatus:
+        if status is None:
+            return RequestStatus.RECEIVED
+        status_str = OVERSEERR_MEDIA_STATUS_MAP.get(status, "unknown")
+        if status_str == "available":
+            return RequestStatus.AVAILABLE
+        if status_str == "partially_available":
+            return RequestStatus.PARTIALLY_AVAILABLE
+        if status_str in ("pending", "processing", "unknown"):
+            return RequestStatus.PENDING
+        return RequestStatus.RECEIVED
 
     @property
     def overseerr(self) -> OverseerrService:
@@ -60,6 +81,17 @@ class EpisodeSyncService:
             )
             return []
 
+        media_info = media_details.get("mediaInfo", {})
+        season_statuses: dict[int, int] = {}
+        for s in media_info.get("seasons", []):
+            season_statuses[s.get("seasonNumber", 0)] = s.get("status", 0)
+
+        if not season_statuses and request.overseerr_request_id:
+            overseerr_request = await self.overseerr.get_request(request.overseerr_request_id)
+            if overseerr_request:
+                for s in overseerr_request.get("seasons", []):
+                    season_statuses[s.get("seasonNumber", 0)] = s.get("status", 0)
+
         seasons_data = media_details.get("seasons", [])
         if not seasons_data:
             logger.info(
@@ -82,17 +114,21 @@ class EpisodeSyncService:
             )
             season = season_result.scalar_one_or_none()
 
+            overseerr_status = season_statuses.get(season_number)
+            season_status = self._overseerr_status_to_request_status(overseerr_status)
+
             if season is None:
                 season = Season(
                     request_id=request_id,
                     season_number=season_number,
-                    status=RequestStatus.RECEIVED,
+                    status=season_status,
                     synced_at=datetime.now(UTC).replace(tzinfo=None),
                 )
                 self.db.add(season)
                 await self.db.flush()
             else:
                 season.synced_at = datetime.now(UTC).replace(tzinfo=None)
+                season.status = season_status
 
             synced_seasons.append(season)
 
@@ -122,13 +158,15 @@ class EpisodeSyncService:
                     with contextlib.suppress(ValueError, TypeError):
                         air_date = date.fromisoformat(air_date_str[:10])
 
+                episode_status = season_status
+
                 if episode is None:
                     episode = Episode(
                         season_id=season.id,
                         episode_number=episode_number,
                         title=title,
                         air_date=air_date,
-                        status=RequestStatus.RECEIVED,
+                        status=episode_status,
                     )
                     self.db.add(episode)
                 else:
@@ -136,6 +174,7 @@ class EpisodeSyncService:
                         episode.title = title
                     if air_date:
                         episode.air_date = air_date
+                    episode.status = episode_status
 
         await self.db.commit()
 

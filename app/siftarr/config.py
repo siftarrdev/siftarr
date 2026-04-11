@@ -30,6 +30,10 @@ class Settings(BaseSettings):
     prowlarr_url: str | None = None
     prowlarr_api_key: str | None = None
 
+    # Plex settings
+    plex_url: str | None = None
+    plex_token: str | None = None
+
     # qBittorrent settings
     qbittorrent_url: str | None = None
     qbittorrent_username: str = "admin"

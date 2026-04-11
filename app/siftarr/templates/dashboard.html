@@ -179,9 +179,9 @@ details[open] summary .accordion-chevron { transform: rotate(90deg); }
                                 {% if req.overseerr_request_id %}
                                 {% set ov_status = overseerr_statuses.get(req.id, 'unknown') %}
                                 {% if overseerr_url and req.tmdb_id %}
-                                <a href="{{ overseerr_url }}/{{ req.media_type.value }}/{{ req.tmdb_id }}" target="_blank" rel="noopener noreferrer" class="badge hover:opacity-80 transition-opacity {% if ov_status == 'approved' %}badge-green{% elif ov_status == 'declined' %}badge-red{% elif ov_status == 'pending' %}badge-yellow{% elif ov_status in ('processing', 'available') %}badge-blue{% elif ov_status == 'partially_available' %}badge-green{% elif ov_status == 'completed' %}badge-green{% elif ov_status == 'deleted' %}badge-gray{% else %}badge-gray{% endif %}">{{ ov_status or 'unknown' }} &#8599;</a>
+                                <a href="{{ overseerr_url }}/{{ req.media_type.value }}/{{ req.tmdb_id }}" target="_blank" rel="noopener noreferrer" class="badge hover:opacity-80 transition-opacity {% if ov_status == 'approved' %}badge-green{% elif ov_status == 'declined' %}badge-yellow{% elif ov_status == 'pending' %}badge-yellow{% elif ov_status in ('processing', 'available') %}badge-blue{% elif ov_status == 'partially_available' %}badge-green{% elif ov_status == 'completed' %}badge-green{% elif ov_status == 'deleted' %}badge-gray{% else %}badge-gray{% endif %}">{{ ov_status or 'unknown' }} &#8599;</a>
                                 {% else %}
-                                <span class="badge {% if ov_status == 'approved' %}badge-green{% elif ov_status == 'declined' %}badge-red{% elif ov_status == 'pending' %}badge-yellow{% elif ov_status in ('processing', 'available') %}badge-blue{% elif ov_status == 'partially_available' %}badge-green{% elif ov_status == 'completed' %}badge-green{% elif ov_status == 'deleted' %}badge-gray{% else %}badge-gray{% endif %}">{{ ov_status or 'unknown' }}</span>
+                                <span class="badge {% if ov_status == 'approved' %}badge-green{% elif ov_status == 'declined' %}badge-yellow{% elif ov_status == 'pending' %}badge-yellow{% elif ov_status in ('processing', 'available') %}badge-blue{% elif ov_status == 'partially_available' %}badge-green{% elif ov_status == 'completed' %}badge-green{% elif ov_status == 'deleted' %}badge-gray{% else %}badge-gray{% endif %}">{{ ov_status or 'unknown' }}</span>
                                 {% endif %}
                                 {% endif %}
                             </td>
@@ -633,7 +633,7 @@ function renderRuleMatches(matches) {
 }
 
 function renderReleaseCard(release, requestId) {
-    const statusClass = release.passed ? 'badge-green' : 'badge-red';
+    const statusClass = release.passed ? 'badge-green' : 'badge-yellow';
     const secondaryMeta = [release.size, release.indexer, release.resolution, release.codec, release.release_group].filter(Boolean).join(' \u00B7 ');
     const availability = `Seeders ${release.seeders ?? 0} \u00B7 Leechers ${release.leechers ?? 0}`;
     const downloaded = release.downloaded ? '<span class="badge badge-blue">Already sent</span>' : '';
@@ -665,12 +665,14 @@ function renderReleaseCard(release, requestId) {
 function episodeStatusBadge(status) {
     const colors = {
         'received': 'badge-gray',
-        'searching': 'badge-yellow',
+        'searching': 'badge-blue',
         'pending': 'badge-yellow',
         'staged': 'badge-blue',
         'downloading': 'badge-blue',
         'completed': 'badge-green',
-        'failed': 'badge-red',
+        'available': 'badge-green',
+        'partially_available': 'badge-yellow',
+        'failed': 'badge-blue',
     };
     return colors[status] || 'badge-gray';
 }
@@ -700,21 +702,28 @@ function renderSeasonAccordion(data) {
                     '<span class="text-gray-500 text-xs font-mono shrink-0">E' + String(ep.episode_number).padStart(2, '0') + '</span>' +
                     '<span class="text-white text-sm truncate">' + escapeHtml(ep.title || 'Untitled') + '</span>' +
                     (ep.air_date ? '<span class="text-gray-600 text-xs shrink-0">' + escapeHtml(ep.air_date) + '</span>' : '') +
-                    '<span class="badge ' + badgeClass + ' shrink-0">' + escapeHtml(ep.status || 'unknown') + '</span>' +
                 '</div>' +
-                '<button onclick="searchEpisode(' + requestId + ', ' + season.season_number + ', ' + ep.episode_number + ')" class="btn-ghost btn-sm ml-2 shrink-0">Search</button>' +
+                '<div class="flex items-center gap-2 shrink-0">' +
+                    '<span class="badge ' + badgeClass + '">' + escapeHtml(ep.status || 'unknown') + '</span>' +
+                    '<button onclick="searchEpisode(' + requestId + ', ' + season.season_number + ', ' + ep.episode_number + ')" class="btn-ghost btn-sm">Search</button>' +
+                '</div>' +
             '</div>' +
             '<div id="episode-search-' + requestId + '-' + season.season_number + '-' + ep.episode_number + '" class="ml-4 mt-1 space-y-1">' + episodeReleasesHtml + '</div>';
         }).join('');
 
-        return '<details class="group" open>' +
+        var availableText = season.available_count + '/' + season.total_count + ' available';
+
+        return '<details class="group">' +
             '<summary class="flex items-center justify-between gap-3 cursor-pointer rounded-xl border border-gray-700/60 bg-surface-800 p-3 hover:bg-surface-850/80 transition-colors">' +
                 '<div class="flex items-center gap-3">' +
                     '<svg class="accordion-chevron w-4 h-4 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>' +
                     '<span class="text-white font-medium">Season ' + season.season_number + '</span>' +
-                    '<span class="badge ' + seasonBadgeClass + '">' + escapeHtml(season.status || 'unknown') + '</span>' +
+                    '<span class="text-gray-500 text-xs">' + availableText + '</span>' +
                 '</div>' +
-                '<button onclick="searchSeasonPacks(' + requestId + ', ' + season.season_number + '); event.stopPropagation();" class="btn-primary btn-sm shrink-0">Search Season Packs</button>' +
+                '<div class="flex items-center gap-2 shrink-0">' +
+                    '<span class="badge ' + seasonBadgeClass + '">' + escapeHtml(season.status || 'unknown') + '</span>' +
+                    '<button onclick="searchSeasonPacks(' + requestId + ', ' + season.season_number + '); event.stopPropagation();" class="btn-primary btn-sm">Search Season Packs</button>' +
+                '</div>' +
             '</summary>' +
             '<div class="mt-2 ml-2 space-y-2">' +
                 '<div id="season-packs-' + requestId + '-' + season.season_number + '" class="space-y-1">' + seasonReleasesHtml + '</div>' +

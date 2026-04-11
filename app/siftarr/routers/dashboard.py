@@ -537,10 +537,18 @@ async def request_details(
                 .order_by(Episode.episode_number)
             )
             episodes = list(episodes_result.scalars().all())
+            if season.status == RequestStatus.AVAILABLE:
+                available_count = len(episodes)
+            elif season.status == RequestStatus.PARTIALLY_AVAILABLE:
+                available_count = 0
+            else:
+                available_count = sum(1 for ep in episodes if ep.status == RequestStatus.AVAILABLE)
             season_data = {
                 "id": season.id,
                 "season_number": season.season_number,
                 "status": season.status.value,
+                "available_count": available_count,
+                "total_count": len(episodes),
                 "episodes": [
                     {
                         "id": ep.id,
