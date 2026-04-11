@@ -21,6 +21,7 @@ from app.siftarr.services.lifecycle_service import LifecycleService
 from app.siftarr.services.media_helpers import extract_media_title_and_year
 from app.siftarr.services.overseerr_service import OverseerrService
 from app.siftarr.services.pending_queue_service import PendingQueueService
+from app.siftarr.services.plex_service import PlexService
 from app.siftarr.services.prowlarr_service import ProwlarrService
 from app.siftarr.services.qbittorrent_service import QbittorrentService
 from app.siftarr.services.release_parser import parse_season_episode
@@ -518,11 +519,14 @@ async def request_details(
     if request.media_type == MediaType.TV:
         from app.siftarr.services.episode_sync_service import EpisodeSyncService
 
-        episode_sync = EpisodeSyncService(db)
+        plex_service = PlexService(settings=effective_settings)
         try:
+            episode_sync = EpisodeSyncService(db, plex=plex_service)
             await episode_sync.refresh_if_stale(request_id)
         except Exception:
             logger.exception("Episode sync failed for request_id=%s", request_id)
+        finally:
+            await plex_service.close()
 
         seasons_result = await db.execute(
             select(Season).where(Season.request_id == request_id).order_by(Season.season_number)
@@ -537,12 +541,7 @@ async def request_details(
                 .order_by(Episode.episode_number)
             )
             episodes = list(episodes_result.scalars().all())
-            if season.status == RequestStatus.AVAILABLE:
-                available_count = len(episodes)
-            elif season.status == RequestStatus.PARTIALLY_AVAILABLE:
-                available_count = 0
-            else:
-                available_count = sum(1 for ep in episodes if ep.status == RequestStatus.AVAILABLE)
+            available_count = sum(1 for ep in episodes if ep.status == RequestStatus.AVAILABLE)
             season_data = {
                 "id": season.id,
                 "season_number": season.season_number,
@@ -600,11 +599,15 @@ async def get_request_seasons(
     if request.media_type != MediaType.TV:
         return JSONResponse({"seasons": [], "message": "Request is not a TV show"})
 
-    episode_sync = EpisodeSyncService(db)
+    effective_settings = await get_effective_settings(db)
+    plex_service = PlexService(settings=effective_settings)
     try:
+        episode_sync = EpisodeSyncService(db, plex=plex_service)
         await episode_sync.refresh_if_stale(request_id)
     except Exception:
         logger.exception("Episode sync failed for request_id=%s", request_id)
+    finally:
+        await plex_service.close()
 
     seasons_result = await db.execute(
         select(Season).where(Season.request_id == request_id).order_by(Season.season_number)
@@ -816,6 +819,37 @@ async def deny_request(
 
     await _deny_request_record(request, db, reason=reason)
     return RedirectResponse(url=redirect_to or "/", status_code=303)
+
+
+@router.post("/requests/{request_id}/refresh-plex")
+async def refresh_plex(
+    request_id: int,
+    db: AsyncSession = Depends(get_db),
+) -> JSONResponse:
+    """Force a Plex re-sync for a TV request regardless of staleness."""
+    from app.siftarr.services.episode_sync_service import EpisodeSyncService
+
+    result = await db.execute(select(RequestModel).where(RequestModel.id == request_id))
+    request = result.scalar_one_or_none()
+
+    if not request:
+        raise HTTPException(status_code=404, detail="Request not found")
+
+    if request.media_type != MediaType.TV:
+        return JSONResponse({"error": "Request is not a TV show"})
+
+    effective_settings = await get_effective_settings(db)
+    plex_service = PlexService(settings=effective_settings)
+
+    try:
+        episode_sync = EpisodeSyncService(db, plex=plex_service)
+        await episode_sync.sync_episodes(request_id, force_plex_refresh=True)
+        return JSONResponse({"status": "success", "message": "Plex sync completed"})
+    except Exception:
+        logger.exception("Plex refresh failed for request_id=%s", request_id)
+        return JSONResponse({"status": "error", "message": "Plex sync failed"}, status_code=500)
+    finally:
+        await plex_service.close()
 
 
 # ---------------------------------------------------------------------------
