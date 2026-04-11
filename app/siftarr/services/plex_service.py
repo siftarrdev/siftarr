@@ -32,7 +32,7 @@ class PlexService:
 
     def _is_available(self, metadata: dict[str, Any]) -> bool:
         """Check if a metadata entry has Media (is available on Plex)."""
-        return "Media" in metadata and metadata.get("Media")
+        return "Media" in metadata and bool(metadata.get("Media"))
 
     async def search_show(self, title: str) -> list[dict[str, Any]]:
         """Search Plex library by title, return matching items with rating keys.
@@ -173,9 +173,7 @@ class PlexService:
         except httpx.RequestError:
             return []
 
-    async def get_episode_availability(
-        self, rating_key: str
-    ) -> dict[tuple[int, int], bool]:
+    async def get_episode_availability(self, rating_key: str) -> dict[tuple[int, int], bool]:
         """Get per-episode availability for a show.
 
         Queries all seasons and episodes to build a map of which episodes
@@ -253,9 +251,7 @@ class PlexService:
                 container = data.get("MediaContainer", {})
                 sections = container.get("Directory", [])
                 return [
-                    str(s.get("key"))
-                    for s in sections
-                    if s.get("type") == "show" and s.get("key")
+                    str(s.get("key")) for s in sections if s.get("type") == "show" and s.get("key")
                 ]
             return []
         except httpx.RequestError:

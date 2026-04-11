@@ -217,9 +217,7 @@ class EpisodeSyncService:
 
                 await self.db.flush()
 
-                available_count = sum(
-                    1 for ep in episodes if ep.status == RequestStatus.AVAILABLE
-                )
+                available_count = sum(1 for ep in episodes if ep.status == RequestStatus.AVAILABLE)
                 if available_count == len(episodes) and len(episodes) > 0:
                     season.status = RequestStatus.AVAILABLE
                 elif available_count > 0:
@@ -240,7 +238,9 @@ class EpisodeSyncService:
 
         return seasons
 
-    async def sync_episodes(self, request_id: int, force_plex_refresh: bool = False) -> list[Season]:
+    async def sync_episodes(
+        self, request_id: int, force_plex_refresh: bool = False
+    ) -> list[Season]:
         """Fetch all seasons/episodes from Overseerr and upsert into Season/Episode tables.
 
         Args:
@@ -261,6 +261,8 @@ class EpisodeSyncService:
 
         if self._plex is not None and request.plex_rating_key:
             synced_seasons = await self._apply_plex_availability(request, synced_seasons)
+        else:
+            await self.db.commit()
 
         logger.info(
             "EpisodeSyncService: synced %d seasons for request %s",
