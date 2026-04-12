@@ -14,7 +14,10 @@ from app.siftarr.models.staged_torrent import StagedTorrent
 from app.siftarr.services.lifecycle_service import LifecycleService
 from app.siftarr.services.qbittorrent_service import MediaCategory, QbittorrentService
 from app.siftarr.services.runtime_settings import get_effective_settings
-from app.siftarr.services.staging_decision_logger import log_staging_decision
+from app.siftarr.services.staging_decision_logger import (
+    log_replacement_decision,
+    log_staging_decision,
+)
 
 router = APIRouter(prefix="/staged", tags=["staged"])
 
@@ -198,18 +201,6 @@ async def replace_staged_torrent(
     if request.media_type == MediaType.MOVIE:
         category = MediaCategory.MOVIES
 
-    # Find the rules-selected torrent for logging
-    rules_selected_result = await db.execute(
-        select(StagedTorrent)
-        .where(
-            StagedTorrent.request_id == request.id,
-            StagedTorrent.selection_source == "rule",
-            StagedTorrent.status.in_(["staged", "approved"]),
-        )
-        .order_by(StagedTorrent.score.desc(), StagedTorrent.created_at.asc())
-    )
-    rules_selected_torrent = rules_selected_result.scalars().first()
-
     # Add new torrent to qBittorrent
     runtime_settings = await get_effective_settings(db)
     qbittorrent = QbittorrentService(settings=runtime_settings)
@@ -232,10 +223,11 @@ async def replace_staged_torrent(
 
     if success:
         # Log the replacement decision
-        log_staging_decision(
+        log_replacement_decision(
             request=request,
-            approved_torrent=new_torrent,
-            rules_selected_torrent=rules_selected_torrent,
+            new_torrent=new_torrent,
+            replaced_torrent=old_torrent,
+            reason=reason,
         )
 
         # Mark the old torrent as replaced
