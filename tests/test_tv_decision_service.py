@@ -1,14 +1,128 @@
 """Tests for TVDecisionService."""
 
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
 from app.siftarr.models.request import MediaType, Request, RequestStatus
+from app.siftarr.services.prowlarr_service import ProwlarrRelease, ProwlarrSearchResult
+from app.siftarr.services.rule_engine import ReleaseEvaluation
 from app.siftarr.services.tv_decision_service import TVDecisionService
 
 
-class TestTVDecisionService:
+def _make_release(title="Test.S01E05.1080p", size=1000000000, seeders=10):
+    return ProwlarrRelease(
+        title=title,
+        size=size,
+        seeders=seeders,
+        leechers=1,
+        download_url="http://example.com/test",
+        magnet_url=None,
+        info_hash="abc123",
+        indexer="test",
+    )
+
+
+def _make_request(**overrides):
+    request = MagicMock(spec=Request)
+    request.id = overrides.get("id", 1)
+    request.media_type = overrides.get("media_type", MediaType.TV)
+    request.tvdb_id = overrides.get("tvdb_id", 12345)
+    request.tmdb_id = overrides.get("tmdb_id")
+    request.title = overrides.get("title", "Test Show")
+    request.year = overrides.get("year", 2024)
+    request.status = overrides.get("status", RequestStatus.PENDING)
+    request.requested_seasons = overrides.get("requested_seasons", "[1]")
+    request.requested_episodes = overrides.get("requested_episodes")
+    return request
+
+
+def _passing_eval(release, score=50):
+    return ReleaseEvaluation(
+        release=release,
+        passed=True,
+        total_score=score,
+        matches=[],
+        rejection_reason=None,
+    )
+
+
+def _failing_eval(release):
+    return ReleaseEvaluation(
+        release=release,
+        passed=False,
+        total_score=-100,
+        matches=[],
+        rejection_reason="Excluded",
+    )
+
+
+class TestGetRequestedEpisodes:
+    @pytest.fixture
+    def service(self):
+        db = AsyncMock()
+        prowlarr = AsyncMock()
+        qbittorrent = AsyncMock()
+        return TVDecisionService(db, prowlarr, qbittorrent)
+
+    def test_get_requested_episodes_handles_list_format(self, service):
+        request = MagicMock(spec=Request)
+        request.requested_episodes = "[14, 15]"
+        request.requested_seasons = "[8]"
+
+        assert service._get_requested_episodes(request) == {8: [14, 15]}
+
+    def test_get_requested_episodes_handles_dict_format(self, service):
+        request = MagicMock(spec=Request)
+        request.requested_episodes = '{"1": [1, 2, 3], "2": [1]}'
+
+        result = service._get_requested_episodes(request)
+        assert result == {1: [1, 2, 3], 2: [1]}
+
+    def test_get_requested_episodes_handles_none(self, service):
+        request = MagicMock(spec=Request)
+        request.requested_episodes = None
+
+        assert service._get_requested_episodes(request) == {}
+
+    def test_get_requested_episodes_handles_empty_string(self, service):
+        request = MagicMock(spec=Request)
+        request.requested_episodes = ""
+
+        assert service._get_requested_episodes(request) == {}
+
+    def test_get_requested_episodes_handles_invalid_json(self, service):
+        request = MagicMock(spec=Request)
+        request.requested_episodes = "not json"
+
+        assert service._get_requested_episodes(request) == {}
+
+
+class TestGetRequestedSeasons:
+    @pytest.fixture
+    def service(self):
+        db = AsyncMock()
+        prowlarr = AsyncMock()
+        qbittorrent = AsyncMock()
+        return TVDecisionService(db, prowlarr, qbittorrent)
+
+    def test_parses_json_list(self, service):
+        request = MagicMock(spec=Request)
+        request.requested_seasons = "[1, 2, 3]"
+        assert service._get_requested_seasons(request) == [1, 2, 3]
+
+    def test_returns_empty_for_none(self, service):
+        request = MagicMock(spec=Request)
+        request.requested_seasons = None
+        assert service._get_requested_seasons(request) == []
+
+    def test_returns_empty_for_invalid_json(self, service):
+        request = MagicMock(spec=Request)
+        request.requested_seasons = "invalid"
+        assert service._get_requested_seasons(request) == []
+
+
+class TestProcessRequest:
     @pytest.fixture
     def mock_db(self):
         return AsyncMock()
@@ -19,52 +133,231 @@ class TestTVDecisionService:
         qbittorrent = AsyncMock()
         return TVDecisionService(mock_db, prowlarr, qbittorrent)
 
-    def test_get_requested_episodes_handles_list_format(self, service):
-        request = MagicMock(spec=Request)
-        request.requested_episodes = "[14, 15]"
-        request.requested_seasons = "[8]"
-
-        assert service._get_requested_episodes(request) == {8: [14, 15]}
-
     @pytest.mark.asyncio
-    async def test_process_request_logs_and_uses_episode_search(
-        self, mock_db, service, monkeypatch
-    ):
-        request = MagicMock(spec=Request)
-        request.id = 1
-        request.media_type = MediaType.TV
-        request.tvdb_id = 123
-        request.title = "The Rookie"
-        request.year = 2024
-        request.status = RequestStatus.PENDING
-        request.requested_seasons = "[8]"
-        request.requested_episodes = "[14]"
-
-        mock_result = MagicMock()
-        mock_result.scalar_one_or_none.return_value = request
-        mock_db.execute.return_value = mock_result
-
-        season_search_result = MagicMock()
-        season_search_result.releases = []
-        episode_search_result = MagicMock()
-        episode_search_result.releases = []
-        service.prowlarr.search_by_tvdbid = AsyncMock(
-            side_effect=[season_search_result, episode_search_result]
-        )
-
-        monkeypatch.setattr(service, "_get_rule_engine", AsyncMock(return_value=MagicMock()))
-        monkeypatch.setattr(
-            "app.siftarr.services.tv_decision_service.store_search_results",
-            AsyncMock(),
-        )
-        pending_queue = MagicMock()
-        pending_queue.add_to_queue = AsyncMock()
-        monkeypatch.setattr(
-            "app.siftarr.services.tv_decision_service.PendingQueueService",
-            lambda db: pending_queue,
-        )
+    async def test_no_tvdb_id_returns_error(self, service, mock_db):
+        request = _make_request(tvdb_id=None)
+        mock_db.execute.return_value = MagicMock(scalar_one_or_none=MagicMock(return_value=request))
+        mock_db.commit = AsyncMock()
 
         result = await service.process_request(1)
 
+        assert result["status"] == "error"
+        assert "TVDB" in result["message"]
+        request.status = RequestStatus.FAILED
+
+    @pytest.mark.asyncio
+    async def test_no_seasons_specified_returns_error(self, service, mock_db):
+        request = _make_request(requested_seasons="[]")
+        mock_db.execute.return_value = MagicMock(scalar_one_or_none=MagicMock(return_value=request))
+        mock_db.commit = AsyncMock()
+
+        with patch.object(service, "_get_rule_engine", new_callable=AsyncMock) as mock_rule:
+            mock_rule.return_value = MagicMock()
+            result = await service.process_request(1)
+
+        assert result["status"] == "error"
+        assert "No seasons" in result["message"]
+
+    @pytest.mark.asyncio
+    async def test_request_not_found_returns_error(self, service, mock_db):
+        mock_db.execute.return_value = MagicMock(scalar_one_or_none=MagicMock(return_value=None))
+
+        result = await service.process_request(999)
+
+        assert result["status"] == "error"
+        assert "not found" in result["message"]
+
+    @pytest.mark.asyncio
+    async def test_non_tv_request_returns_error(self, service, mock_db):
+        request = _make_request(media_type=MediaType.MOVIE)
+        mock_db.execute.return_value = MagicMock(scalar_one_or_none=MagicMock(return_value=request))
+
+        result = await service.process_request(1)
+
+        assert result["status"] == "error"
+        assert "not TV" in result["message"]
+
+    @pytest.mark.asyncio
+    async def test_parallel_search_returns_both_packs_and_episodes(self, service, mock_db):
+        request = _make_request(
+            requested_seasons="[1]",
+            requested_episodes='{"1": [1, 2]}',
+        )
+        mock_db.execute.return_value = MagicMock(scalar_one_or_none=MagicMock(return_value=request))
+        mock_db.commit = AsyncMock()
+        mock_db.flush = AsyncMock()
+
+        pack_release = _make_release(title="Show.S01.1080p")
+        episode_release = _make_release(title="Show.S01E01.1080p")
+
+        pack_result = ProwlarrSearchResult(releases=[pack_release], query_time_ms=100)
+        ep1_result = ProwlarrSearchResult(releases=[episode_release], query_time_ms=100)
+        ep2_result = ProwlarrSearchResult(releases=[], query_time_ms=100)
+
+        service.prowlarr.search_by_tvdbid = AsyncMock(
+            side_effect=[pack_result, ep1_result, ep2_result]
+        )
+
+        rule_engine = MagicMock()
+        rule_engine.evaluate.side_effect = [
+            _passing_eval(pack_release, score=80),
+            _passing_eval(episode_release, score=50),
+        ]
+
+        with (
+            patch.object(
+                service, "_get_rule_engine", new_callable=AsyncMock, return_value=rule_engine
+            ),
+            patch(
+                "app.siftarr.services.tv_decision_service.store_search_results",
+                new_callable=AsyncMock,
+            ),
+            patch(
+                "app.siftarr.services.tv_decision_service.use_releases", new_callable=AsyncMock
+            ) as mock_use,
+        ):
+            mock_use.return_value = {"status": "downloading", "message": "ok"}
+            await service.process_request(1)
+
+        assert service.prowlarr.search_by_tvdbid.await_count == 3
+
+    @pytest.mark.asyncio
+    async def test_season_packs_preferred_over_episodes(self, service, mock_db):
+        request = _make_request(
+            requested_seasons="[1]",
+            requested_episodes='{"1": [1]}',
+        )
+        mock_db.execute.return_value = MagicMock(scalar_one_or_none=MagicMock(return_value=request))
+        mock_db.commit = AsyncMock()
+        mock_db.flush = AsyncMock()
+
+        pack_release = _make_release(title="Show.S01.1080p")
+        ep_release = _make_release(title="Show.S01E01.1080p")
+
+        pack_result = ProwlarrSearchResult(releases=[pack_release], query_time_ms=100)
+        ep_result = ProwlarrSearchResult(releases=[ep_release], query_time_ms=100)
+
+        service.prowlarr.search_by_tvdbid = AsyncMock(side_effect=[pack_result, ep_result])
+
+        rule_engine = MagicMock()
+        pack_eval = _passing_eval(pack_release, score=80)
+        ep_eval = _passing_eval(ep_release, score=50)
+        rule_engine.evaluate.side_effect = [pack_eval, ep_eval]
+
+        with (
+            patch.object(
+                service, "_get_rule_engine", new_callable=AsyncMock, return_value=rule_engine
+            ),
+            patch(
+                "app.siftarr.services.tv_decision_service.store_search_results",
+                new_callable=AsyncMock,
+            ),
+            patch(
+                "app.siftarr.services.tv_decision_service.use_releases", new_callable=AsyncMock
+            ) as mock_use,
+        ):
+            mock_use.return_value = {"status": "downloading", "message": "ok"}
+            result = await service.process_request(1)
+
+        selected_titles = [r["title"] for r in result.get("selected_releases", [])]
+        assert "Show.S01.1080p" in selected_titles
+
+    @pytest.mark.asyncio
+    async def test_episode_discovery_range_respected(self, service, mock_db):
+        request = _make_request(
+            requested_seasons="[1]",
+            requested_episodes=None,
+        )
+        mock_db.execute.return_value = MagicMock(scalar_one_or_none=MagicMock(return_value=request))
+        mock_db.commit = AsyncMock()
+        mock_db.flush = AsyncMock()
+
+        empty_result = ProwlarrSearchResult(releases=[], query_time_ms=100)
+        service.prowlarr.search_by_tvdbid = AsyncMock(return_value=empty_result)
+
+        db_ep_result = MagicMock()
+        db_ep_result.all.return_value = []
+
+        with patch.object(service, "_get_rule_engine", new_callable=AsyncMock) as mock_rule:
+            mock_rule.return_value = MagicMock()
+            with (
+                patch(
+                    "app.siftarr.services.tv_decision_service.store_search_results",
+                    new_callable=AsyncMock,
+                ),
+                patch(
+                    "app.siftarr.services.tv_decision_service.PendingQueueService",
+                    lambda db: MagicMock(add_to_queue=AsyncMock()),
+                ),
+            ):
+                await service.process_request(1)
+
+        assert service.prowlarr.search_by_tvdbid.await_count > 1
+
+    @pytest.mark.asyncio
+    async def test_no_passing_releases_goes_to_pending(self, service, mock_db):
+        request = _make_request(
+            requested_seasons="[1]",
+            requested_episodes='{"1": [1]}',
+        )
+        mock_db.execute.return_value = MagicMock(scalar_one_or_none=MagicMock(return_value=request))
+        mock_db.commit = AsyncMock()
+        mock_db.flush = AsyncMock()
+
+        release = _make_release()
+        search_result = ProwlarrSearchResult(releases=[release], query_time_ms=100)
+
+        service.prowlarr.search_by_tvdbid = AsyncMock(return_value=search_result)
+
+        rule_engine = MagicMock()
+        rule_engine.evaluate.return_value = _failing_eval(release)
+
+        with (
+            patch.object(
+                service, "_get_rule_engine", new_callable=AsyncMock, return_value=rule_engine
+            ),
+            patch(
+                "app.siftarr.services.tv_decision_service.store_search_results",
+                new_callable=AsyncMock,
+            ),
+            patch(
+                "app.siftarr.services.tv_decision_service.PendingQueueService",
+                lambda db: MagicMock(add_to_queue=AsyncMock()),
+            ),
+        ):
+            result = await service.process_request(1)
+
         assert result["status"] == "pending"
-        assert service.prowlarr.search_by_tvdbid.await_count == 2
+
+    @pytest.mark.asyncio
+    async def test_search_errors_are_collected(self, service, mock_db):
+        request = _make_request(
+            requested_seasons="[1]",
+            requested_episodes='{"1": [1]}',
+        )
+        mock_db.execute.return_value = MagicMock(scalar_one_or_none=MagicMock(return_value=request))
+        mock_db.commit = AsyncMock()
+        mock_db.flush = AsyncMock()
+
+        error_result = ProwlarrSearchResult(releases=[], query_time_ms=0, error="Timeout")
+        service.prowlarr.search_by_tvdbid = AsyncMock(return_value=error_result)
+
+        rule_engine = MagicMock()
+
+        with (
+            patch.object(
+                service, "_get_rule_engine", new_callable=AsyncMock, return_value=rule_engine
+            ),
+            patch(
+                "app.siftarr.services.tv_decision_service.store_search_results",
+                new_callable=AsyncMock,
+            ),
+            patch(
+                "app.siftarr.services.tv_decision_service.PendingQueueService",
+                lambda db: MagicMock(add_to_queue=AsyncMock()),
+            ),
+        ):
+            result = await service.process_request(1)
+
+        assert result["status"] == "pending"
+        assert "Timeout" in result.get("search_errors", [])

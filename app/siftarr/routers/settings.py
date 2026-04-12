@@ -1,5 +1,7 @@
 """Settings page router for viewing and editing application settings."""
 
+import logging
+
 from fastapi import APIRouter, Depends, Form, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
@@ -21,6 +23,7 @@ from app.siftarr.services.runtime_settings import get_effective_settings
 
 router = APIRouter(prefix="/settings", tags=["settings"])
 templates = Jinja2Templates(directory="app/siftarr/templates")
+logger = logging.getLogger(__name__)
 
 
 # Pydantic models for connection settings
@@ -386,6 +389,7 @@ async def sync_overseerr(
                     actionable_requests.append(ov_req)
 
                 # Process each request
+                new_tv_requests: list[RequestModel] = []
                 for ov_req in actionable_requests:
                     try:
                         # Overseerr API returns media info nested under "media" key
@@ -453,6 +457,9 @@ async def sync_overseerr(
                             overseerr_request_id=overseerr_request_id,
                         )
                         db.add(new_request)
+                        await db.flush()
+                        if media_type == MediaType.TV:
+                            new_tv_requests.append(new_request)
                         existing_external_ids.add(external_id)  # Prevent duplicates in same sync
                         if overseerr_request_id is not None:
                             existing_request_ids.add(overseerr_request_id)
@@ -465,6 +472,17 @@ async def sync_overseerr(
                 await db.commit()
 
                 if synced_count > 0:
+                    from app.siftarr.services.episode_sync_service import EpisodeSyncService
+
+                    episode_sync = EpisodeSyncService(db, overseerr=overseerr_service)
+                    for req in new_tv_requests:
+                        try:
+                            await episode_sync.sync_episodes(req.id)
+                        except Exception:
+                            logger.exception(
+                                "Episode sync failed for request_id=%s during import", req.id
+                            )
+
                     message = f"Synced {synced_count} new request(s) from Overseerr"
                     message_type = "success"
                 else:

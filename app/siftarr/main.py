@@ -21,7 +21,7 @@ from app.siftarr.version import __version__
 
 scheduler_service: SchedulerService | None = None
 INITIAL_MIGRATION_REVISION = "bc9c8cfbe08b"
-LATEST_KNOWN_MIGRATION_REVISION = "add_rejection_reason_to_requests"
+LATEST_KNOWN_MIGRATION_REVISION = "add_plex_rating_key_to_requests"
 
 
 def _configure_logging() -> None:

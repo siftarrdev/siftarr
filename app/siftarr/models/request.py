@@ -13,6 +13,7 @@ from app.siftarr.models._base import Base  # noqa: PLC0414
 if TYPE_CHECKING:
     from app.siftarr.models.pending_queue import PendingQueue
     from app.siftarr.models.release import Release
+    from app.siftarr.models.season import Season
 
 
 def _utc_now() -> datetime:
@@ -33,6 +34,8 @@ class RequestStatus(enum.StrEnum):
     DOWNLOADING = "downloading"
     COMPLETED = "completed"
     FAILED = "failed"
+    AVAILABLE = "available"
+    PARTIALLY_AVAILABLE = "partially_available"
 
 
 class Request(Base):
@@ -65,10 +68,14 @@ class Request(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=_utc_now, onupdate=_utc_now)
     overseerr_request_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
     rejection_reason: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    plex_rating_key: Mapped[str | None] = mapped_column(String(100), nullable=True)
 
     # Relationships
     releases: Mapped[list["Release"]] = relationship(
         "Release", back_populates="request", cascade="all, delete-orphan"
+    )
+    seasons: Mapped[list["Season"]] = relationship(
+        "Season", back_populates="request", cascade="all, delete-orphan"
     )
     pending_item: Mapped["PendingQueue | None"] = relationship(
         "PendingQueue", back_populates="request", uselist=False

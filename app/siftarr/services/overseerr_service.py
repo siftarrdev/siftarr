@@ -189,6 +189,31 @@ class OverseerrService:
         except httpx.RequestError:
             return None
 
+    async def get_season_details(self, tv_id: int, season_number: int) -> dict | None:
+        """Fetch season details (including episodes) from Overseerr.
+
+        Args:
+            tv_id: The TMDB ID for the TV show.
+            season_number: The season number to fetch.
+
+        Returns:
+            A dict containing season details with episodes if successful, None otherwise.
+        """
+        if not self.base_url or not self.api_key:
+            return None
+
+        endpoint = f"{self.base_url}/api/v1/tv/{tv_id}/season/{season_number}"
+        client = await self._get_client()
+        headers = self._get_headers()
+
+        try:
+            response = await client.get(endpoint, headers=headers, timeout=30.0)
+            if response.status_code == 200:
+                return response.json()
+            return None
+        except httpx.RequestError:
+            return None
+
     async def approve_request(self, request_id: int) -> bool:
         """Approve a request in Overseerr via API."""
         if not self.base_url or not self.api_key:

@@ -12,6 +12,7 @@ from app.siftarr.models.staged_torrent import StagedTorrent
 from app.siftarr.services.pending_queue_service import PendingQueueService
 from app.siftarr.services.prowlarr_service import ProwlarrRelease
 from app.siftarr.services.qbittorrent_service import MediaCategory, QbittorrentService
+from app.siftarr.services.release_parser import parse_season_episode
 from app.siftarr.services.rule_engine import ReleaseEvaluation
 from app.siftarr.services.runtime_settings import get_effective_settings
 from app.siftarr.services.staging_service import StagingService
@@ -54,6 +55,7 @@ async def store_search_results(
             continue
         seen_keys.add(dedupe_key)
 
+        parsed = parse_season_episode(release.title)
         record = Release(
             request_id=request_id,
             title=release.title,
@@ -68,6 +70,8 @@ async def store_search_results(
             resolution=release.resolution,
             codec=release.codec,
             release_group=release.release_group,
+            season_number=parsed.season_number,
+            episode_number=parsed.episode_number,
             score=evaluation.total_score,
             passed_rules=evaluation.passed,
         )

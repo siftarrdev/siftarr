@@ -9,9 +9,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.siftarr.database import async_session_maker, get_db
 from app.siftarr.models import MediaType, Request, RequestStatus
+from app.siftarr.services.episode_sync_service import EpisodeSyncService
 from app.siftarr.services.media_helpers import extract_media_title_and_year
 from app.siftarr.services.movie_decision_service import MovieDecisionService
 from app.siftarr.services.overseerr_service import OverseerrService
+from app.siftarr.services.plex_service import PlexService
 from app.siftarr.services.prowlarr_service import ProwlarrService
 from app.siftarr.services.qbittorrent_service import QbittorrentService
 from app.siftarr.services.runtime_settings import get_effective_settings
@@ -148,6 +150,17 @@ async def process_request_background(request_id: int) -> None:
                 request.media_type,
                 request.title,
             )
+
+            if request.media_type == MediaType.TV:
+                settings = await get_effective_settings(db)
+                plex_service = PlexService(settings=settings)
+                episode_sync = EpisodeSyncService(db, plex=plex_service)
+                try:
+                    await episode_sync.sync_episodes(request.id)
+                except Exception:
+                    logger.exception("Episode sync failed for request_id=%s", request_id)
+                finally:
+                    await plex_service.close()
 
             settings = await get_effective_settings(db)
             prowlarr = ProwlarrService(settings=settings)

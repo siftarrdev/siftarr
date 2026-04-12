@@ -30,6 +30,10 @@ class Settings(BaseSettings):
     prowlarr_url: str | None = None
     prowlarr_api_key: str | None = None
 
+    # Plex settings
+    plex_url: str | None = None
+    plex_token: str | None = None
+
     # qBittorrent settings
     qbittorrent_url: str | None = None
     qbittorrent_username: str = "admin"
@@ -39,6 +43,8 @@ class Settings(BaseSettings):
     staging_mode_enabled: bool = True
     retry_interval_hours: int = 24
     max_retry_duration_days: int = 7
+    episode_sync_stale_hours: int = 24
+    max_episode_discovery: int = 30
 
     database_url: str = Field(
         default_factory=lambda: (

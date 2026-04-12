@@ -21,8 +21,10 @@ from app.siftarr.services.lifecycle_service import LifecycleService
 from app.siftarr.services.media_helpers import extract_media_title_and_year
 from app.siftarr.services.overseerr_service import OverseerrService
 from app.siftarr.services.pending_queue_service import PendingQueueService
+from app.siftarr.services.plex_service import PlexService
 from app.siftarr.services.prowlarr_service import ProwlarrService
 from app.siftarr.services.qbittorrent_service import QbittorrentService
+from app.siftarr.services.release_parser import parse_season_episode
 from app.siftarr.services.release_selection_service import build_prowlarr_release, use_releases
 from app.siftarr.services.rule_engine import RuleEngine
 from app.siftarr.services.runtime_settings import get_effective_settings
@@ -417,7 +419,9 @@ async def request_details(
     request_id: int,
     db: AsyncSession = Depends(get_db),
 ) -> JSONResponse:
+    from app.siftarr.models.episode import Episode
     from app.siftarr.models.release import Release
+    from app.siftarr.models.season import Season
 
     result = await db.execute(select(RequestModel).where(RequestModel.id == request_id))
     request = result.scalar_one_or_none()
@@ -447,10 +451,8 @@ async def request_details(
             media_details = None
             if request.media_type.value == "movie" and request.tmdb_id:
                 media_details = await overseerr_service.get_media_details("movie", request.tmdb_id)
-            elif request.media_type.value == "tv":
-                tv_external_id = request.tmdb_id or request.tvdb_id
-                if tv_external_id:
-                    media_details = await overseerr_service.get_media_details("tv", tv_external_id)
+            elif request.media_type.value == "tv" and request.tmdb_id:
+                media_details = await overseerr_service.get_media_details("tv", request.tmdb_id)
 
             merged_media = {**media, **(media_details or {})}
             poster = _build_poster_url(
@@ -499,6 +501,8 @@ async def request_details(
                 "downloaded": release.is_downloaded,
                 "publish_date": release.publish_date.isoformat() if release.publish_date else None,
                 "rejection_reason": evaluation.rejection_reason,
+                "season_number": release.season_number,
+                "episode_number": release.episode_number,
                 "matches": [
                     {
                         "rule_name": m.rule_name,
@@ -511,7 +515,266 @@ async def request_details(
         )
 
     details["releases"] = matched
+
+    if request.media_type == MediaType.TV:
+        from app.siftarr.services.episode_sync_service import EpisodeSyncService
+
+        plex_service = PlexService(settings=effective_settings)
+        try:
+            episode_sync = EpisodeSyncService(db, plex=plex_service)
+            await episode_sync.refresh_if_stale(request_id)
+        except Exception:
+            logger.exception("Episode sync failed for request_id=%s", request_id)
+        finally:
+            await plex_service.close()
+
+        seasons_result = await db.execute(
+            select(Season).where(Season.request_id == request_id).order_by(Season.season_number)
+        )
+        seasons = list(seasons_result.scalars().all())
+
+        seasons_data = []
+        for season in seasons:
+            episodes_result = await db.execute(
+                select(Episode)
+                .where(Episode.season_id == season.id)
+                .order_by(Episode.episode_number)
+            )
+            episodes = list(episodes_result.scalars().all())
+            available_count = sum(1 for ep in episodes if ep.status == RequestStatus.AVAILABLE)
+            season_data = {
+                "id": season.id,
+                "season_number": season.season_number,
+                "status": season.status.value,
+                "available_count": available_count,
+                "total_count": len(episodes),
+                "episodes": [
+                    {
+                        "id": ep.id,
+                        "episode_number": ep.episode_number,
+                        "title": ep.title,
+                        "air_date": ep.air_date.isoformat() if ep.air_date else None,
+                        "status": ep.status.value,
+                        "release_id": ep.release_id,
+                    }
+                    for ep in episodes
+                ],
+            }
+            seasons_data.append(season_data)
+
+        releases_by_season: dict[int, list] = {}
+        releases_by_episode: dict[tuple[int, int], list] = {}
+        for r in matched:
+            sn = r.get("season_number")
+            en = r.get("episode_number")
+            if en is not None and sn is not None:
+                releases_by_episode.setdefault((sn, en), []).append(r)
+            elif sn is not None:
+                releases_by_season.setdefault(sn, []).append(r)
+
+        details["tv_info"] = {
+            "seasons": seasons_data,
+            "releases_by_season": {str(k): v for k, v in releases_by_season.items()},
+            "releases_by_episode": {f"{k[0]}-{k[1]}": v for k, v in releases_by_episode.items()},
+        }
+
     return JSONResponse(details)
+
+
+@router.get("/requests/{request_id}/seasons")
+async def get_request_seasons(
+    request_id: int,
+    db: AsyncSession = Depends(get_db),
+) -> JSONResponse:
+    """Get seasons and episodes for a TV request."""
+    from app.siftarr.models.episode import Episode
+    from app.siftarr.models.season import Season
+    from app.siftarr.services.episode_sync_service import EpisodeSyncService
+
+    result = await db.execute(select(RequestModel).where(RequestModel.id == request_id))
+    request = result.scalar_one_or_none()
+    if not request:
+        raise HTTPException(status_code=404, detail="Request not found")
+
+    if request.media_type != MediaType.TV:
+        return JSONResponse({"seasons": [], "message": "Request is not a TV show"})
+
+    effective_settings = await get_effective_settings(db)
+    plex_service = PlexService(settings=effective_settings)
+    try:
+        episode_sync = EpisodeSyncService(db, plex=plex_service)
+        await episode_sync.refresh_if_stale(request_id)
+    except Exception:
+        logger.exception("Episode sync failed for request_id=%s", request_id)
+    finally:
+        await plex_service.close()
+
+    seasons_result = await db.execute(
+        select(Season).where(Season.request_id == request_id).order_by(Season.season_number)
+    )
+    seasons = list(seasons_result.scalars().all())
+
+    seasons_data = []
+    for season in seasons:
+        episodes_result = await db.execute(
+            select(Episode).where(Episode.season_id == season.id).order_by(Episode.episode_number)
+        )
+        episodes = list(episodes_result.scalars().all())
+
+        season_data = {
+            "id": season.id,
+            "season_number": season.season_number,
+            "status": season.status.value,
+            "synced_at": season.synced_at.isoformat() if season.synced_at else None,
+            "episodes": [
+                {
+                    "id": ep.id,
+                    "episode_number": ep.episode_number,
+                    "title": ep.title,
+                    "air_date": ep.air_date.isoformat() if ep.air_date else None,
+                    "status": ep.status.value,
+                    "release_id": ep.release_id,
+                }
+                for ep in episodes
+            ],
+        }
+        seasons_data.append(season_data)
+
+    return JSONResponse({"seasons": seasons_data})
+
+
+@router.post("/requests/{request_id}/seasons/{season_number}/search")
+async def search_season_packs(
+    request_id: int,
+    season_number: int,
+    db: AsyncSession = Depends(get_db),
+) -> JSONResponse:
+    """Search for season packs for a specific season."""
+    result = await db.execute(select(RequestModel).where(RequestModel.id == request_id))
+    request = result.scalar_one_or_none()
+    if not request:
+        raise HTTPException(status_code=404, detail="Request not found")
+
+    if request.media_type != MediaType.TV:
+        raise HTTPException(status_code=400, detail="Request is not a TV show")
+
+    if not request.tvdb_id:
+        raise HTTPException(status_code=400, detail="No TVDB ID available")
+
+    runtime_settings = await get_effective_settings(db)
+    prowlarr = ProwlarrService(settings=runtime_settings)
+
+    try:
+        search_result = await prowlarr.search_by_tvdbid(
+            tvdbid=request.tvdb_id,
+            title=request.title,
+            season=season_number,
+            year=request.year,
+        )
+
+        if search_result.error:
+            return JSONResponse({"error": search_result.error, "releases": []})
+
+        rules_result = await db.execute(select(Rule))
+        rules = list(rules_result.scalars().all())
+        engine = RuleEngine.from_db_rules(rules=rules, media_type="tv")
+
+        releases = []
+        for release in search_result.releases:
+            parsed = parse_season_episode(release.title)
+            if parsed.episode_number is not None:
+                continue
+            if parsed.season_number is not None and parsed.season_number != season_number:
+                continue
+            evaluation = engine.evaluate(release)
+            releases.append(
+                {
+                    "title": release.title,
+                    "size": _format_release_size(release.size),
+                    "seeders": release.seeders,
+                    "leechers": release.leechers,
+                    "indexer": release.indexer,
+                    "resolution": release.resolution,
+                    "codec": release.codec,
+                    "release_group": release.release_group,
+                    "score": evaluation.total_score,
+                    "passed": evaluation.passed,
+                    "download_url": release.download_url,
+                    "magnet_url": release.magnet_url,
+                }
+            )
+
+        return JSONResponse({"releases": releases})
+    finally:
+        pass
+
+
+@router.post("/requests/{request_id}/seasons/{season_number}/episodes/{episode_number}/search")
+async def search_episode(
+    request_id: int,
+    season_number: int,
+    episode_number: int,
+    db: AsyncSession = Depends(get_db),
+) -> JSONResponse:
+    """Search for a specific episode."""
+    result = await db.execute(select(RequestModel).where(RequestModel.id == request_id))
+    request = result.scalar_one_or_none()
+    if not request:
+        raise HTTPException(status_code=404, detail="Request not found")
+
+    if request.media_type != MediaType.TV:
+        raise HTTPException(status_code=400, detail="Request is not a TV show")
+
+    if not request.tvdb_id:
+        raise HTTPException(status_code=400, detail="No TVDB ID available")
+
+    runtime_settings = await get_effective_settings(db)
+    prowlarr = ProwlarrService(settings=runtime_settings)
+
+    try:
+        search_result = await prowlarr.search_by_tvdbid(
+            tvdbid=request.tvdb_id,
+            title=request.title,
+            season=season_number,
+            episode=episode_number,
+            year=request.year,
+        )
+
+        if search_result.error:
+            return JSONResponse({"error": search_result.error, "releases": []})
+
+        rules_result = await db.execute(select(Rule))
+        rules = list(rules_result.scalars().all())
+        engine = RuleEngine.from_db_rules(rules=rules, media_type="tv")
+
+        releases = []
+        for release in search_result.releases:
+            parsed = parse_season_episode(release.title)
+            if parsed.season_number is not None and parsed.season_number != season_number:
+                continue
+            if parsed.episode_number is not None and parsed.episode_number != episode_number:
+                continue
+            evaluation = engine.evaluate(release)
+            releases.append(
+                {
+                    "title": release.title,
+                    "size": _format_release_size(release.size),
+                    "seeders": release.seeders,
+                    "leechers": release.leechers,
+                    "indexer": release.indexer,
+                    "resolution": release.resolution,
+                    "codec": release.codec,
+                    "release_group": release.release_group,
+                    "score": evaluation.total_score,
+                    "passed": evaluation.passed,
+                    "download_url": release.download_url,
+                    "magnet_url": release.magnet_url,
+                }
+            )
+
+        return JSONResponse({"releases": releases})
+    finally:
+        pass
 
 
 @router.post("/requests/{request_id}/releases/{release_id}/use")
@@ -556,6 +819,37 @@ async def deny_request(
 
     await _deny_request_record(request, db, reason=reason)
     return RedirectResponse(url=redirect_to or "/", status_code=303)
+
+
+@router.post("/requests/{request_id}/refresh-plex")
+async def refresh_plex(
+    request_id: int,
+    db: AsyncSession = Depends(get_db),
+) -> JSONResponse:
+    """Force a Plex re-sync for a TV request regardless of staleness."""
+    from app.siftarr.services.episode_sync_service import EpisodeSyncService
+
+    result = await db.execute(select(RequestModel).where(RequestModel.id == request_id))
+    request = result.scalar_one_or_none()
+
+    if not request:
+        raise HTTPException(status_code=404, detail="Request not found")
+
+    if request.media_type != MediaType.TV:
+        return JSONResponse({"error": "Request is not a TV show"})
+
+    effective_settings = await get_effective_settings(db)
+    plex_service = PlexService(settings=effective_settings)
+
+    try:
+        episode_sync = EpisodeSyncService(db, plex=plex_service)
+        await episode_sync.sync_episodes(request_id, force_plex_refresh=True)
+        return JSONResponse({"status": "success", "message": "Plex sync completed"})
+    except Exception:
+        logger.exception("Plex refresh failed for request_id=%s", request_id)
+        return JSONResponse({"status": "error", "message": "Plex sync failed"}, status_code=500)
+    finally:
+        await plex_service.close()
 
 
 # ---------------------------------------------------------------------------
