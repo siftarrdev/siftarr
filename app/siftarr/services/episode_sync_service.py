@@ -406,9 +406,10 @@ class EpisodeSyncService:
         if newest_synced is None:
             return await self.sync_episodes(request_id)
 
-        stale_threshold = datetime.now(UTC).replace(tzinfo=None) - timedelta(
-            hours=self._stale_hours
-        )
+        stale_threshold = datetime.now(UTC) - timedelta(hours=self._stale_hours)
+        # Ensure newest_synced is timezone-aware for comparison
+        if newest_synced.tzinfo is None:
+            newest_synced = newest_synced.replace(tzinfo=UTC)
         if newest_synced < stale_threshold:
             logger.info("EpisodeSyncService: stale sync for request %s, refreshing", request_id)
             return await self.sync_episodes(request_id)
