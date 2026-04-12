@@ -2,7 +2,7 @@
 
 from datetime import UTC, datetime
 
-from sqlalchemy import BigInteger, DateTime, Integer, String, Text
+from sqlalchemy import BigInteger, DateTime, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.siftarr.models._base import Base
@@ -33,9 +33,18 @@ class StagedTorrent(Base):
     selection_source: Mapped[str] = mapped_column(String(20), default="rule")
 
     # Status
-    status: Mapped[str] = mapped_column(String(50), default="staged")  # staged, approved, discarded
+    status: Mapped[str] = mapped_column(
+        String(50), default="staged"
+    )  # staged, approved, discarded, replaced
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utc_now)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=_utc_now, onupdate=_utc_now)
+
+    # Replacement tracking (self-referential)
+    replaced_by_id: Mapped[int | None] = mapped_column(
+        Integer, ForeignKey("staged_torrents.id"), nullable=True
+    )
+    replaced_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    replacement_reason: Mapped[str | None] = mapped_column(String(500), nullable=True)
 
     def __repr__(self) -> str:
         return f"<StagedTorrent(id={self.id}, title='{self.title[:30]}...')>"

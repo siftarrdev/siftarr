@@ -45,6 +45,8 @@ class LifecycleService:
             RequestStatus.FAILED,
         ],
         RequestStatus.DOWNLOADING: [
+            RequestStatus.STAGED,
+            RequestStatus.PENDING,
             RequestStatus.COMPLETED,
             RequestStatus.FAILED,
         ],
@@ -210,3 +212,23 @@ class LifecycleService:
     async def mark_as_pending(self, request_id: int) -> Request | None:
         """Convenience method to mark a request as pending."""
         return await self.transition(request_id, RequestStatus.PENDING)
+
+    async def mark_as_replacing(
+        self,
+        request_id: int,
+        reason: str | None = None,
+    ) -> Request | None:
+        """
+        Convenience method to mark a request as replacing.
+
+        Transitions from DOWNLOADING to STAGED, allowing the user
+        to re-stage a different torrent.
+
+        Args:
+            request_id: The request ID
+            reason: Optional reason for replacing
+
+        Returns:
+            Updated Request or None if transition invalid
+        """
+        return await self.transition(request_id, RequestStatus.STAGED, reason)
