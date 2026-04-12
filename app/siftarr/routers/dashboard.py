@@ -314,7 +314,7 @@ async def dashboard(
         replaced_result = await db.execute(
             select(StagedTorrent.id, StagedTorrent.title).where(StagedTorrent.id.in_(replaced_ids))
         )
-        replaced_by_titles = dict(list(replaced_result.all()))
+        replaced_by_titles = {row[0]: row[1] for row in replaced_result.all()}
 
     # Get completed requests for the Finished tab
     completed_requests = await lifecycle_service.get_requests_by_status(

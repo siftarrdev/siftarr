@@ -24,25 +24,24 @@ def upgrade() -> None:
     inspector = inspect(conn)
     existing_columns = [c["name"] for c in inspector.get_columns("staged_torrents")]
 
-    if "replaced_by_id" not in existing_columns:
-        op.add_column(
-            "staged_torrents",
-            sa.Column(
-                "replaced_by_id", sa.Integer, sa.ForeignKey("staged_torrents.id"), nullable=True
-            ),
-        )
+    # Use batch mode for SQLite compatibility (required for foreign keys)
+    with op.batch_alter_table("staged_torrents", recreate="always") as batch_op:
+        if "replaced_by_id" not in existing_columns:
+            batch_op.add_column(
+                sa.Column(
+                    "replaced_by_id", sa.Integer, sa.ForeignKey("staged_torrents.id"), nullable=True
+                ),
+            )
 
-    if "replaced_at" not in existing_columns:
-        op.add_column(
-            "staged_torrents",
-            sa.Column("replaced_at", sa.DateTime, nullable=True),
-        )
+        if "replaced_at" not in existing_columns:
+            batch_op.add_column(
+                sa.Column("replaced_at", sa.DateTime, nullable=True),
+            )
 
-    if "replacement_reason" not in existing_columns:
-        op.add_column(
-            "staged_torrents",
-            sa.Column("replacement_reason", sa.String(500), nullable=True),
-        )
+        if "replacement_reason" not in existing_columns:
+            batch_op.add_column(
+                sa.Column("replacement_reason", sa.String(500), nullable=True),
+            )
 
 
 def downgrade() -> None:
@@ -50,11 +49,13 @@ def downgrade() -> None:
     inspector = inspect(conn)
     existing_columns = [c["name"] for c in inspector.get_columns("staged_torrents")]
 
-    if "replacement_reason" in existing_columns:
-        op.drop_column("staged_torrents", "replacement_reason")
+    # Use batch mode for SQLite compatibility
+    with op.batch_alter_table("staged_torrents", recreate="always") as batch_op:
+        if "replacement_reason" in existing_columns:
+            batch_op.drop_column("replacement_reason")
 
-    if "replaced_at" in existing_columns:
-        op.drop_column("staged_torrents", "replaced_at")
+        if "replaced_at" in existing_columns:
+            batch_op.drop_column("replaced_at")
 
-    if "replaced_by_id" in existing_columns:
-        op.drop_column("staged_torrents", "replaced_by_id")
+        if "replaced_by_id" in existing_columns:
+            batch_op.drop_column("replaced_by_id")
