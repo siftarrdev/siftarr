@@ -183,21 +183,101 @@ class EpisodeSyncService:
 
         return synced_seasons
 
+    async def _resolve_plex_rating_key(self, request: Request) -> str | None:
+        """Try to find and persist the Plex rating key for a request.
+
+        Looks up the show by TMDB ID, then TVDB ID, then falls back to
+        title search. Saves the result on the request so future syncs
+        skip the lookup.
+        """
+        if self._plex is None:
+            return None
+
+        if request.plex_rating_key:
+            return request.plex_rating_key
+
+        rating_key: str | None = None
+
+        if request.tmdb_id:
+            result = await self._plex.get_show_by_tmdb(request.tmdb_id)
+            if result:
+                rating_key = str(result["rating_key"])
+                logger.info(
+                    "EpisodeSyncService: resolved Plex rating key via TMDB ID %s: %s",
+                    request.tmdb_id,
+                    rating_key,
+                )
+
+        if not rating_key and request.tvdb_id:
+            result = await self._plex.get_show_by_tvdb(request.tvdb_id)
+            if result:
+                rating_key = str(result["rating_key"])
+                logger.info(
+                    "EpisodeSyncService: resolved Plex rating key via TVDB ID %s: %s",
+                    request.tvdb_id,
+                    rating_key,
+                )
+
+        if not rating_key and request.title:
+            results = await self._plex.search_show(request.title)
+            if results:
+                rating_key = str(results[0]["rating_key"])
+                logger.info(
+                    "EpisodeSyncService: resolved Plex rating key via title search (%s): %s",
+                    request.title,
+                    rating_key,
+                )
+
+        if rating_key:
+            request.plex_rating_key = rating_key
+            await self.db.flush()
+            logger.info(
+                "EpisodeSyncService: saved Plex rating key %s for request %s (%s)",
+                rating_key,
+                request.id,
+                request.title,
+            )
+        else:
+            logger.warning(
+                "EpisodeSyncService: could not resolve Plex rating key for request %s "
+                "(tmdb_id=%s, tvdb_id=%s, title=%s)",
+                request.id,
+                request.tmdb_id,
+                request.tvdb_id,
+                request.title,
+            )
+
+        return rating_key
+
     async def _apply_plex_availability(
         self, request: Request, seasons: list[Season]
     ) -> list[Season]:
         """Override episode statuses based on Plex per-episode availability."""
-        if self._plex is None or not request.plex_rating_key:
+        if self._plex is None:
+            return seasons
+
+        rating_key = await self._resolve_plex_rating_key(request)
+        if not rating_key:
+            logger.info(
+                "EpisodeSyncService: could not resolve Plex rating key for request %s (%s), "
+                "falling back to Overseerr-only statuses",
+                request.id,
+                request.title,
+            )
+            await self._apply_fallback_statuses(seasons)
+            await self.db.commit()
             return seasons
 
         try:
-            availability = await self._plex.get_episode_availability(request.plex_rating_key)
+            availability = await self._plex.get_episode_availability(rating_key)
             if not availability:
                 logger.info(
                     "EpisodeSyncService: no episodes found on Plex for request %s (rating_key=%s)",
                     request.id,
-                    request.plex_rating_key,
+                    rating_key,
                 )
+                await self._apply_fallback_statuses(seasons)
+                await self.db.commit()
                 return seasons
 
             for season in seasons:
@@ -212,7 +292,7 @@ class EpisodeSyncService:
                     )
                     if is_on_plex:
                         episode.status = RequestStatus.AVAILABLE
-                    elif episode.status == RequestStatus.AVAILABLE:
+                    else:
                         episode.status = RequestStatus.PENDING
 
                 await self.db.flush()
@@ -222,6 +302,8 @@ class EpisodeSyncService:
                     season.status = RequestStatus.AVAILABLE
                 elif available_count > 0:
                     season.status = RequestStatus.PARTIALLY_AVAILABLE
+                else:
+                    season.status = RequestStatus.PENDING
 
             await self.db.commit()
 
@@ -237,6 +319,30 @@ class EpisodeSyncService:
             )
 
         return seasons
+
+    async def _apply_fallback_statuses(self, seasons: list[Season]) -> None:
+        """When Plex data is unavailable, downgrade season-level statuses to per-episode defaults.
+
+        Overseerr reports season-level statuses like 'partially_available'.  Applying that
+        same status to every individual episode is semantically wrong — episodes should be
+        either AVAILABLE (on Plex) or PENDING (needs search).  When we can't reach Plex, we
+        convert PARTIALLY_AVAILABLE episodes to PENDING so the UI and search logic work
+        correctly.
+        """
+        for season in seasons:
+            if season.status != RequestStatus.PARTIALLY_AVAILABLE:
+                continue
+            episodes_result = await self.db.execute(
+                select(Episode).where(Episode.season_id == season.id)
+            )
+            episodes = list(episodes_result.scalars().all())
+            for episode in episodes:
+                if episode.status == RequestStatus.PARTIALLY_AVAILABLE:
+                    episode.status = RequestStatus.PENDING
+            available = sum(1 for ep in episodes if ep.status == RequestStatus.AVAILABLE)
+            total = len(episodes)
+            if available == 0 and total > 0:
+                season.status = RequestStatus.PENDING
 
     async def sync_episodes(
         self, request_id: int, force_plex_refresh: bool = False
@@ -259,7 +365,7 @@ class EpisodeSyncService:
 
         synced_seasons = await self._sync_from_overseerr(request)
 
-        if self._plex is not None and request.plex_rating_key:
+        if self._plex is not None:
             synced_seasons = await self._apply_plex_availability(request, synced_seasons)
         else:
             await self.db.commit()
@@ -272,12 +378,24 @@ class EpisodeSyncService:
         return synced_seasons
 
     async def refresh_if_stale(self, request_id: int) -> list[Season]:
-        """Re-sync episodes if synced_at is older than the stale threshold."""
+        """Re-sync episodes if synced_at is older than the stale threshold.
+
+        Also forces a re-sync when the request lacks a plex_rating_key and a
+        PlexService is available, because that means per-episode Plex
+        availability was never applied.
+        """
+        request_result = await self.db.execute(select(Request).where(Request.id == request_id))
+        request = request_result.scalar_one_or_none()
+        if not request:
+            return []
+
         result = await self.db.execute(select(Season).where(Season.request_id == request_id))
         seasons = list(result.scalars().all())
 
         if not seasons:
             return await self.sync_episodes(request_id)
+
+        needs_plex_resolution = self._plex is not None and not request.plex_rating_key
 
         newest_synced = max(
             (s.synced_at for s in seasons if s.synced_at),
@@ -292,6 +410,13 @@ class EpisodeSyncService:
         )
         if newest_synced < stale_threshold:
             logger.info("EpisodeSyncService: stale sync for request %s, refreshing", request_id)
+            return await self.sync_episodes(request_id)
+
+        if needs_plex_resolution and self._plex is not None:
+            logger.info(
+                "EpisodeSyncService: request %s has no plex_rating_key, forcing re-sync",
+                request_id,
+            )
             return await self.sync_episodes(request_id)
 
         return seasons

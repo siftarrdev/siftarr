@@ -21,4 +21,4 @@
 ## Bugs
 - Searching for tv shows that don't have full seasons is not showing any results because the search is only looking for season packs; need to also search for individual episodes and allow rules to match on those
 - exclusion pattern matches shouldn't report as an error in the dashboard
-
+- send logs for rejext release when other release already sent to qbittorrent. also the sent release is downloaded by the torrent is still in staging.

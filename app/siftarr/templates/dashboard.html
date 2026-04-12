@@ -514,6 +514,7 @@ details[open] summary .accordion-chevron { transform: rotate(90deg); }
                         <p id="request-details-overview" class="mt-1 text-sm text-gray-300 leading-relaxed whitespace-pre-wrap"></p>
                     </div>
                     <a id="request-details-overseerr-link" href="#" target="_blank" rel="noopener noreferrer" class="hidden shrink-0 btn-ghost btn-sm">Open in Overseerr</a>
+                    <button id="request-details-refresh-plex" onclick="refreshPlexAndReload()" class="hidden shrink-0 btn-ghost btn-sm">Refresh Plex</button>
                 </div>
                 <div>
                     <div id="release-results-header" class="flex items-center justify-between gap-4">
@@ -909,6 +910,7 @@ async function openRequestDetails(requestId, explicitIndex = null) {
     const overview = document.getElementById('request-details-overview');
     const releases = document.getElementById('request-details-releases');
     const overseerrLink = document.getElementById('request-details-overseerr-link');
+    const refreshPlexBtn = document.getElementById('request-details-refresh-plex');
     const filterInput = document.getElementById('release-filter-input');
 
     // Build navigation context from currently visible rows
@@ -929,6 +931,9 @@ async function openRequestDetails(requestId, explicitIndex = null) {
     if (overseerrLink) {
         overseerrLink.classList.add('hidden');
         overseerrLink.removeAttribute('href');
+    }
+    if (refreshPlexBtn) {
+        refreshPlexBtn.classList.add('hidden');
     }
     setPoster(null, 'Loading poster');
     document.getElementById('release-results-header').classList.remove('hidden');
@@ -953,6 +958,10 @@ async function openRequestDetails(requestId, explicitIndex = null) {
             overseerrLink.classList.remove('hidden');
         }
 
+        if (data.request.media_type === 'tv' && refreshPlexBtn) {
+            refreshPlexBtn.classList.remove('hidden');
+        }
+
         currentReleases = data.releases || [];
         currentRequestId = data.request.id;
 
@@ -971,6 +980,28 @@ async function openRequestDetails(requestId, explicitIndex = null) {
         overview.textContent = '';
         setPoster(null, 'Poster unavailable');
         releases.innerHTML = '<div class="text-red-400 text-sm">Failed to load request details. Check that Overseerr is reachable.</div>';
+    }
+}
+
+async function refreshPlexAndReload() {
+    if (!currentRequestId) return;
+    const btn = document.getElementById('request-details-refresh-plex');
+    if (btn) {
+        btn.disabled = true;
+        btn.textContent = 'Refreshing...';
+    }
+    try {
+        const response = await fetch('/requests/' + currentRequestId + '/refresh-plex', { method: 'POST' });
+        if (!response.ok) {
+            throw new Error('Server error: ' + response.status);
+        }
+        await openRequestDetails(currentRequestId, currentDetailsIndex);
+    } catch (err) {
+        console.error('Plex refresh failed:', err);
+        if (btn) {
+            btn.disabled = false;
+            btn.textContent = 'Refresh Plex';
+        }
     }
 }
 
