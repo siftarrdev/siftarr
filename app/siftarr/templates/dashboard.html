@@ -311,6 +311,7 @@ details[open] summary .accordion-chevron { transform: rotate(90deg); }
                     <option value="">All Torrent States</option>
                     <option value="staged">Staged</option>
                     <option value="approved">Sent to qBittorrent</option>
+                    <option value="replaced">Replaced</option>
                 </select>
             </div>
             <div class="overflow-x-auto">
@@ -340,7 +341,14 @@ details[open] summary .accordion-chevron { transform: rotate(90deg); }
                         {% set request_state = staged_request_statuses.get(torrent.request_id, 'unknown') %}
                         <tr class="hover:bg-surface-850/80 cursor-pointer transition-colors" onclick="{% if torrent.request_id %}openRequestDetails({{ torrent.request_id }}){% endif %}" data-request-id="{{ torrent.request_id }}" data-title="{{ torrent.title|lower }}" data-state="{{ torrent.status|lower }}" data-requeststate="{{ request_state|lower }}" data-size="{{ torrent.size }}" data-indexer="{{ torrent.indexer|lower }}" data-score="{{ torrent.score }}">
                             <td class="px-5 py-3.5 text-sm font-medium text-white">{{ torrent.title }}</td>
-                            <td class="px-5 py-3.5 whitespace-nowrap text-sm"><span class="badge {% if torrent.status == 'staged' %}badge-yellow{% elif torrent.status == 'approved' %}badge-blue{% else %}badge-gray{% endif %}">{{ 'sent to qBittorrent' if torrent.status == 'approved' else torrent.status }}</span></td>
+                            <td class="px-5 py-3.5 whitespace-nowrap text-sm">
+                                {% if torrent.status == 'replaced' %}
+                                {% set replacement_title = replaced_by_titles.get(torrent.replaced_by_id, 'Unknown') %}
+                                <span class="badge badge-purple" title="Replaced by: {{ replacement_title }}{% if torrent.replacement_reason %} - {{ torrent.replacement_reason }}{% endif %}">replaced</span>
+                                {% else %}
+                                <span class="badge {% if torrent.status == 'staged' %}badge-yellow{% elif torrent.status == 'approved' %}badge-blue{% else %}badge-gray{% endif %}">{{ 'sent to qBittorrent' if torrent.status == 'approved' else torrent.status }}</span>
+                                {% endif %}
+                            </td>
                             <td class="px-5 py-3.5 whitespace-nowrap text-sm"><span class="badge {% if request_state == 'downloading' %}badge-blue{% elif request_state == 'staged' %}badge-yellow{% else %}badge-gray{% endif %}">{{ request_state }}</span></td>
                             <td class="px-5 py-3.5 whitespace-nowrap text-sm text-gray-400 tabular-nums">{{ (torrent.size / 1024 / 1024 / 1024)|round(2) }} GB</td>
                             <td class="px-5 py-3.5 whitespace-nowrap text-sm text-gray-400">{{ torrent.indexer }}</td>
@@ -352,7 +360,10 @@ details[open] summary .accordion-chevron { transform: rotate(90deg); }
                                     {% endif %}
                                     {% if torrent.status == 'staged' %}
                                     <form action="/staged/{{ torrent.id }}/approve" method="post" class="inline"><button type="submit" class="text-emerald-400 hover:text-emerald-300 font-medium">Approve</button></form>
+                                    <button type="button" onclick="openReplaceModal({{ torrent.id }}, {{ torrent.request_id }}, '{{ torrent.title|replace("'", "\\'") }}')" class="text-amber-400 hover:text-amber-300 font-medium">Replace</button>
                                     <form action="/staged/{{ torrent.id }}/discard" method="post" class="inline"><button type="submit" class="text-red-400 hover:text-red-300 font-medium">Discard</button></form>
+                                    {% elif torrent.status == 'replaced' %}
+                                    <span class="text-gray-500 text-xs" title="Replaced{% if torrent.replacement_reason %}: {{ torrent.replacement_reason }}{% endif %}">Replaced</span>
                                     {% else %}
                                     {% if not torrent.request_id %}<span class="text-gray-600">No actions</span>{% endif %}
                                     {% endif %}
@@ -543,6 +554,31 @@ details[open] summary .accordion-chevron { transform: rotate(90deg); }
             <div class="flex justify-end gap-3">
                 <button type="button" onclick="closeDenyModal()" class="btn-ghost">Cancel</button>
                 <button type="submit" class="btn-danger">Deny Request</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+{# ═══════════════ REPLACE MODAL ═══════════════ #}
+<div id="replace-modal" class="fixed inset-0 z-[60] hidden">
+    <div class="absolute inset-0 bg-black/60 backdrop-blur-sm" onclick="closeReplaceModal()"></div>
+    <div class="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-full max-w-lg bg-surface-900 border border-gray-700/60 rounded-2xl shadow-2xl p-6">
+        <h3 class="text-lg font-semibold text-white mb-2">Replace Torrent</h3>
+        <p class="text-sm text-gray-400 mb-4">Replace the currently downloading torrent with a different one. The current torrent will be marked as replaced.</p>
+        <form id="replace-form" method="post">
+            <input type="hidden" name="redirect_to" id="replace-redirect" value="/?tab=staged">
+            <div class="mb-4 p-3 rounded-lg bg-surface-800 border border-gray-700/40">
+                <div class="text-xs text-gray-500 uppercase tracking-wider mb-1">Current Torrent</div>
+                <div id="replace-current-torrent" class="text-sm text-white font-medium break-words"></div>
+            </div>
+            <div class="mb-4">
+                <label for="replace-reason" class="block text-sm font-medium text-gray-300 mb-2">Why are you replacing this torrent?</label>
+                <textarea name="reason" id="replace-reason" rows="3" placeholder="e.g., Better quality, more seeders, correct release group..." class="form-input"></textarea>
+                <p class="mt-1 text-xs text-gray-500">Providing a reason helps us refine the selection rules</p>
+            </div>
+            <div class="flex justify-end gap-3">
+                <button type="button" onclick="closeReplaceModal()" class="btn-ghost">Cancel</button>
+                <button type="submit" class="btn-primary">Confirm Replace</button>
             </div>
         </form>
     </div>
@@ -1113,6 +1149,21 @@ function openDenyModal(requestId, redirectTo) {
 
 function closeDenyModal() {
     document.getElementById('deny-modal').classList.add('hidden');
+}
+
+function openReplaceModal(torrentId, requestId, torrentTitle) {
+    const modal = document.getElementById('replace-modal');
+    const form = document.getElementById('replace-form');
+    const currentTorrentEl = document.getElementById('replace-current-torrent');
+    const reason = document.getElementById('replace-reason');
+    form.action = '/staged/' + torrentId + '/replace';
+    currentTorrentEl.textContent = torrentTitle || 'Unknown torrent';
+    reason.value = '';
+    modal.classList.remove('hidden');
+}
+
+function closeReplaceModal() {
+    document.getElementById('replace-modal').classList.add('hidden');
 }
 
 class ColumnResizer {

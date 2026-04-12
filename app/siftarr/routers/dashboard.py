@@ -307,6 +307,15 @@ async def dashboard(
             request_id: status.value for request_id, status in staged_request_result.all()
         }
 
+    # Build mapping for replaced torrents to their replacements
+    replaced_by_titles: dict[int, str] = {}
+    replaced_ids = [t.replaced_by_id for t in staged_torrents if t.replaced_by_id]
+    if replaced_ids:
+        replaced_result = await db.execute(
+            select(StagedTorrent.id, StagedTorrent.title).where(StagedTorrent.id.in_(replaced_ids))
+        )
+        replaced_by_titles = dict(list(replaced_result.all()))
+
     # Get completed requests for the Finished tab
     completed_requests = await lifecycle_service.get_requests_by_status(
         RequestStatus.COMPLETED, limit=500
@@ -337,6 +346,7 @@ async def dashboard(
             "pending_items_by_request_id": pending_items_by_request_id,
             "staged_torrents": staged_torrents,
             "staged_request_statuses": staged_request_statuses,
+            "replaced_by_titles": replaced_by_titles,
             "completed_requests": completed_requests,
             "rejected_requests": rejected_requests,
             "stats": {
