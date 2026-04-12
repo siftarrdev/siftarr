@@ -110,22 +110,31 @@ async def discard_staged_torrent(
     db: AsyncSession = Depends(get_db),
 ) -> RedirectResponse:
     """Discard a staged torrent - delete files."""
+    from app.siftarr.models.request import RequestStatus
+
     result = await db.execute(select(StagedTorrent).where(StagedTorrent.id == torrent_id))
     torrent = result.scalar_one_or_none()
 
     if not torrent:
         raise HTTPException(status_code=404, detail="Staged torrent not found")
 
-    # Update torrent status
-    torrent.status = "discarded"
-
-    # Update request status if exists
+    # Check request status before allowing discard
     if torrent.request_id:
         result = await db.execute(select(Request).where(Request.id == torrent.request_id))
         request = result.scalar_one_or_none()
         if request:
-            lifecycle_service = LifecycleService(db)
-            await lifecycle_service.mark_as_pending(torrent.request_id)
+            if request.status == RequestStatus.DOWNLOADING:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Cannot discard a torrent that is already downloading. Use Replace instead to select a different torrent.",
+                )
+            # Only transition to pending if currently staged
+            if request.status == RequestStatus.STAGED:
+                lifecycle_service = LifecycleService(db)
+                await lifecycle_service.mark_as_pending(torrent.request_id)
+
+    # Update torrent status
+    torrent.status = "discarded"
 
     # Delete staging files
     try:
