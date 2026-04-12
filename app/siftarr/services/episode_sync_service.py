@@ -238,9 +238,10 @@ class EpisodeSyncService:
                 request.title,
             )
         else:
-            logger.warning(
+            # Not a warning - show simply doesn't exist in Plex yet (expected for new requests)
+            logger.debug(
                 "EpisodeSyncService: could not resolve Plex rating key for request %s "
-                "(tmdb_id=%s, tvdb_id=%s, title=%s)",
+                "(tmdb_id=%s, tvdb_id=%s, title=%s) - show not in Plex yet",
                 request.id,
                 request.tmdb_id,
                 request.tvdb_id,
