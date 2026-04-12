@@ -1,8 +1,9 @@
 """Staged torrent management router."""
 
 import os
+from datetime import UTC, datetime
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, Form, HTTPException
 from fastapi.responses import RedirectResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -134,6 +135,117 @@ async def discard_staged_torrent(
             os.remove(torrent.json_path)
     except OSError:
         pass
+
+    await db.commit()
+
+    return RedirectResponse(url="/", status_code=303)
+
+
+@router.post("/{torrent_id}/replace")
+async def replace_staged_torrent(
+    torrent_id: int,
+    reason: str | None = Form(None),
+    db: AsyncSession = Depends(get_db),
+) -> RedirectResponse:
+    """Replace an approved torrent with a new staged one."""
+    # Get the new torrent (the one being approved)
+    result = await db.execute(select(StagedTorrent).where(StagedTorrent.id == torrent_id))
+    new_torrent = result.scalar_one_or_none()
+
+    if not new_torrent:
+        raise HTTPException(status_code=404, detail="Staged torrent not found")
+
+    # Handle case where torrent has no request_id (manual add)
+    if not new_torrent.request_id:
+        raise HTTPException(
+            status_code=400,
+            detail="Cannot replace torrent without an associated request",
+        )
+
+    # Find the request associated with this torrent
+    result = await db.execute(select(Request).where(Request.id == new_torrent.request_id))
+    request = result.scalar_one_or_none()
+
+    if not request:
+        raise HTTPException(status_code=404, detail="Associated request not found")
+
+    # Find the currently approved torrent for this request (the one being replaced)
+    result = await db.execute(
+        select(StagedTorrent).where(
+            StagedTorrent.request_id == request.id,
+            StagedTorrent.status == "approved",
+        )
+    )
+    old_torrent = result.scalar_one_or_none()
+
+    if not old_torrent:
+        raise HTTPException(
+            status_code=400,
+            detail="No approved torrent found to replace for this request",
+        )
+
+    # Determine category
+    category = MediaCategory.TV
+    if request.media_type == MediaType.MOVIE:
+        category = MediaCategory.MOVIES
+
+    # Find the rules-selected torrent for logging
+    rules_selected_result = await db.execute(
+        select(StagedTorrent)
+        .where(
+            StagedTorrent.request_id == request.id,
+            StagedTorrent.selection_source == "rule",
+            StagedTorrent.status.in_(["staged", "approved"]),
+        )
+        .order_by(StagedTorrent.score.desc(), StagedTorrent.created_at.asc())
+    )
+    rules_selected_torrent = rules_selected_result.scalars().first()
+
+    # Add new torrent to qBittorrent
+    runtime_settings = await get_effective_settings(db)
+    qbittorrent = QbittorrentService(settings=runtime_settings)
+    success = False
+
+    if new_torrent.magnet_url:
+        torrent_hash = await qbittorrent.add_torrent(
+            magnet_uri=new_torrent.magnet_url,
+            category=category,
+        )
+        success = torrent_hash is not None
+    else:
+        success = (
+            await qbittorrent.add_torrent(
+                torrent_path=new_torrent.torrent_path,
+                category=category,
+            )
+            is not None
+        )
+
+    if success:
+        # Log the replacement decision
+        log_staging_decision(
+            request=request,
+            approved_torrent=new_torrent,
+            rules_selected_torrent=rules_selected_torrent,
+        )
+
+        # Mark the old torrent as replaced
+        old_torrent.status = "replaced"
+        old_torrent.replaced_by_id = new_torrent.id
+        old_torrent.replaced_at = datetime.now(UTC)
+        old_torrent.replacement_reason = reason
+
+        # Mark the new torrent as approved
+        new_torrent.status = "approved"
+
+        # Delete staging files for the new torrent
+        try:
+            if os.path.exists(new_torrent.torrent_path):
+                os.remove(new_torrent.torrent_path)
+            if os.path.exists(new_torrent.json_path):
+                os.remove(new_torrent.json_path)
+        except OSError:
+            pass
 
     await db.commit()
 

@@ -33,7 +33,9 @@ class StagedTorrent(Base):
     selection_source: Mapped[str] = mapped_column(String(20), default="rule")
 
     # Status
-    status: Mapped[str] = mapped_column(String(50), default="staged")  # staged, approved, discarded
+    status: Mapped[str] = mapped_column(
+        String(50), default="staged"
+    )  # staged, approved, discarded, replaced
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utc_now)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=_utc_now, onupdate=_utc_now)
 
