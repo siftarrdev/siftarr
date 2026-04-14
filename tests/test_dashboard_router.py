@@ -7,6 +7,8 @@ import pytest
 from fastapi import HTTPException
 
 from app.siftarr.routers import dashboard
+from app.siftarr.models.release import Release
+from app.siftarr.models.request import MediaType, RequestStatus
 from app.siftarr.services.prowlarr_service import ProwlarrRelease, ProwlarrSearchResult
 
 
@@ -248,6 +250,113 @@ class TestDashboardRouter:
 
         assert exc_info.value.status_code == 400
         assert exc_info.value.detail == "Request is not a TV show"
+
+    @pytest.mark.asyncio
+    async def test_request_details_reuses_persisted_multi_season_coverage(self, mock_db, monkeypatch):
+        """Stored multi-season coverage should serialize and group by each covered season."""
+        request_record = MagicMock()
+        request_record.id = 21
+        request_record.media_type = MediaType.TV
+        request_record.status = RequestStatus.PENDING
+        request_record.title = "Foundation"
+        request_record.overseerr_request_id = None
+
+        stored_release = Release(
+            id=8,
+            request_id=21,
+            title="Foundation.S01-S02.2160p.WEB-DL",
+            size=30 * 1024 * 1024 * 1024,
+            seeders=55,
+            leechers=4,
+            download_url="https://example.test/foundation-s01-s02",
+            magnet_url=None,
+            info_hash=None,
+            indexer="IndexerA",
+            publish_date=None,
+            resolution="2160p",
+            codec=None,
+            release_group=None,
+            season_number=1,
+            episode_number=None,
+            season_coverage="1,2",
+            score=95,
+            passed_rules=True,
+            is_downloaded=False,
+        )
+
+        season_one = MagicMock(id=101, season_number=1, status=RequestStatus.PENDING, synced_at=None)
+        season_two = MagicMock(id=102, season_number=2, status=RequestStatus.PENDING, synced_at=None)
+
+        request_result = MagicMock()
+        request_result.scalar_one_or_none.return_value = request_record
+        release_result = MagicMock()
+        release_result.scalars.return_value.all.return_value = [stored_release]
+        rules_result = MagicMock()
+        rules_result.scalars.return_value.all.return_value = []
+        seasons_result = MagicMock()
+        seasons_result.scalars.return_value.all.return_value = [season_one, season_two]
+        episodes_one_result = MagicMock()
+        episodes_one_result.scalars.return_value.all.return_value = []
+        episodes_two_result = MagicMock()
+        episodes_two_result.scalars.return_value.all.return_value = []
+        mock_db.execute.side_effect = [
+            request_result,
+            release_result,
+            rules_result,
+            seasons_result,
+            episodes_one_result,
+            episodes_two_result,
+        ]
+
+        monkeypatch.setattr(dashboard, "get_effective_settings", AsyncMock(return_value=MagicMock()))
+
+        class FakeOverseerrService:
+            def __init__(self, settings):
+                pass
+
+            async def close(self):
+                return None
+
+        class FakePlexService:
+            async def close(self):
+                return None
+
+        fake_engine = MagicMock()
+        fake_engine.evaluate.return_value = MagicMock(rejection_reason=None, matches=[])
+
+        monkeypatch.setattr(dashboard, "OverseerrService", FakeOverseerrService)
+        monkeypatch.setattr(dashboard, "PlexService", lambda settings: FakePlexService())
+        monkeypatch.setattr(
+            dashboard.RuleEngine,
+            "from_db_rules",
+            MagicMock(return_value=fake_engine),
+        )
+
+        class FakeEpisodeSyncService:
+            def __init__(self, db, plex):
+                self.db = db
+                self.plex = plex
+
+            async def refresh_if_stale(self, request_id):
+                return None
+
+        with pytest.MonkeyPatch.context() as inner_monkeypatch:
+            inner_monkeypatch.setattr(
+                "app.siftarr.services.episode_sync_service.EpisodeSyncService",
+                FakeEpisodeSyncService,
+            )
+            response = await dashboard.request_details(request_id=21, db=mock_db)
+
+        body = json.loads(response.body)
+        assert body["releases"][0]["covered_seasons"] == [1, 2]
+        assert body["releases"][0]["covered_season_count"] == 2
+        assert body["releases"][0]["covers_all_known_seasons"] is True
+        assert [release["title"] for release in body["tv_info"]["releases_by_season"]["1"]] == [
+            "Foundation.S01-S02.2160p.WEB-DL"
+        ]
+        assert [release["title"] for release in body["tv_info"]["releases_by_season"]["2"]] == [
+            "Foundation.S01-S02.2160p.WEB-DL"
+        ]
 
     def test_dashboard_template_includes_search_all_ui(self):
         """Dashboard template should expose the Search All TV UI."""

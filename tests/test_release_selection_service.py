@@ -6,6 +6,8 @@ import pytest
 
 from app.siftarr.models.request import MediaType, Request, RequestStatus
 from app.siftarr.services import release_selection_service
+from app.siftarr.services.prowlarr_service import ProwlarrRelease
+from app.siftarr.services.rule_engine import ReleaseEvaluation
 
 
 class TestReleaseSelectionService:
@@ -134,3 +136,55 @@ class TestReleaseSelectionService:
         assert result["staged_ids"] == [existing_stage.id]
         staging_service.save_release.assert_not_awaited()
         queue_service.remove_from_queue.assert_awaited_once_with(request_record.id)
+
+    @pytest.mark.asyncio
+    async def test_store_search_results_persists_multi_season_coverage(self, mock_db):
+        """Multi-season packs should persist exact covered seasons."""
+        mock_db.add = MagicMock()
+        mock_db.commit = AsyncMock()
+        mock_db.refresh = AsyncMock()
+
+        release = ProwlarrRelease(
+            title="Show.S01-S03.2160p.WEB-DL",
+            size=30 * 1024 * 1024 * 1024,
+            seeders=50,
+            leechers=4,
+            download_url="https://example.test/show-s01-s03.torrent",
+            indexer="IndexerA",
+        )
+        evaluation = ReleaseEvaluation(release=release, passed=True, total_score=95, matches=[])
+
+        await release_selection_service.store_search_results(mock_db, 12, [evaluation])
+
+        stored_record = mock_db.add.call_args.args[0]
+        assert stored_record.request_id == 12
+        assert stored_record.season_number == 1
+        assert stored_record.episode_number is None
+        assert stored_record.season_coverage == "1,2,3"
+        mock_db.commit.assert_awaited_once()
+        mock_db.refresh.assert_awaited_once_with(stored_record)
+
+    @pytest.mark.asyncio
+    async def test_store_search_results_persists_complete_series_marker(self, mock_db):
+        """Complete-series releases should persist a reusable broad coverage marker."""
+        mock_db.add = MagicMock()
+        mock_db.commit = AsyncMock()
+        mock_db.refresh = AsyncMock()
+
+        release = ProwlarrRelease(
+            title="Show.Complete.Series.1080p.BluRay",
+            size=42 * 1024 * 1024 * 1024,
+            seeders=77,
+            leechers=2,
+            download_url="https://example.test/show-complete-series.torrent",
+            indexer="IndexerB",
+        )
+        evaluation = ReleaseEvaluation(release=release, passed=True, total_score=88, matches=[])
+
+        await release_selection_service.store_search_results(mock_db, 33, [evaluation])
+
+        stored_record = mock_db.add.call_args.args[0]
+        assert stored_record.request_id == 33
+        assert stored_record.season_number is None
+        assert stored_record.episode_number is None
+        assert stored_record.season_coverage == "*"

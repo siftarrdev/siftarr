@@ -24,7 +24,11 @@ from app.siftarr.services.pending_queue_service import PendingQueueService
 from app.siftarr.services.plex_service import PlexService
 from app.siftarr.services.prowlarr_service import ProwlarrService
 from app.siftarr.services.qbittorrent_service import QbittorrentService
-from app.siftarr.services.release_parser import parse_release_coverage, parse_season_episode
+from app.siftarr.services.release_parser import (
+    parse_release_coverage,
+    parse_season_episode,
+    parse_stored_release_coverage,
+)
 from app.siftarr.services.release_selection_service import build_prowlarr_release, use_releases
 from app.siftarr.services.rule_engine import RuleEngine
 from app.siftarr.services.runtime_settings import get_effective_settings
@@ -539,19 +543,19 @@ async def request_details(
     matched = []
     for release in releases:
         evaluation = engine.evaluate(build_prowlarr_release(release))
-        matched.append(
+        coverage = None
+        if request.media_type == MediaType.TV:
+            coverage = parse_stored_release_coverage(
+                release.season_coverage,
+                release.season_number,
+                release.episode_number,
+            )
+
+        payload = _serialize_evaluated_release(release, evaluation, coverage=coverage)
+        payload.update(
             {
-                "id": release.id,
-                "title": release.title,
                 "score": release.score,
                 "passed": release.passed_rules,
-                "size": _format_release_size(release.size),
-                "seeders": release.seeders,
-                "leechers": release.leechers,
-                "indexer": release.indexer,
-                "resolution": release.resolution,
-                "codec": release.codec,
-                "release_group": release.release_group,
                 "downloaded": release.is_downloaded,
                 "publish_date": release.publish_date.isoformat() if release.publish_date else None,
                 "rejection_reason": evaluation.rejection_reason,
@@ -567,6 +571,7 @@ async def request_details(
                 ],
             }
         )
+        matched.append(payload)
 
     details["releases"] = matched
 
@@ -588,7 +593,9 @@ async def request_details(
         seasons = list(seasons_result.scalars().all())
 
         seasons_data = []
+        known_season_numbers: list[int] = []
         for season in seasons:
+            known_season_numbers.append(season.season_number)
             episodes_result = await db.execute(
                 select(Episode)
                 .where(Episode.season_id == season.id)
@@ -616,13 +623,34 @@ async def request_details(
             }
             seasons_data.append(season_data)
 
+        known_total_seasons = len(known_season_numbers)
+        for release in matched:
+            if "covered_seasons" not in release and not release.get("is_complete_series"):
+                continue
+
+            release["known_total_seasons"] = known_total_seasons
+            covered_seasons = release.get("covered_seasons") or []
+            release["covers_all_known_seasons"] = bool(
+                known_total_seasons
+                and (
+                    release.get("is_complete_series")
+                    or len(covered_seasons) >= known_total_seasons
+                )
+            )
+
         releases_by_season: dict[int, list] = {}
         releases_by_episode: dict[tuple[int, int], list] = {}
         for r in matched:
             sn = r.get("season_number")
             en = r.get("episode_number")
+            covered_seasons = [season for season in r.get("covered_seasons", []) if isinstance(season, int)]
+            if r.get("covers_all_known_seasons"):
+                covered_seasons = known_season_numbers
             if en is not None and sn is not None:
                 releases_by_episode.setdefault((sn, en), []).append(r)
+            elif covered_seasons:
+                for covered_season in covered_seasons:
+                    releases_by_season.setdefault(covered_season, []).append(r)
             elif sn is not None:
                 releases_by_season.setdefault(sn, []).append(r)
 

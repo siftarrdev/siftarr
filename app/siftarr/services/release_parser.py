@@ -24,6 +24,47 @@ class ParsedReleaseCoverage:
         return self.season_numbers[0]
 
 
+def serialize_release_coverage(coverage: ParsedReleaseCoverage) -> str | None:
+    """Serialize multi-season coverage for storage on release records."""
+    if coverage.episode_number is not None:
+        return None
+    if coverage.is_complete_series:
+        return "*"
+    if len(coverage.season_numbers) <= 1:
+        return None
+    return ",".join(str(season) for season in coverage.season_numbers)
+
+
+def parse_stored_release_coverage(
+    stored_value: str | None,
+    season_number: int | None,
+    episode_number: int | None,
+) -> ParsedReleaseCoverage:
+    """Rebuild release coverage from stored release metadata."""
+    if episode_number is not None:
+        return ParsedReleaseCoverage(
+            season_numbers=(season_number,) if season_number is not None else (),
+            episode_number=episode_number,
+        )
+
+    if stored_value == "*":
+        return ParsedReleaseCoverage(season_numbers=(), episode_number=None, is_complete_series=True)
+
+    if stored_value:
+        season_numbers = tuple(
+            int(token)
+            for token in stored_value.split(",")
+            if token.strip().isdigit()
+        )
+        if season_numbers:
+            return ParsedReleaseCoverage(season_numbers=season_numbers, episode_number=None)
+
+    if season_number is not None:
+        return ParsedReleaseCoverage(season_numbers=(season_number,), episode_number=None)
+
+    return ParsedReleaseCoverage(season_numbers=(), episode_number=None)
+
+
 _SEASON_EPISODE_PATTERNS = [
     re.compile(r"(?:^|[.()\s_]+)S(\d{1,2})E(\d{1,3})(?![0-9])", re.IGNORECASE),
 ]
