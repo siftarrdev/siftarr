@@ -1,6 +1,7 @@
 import asyncio
 import json
 import logging
+from collections.abc import Iterable
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -14,6 +15,7 @@ from app.siftarr.models.season import Season
 from app.siftarr.services.pending_queue_service import PendingQueueService
 from app.siftarr.services.prowlarr_service import ProwlarrSearchResult, ProwlarrService
 from app.siftarr.services.qbittorrent_service import QbittorrentService
+from app.siftarr.services.release_parser import parse_release_coverage
 from app.siftarr.services.release_selection_service import store_search_results, use_releases
 from app.siftarr.services.rule_engine import ReleaseEvaluation, RuleEngine
 
@@ -80,6 +82,58 @@ class TVDecisionService:
     async def _limited_search(self, coro):
         async with self._search_semaphore:
             return await coro
+
+    @staticmethod
+    def _release_key(evaluation: ReleaseEvaluation) -> str:
+        return evaluation.release.info_hash or evaluation.release.title
+
+    @staticmethod
+    def _get_release_season_coverage(
+        evaluation: ReleaseEvaluation, requested_seasons: Iterable[int]
+    ) -> set[int]:
+        requested_season_set = set(requested_seasons)
+        coverage = parse_release_coverage(evaluation.release.title)
+        if coverage.episode_number is not None:
+            return set()
+        if coverage.is_complete_series:
+            return requested_season_set
+        return set(coverage.season_numbers).intersection(requested_season_set)
+
+    def _select_pack_releases(
+        self, pack_evaluations: list[ReleaseEvaluation], requested_seasons: list[int]
+    ) -> tuple[list[tuple[ReleaseEvaluation, set[int]]], set[int]]:
+        deduped_candidates: dict[str, tuple[ReleaseEvaluation, set[int]]] = {}
+
+        for evaluation in pack_evaluations:
+            season_coverage = self._get_release_season_coverage(evaluation, requested_seasons)
+            if not season_coverage:
+                continue
+
+            key = self._release_key(evaluation)
+            existing = deduped_candidates.get(key)
+            if existing is None or (
+                len(season_coverage),
+                evaluation.total_score,
+            ) > (
+                len(existing[1]),
+                existing[0].total_score,
+            ):
+                deduped_candidates[key] = (evaluation, season_coverage)
+
+        selected_releases: list[tuple[ReleaseEvaluation, set[int]]] = []
+        uncovered_seasons = set(requested_seasons)
+
+        for evaluation, season_coverage in sorted(
+            deduped_candidates.values(),
+            key=lambda item: (len(item[1]), item[0].total_score),
+            reverse=True,
+        ):
+            if season_coverage.isdisjoint(uncovered_seasons):
+                continue
+            selected_releases.append((evaluation, set(season_coverage)))
+            uncovered_seasons.difference_update(season_coverage)
+
+        return selected_releases, uncovered_seasons
 
     async def _get_db_episodes_for_season(self, request_id: int, season_number: int) -> list[int]:
         result = await self.db.execute(
@@ -170,7 +224,10 @@ class TVDecisionService:
         if not requested_seasons:
             return {"status": "error", "message": "No seasons specified"}
 
-        search_tasks: list[tuple[str, int, int | None]] = []
+        search_tasks: list[tuple[str, int | None, int | None]] = []
+
+        if len(requested_seasons) > 1:
+            search_tasks.append(("broad_pack", None, None))
 
         for season in requested_seasons:
             search_tasks.append(("season_pack", season, None))
@@ -186,7 +243,7 @@ class TVDecisionService:
 
         search_coros = []
         for task_type, season, episode in search_tasks:
-            if task_type == "season_pack":
+            if task_type in {"season_pack", "broad_pack"}:
                 search_coros.append(
                     self._limited_search(
                         self.prowlarr.search_by_tvdbid(
@@ -214,7 +271,7 @@ class TVDecisionService:
 
         all_evaluated_releases: list[ReleaseEvaluation] = []
         all_search_errors: list[str] = []
-        pack_evaluations: list[tuple[int, ReleaseEvaluation]] = []
+        pack_evaluations: list[ReleaseEvaluation] = []
         episode_evaluations: list[tuple[int, int, ReleaseEvaluation]] = []
 
         for i, sr in enumerate(all_results):
@@ -249,9 +306,12 @@ class TVDecisionService:
                 evaluation = rule_engine.evaluate(release)
                 all_evaluated_releases.append(evaluation)
                 if evaluation.passed:
-                    if task_type == "season_pack":
-                        pack_evaluations.append((season, evaluation))
-                    else:
+                    coverage = parse_release_coverage(release.title)
+                    if coverage.episode_number is None and (
+                        coverage.season_numbers or coverage.is_complete_series
+                    ):
+                        pack_evaluations.append(evaluation)
+                    elif task_type == "episode":
                         assert episode is not None
                         episode_evaluations.append((season, episode, evaluation))
 
@@ -266,20 +326,17 @@ class TVDecisionService:
 
         all_selected_releases: list[ReleaseEvaluation] = []
 
-        best_packs_by_season: dict[int, ReleaseEvaluation] = {}
-        for season, pack_eval in pack_evaluations:
-            if (
-                season not in best_packs_by_season
-                or pack_eval.total_score > best_packs_by_season[season].total_score
-            ):
-                best_packs_by_season[season] = pack_eval
+        selected_pack_releases, uncovered_seasons = self._select_pack_releases(
+            pack_evaluations, requested_seasons
+        )
+        seasons_with_packs: set[int] = set()
 
-        seasons_with_packs: set[int] = set(best_packs_by_season.keys())
-
-        for season, best_pack in best_packs_by_season.items():
-            all_selected_releases.append(best_pack)
-            await self._update_episode_status(request.id, season, None, RequestStatus.SEARCHING)
-            await self._update_season_status(request.id, season, RequestStatus.SEARCHING)
+        for pack_eval, covered_seasons in selected_pack_releases:
+            all_selected_releases.append(pack_eval)
+            seasons_with_packs.update(covered_seasons)
+            for season in covered_seasons:
+                await self._update_episode_status(request.id, season, None, RequestStatus.SEARCHING)
+                await self._update_season_status(request.id, season, RequestStatus.SEARCHING)
 
         episodes_by_key: dict[tuple[int, int], ReleaseEvaluation] = {}
         for season, episode, ep_eval in episode_evaluations:
@@ -288,7 +345,7 @@ class TVDecisionService:
                 episodes_by_key[key] = ep_eval
 
         for (season, episode), ep_eval in episodes_by_key.items():
-            if season not in seasons_with_packs:
+            if season in uncovered_seasons:
                 all_selected_releases.append(ep_eval)
                 await self._update_episode_status(
                     request.id, season, episode, RequestStatus.SEARCHING
@@ -329,11 +386,12 @@ class TVDecisionService:
                 }
                 action_status: str = str(action_result.get("status", ""))
                 new_status = status_map[action_status]
-                for season in seasons_with_packs:
-                    await self._update_episode_status(request.id, season, None, new_status)
-                    await self._update_season_status(request.id, season, new_status)
+                for _, covered_seasons in selected_pack_releases:
+                    for season in covered_seasons:
+                        await self._update_episode_status(request.id, season, None, new_status)
+                        await self._update_season_status(request.id, season, new_status)
                 for season, episode in episodes_by_key:
-                    if season not in seasons_with_packs:
+                    if season in uncovered_seasons:
                         await self._update_episode_status(request.id, season, episode, new_status)
                 await self.db.flush()
 

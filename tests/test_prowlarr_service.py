@@ -100,6 +100,12 @@ class TestProwlarrService:
 
         assert query == "Example Show {tvdbid:5678} {season:8} {year:2024}"
 
+    def test_build_tv_query_handles_broad_pack_searches(self) -> None:
+        """TV queries should support broad searches without season or episode tokens."""
+        query = ProwlarrService._build_tv_query("Example Show", 5678, year=2024)
+
+        assert query == "Example Show {tvdbid:5678} {year:2024}"
+
     def test_build_tv_title_query_handles_season_only_searches(self) -> None:
         """Fallback TV queries should still work when only a season is requested."""
         query = ProwlarrService._build_tv_title_query("Example Show", season=8, year=2024)
