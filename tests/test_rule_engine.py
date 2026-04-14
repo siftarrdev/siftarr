@@ -2,9 +2,9 @@
 
 from unittest.mock import MagicMock
 
-from app.siftarr.models.rule import Rule, RuleType
+from app.siftarr.models.rule import Rule, RuleType, SizeLimitMode
 from app.siftarr.services.prowlarr_service import ProwlarrRelease
-from app.siftarr.services.rule_engine import ReleaseEvaluation, RuleEngine, RuleMatch
+from app.siftarr.services.rule_engine import ReleaseEvaluation, RuleEngine, RuleMatch, SizeLimitRule
 
 
 class TestRuleEngine:
@@ -57,12 +57,14 @@ class TestRuleEngine:
         mock_rule.pattern = "size_limit"
         mock_rule.min_size_gb = 1
         mock_rule.max_size_gb = 10
+        mock_rule.size_limit_mode = SizeLimitMode.PER_SEASON
 
         engine = RuleEngine.from_db_rules(rules=[mock_rule])
 
         assert len(engine.size_limit_rules) == 1
-        assert engine.size_limit_rules[0][2] == 1 * 1024 * 1024 * 1024
-        assert engine.size_limit_rules[0][3] == 10 * 1024 * 1024 * 1024
+        assert engine.size_limit_rules[0].min_size_bytes == 1 * 1024 * 1024 * 1024
+        assert engine.size_limit_rules[0].max_size_bytes == 10 * 1024 * 1024 * 1024
+        assert engine.size_limit_rules[0].mode == SizeLimitMode.PER_SEASON
 
     def test_evaluate_no_rules(self):
         """Test evaluating with no rules."""
@@ -119,6 +121,156 @@ class TestRuleEngine:
         assert result.passed is False
         assert result.rejection_reason is not None
         assert "above maximum" in result.rejection_reason
+
+    def test_evaluate_size_limit_per_season_scales_multi_season_pack_minimum(self):
+        """Per-season mode should scale minimum by covered season count."""
+        engine = RuleEngine(
+            size_limit_rules=[
+                SizeLimitRule(
+                    rule_id=1,
+                    rule_name="TV Pack Size",
+                    min_size_bytes=5 * 1024 * 1024 * 1024,
+                    max_size_bytes=20 * 1024 * 1024 * 1024,
+                    mode=SizeLimitMode.PER_SEASON,
+                )
+            ]
+        )
+
+        release = ProwlarrRelease(
+            title="Show.S01-S03.1080p",
+            size=12 * 1024 * 1024 * 1024,
+            seeders=10,
+            leechers=2,
+            download_url="http://example.com",
+            indexer="test",
+        )
+
+        result = engine.evaluate(release)
+
+        assert result.passed is False
+        assert result.rejection_reason == (
+            f"Size {12 * 1024 * 1024 * 1024} below minimum {15 * 1024 * 1024 * 1024}"
+        )
+
+    def test_evaluate_size_limit_per_season_scales_multi_season_pack_maximum(self):
+        """Per-season mode should scale maximum by covered season count."""
+        engine = RuleEngine(
+            size_limit_rules=[
+                SizeLimitRule(
+                    rule_id=1,
+                    rule_name="TV Pack Size",
+                    min_size_bytes=2 * 1024 * 1024 * 1024,
+                    max_size_bytes=5 * 1024 * 1024 * 1024,
+                    mode=SizeLimitMode.PER_SEASON,
+                )
+            ]
+        )
+
+        release = ProwlarrRelease(
+            title="Show.S01-S02.1080p",
+            size=11 * 1024 * 1024 * 1024,
+            seeders=10,
+            leechers=2,
+            download_url="http://example.com",
+            indexer="test",
+        )
+
+        result = engine.evaluate(release)
+
+        assert result.passed is False
+        assert result.rejection_reason == (
+            f"Size {11 * 1024 * 1024 * 1024} above maximum {10 * 1024 * 1024 * 1024}"
+        )
+
+    def test_evaluate_size_limit_per_season_preserves_single_season_pack_behavior(self):
+        """Single-season packs should keep total-size behavior in per-season mode."""
+        engine = RuleEngine(
+            size_limit_rules=[
+                SizeLimitRule(
+                    rule_id=1,
+                    rule_name="TV Pack Size",
+                    min_size_bytes=5 * 1024 * 1024 * 1024,
+                    max_size_bytes=None,
+                    mode=SizeLimitMode.PER_SEASON,
+                )
+            ]
+        )
+
+        release = ProwlarrRelease(
+            title="Show.S01.1080p",
+            size=4 * 1024 * 1024 * 1024,
+            seeders=10,
+            leechers=2,
+            download_url="http://example.com",
+            indexer="test",
+        )
+
+        result = engine.evaluate(release)
+
+        assert result.passed is False
+        assert result.rejection_reason == (
+            f"Size {4 * 1024 * 1024 * 1024} below minimum {5 * 1024 * 1024 * 1024}"
+        )
+
+    def test_evaluate_size_limit_per_season_preserves_episode_behavior(self):
+        """Non-pack episode releases should keep total-size behavior in per-season mode."""
+        engine = RuleEngine(
+            size_limit_rules=[
+                SizeLimitRule(
+                    rule_id=1,
+                    rule_name="TV Pack Size",
+                    min_size_bytes=2 * 1024 * 1024 * 1024,
+                    max_size_bytes=None,
+                    mode=SizeLimitMode.PER_SEASON,
+                )
+            ]
+        )
+
+        release = ProwlarrRelease(
+            title="Show.S01E01.1080p",
+            size=1 * 1024 * 1024 * 1024,
+            seeders=10,
+            leechers=2,
+            download_url="http://example.com",
+            indexer="test",
+        )
+
+        result = engine.evaluate(release)
+
+        assert result.passed is False
+        assert result.rejection_reason == (
+            f"Size {1 * 1024 * 1024 * 1024} below minimum {2 * 1024 * 1024 * 1024}"
+        )
+
+    def test_evaluate_size_limit_per_season_preserves_movie_behavior(self):
+        """Movies should keep total-size behavior in per-season mode."""
+        engine = RuleEngine(
+            size_limit_rules=[
+                SizeLimitRule(
+                    rule_id=1,
+                    rule_name="TV Pack Size",
+                    min_size_bytes=5 * 1024 * 1024 * 1024,
+                    max_size_bytes=None,
+                    mode=SizeLimitMode.PER_SEASON,
+                )
+            ]
+        )
+
+        release = ProwlarrRelease(
+            title="Movie.2024.1080p",
+            size=4 * 1024 * 1024 * 1024,
+            seeders=10,
+            leechers=2,
+            download_url="http://example.com",
+            indexer="test",
+        )
+
+        result = engine.evaluate(release)
+
+        assert result.passed is False
+        assert result.rejection_reason == (
+            f"Size {4 * 1024 * 1024 * 1024} below minimum {5 * 1024 * 1024 * 1024}"
+        )
 
     def test_evaluate_exclusion_rejection(self):
         """Test exclusion pattern rejection."""

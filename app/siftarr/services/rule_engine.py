@@ -2,7 +2,18 @@ import re
 from contextlib import suppress
 from dataclasses import dataclass
 
+from app.siftarr.models.rule import SizeLimitMode
 from app.siftarr.services.prowlarr_service import ProwlarrRelease
+from app.siftarr.services.release_parser import parse_release_coverage
+
+
+@dataclass
+class SizeLimitRule:
+    rule_id: int
+    rule_name: str
+    min_size_bytes: int | None
+    max_size_bytes: int | None
+    mode: SizeLimitMode = SizeLimitMode.TOTAL
 
 
 @dataclass
@@ -39,13 +50,16 @@ class RuleEngine:
 
     def __init__(
         self,
-        size_limit_rules: list[tuple[int, str, int | None, int | None]] | None = None,
+        size_limit_rules: list[tuple[int, str, int | None, int | None] | SizeLimitRule] | None = None,
         exclusion_patterns: list[tuple[int, str, str]] | None = None,  # (id, name, pattern)
         requirement_patterns: list[tuple[int, str, str]] | None = None,  # (id, name, pattern)
         scorer_patterns: list[tuple[int, str, str, int]]
         | None = None,  # (id, name, pattern, score)
     ):
-        self.size_limit_rules = size_limit_rules or []
+        self.size_limit_rules = [
+            rule if isinstance(rule, SizeLimitRule) else SizeLimitRule(*rule)
+            for rule in (size_limit_rules or [])
+        ]
         self.exclusion_patterns = exclusion_patterns or []
         self.requirement_patterns = requirement_patterns or []
         self.scorer_patterns = scorer_patterns or []
@@ -85,7 +99,7 @@ class RuleEngine:
         media_type: str | None = None,
     ) -> "RuleEngine":
         """Create RuleEngine from database rules."""
-        size_limit_rules = []
+        size_limit_rules: list[SizeLimitRule] = []
         exclusions = []
         requirements = []
         scorers = []
@@ -108,7 +122,15 @@ class RuleEngine:
                         if getattr(rule, "max_size_gb", None) is not None
                         else None
                     )
-                    size_limit_rules.append((rule.id, rule.name, min_bytes, max_bytes))
+                    size_limit_rules.append(
+                        SizeLimitRule(
+                            rule_id=rule.id,
+                            rule_name=rule.name,
+                            min_size_bytes=min_bytes,
+                            max_size_bytes=max_bytes,
+                            mode=getattr(rule, "size_limit_mode", SizeLimitMode.TOTAL),
+                        )
+                    )
                 elif rule.rule_type.value == "exclusion":
                     exclusions.append((rule.id, rule.name, pattern))
                 elif rule.rule_type.value == "requirement":
@@ -142,6 +164,26 @@ class RuleEngine:
                     return None
         return None
 
+    @staticmethod
+    def _get_size_limit_bounds(
+        rule: SizeLimitRule,
+        release: ProwlarrRelease,
+    ) -> tuple[int | None, int | None]:
+        min_size_bytes = rule.min_size_bytes
+        max_size_bytes = rule.max_size_bytes
+
+        if rule.mode != SizeLimitMode.PER_SEASON:
+            return min_size_bytes, max_size_bytes
+
+        coverage = parse_release_coverage(release.title)
+        season_count = len(coverage.season_numbers)
+        if coverage.episode_number is not None or season_count <= 1:
+            return min_size_bytes, max_size_bytes
+
+        scaled_min = min_size_bytes * season_count if min_size_bytes is not None else None
+        scaled_max = max_size_bytes * season_count if max_size_bytes is not None else None
+        return scaled_min, scaled_max
+
     def evaluate(self, release: ProwlarrRelease) -> ReleaseEvaluation:
         """
         Evaluate a single release against all rules.
@@ -155,14 +197,15 @@ class RuleEngine:
         rejection_reason: str | None = None
 
         # Check size limits
-        for rule_id, rule_name, min_size_bytes, max_size_bytes in self.size_limit_rules:
+        for rule in self.size_limit_rules:
+            min_size_bytes, max_size_bytes = self._get_size_limit_bounds(rule, release)
             if min_size_bytes is not None and release.size < min_size_bytes:
                 passed = False
                 rejection_reason = f"Size {release.size} below minimum {min_size_bytes}"
                 matches.append(
                     RuleMatch(
-                        rule_id=rule_id,
-                        rule_name=rule_name,
+                        rule_id=rule.rule_id,
+                        rule_name=rule.rule_name,
                         matched=False,
                     )
                 )
@@ -172,16 +215,16 @@ class RuleEngine:
                 rejection_reason = f"Size {release.size} above maximum {max_size_bytes}"
                 matches.append(
                     RuleMatch(
-                        rule_id=rule_id,
-                        rule_name=rule_name,
+                        rule_id=rule.rule_id,
+                        rule_name=rule.rule_name,
                         matched=False,
                     )
                 )
                 break
             matches.append(
                 RuleMatch(
-                    rule_id=rule_id,
-                    rule_name=rule_name,
+                    rule_id=rule.rule_id,
+                    rule_name=rule.rule_name,
                     matched=True,
                 )
             )

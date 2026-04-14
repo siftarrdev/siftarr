@@ -5,6 +5,7 @@
 {% block content %}
 {% set current_type = rule.rule_type.value if rule else default_type %}
 {% set is_size_limit = current_type == 'size_limit' %}
+{% set current_size_limit_mode = rule.size_limit_mode.value if rule and rule.size_limit_mode else 'total' %}
 <div class="max-w-2xl">
     <div class="mb-6">
         <a href="/rules" class="text-gray-500 hover:text-white text-sm inline-flex items-center gap-1 transition-colors">
@@ -69,6 +70,14 @@
                 <input type="number" name="max_size_gb" value="{{ rule.max_size_gb if rule and rule.max_size_gb is not none else '' }}" step="0.1" min="0" class="form-input" placeholder="e.g. 20">
                 <p class="mt-1.5 text-xs text-gray-500">Optional. Leave blank for no maximum.</p>
             </div>
+        </div>
+        <div>
+            <label class="form-label">Size Mode</label>
+            <select name="size_limit_mode" required class="form-select">
+                <option value="total" {% if current_size_limit_mode == 'total' %}selected{% endif %}>Total release size</option>
+                <option value="per_season" {% if current_size_limit_mode == 'per_season' %}selected{% endif %}>Per-season for TV season packs</option>
+            </select>
+            <p class="mt-1.5 text-xs text-gray-500">Per-season mode keeps normal behavior for movies and non-pack releases, but multiplies TV season-pack min and max by the number of covered seasons.</p>
         </div>
         {% else %}
         <div>

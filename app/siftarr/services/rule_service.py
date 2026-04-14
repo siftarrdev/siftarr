@@ -3,7 +3,7 @@ from typing import TypedDict
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.siftarr.models.rule import Rule, RuleType
+from app.siftarr.models.rule import Rule, RuleType, SizeLimitMode
 
 
 class RuleData(TypedDict):
@@ -128,6 +128,7 @@ class RuleService:
         score: int = 0,
         min_size_gb: float | None = None,
         max_size_gb: float | None = None,
+        size_limit_mode: SizeLimitMode = SizeLimitMode.TOTAL,
         priority: int = 0,
         is_enabled: bool = True,
         description: str | None = None,
@@ -141,6 +142,7 @@ class RuleService:
             score=score,
             min_size_gb=min_size_gb,
             max_size_gb=max_size_gb,
+            size_limit_mode=size_limit_mode,
             priority=priority,
             is_enabled=is_enabled,
             description=description,
@@ -159,6 +161,7 @@ class RuleService:
         score: int | None = None,
         min_size_gb: float | None = None,
         max_size_gb: float | None = None,
+        size_limit_mode: SizeLimitMode | None = None,
         priority: int | None = None,
         is_enabled: bool | None = None,
         description: str | None = None,
@@ -178,6 +181,8 @@ class RuleService:
             rule.score = score
         rule.min_size_gb = min_size_gb
         rule.max_size_gb = max_size_gb
+        if size_limit_mode is not None:
+            rule.size_limit_mode = size_limit_mode
         if priority is not None:
             rule.priority = priority
         if is_enabled is not None:
@@ -223,6 +228,9 @@ class RuleService:
             if not getattr(rule, "media_scope", None):
                 rule.media_scope = "both"
                 changed = True
+            if not getattr(rule, "size_limit_mode", None):
+                rule.size_limit_mode = SizeLimitMode.TOTAL
+                changed = True
 
         if changed:
             await self.db.commit()
@@ -260,6 +268,7 @@ class RuleService:
         media_scope: str,
         min_size_gb: float | None,
         max_size_gb: float | None,
+        size_limit_mode: SizeLimitMode = SizeLimitMode.TOTAL,
         is_enabled: bool = True,
     ) -> Rule:
         """Create or update a size limit rule for a media scope."""
@@ -269,6 +278,8 @@ class RuleService:
             description_bits.append(f"min {min_size_gb} GB")
         if max_size_gb is not None:
             description_bits.append(f"max {max_size_gb} GB")
+        if size_limit_mode == SizeLimitMode.PER_SEASON:
+            description_bits.append("per season for TV season packs")
         description = ", ".join(description_bits) if description_bits else "No limits configured"
 
         if rule:
@@ -276,6 +287,7 @@ class RuleService:
             rule.pattern = "size_limit"
             rule.min_size_gb = min_size_gb
             rule.max_size_gb = max_size_gb
+            rule.size_limit_mode = size_limit_mode
             rule.is_enabled = is_enabled
             rule.description = description
             await self.db.commit()
@@ -290,6 +302,7 @@ class RuleService:
             score=0,
             min_size_gb=min_size_gb,
             max_size_gb=max_size_gb,
+            size_limit_mode=size_limit_mode,
             is_enabled=is_enabled,
             description=description,
         )

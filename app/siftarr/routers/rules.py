@@ -9,7 +9,7 @@ from fastapi.templating import Jinja2Templates
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.siftarr.database import get_db
-from app.siftarr.models.rule import Rule, RuleType
+from app.siftarr.models.rule import Rule, RuleType, SizeLimitMode
 from app.siftarr.services.prowlarr_service import ProwlarrRelease
 from app.siftarr.services.rule_engine import RuleEngine
 from app.siftarr.services.rule_service import RuleService
@@ -23,6 +23,8 @@ def _validate_rule_input(
     pattern: str,
     min_size_gb: float | None,
     max_size_gb: float | None,
+    size_limit_mode: SizeLimitMode,
+    media_scope: str,
 ) -> None:
     """Validate rule input based on rule type."""
     if rule_type == RuleType.SIZE_LIMIT:
@@ -39,6 +41,11 @@ def _validate_rule_input(
             raise HTTPException(
                 status_code=400,
                 detail="Minimum size cannot be greater than maximum size.",
+            )
+        if size_limit_mode == SizeLimitMode.PER_SEASON and media_scope != "tv":
+            raise HTTPException(
+                status_code=400,
+                detail="Per-season size mode is only supported for TV rules.",
             )
         return
 
@@ -89,6 +96,7 @@ async def new_rule_form(
             "rule": None,
             "action": "/rules",
             "default_type": rule_type,
+            "size_limit_modes": SizeLimitMode,
         },
     )
 
@@ -103,12 +111,21 @@ async def create_rule(
     score: int = Form(0),
     min_size_gb: float | None = Form(None),
     max_size_gb: float | None = Form(None),
+    size_limit_mode: str = Form(SizeLimitMode.TOTAL.value),
     description: str | None = Form(None),
     db: AsyncSession = Depends(get_db),
 ) -> RedirectResponse:
     """Create a new rule."""
     parsed_rule_type = RuleType(rule_type)
-    _validate_rule_input(parsed_rule_type, pattern, min_size_gb, max_size_gb)
+    parsed_size_limit_mode = SizeLimitMode(size_limit_mode)
+    _validate_rule_input(
+        parsed_rule_type,
+        pattern,
+        min_size_gb,
+        max_size_gb,
+        parsed_size_limit_mode,
+        media_scope,
+    )
 
     rule_service = RuleService(db)
     await rule_service.create_rule(
@@ -119,6 +136,7 @@ async def create_rule(
         score=score,
         min_size_gb=min_size_gb,
         max_size_gb=max_size_gb,
+        size_limit_mode=parsed_size_limit_mode,
         description=description,
     )
 
@@ -145,6 +163,7 @@ async def edit_rule_form(
             "request": request,
             "rule": rule,
             "action": f"/rules/{rule_id}",
+            "size_limit_modes": SizeLimitMode,
         },
     )
 
@@ -159,6 +178,7 @@ async def update_rule(
     score: int = Form(0),
     min_size_gb: float | None = Form(None),
     max_size_gb: float | None = Form(None),
+    size_limit_mode: str = Form(SizeLimitMode.TOTAL.value),
     description: str | None = Form(None),
     db: AsyncSession = Depends(get_db),
 ) -> RedirectResponse:
@@ -168,7 +188,15 @@ async def update_rule(
     if not existing_rule:
         raise HTTPException(status_code=404, detail="Rule not found")
 
-    _validate_rule_input(existing_rule.rule_type, pattern, min_size_gb, max_size_gb)
+    parsed_size_limit_mode = SizeLimitMode(size_limit_mode)
+    _validate_rule_input(
+        existing_rule.rule_type,
+        pattern,
+        min_size_gb,
+        max_size_gb,
+        parsed_size_limit_mode,
+        media_scope,
+    )
 
     await rule_service.update_rule(
         rule_id=rule_id,
@@ -178,6 +206,7 @@ async def update_rule(
         score=score,
         min_size_gb=min_size_gb,
         max_size_gb=max_size_gb,
+        size_limit_mode=parsed_size_limit_mode,
         description=description,
     )
 

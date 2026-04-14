@@ -4,7 +4,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from app.siftarr.models.rule import Rule, RuleType
+from app.siftarr.models.rule import Rule, RuleType, SizeLimitMode
 from app.siftarr.services.rule_service import DEFAULT_RULES, RuleService
 
 
@@ -117,6 +117,7 @@ class TestRuleService:
             score=0,
             min_size_gb=None,
             max_size_gb=None,
+            size_limit_mode=SizeLimitMode.TOTAL,
             priority=1,
             is_enabled=True,
             description="Test description",
@@ -173,6 +174,40 @@ class TestRuleService:
         assert mock_rule.name == "Original"
         assert mock_rule.pattern == "OriginalPattern"
         assert mock_rule.score == 50
+
+    @pytest.mark.asyncio
+    async def test_update_rule_backfills_missing_size_limit_mode(self, mock_db, service):
+        """Legacy rules without mode should be backfilled to total."""
+        legacy_rule = MagicMock(spec=Rule)
+        legacy_rule.media_scope = None
+        legacy_rule.size_limit_mode = None
+
+        with patch.object(service, "get_all_rules", return_value=[legacy_rule]):
+            result = await service.ensure_default_rules()
+
+        assert result == [legacy_rule]
+        assert legacy_rule.media_scope == "both"
+        assert legacy_rule.size_limit_mode == SizeLimitMode.TOTAL
+        mock_db.commit.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_upsert_size_limit_rule_updates_mode_and_description(self, mock_db, service):
+        """Upsert should persist size-limit mode on existing rules."""
+        existing_rule = MagicMock(spec=Rule)
+
+        with patch.object(service, "get_size_limit_rule_by_scope", return_value=existing_rule):
+            result = await service.upsert_size_limit_rule(
+                media_scope="tv",
+                min_size_gb=2.5,
+                max_size_gb=8.0,
+                size_limit_mode=SizeLimitMode.PER_SEASON,
+            )
+
+        assert result == existing_rule
+        assert existing_rule.size_limit_mode == SizeLimitMode.PER_SEASON
+        assert existing_rule.description == "min 2.5 GB, max 8.0 GB, per season for TV season packs"
+        mock_db.commit.assert_called_once()
+        mock_db.refresh.assert_called_once_with(existing_rule)
 
     @pytest.mark.asyncio
     async def test_delete_rule(self, mock_db, service):

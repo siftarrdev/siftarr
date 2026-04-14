@@ -130,6 +130,7 @@
                             {% if not rule.is_enabled %}<span class="badge badge-gray">Disabled</span>{% endif %}
                         </div>
                         <div class="text-cyan-400 text-sm mt-1.5 tabular-nums">{% if rule.min_size_gb is not none %}Min {{ rule.min_size_gb }} GB{% else %}No min{% endif %} &middot; {% if rule.max_size_gb is not none %}Max {{ rule.max_size_gb }} GB{% else %}No max{% endif %}</div>
+                        <div class="text-xs text-gray-500 mt-1">{% if rule.size_limit_mode.value == 'per_season' %}Per-season TV pack scaling{% else %}Total size mode{% endif %}</div>
                         {% if rule.description %}<p class="text-xs text-gray-500 mt-1">{{ rule.description }}</p>{% endif %}
                     </div>
                     <div class="flex items-center gap-2.5 ml-4 shrink-0">
