@@ -312,6 +312,7 @@ class TVDecisionService:
                     ):
                         pack_evaluations.append(evaluation)
                     elif task_type == "episode":
+                        assert season is not None
                         assert episode is not None
                         episode_evaluations.append((season, episode, evaluation))
 

@@ -27,7 +27,9 @@ def upgrade() -> None:
 
     release_columns = [column["name"] for column in inspector.get_columns("releases")]
     if "season_coverage" not in release_columns:
-        op.add_column("releases", sa.Column("season_coverage", sa.String(length=100), nullable=True))
+        op.add_column(
+            "releases", sa.Column("season_coverage", sa.String(length=100), nullable=True)
+        )
 
 
 def downgrade() -> None:

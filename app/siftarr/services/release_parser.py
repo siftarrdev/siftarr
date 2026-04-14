@@ -48,13 +48,13 @@ def parse_stored_release_coverage(
         )
 
     if stored_value == "*":
-        return ParsedReleaseCoverage(season_numbers=(), episode_number=None, is_complete_series=True)
+        return ParsedReleaseCoverage(
+            season_numbers=(), episode_number=None, is_complete_series=True
+        )
 
     if stored_value:
         season_numbers = tuple(
-            int(token)
-            for token in stored_value.split(",")
-            if token.strip().isdigit()
+            int(token) for token in stored_value.split(",") if token.strip().isdigit()
         )
         if season_numbers:
             return ParsedReleaseCoverage(season_numbers=season_numbers, episode_number=None)
@@ -83,7 +83,9 @@ _SEASON_PACK_PATTERNS = [
 ]
 
 _COMPLETE_SERIES_PATTERNS = [
-    re.compile(r"(?:^|[.()\s_]+)(?:The[.()\s_]+)?Complete[.()\s_]+Series(?:$|[.()\s_]+)", re.IGNORECASE),
+    re.compile(
+        r"(?:^|[.()\s_]+)(?:The[.()\s_]+)?Complete[.()\s_]+Series(?:$|[.()\s_]+)", re.IGNORECASE
+    ),
     re.compile(r"(?:^|[.()\s_]+)All[.()\s_]+Seasons?(?:$|[.()\s_]+)", re.IGNORECASE),
     re.compile(r"(?:^|[.()\s_]+)Complete[.()\s_]+Seasons?(?:$|[.()\s_]+)", re.IGNORECASE),
 ]

@@ -1,14 +1,15 @@
 """Tests for dashboard router helpers and endpoints."""
 
 import json
+from typing import cast
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from fastapi import HTTPException
 
-from app.siftarr.routers import dashboard
 from app.siftarr.models.release import Release
 from app.siftarr.models.request import MediaType, RequestStatus
+from app.siftarr.routers import dashboard
 from app.siftarr.services.prowlarr_service import ProwlarrRelease, ProwlarrSearchResult
 
 
@@ -174,7 +175,11 @@ class TestDashboardRouter:
         request_result = MagicMock()
         request_result.scalar_one_or_none.return_value = request_record
         seasons_result = MagicMock()
-        seasons_result.scalars.return_value.all.return_value = [season_one, season_two, season_three]
+        seasons_result.scalars.return_value.all.return_value = [
+            season_one,
+            season_two,
+            season_three,
+        ]
         rules_result = MagicMock()
         rules_result.scalars.return_value.all.return_value = []
         mock_db.execute.side_effect = [request_result, seasons_result, rules_result]
@@ -210,7 +215,9 @@ class TestDashboardRouter:
             query_time_ms=5,
         )
         monkeypatch.setattr(dashboard, "ProwlarrService", lambda settings: prowlarr_service)
-        monkeypatch.setattr(dashboard, "get_effective_settings", AsyncMock(return_value=MagicMock()))
+        monkeypatch.setattr(
+            dashboard, "get_effective_settings", AsyncMock(return_value=MagicMock())
+        )
 
         fake_evaluation = MagicMock(total_score=12.5, passed=True)
         fake_engine = MagicMock(evaluate=MagicMock(return_value=fake_evaluation))
@@ -222,7 +229,7 @@ class TestDashboardRouter:
 
         response = await dashboard.search_all_season_packs(request_id=12, db=mock_db)
 
-        body = json.loads(response.body)
+        body = json.loads(cast(bytes, response.body))
         assert body["known_total_seasons"] == 3
         assert [release["title"] for release in body["releases"]] == [
             "Foundation.S01-S03.2160p.WEB-DL",
@@ -252,7 +259,9 @@ class TestDashboardRouter:
         assert exc_info.value.detail == "Request is not a TV show"
 
     @pytest.mark.asyncio
-    async def test_request_details_reuses_persisted_multi_season_coverage(self, mock_db, monkeypatch):
+    async def test_request_details_reuses_persisted_multi_season_coverage(
+        self, mock_db, monkeypatch
+    ):
         """Stored multi-season coverage should serialize and group by each covered season."""
         request_record = MagicMock()
         request_record.id = 21
@@ -284,8 +293,12 @@ class TestDashboardRouter:
             is_downloaded=False,
         )
 
-        season_one = MagicMock(id=101, season_number=1, status=RequestStatus.PENDING, synced_at=None)
-        season_two = MagicMock(id=102, season_number=2, status=RequestStatus.PENDING, synced_at=None)
+        season_one = MagicMock(
+            id=101, season_number=1, status=RequestStatus.PENDING, synced_at=None
+        )
+        season_two = MagicMock(
+            id=102, season_number=2, status=RequestStatus.PENDING, synced_at=None
+        )
 
         request_result = MagicMock()
         request_result.scalar_one_or_none.return_value = request_record
@@ -308,7 +321,9 @@ class TestDashboardRouter:
             episodes_two_result,
         ]
 
-        monkeypatch.setattr(dashboard, "get_effective_settings", AsyncMock(return_value=MagicMock()))
+        monkeypatch.setattr(
+            dashboard, "get_effective_settings", AsyncMock(return_value=MagicMock())
+        )
 
         class FakeOverseerrService:
             def __init__(self, settings):
@@ -347,7 +362,7 @@ class TestDashboardRouter:
             )
             response = await dashboard.request_details(request_id=21, db=mock_db)
 
-        body = json.loads(response.body)
+        body = json.loads(cast(bytes, response.body))
         assert body["releases"][0]["covered_seasons"] == [1, 2]
         assert body["releases"][0]["covered_season_count"] == 2
         assert body["releases"][0]["covers_all_known_seasons"] is True

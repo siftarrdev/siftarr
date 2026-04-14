@@ -2,6 +2,7 @@
 
 import asyncio
 import logging
+from typing import Any
 
 import httpx
 from fastapi import APIRouter, Depends, Form, HTTPException, Query
@@ -22,15 +23,16 @@ from app.siftarr.services.media_helpers import extract_media_title_and_year
 from app.siftarr.services.overseerr_service import OverseerrService
 from app.siftarr.services.pending_queue_service import PendingQueueService
 from app.siftarr.services.plex_service import PlexService
-from app.siftarr.services.prowlarr_service import ProwlarrService
+from app.siftarr.services.prowlarr_service import ProwlarrRelease, ProwlarrService
 from app.siftarr.services.qbittorrent_service import QbittorrentService
 from app.siftarr.services.release_parser import (
+    ParsedReleaseCoverage,
     parse_release_coverage,
     parse_season_episode,
     parse_stored_release_coverage,
 )
 from app.siftarr.services.release_selection_service import build_prowlarr_release, use_releases
-from app.siftarr.services.rule_engine import RuleEngine
+from app.siftarr.services.rule_engine import ReleaseEvaluation, RuleEngine
 from app.siftarr.services.runtime_settings import get_effective_settings
 
 logger = logging.getLogger(__name__)
@@ -116,10 +118,10 @@ def _format_release_size(size_bytes: int) -> str:
 
 
 def _serialize_evaluated_release(
-    release: object,
-    evaluation: object,
+    release: ProwlarrRelease | Any,
+    evaluation: ReleaseEvaluation | Any,
     *,
-    coverage: object | None = None,
+    coverage: ParsedReleaseCoverage | None = None,
     known_total_seasons: int | None = None,
 ) -> dict[str, object]:
     """Serialize a release plus rule evaluation for dashboard responses."""
@@ -150,10 +152,7 @@ def _serialize_evaluated_release(
         payload["is_complete_series"] = coverage.is_complete_series
         payload["covers_all_known_seasons"] = bool(
             known_total_seasons
-            and (
-                coverage.is_complete_series
-                or len(covered_seasons) >= known_total_seasons
-            )
+            and (coverage.is_complete_series or len(covered_seasons) >= known_total_seasons)
         )
 
     return payload
@@ -633,8 +632,7 @@ async def request_details(
             release["covers_all_known_seasons"] = bool(
                 known_total_seasons
                 and (
-                    release.get("is_complete_series")
-                    or len(covered_seasons) >= known_total_seasons
+                    release.get("is_complete_series") or len(covered_seasons) >= known_total_seasons
                 )
             )
 
@@ -643,7 +641,9 @@ async def request_details(
         for r in matched:
             sn = r.get("season_number")
             en = r.get("episode_number")
-            covered_seasons = [season for season in r.get("covered_seasons", []) if isinstance(season, int)]
+            covered_seasons = [
+                season for season in r.get("covered_seasons", []) if isinstance(season, int)
+            ]
             if r.get("covers_all_known_seasons"):
                 covered_seasons = known_season_numbers
             if en is not None and sn is not None:
@@ -836,9 +836,7 @@ async def search_all_season_packs(
                 )
             )
 
-        return JSONResponse(
-            {"releases": releases, "known_total_seasons": known_total_seasons}
-        )
+        return JSONResponse({"releases": releases, "known_total_seasons": known_total_seasons})
     finally:
         pass
 

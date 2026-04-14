@@ -1,4 +1,5 @@
 import re
+from collections.abc import Sequence
 from contextlib import suppress
 from dataclasses import dataclass
 
@@ -50,7 +51,12 @@ class RuleEngine:
 
     def __init__(
         self,
-        size_limit_rules: list[tuple[int, str, int | None, int | None] | SizeLimitRule] | None = None,
+        size_limit_rules: Sequence[
+            tuple[int, str, int | None, int | None]
+            | tuple[int, str, int | None, int | None, SizeLimitMode]
+            | SizeLimitRule
+        ]
+        | None = None,
         exclusion_patterns: list[tuple[int, str, str]] | None = None,  # (id, name, pattern)
         requirement_patterns: list[tuple[int, str, str]] | None = None,  # (id, name, pattern)
         scorer_patterns: list[tuple[int, str, str, int]]
