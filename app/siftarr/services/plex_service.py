@@ -129,8 +129,9 @@ class PlexService:
                         }
                 logger.info("PlexService: get_show_by_tmdb(%s) found no show match", tmdb_id)
             else:
-                logger.warning(
-                    "PlexService: get_show_by_tmdb(%s) returned status %d",
+                # 400 = not found (expected when show doesn't exist in Plex yet)
+                logger.debug(
+                    "PlexService: get_show_by_tmdb(%s) returned status %d (not in Plex)",
                     tmdb_id,
                     response.status_code,
                 )
@@ -182,8 +183,9 @@ class PlexService:
                         }
                 logger.info("PlexService: get_show_by_tvdb(%s) found no show match", tvdb_id)
             else:
-                logger.warning(
-                    "PlexService: get_show_by_tvdb(%s) returned status %d",
+                # 400 = not found (expected when show doesn't exist in Plex yet)
+                logger.debug(
+                    "PlexService: get_show_by_tvdb(%s) returned status %d (not in Plex)",
                     tvdb_id,
                     response.status_code,
                 )

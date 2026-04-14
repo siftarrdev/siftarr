@@ -238,9 +238,10 @@ class EpisodeSyncService:
                 request.title,
             )
         else:
-            logger.warning(
+            # Not a warning - show simply doesn't exist in Plex yet (expected for new requests)
+            logger.debug(
                 "EpisodeSyncService: could not resolve Plex rating key for request %s "
-                "(tmdb_id=%s, tvdb_id=%s, title=%s)",
+                "(tmdb_id=%s, tvdb_id=%s, title=%s) - show not in Plex yet",
                 request.id,
                 request.tmdb_id,
                 request.tvdb_id,
@@ -405,9 +406,10 @@ class EpisodeSyncService:
         if newest_synced is None:
             return await self.sync_episodes(request_id)
 
-        stale_threshold = datetime.now(UTC).replace(tzinfo=None) - timedelta(
-            hours=self._stale_hours
-        )
+        stale_threshold = datetime.now(UTC) - timedelta(hours=self._stale_hours)
+        # Ensure newest_synced is timezone-aware for comparison
+        if newest_synced.tzinfo is None:
+            newest_synced = newest_synced.replace(tzinfo=UTC)
         if newest_synced < stale_threshold:
             logger.info("EpisodeSyncService: stale sync for request %s, refreshing", request_id)
             return await self.sync_episodes(request_id)

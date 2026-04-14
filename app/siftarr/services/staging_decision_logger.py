@@ -59,3 +59,34 @@ def log_staging_decision(
     with STAGING_DECISION_LOG_PATH.open("a", encoding="utf-8") as file_handle:
         file_handle.write(json.dumps(payload, sort_keys=True))
         file_handle.write("\n")
+
+
+def log_replacement_decision(
+    *,
+    request: Request | None,
+    new_torrent: StagedTorrent,
+    replaced_torrent: StagedTorrent,
+    reason: str | None = None,
+) -> None:
+    """Append a replacement decision when an approved torrent is replaced."""
+    STAGING_DECISION_LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "logged_at": datetime.now(UTC).isoformat(),
+        "event_type": "replacement",
+        "request": {
+            "id": request.id,
+            "title": request.title,
+            "media_type": request.media_type.value,
+            "tmdb_id": request.tmdb_id,
+            "tvdb_id": request.tvdb_id,
+            "year": request.year,
+        }
+        if request is not None
+        else None,
+        "new_torrent": _build_torrent_payload(new_torrent),
+        "replaced_torrent": _build_torrent_payload(replaced_torrent),
+        "reason": reason,
+    }
+    with STAGING_DECISION_LOG_PATH.open("a", encoding="utf-8") as file_handle:
+        file_handle.write(json.dumps(payload, sort_keys=True))
+        file_handle.write("\n")
