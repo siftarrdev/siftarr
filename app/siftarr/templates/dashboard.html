@@ -675,8 +675,14 @@ function renderReleaseCard(release, requestId) {
     const availability = `Seeders ${release.seeders ?? 0} \u00B7 Leechers ${release.leechers ?? 0}`;
     const downloaded = release.downloaded ? '<span class="badge badge-blue">Already sent</span>' : '';
     const currentTab = new URLSearchParams(window.location.search).get('tab') || 'active';
-    const formAction = `/requests/${requestId}/releases/${release.id}/use`;
     const useLabel = release.passed ? 'Use Release' : 'Force Use';
+    const formAction = release.id ? `/requests/${requestId}/releases/${release.id}/use` : null;
+    const actionHtml = formAction
+        ? `<form action="${formAction}" method="post" class="shrink-0" onsubmit="event.stopPropagation()">
+                <input type="hidden" name="redirect_to" value="/?tab=${currentTab}">
+                <button type="submit" class="btn-primary btn-sm">${useLabel}</button>
+           </form>`
+        : '';
 
     return `
         <div class="rounded-xl border border-gray-700/60 bg-surface-800 p-2">
@@ -690,13 +696,30 @@ function renderReleaseCard(release, requestId) {
                     <div class="mt-1 text-xs text-gray-400">Score <span class="font-semibold text-emerald-400">${release.score}</span> &middot; ${escapeHtml(secondaryMeta || 'No release metadata')} &middot; ${escapeHtml(availability)}</div>
                     ${renderRuleMatches(release.matches)}
                 </div>
-                <form action="${formAction}" method="post" class="shrink-0" onsubmit="event.stopPropagation()">
-                    <input type="hidden" name="redirect_to" value="/?tab=${currentTab}">
-                    <button type="submit" class="btn-primary btn-sm">${useLabel}</button>
-                </form>
+                ${actionHtml}
             </div>
         </div>
     `;
+}
+
+function renderCoverageBadge(release) {
+    const coveredSeasons = Array.isArray(release.covered_seasons) ? release.covered_seasons : [];
+    const seasonCount = release.known_total_seasons;
+    const coverageText = coveredSeasons.length
+        ? `S${coveredSeasons.join(', S')}`
+        : 'Season coverage unknown';
+    const countText = seasonCount
+        ? `${release.covered_season_count || coveredSeasons.length}/${seasonCount} seasons`
+        : `${release.covered_season_count || coveredSeasons.length} seasons`;
+    const seriesBadge = release.is_complete_series || release.covers_all_known_seasons
+        ? '<span class="badge badge-green">Complete series</span>'
+        : '';
+
+    return '<div class="mt-1 flex flex-wrap items-center gap-2 text-xs text-gray-400">' +
+        '<span class="badge badge-blue">' + escapeHtml(countText) + '</span>' +
+        '<span>' + escapeHtml(coverageText) + '</span>' +
+        seriesBadge +
+    '</div>';
 }
 
 function episodeStatusBadge(status) {
@@ -722,7 +745,18 @@ function renderSeasonAccordion(data) {
         return '<div class="text-gray-500 text-sm">No season information available.</div>';
     }
 
-    return '<div class="space-y-3">' + tvInfo.seasons.map(function(season) {
+    const searchAllSection = '<div class="rounded-xl border border-gray-700/60 bg-surface-800 p-3 space-y-3">' +
+        '<div class="flex items-center justify-between gap-3">' +
+            '<div>' +
+                '<div class="text-white font-medium">Search All Season Packs</div>' +
+                '<div class="text-xs text-gray-500">Broad search for multi-season and complete-series packs without downloading.</div>' +
+            '</div>' +
+            '<button onclick="searchAllSeasonPacks(' + requestId + '); event.stopPropagation();" class="btn-primary btn-sm">Search All</button>' +
+        '</div>' +
+        '<div id="season-packs-all-' + requestId + '" class="space-y-1"><div class="text-gray-500 text-sm">Run Search All to inspect broad season-pack coverage.</div></div>' +
+    '</div>';
+
+    return '<div class="space-y-3">' + searchAllSection + tvInfo.seasons.map(function(season) {
         var seasonKey = String(season.season_number);
         var seasonBadgeClass = episodeStatusBadge(season.status);
         var seasonReleases = (tvInfo.releases_by_season && tvInfo.releases_by_season[seasonKey]) || [];
@@ -786,6 +820,52 @@ async function searchSeasonPacks(requestId, seasonNumber) {
             container.innerHTML = data.releases.map(function(r) { return renderReleaseCard(r, requestId); }).join('');
         } else {
             container.innerHTML = '<div class="text-gray-500 text-sm py-2">No season pack results found.</div>';
+        }
+    } catch (err) {
+        container.innerHTML = '<div class="text-red-400 text-sm py-2">Error: ' + escapeHtml(err.message) + '</div>';
+    }
+}
+
+function renderSearchAllResults(releases) {
+    return releases.map(function(release) {
+        return '<div class="rounded-xl border border-gray-700/60 bg-surface-800 p-2">' +
+            '<div class="flex flex-col gap-2 lg:flex-row lg:items-start lg:justify-between">' +
+                '<div class="min-w-0">' +
+                    '<div class="flex flex-wrap items-center gap-2">' +
+                        '<div class="font-medium text-white text-sm break-words">' + escapeHtml(release.title) + '</div>' +
+                        '<span class="badge ' + (release.passed ? 'badge-green' : 'badge-yellow') + '">' + (release.passed ? 'Passed' : 'Rejected') + '</span>' +
+                    '</div>' +
+                    '<div class="mt-1 text-xs text-gray-400">Score <span class="font-semibold text-emerald-400">' + escapeHtml(release.score) + '</span> &middot; ' + escapeHtml([release.size, release.indexer, release.resolution, release.codec, release.release_group].filter(Boolean).join(' \u00B7 ') || 'No release metadata') + ' &middot; ' + escapeHtml(`Seeders ${release.seeders ?? 0} \u00B7 Leechers ${release.leechers ?? 0}`) + '</div>' +
+                    renderCoverageBadge(release) +
+                '</div>' +
+            '</div>' +
+        '</div>';
+    }).join('');
+}
+
+async function searchAllSeasonPacks(requestId = null) {
+    var targetRequestId = requestId || currentRequestId;
+    if (!targetRequestId) return;
+
+    var container = document.getElementById('season-packs-all-' + targetRequestId);
+    if (!container) {
+        container = document.getElementById('tv-search-all-results');
+    }
+    if (!container) return;
+
+    container.innerHTML = '<div class="flex items-center gap-2 text-gray-400 text-sm py-2">' +
+        '<svg class="animate-spin h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>' +
+        ' Searching all season packs...</div>';
+
+    try {
+        var response = await fetch('/requests/' + targetRequestId + '/seasons/search-all', { method: 'POST' });
+        if (!response.ok) throw new Error('Server error: ' + response.status);
+        var data = await response.json();
+
+        if (data.releases && data.releases.length > 0) {
+            container.innerHTML = renderSearchAllResults(data.releases);
+        } else {
+            container.innerHTML = '<div class="text-gray-500 text-sm py-2">No multi-season or complete-series results found.</div>';
         }
     } catch (err) {
         container.innerHTML = '<div class="text-red-400 text-sm py-2">Error: ' + escapeHtml(err.message) + '</div>';

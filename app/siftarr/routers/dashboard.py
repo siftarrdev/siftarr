@@ -24,7 +24,7 @@ from app.siftarr.services.pending_queue_service import PendingQueueService
 from app.siftarr.services.plex_service import PlexService
 from app.siftarr.services.prowlarr_service import ProwlarrService
 from app.siftarr.services.qbittorrent_service import QbittorrentService
-from app.siftarr.services.release_parser import parse_season_episode
+from app.siftarr.services.release_parser import parse_release_coverage, parse_season_episode
 from app.siftarr.services.release_selection_service import build_prowlarr_release, use_releases
 from app.siftarr.services.rule_engine import RuleEngine
 from app.siftarr.services.runtime_settings import get_effective_settings
@@ -109,6 +109,50 @@ def _format_release_size(size_bytes: int) -> str:
         return "Unknown"
     gib = size_bytes / 1024 / 1024 / 1024
     return f"{gib:.2f} GB"
+
+
+def _serialize_evaluated_release(
+    release: object,
+    evaluation: object,
+    *,
+    coverage: object | None = None,
+    known_total_seasons: int | None = None,
+) -> dict[str, object]:
+    """Serialize a release plus rule evaluation for dashboard responses."""
+    payload: dict[str, object] = {
+        "title": release.title,
+        "size": _format_release_size(release.size),
+        "seeders": release.seeders,
+        "leechers": release.leechers,
+        "indexer": release.indexer,
+        "resolution": release.resolution,
+        "codec": release.codec,
+        "release_group": release.release_group,
+        "score": evaluation.total_score,
+        "passed": evaluation.passed,
+        "download_url": release.download_url,
+        "magnet_url": release.magnet_url,
+    }
+
+    release_id = getattr(release, "id", None)
+    if release_id is not None:
+        payload["id"] = release_id
+
+    if coverage is not None:
+        covered_seasons = list(coverage.season_numbers)
+        payload["covered_seasons"] = covered_seasons
+        payload["covered_season_count"] = len(covered_seasons)
+        payload["known_total_seasons"] = known_total_seasons
+        payload["is_complete_series"] = coverage.is_complete_series
+        payload["covers_all_known_seasons"] = bool(
+            known_total_seasons
+            and (
+                coverage.is_complete_series
+                or len(covered_seasons) >= known_total_seasons
+            )
+        )
+
+    return payload
 
 
 def _choose_overseerr_display_status(request_status: str, media_status: str) -> str:
@@ -697,24 +741,76 @@ async def search_season_packs(
             if parsed.season_number is not None and parsed.season_number != season_number:
                 continue
             evaluation = engine.evaluate(release)
-            releases.append(
-                {
-                    "title": release.title,
-                    "size": _format_release_size(release.size),
-                    "seeders": release.seeders,
-                    "leechers": release.leechers,
-                    "indexer": release.indexer,
-                    "resolution": release.resolution,
-                    "codec": release.codec,
-                    "release_group": release.release_group,
-                    "score": evaluation.total_score,
-                    "passed": evaluation.passed,
-                    "download_url": release.download_url,
-                    "magnet_url": release.magnet_url,
-                }
-            )
+            releases.append(_serialize_evaluated_release(release, evaluation))
 
         return JSONResponse({"releases": releases})
+    finally:
+        pass
+
+
+@router.post("/requests/{request_id}/seasons/search-all")
+async def search_all_season_packs(
+    request_id: int,
+    db: AsyncSession = Depends(get_db),
+) -> JSONResponse:
+    """Search broadly for TV season packs without downloading anything."""
+    from app.siftarr.models.season import Season
+
+    result = await db.execute(select(RequestModel).where(RequestModel.id == request_id))
+    request = result.scalar_one_or_none()
+    if not request:
+        raise HTTPException(status_code=404, detail="Request not found")
+
+    if request.media_type != MediaType.TV:
+        raise HTTPException(status_code=400, detail="Request is not a TV show")
+
+    if not request.tvdb_id:
+        raise HTTPException(status_code=400, detail="No TVDB ID available")
+
+    seasons_result = await db.execute(
+        select(Season).where(Season.request_id == request_id).order_by(Season.season_number)
+    )
+    seasons = list(seasons_result.scalars().all())
+    known_total_seasons = len(seasons) or None
+
+    runtime_settings = await get_effective_settings(db)
+    prowlarr = ProwlarrService(settings=runtime_settings)
+
+    try:
+        search_result = await prowlarr.search_by_tvdbid(
+            tvdbid=request.tvdb_id,
+            title=request.title,
+            year=request.year,
+        )
+
+        if search_result.error:
+            return JSONResponse({"error": search_result.error, "releases": []})
+
+        rules_result = await db.execute(select(Rule))
+        rules = list(rules_result.scalars().all())
+        engine = RuleEngine.from_db_rules(rules=rules, media_type="tv")
+
+        releases = []
+        for release in search_result.releases:
+            coverage = parse_release_coverage(release.title)
+            if coverage.episode_number is not None:
+                continue
+            if not coverage.season_numbers and not coverage.is_complete_series:
+                continue
+
+            evaluation = engine.evaluate(release)
+            releases.append(
+                _serialize_evaluated_release(
+                    release,
+                    evaluation,
+                    coverage=coverage,
+                    known_total_seasons=known_total_seasons,
+                )
+            )
+
+        return JSONResponse(
+            {"releases": releases, "known_total_seasons": known_total_seasons}
+        )
     finally:
         pass
 
@@ -765,22 +861,7 @@ async def search_episode(
             if parsed.episode_number is not None and parsed.episode_number != episode_number:
                 continue
             evaluation = engine.evaluate(release)
-            releases.append(
-                {
-                    "title": release.title,
-                    "size": _format_release_size(release.size),
-                    "seeders": release.seeders,
-                    "leechers": release.leechers,
-                    "indexer": release.indexer,
-                    "resolution": release.resolution,
-                    "codec": release.codec,
-                    "release_group": release.release_group,
-                    "score": evaluation.total_score,
-                    "passed": evaluation.passed,
-                    "download_url": release.download_url,
-                    "magnet_url": release.magnet_url,
-                }
-            )
+            releases.append(_serialize_evaluated_release(release, evaluation))
 
         return JSONResponse({"releases": releases})
     finally:
