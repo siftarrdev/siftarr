@@ -383,3 +383,13 @@ class TestDashboardRouter:
         assert "Run Search All to inspect broad season-pack coverage." in template
         assert "function searchAllSeasonPacks(" in template
         assert "/requests/' + targetRequestId + '/seasons/search-all" in template
+
+    def test_dashboard_template_uses_collapsible_episode_results(self):
+        """Episode search results should live in their own collapsible sections."""
+        template_path = "/home/lucas/9999-personal/siftarr/app/siftarr/templates/dashboard.html"
+        with open(template_path, encoding="utf-8") as handle:
+            template = handle.read()
+
+        assert "episode-details-" in template
+        assert "<details id=\"' + episodeDetailsId + '\" class=\"group rounded-lg border" in template
+        assert "if (details) details.open = true;" in template

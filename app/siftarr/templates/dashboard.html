@@ -767,19 +767,25 @@ function renderSeasonAccordion(data) {
             var badgeClass = episodeStatusBadge(ep.status);
             var episodeReleases = (tvInfo.releases_by_episode && tvInfo.releases_by_episode[epKey]) || [];
             var episodeReleasesHtml = episodeReleases.map(function(r) { return renderReleaseCard(r, requestId); }).join('');
+            var episodeDetailsId = 'episode-details-' + requestId + '-' + season.season_number + '-' + ep.episode_number;
+            var episodeSearchId = 'episode-search-' + requestId + '-' + season.season_number + '-' + ep.episode_number;
+            var isOpen = episodeReleases.length > 0 ? ' open' : '';
 
-            return '<div class="flex items-center justify-between rounded-lg border border-gray-700/40 bg-surface-800/50 px-3 py-2">' +
-                '<div class="flex items-center gap-3 min-w-0 flex-1">' +
-                    '<span class="text-gray-500 text-xs font-mono shrink-0">E' + String(ep.episode_number).padStart(2, '0') + '</span>' +
-                    '<span class="text-white text-sm truncate">' + escapeHtml(ep.title || 'Untitled') + '</span>' +
-                    (ep.air_date ? '<span class="text-gray-600 text-xs shrink-0">' + escapeHtml(ep.air_date) + '</span>' : '') +
-                '</div>' +
-                '<div class="flex items-center gap-2 shrink-0">' +
-                    '<span class="badge ' + badgeClass + '">' + escapeHtml(ep.status || 'unknown') + '</span>' +
-                    '<button onclick="searchEpisode(' + requestId + ', ' + season.season_number + ', ' + ep.episode_number + ')" class="btn-ghost btn-sm">Search</button>' +
-                '</div>' +
-            '</div>' +
-            '<div id="episode-search-' + requestId + '-' + season.season_number + '-' + ep.episode_number + '" class="ml-4 mt-1 space-y-1">' + episodeReleasesHtml + '</div>';
+            return '<details id="' + episodeDetailsId + '" class="group rounded-lg border border-gray-700/40 bg-surface-800/50"' + isOpen + '>' +
+                '<summary class="flex items-center justify-between gap-3 cursor-pointer px-3 py-2 hover:bg-surface-850/60 transition-colors">' +
+                    '<div class="flex items-center gap-3 min-w-0 flex-1">' +
+                        '<svg class="accordion-chevron w-4 h-4 text-gray-500 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>' +
+                        '<span class="text-gray-500 text-xs font-mono shrink-0">E' + String(ep.episode_number).padStart(2, '0') + '</span>' +
+                        '<span class="text-white text-sm truncate">' + escapeHtml(ep.title || 'Untitled') + '</span>' +
+                        (ep.air_date ? '<span class="text-gray-600 text-xs shrink-0">' + escapeHtml(ep.air_date) + '</span>' : '') +
+                    '</div>' +
+                    '<div class="flex items-center gap-2 shrink-0">' +
+                        '<span class="badge ' + badgeClass + '">' + escapeHtml(ep.status || 'unknown') + '</span>' +
+                        '<button onclick="searchEpisode(' + requestId + ', ' + season.season_number + ', ' + ep.episode_number + '); event.stopPropagation();" class="btn-ghost btn-sm">Search</button>' +
+                    '</div>' +
+                '</summary>' +
+                '<div id="' + episodeSearchId + '" class="ml-7 mr-3 mb-3 space-y-1">' + episodeReleasesHtml + '</div>' +
+            '</details>';
         }).join('');
 
         var availableText = season.available_count + '/' + season.total_count + ' available';
@@ -873,8 +879,10 @@ async function searchAllSeasonPacks(requestId = null) {
 }
 
 async function searchEpisode(requestId, seasonNumber, episodeNumber) {
+    var details = document.getElementById('episode-details-' + requestId + '-' + seasonNumber + '-' + episodeNumber);
     var container = document.getElementById('episode-search-' + requestId + '-' + seasonNumber + '-' + episodeNumber);
     if (!container) return;
+    if (details) details.open = true;
     container.innerHTML = '<div class="flex items-center gap-2 text-gray-400 text-sm py-2">' +
         '<svg class="animate-spin h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>' +
         ' Searching episode...</div>';
