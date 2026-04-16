@@ -179,7 +179,7 @@
         <div class="card-header">
             <h2 class="section-title">Manual Actions</h2>
         </div>
-        <div class="card-body grid grid-cols-1 lg:grid-cols-3 gap-4">
+        <div class="card-body grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-4 gap-4">
             <form action="/settings/retry-pending" method="post" class="rounded-xl bg-surface-850 border border-gray-700/40 p-5 flex flex-col gap-2">
                 <div class="text-sm font-semibold text-white">Retry Pending</div>
                 <div class="text-xs text-gray-500">{{ pending_count }} items ready for retry</div>
@@ -196,6 +196,12 @@
                 <div class="text-sm font-semibold text-white">Reseed Default Rules</div>
                 <div class="text-xs text-gray-500">Restore bundled defaults without deleting custom rules</div>
                 <button type="submit" class="btn-warning btn-sm w-fit mt-1">Reseed</button>
+            </form>
+
+            <form action="/settings/clear-cache" method="post" class="rounded-xl bg-surface-850 border border-gray-700/40 p-5 flex flex-col gap-2">
+                <div class="text-sm font-semibold text-white">Clear App Search Cache</div>
+                <div class="text-xs text-gray-500">Clears stored releases from the releases table and Siftarr's app-side Overseerr status cache. Requests stay intact, but external/manual Prowlarr caching cannot be guaranteed if it lives outside Siftarr.</div>
+                <button type="submit" class="btn-danger btn-sm w-fit mt-1">Clear Cache</button>
             </form>
         </div>
     </div>

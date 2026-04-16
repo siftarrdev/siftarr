@@ -12,6 +12,13 @@ _STATUS_CACHE: dict[int, tuple[float, dict]] = {}
 _STATUS_CACHE_TTL = 60.0
 
 
+def clear_status_cache() -> int:
+    """Clear the app-side Overseerr request-status cache."""
+    cleared_entries = len(_STATUS_CACHE)
+    _STATUS_CACHE.clear()
+    return cleared_entries
+
+
 class OverseerrService:
     """Service for fetching media details from Overseerr."""
 

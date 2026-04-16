@@ -3,9 +3,10 @@
 import logging
 from datetime import UTC, datetime
 
-from sqlalchemy import delete, select
+from sqlalchemy import delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.siftarr.models.episode import Episode
 from app.siftarr.models.release import Release
 from app.siftarr.models.request import MediaType, Request, RequestStatus
 from app.siftarr.models.staged_torrent import StagedTorrent
@@ -22,6 +23,56 @@ from app.siftarr.services.runtime_settings import get_effective_settings
 from app.siftarr.services.staging_service import StagingService
 
 logger = logging.getLogger(__name__)
+
+
+async def _purge_releases(
+    db: AsyncSession,
+    *,
+    request_id: int | None = None,
+    commit: bool = True,
+) -> dict[str, int]:
+    """Detach episode links and delete stored releases, optionally for one request."""
+    release_ids_query = select(Release.id)
+    release_delete_query = delete(Release)
+    if request_id is not None:
+        release_ids_query = release_ids_query.where(Release.request_id == request_id)
+        release_delete_query = release_delete_query.where(Release.request_id == request_id)
+
+    detached_episode_count = (
+        await db.scalar(
+            select(func.count())
+            .select_from(Episode)
+            .where(Episode.release_id.in_(release_ids_query))
+        )
+        or 0
+    )
+
+    if detached_episode_count:
+        await db.execute(
+            update(Episode).where(Episode.release_id.in_(release_ids_query)).values(release_id=None)
+        )
+
+    delete_result = await db.execute(release_delete_query)
+    deleted_release_count = delete_result.rowcount or 0
+    if commit:
+        await db.commit()
+
+    return {
+        "deleted_releases": deleted_release_count,
+        "detached_episode_refs": detached_episode_count,
+    }
+
+
+async def clear_release_search_cache(db: AsyncSession) -> dict[str, int]:
+    """Clear persisted search results and detach stale episode release links."""
+    result = await _purge_releases(db)
+
+    logger.info(
+        "Cleared persisted release search cache: deleted_releases=%s detached_episode_refs=%s",
+        result["deleted_releases"],
+        result["detached_episode_refs"],
+    )
+    return result
 
 
 def build_prowlarr_release(release: Release) -> ProwlarrRelease:
@@ -48,7 +99,7 @@ async def store_search_results(
     evaluations: list[ReleaseEvaluation],
 ) -> dict[str, Release]:
     """Replace stored search results for a request with the latest evaluations."""
-    await db.execute(delete(Release).where(Release.request_id == request_id))
+    await _purge_releases(db, request_id=request_id, commit=False)
 
     records_by_title: dict[str, Release] = {}
     seen_keys: set[str] = set()

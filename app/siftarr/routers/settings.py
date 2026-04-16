@@ -16,8 +16,9 @@ from app.siftarr.models.request import Request as RequestModel
 from app.siftarr.models.settings import Settings as DBSettings
 from app.siftarr.services.connection_tester import ConnectionTester, ConnectionTestResult
 from app.siftarr.services.media_helpers import extract_media_title_and_year
-from app.siftarr.services.overseerr_service import OverseerrService
+from app.siftarr.services.overseerr_service import OverseerrService, clear_status_cache
 from app.siftarr.services.pending_queue_service import PendingQueueService
+from app.siftarr.services.release_selection_service import clear_release_search_cache
 from app.siftarr.services.rule_service import RuleService
 from app.siftarr.services.runtime_settings import get_effective_settings
 
@@ -94,6 +95,39 @@ async def _build_effective_settings_obj(db: AsyncSession) -> Settings:
     )
 
 
+async def _build_settings_page_context(request: Request, db: AsyncSession) -> dict:
+    """Build the shared context required by the settings page."""
+    eff_settings = await _build_effective_settings(db)
+
+    result = await db.execute(
+        select(DBSettings).where(DBSettings.key == "staging_mode_enabled"),
+    )
+    staging_setting = result.scalar_one_or_none()
+    staging_enabled = staging_setting.value == "true" if staging_setting else True
+
+    queue_service = PendingQueueService(db)
+    ready = await queue_service.get_ready_for_retry()
+    pending_count = len(ready)
+
+    status_counts = (
+        await db.execute(select(RequestModel.status, func.count()).group_by(RequestModel.status))
+    ).all()
+    stats_by_status = {s.value: c for s, c in status_counts}
+
+    return {
+        "request": request,
+        "staging_enabled": staging_enabled,
+        "pending_count": pending_count,
+        "stats": {
+            "total_requests": sum(stats_by_status.values()),
+            "completed": stats_by_status.get(RequestStatus.COMPLETED.value, 0),
+            "pending": stats_by_status.get(RequestStatus.PENDING.value, 0),
+            "failed": stats_by_status.get(RequestStatus.FAILED.value, 0),
+        },
+        "env": eff_settings,
+    }
+
+
 @router.get("")
 async def get_settings_page(
     request: Request,
@@ -102,45 +136,12 @@ async def get_settings_page(
     """Display settings page."""
     rule_service = RuleService(db)
     await rule_service.ensure_default_rules()
-    eff_settings = await _build_effective_settings(db)
-
-    # Get staging mode setting
-    result = await db.execute(
-        select(DBSettings).where(DBSettings.key == "staging_mode_enabled"),
-    )
-    staging_setting = result.scalar_one_or_none()
-    staging_enabled = staging_setting.value == "true" if staging_setting else True
-
-    # Get pending queue count
-    queue_service = PendingQueueService(db)
-    ready = await queue_service.get_ready_for_retry()
-    pending_count = len(ready)
-
-    # Get request stats using SQL aggregates
-    status_counts = (
-        await db.execute(select(RequestModel.status, func.count()).group_by(RequestModel.status))
-    ).all()
-    stats_by_status = {s.value: c for s, c in status_counts}
-    total_requests = sum(stats_by_status.values())
-    completed = stats_by_status.get(RequestStatus.COMPLETED.value, 0)
-    pending = stats_by_status.get(RequestStatus.PENDING.value, 0)
-    failed = stats_by_status.get(RequestStatus.FAILED.value, 0)
+    context = await _build_settings_page_context(request, db)
 
     return templates.TemplateResponse(
         request,
         "settings.html",
-        {
-            "request": request,
-            "staging_enabled": staging_enabled,
-            "pending_count": pending_count,
-            "stats": {
-                "total_requests": total_requests,
-                "completed": completed,
-                "pending": pending,
-                "failed": failed,
-            },
-            "env": eff_settings,
-        },
+        context,
     )
 
 
@@ -512,6 +513,33 @@ async def sync_overseerr(
             },
         },
     )
+
+
+@router.post("/clear-cache")
+async def clear_cache(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+) -> HTMLResponse:
+    """Clear app-side persisted release results and Overseerr status cache."""
+    context = await _build_settings_page_context(request, db)
+
+    try:
+        release_result = await clear_release_search_cache(db)
+        cleared_status_entries = clear_status_cache()
+        context["message"] = (
+            "Cleared app search cache: "
+            f"removed {release_result['deleted_releases']} stored release result(s), "
+            f"detached {release_result['detached_episode_refs']} episode link(s), and "
+            f"cleared {cleared_status_entries} Overseerr status cache entr{'y' if cleared_status_entries == 1 else 'ies'}."
+        )
+        context["message_type"] = "success"
+    except Exception as exc:
+        logger.exception("Failed to clear app search cache")
+        await db.rollback()
+        context["message"] = f"Failed to clear app search cache: {exc}"
+        context["message_type"] = "error"
+
+    return templates.TemplateResponse(request, "settings.html", context)
 
 
 @router.post("/reseed-rules")

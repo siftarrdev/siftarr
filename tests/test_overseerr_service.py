@@ -4,6 +4,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from app.siftarr.services import overseerr_service
 from app.siftarr.services.overseerr_service import OverseerrService
 
 
@@ -447,3 +448,18 @@ class TestOverseerrService:
                 result = await service.get_request_status(999)
 
             assert result is None
+
+    def test_clear_status_cache_empties_app_side_cache(self):
+        """Clear helper should empty the in-memory Overseerr status cache."""
+        overseerr_service._STATUS_CACHE.clear()
+        overseerr_service._STATUS_CACHE.update(
+            {
+                1: (1.0, {"status": "approved"}),
+                2: (2.0, {"status": "pending"}),
+            }
+        )
+
+        cleared = overseerr_service.clear_status_cache()
+
+        assert cleared == 2
+        assert overseerr_service._STATUS_CACHE == {}
