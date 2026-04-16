@@ -144,6 +144,117 @@ class TestReleaseSelectionService:
         queue_service.remove_from_queue.assert_awaited_once_with(request_record.id)
 
     @pytest.mark.asyncio
+    async def test_persist_manual_release_upserts_existing_release(self, mock_db, request_record):
+        """Manual picks should upsert a stored release for reuse by normal selection flow."""
+        existing_release = Release(
+            id=1,
+            request_id=request_record.id,
+            title="User Pick",
+            size=1,
+            seeders=1,
+            leechers=0,
+            download_url="https://old.example/release.torrent",
+            indexer="OldIndexer",
+            score=1,
+            passed_rules=False,
+        )
+        query_result = MagicMock()
+        query_result.scalar_one_or_none.return_value = existing_release
+        mock_db.execute.return_value = query_result
+        mock_db.commit = AsyncMock()
+        mock_db.refresh = AsyncMock()
+
+        release = ProwlarrRelease(
+            title="User Pick",
+            size=10,
+            seeders=25,
+            leechers=3,
+            download_url="https://example.com/user-pick.torrent",
+            magnet_url="magnet:?xt=urn:btih:userpick",
+            info_hash="abc123",
+            indexer="Indexer A",
+        )
+        evaluation = ReleaseEvaluation(release=release, passed=True, total_score=50, matches=[])
+
+        stored = await release_selection_service.persist_manual_release(
+            mock_db,
+            request_record,
+            release,
+            evaluation,
+        )
+
+        assert stored is existing_release
+        assert existing_release.download_url == release.download_url
+        assert existing_release.magnet_url == release.magnet_url
+        assert existing_release.info_hash == release.info_hash
+        assert existing_release.score == 50
+        assert existing_release.passed_rules is True
+        mock_db.commit.assert_awaited_once()
+        mock_db.refresh.assert_awaited_once_with(existing_release)
+
+    @pytest.mark.asyncio
+    async def test_use_releases_skips_duplicate_direct_send(
+        self, mock_db, request_record, selected_release
+    ):
+        """Direct-send path should not re-send releases already marked as downloaded."""
+        settings = MagicMock(staging_mode_enabled=False)
+        queue_service = AsyncMock()
+        qbittorrent_service = AsyncMock()
+        selected_release.is_downloaded = True
+        mock_db.commit = AsyncMock()
+
+        with pytest.MonkeyPatch.context() as monkeypatch:
+            monkeypatch.setattr(
+                release_selection_service,
+                "get_effective_settings",
+                AsyncMock(return_value=settings),
+            )
+            monkeypatch.setattr(
+                release_selection_service,
+                "PendingQueueService",
+                MagicMock(return_value=queue_service),
+            )
+            monkeypatch.setattr(
+                release_selection_service,
+                "QbittorrentService",
+                MagicMock(return_value=qbittorrent_service),
+            )
+
+            result = await release_selection_service.use_releases(
+                mock_db,
+                request_record,
+                [selected_release],
+                selection_source="manual",
+            )
+
+        assert result["status"] == "downloading"
+        assert result["already_sent_titles"] == [selected_release.title]
+        qbittorrent_service.add_torrent.assert_not_awaited()
+        queue_service.remove_from_queue.assert_awaited_once_with(request_record.id)
+
+    @pytest.mark.asyncio
+    async def test_persist_manual_release_requires_download_source(self, mock_db, request_record):
+        """Manual picks without a download source should be rejected early."""
+        release = ProwlarrRelease(
+            title="User Pick",
+            size=10,
+            seeders=1,
+            leechers=0,
+            download_url="",
+            magnet_url=None,
+            indexer="Indexer A",
+        )
+        evaluation = ReleaseEvaluation(release=release, passed=True, total_score=10, matches=[])
+
+        with pytest.raises(RuntimeError, match="no usable download source"):
+            await release_selection_service.persist_manual_release(
+                mock_db,
+                request_record,
+                release,
+                evaluation,
+            )
+
+    @pytest.mark.asyncio
     async def test_store_search_results_persists_multi_season_coverage(self, mock_db):
         """Multi-season packs should persist exact covered seasons."""
         mock_db.add = MagicMock()

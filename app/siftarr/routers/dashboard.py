@@ -3,18 +3,18 @@
 import asyncio
 import logging
 import re
-from datetime import datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import httpx
-from fastapi import APIRouter, Depends, Form, HTTPException, Query
+from fastapi import APIRouter, BackgroundTasks, Depends, Form, HTTPException, Query
 from fastapi import Request as FastAPIRequest
 from fastapi.responses import JSONResponse, RedirectResponse, Response
 from fastapi.templating import Jinja2Templates
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.siftarr.database import get_db
+from app.siftarr.database import async_session_maker, get_db
 from app.siftarr.models.request import MediaType, RequestStatus
 from app.siftarr.models.request import Request as RequestModel
 from app.siftarr.models.rule import Rule
@@ -22,7 +22,11 @@ from app.siftarr.models.staged_torrent import StagedTorrent
 from app.siftarr.services.http_client import get_shared_client
 from app.siftarr.services.lifecycle_service import LifecycleService
 from app.siftarr.services.media_helpers import extract_media_title_and_year
-from app.siftarr.services.overseerr_service import OverseerrService
+from app.siftarr.services.overseerr_service import (
+    OverseerrService,
+    clear_media_details_cache,
+    clear_status_cache,
+)
 from app.siftarr.services.pending_queue_service import PendingQueueService
 from app.siftarr.services.plex_service import PlexService
 from app.siftarr.services.prowlarr_service import ProwlarrRelease, ProwlarrService
@@ -32,7 +36,11 @@ from app.siftarr.services.release_parser import (
     parse_release_coverage,
     parse_stored_release_coverage,
 )
-from app.siftarr.services.release_selection_service import build_prowlarr_release, use_releases
+from app.siftarr.services.release_selection_service import (
+    build_prowlarr_release,
+    persist_manual_release,
+    use_releases,
+)
 from app.siftarr.services.rule_engine import ReleaseEvaluation, RuleEngine
 from app.siftarr.services.runtime_settings import get_effective_settings
 
@@ -43,6 +51,7 @@ templates = Jinja2Templates(directory="app/siftarr/templates")
 
 
 _OVERSEERR_SEMAPHORE = asyncio.Semaphore(10)
+_DETAILS_SYNC_TASKS: set[int] = set()
 
 _SINGLE_EPISODE_RELEASE_PATTERN = re.compile(
     r"(?:^|[.()\s_]+)S(?P<season>\d{1,2})E(?P<episode>\d{1,3})(?!\d)",
@@ -56,6 +65,48 @@ _ADDITIONAL_EPISODE_TOKEN_PATTERN = re.compile(
     r"(?:^|[.()\s_-]+)E\d{1,3}(?!\d)",
     re.IGNORECASE,
 )
+
+
+def _normalize_optional_text(value: object) -> str | None:
+    """Return a JSON-safe optional string value."""
+    if value is None or isinstance(value, str):
+        return value
+    return None
+
+
+def _normalize_float(value: object) -> float:
+    """Return a safe float for sorting."""
+    if isinstance(value, int | float):
+        return float(value)
+    if isinstance(value, str):
+        try:
+            return float(value)
+        except ValueError:
+            return 0.0
+    return 0.0
+
+
+def _normalize_int(value: object) -> int:
+    """Return a safe int for sorting."""
+    if isinstance(value, bool):
+        return int(value)
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float):
+        return int(value)
+    if isinstance(value, str):
+        try:
+            return int(value)
+        except ValueError:
+            return 0
+    return 0
+
+
+def _coerce_int_list(value: object) -> list[int]:
+    """Coerce a payload field to a list of ints."""
+    if not isinstance(value, list):
+        return []
+    return [item for item in value if isinstance(item, int)]
 
 
 def _extract_poster_path(poster_path: object) -> str | None:
@@ -150,6 +201,30 @@ def _format_release_size(size_bytes: int) -> str:
     return f"{gib:.2f} GB"
 
 
+def _apply_release_size_per_season_metadata(release: dict[str, object]) -> dict[str, object]:
+    """Attach derived per-season size metadata when season coverage is known."""
+    size_bytes = _normalize_int(release.get("size_bytes"))
+    covered_seasons = _coerce_int_list(release.get("covered_seasons"))
+    known_total_seasons = _normalize_int(release.get("known_total_seasons"))
+    covered_season_count = _normalize_int(release.get("covered_season_count"))
+
+    if covered_season_count <= 0:
+        if covered_seasons:
+            covered_season_count = len(covered_seasons)
+        elif release.get("is_complete_series") and known_total_seasons > 0:
+            covered_season_count = known_total_seasons
+
+    if size_bytes <= 0 or covered_season_count <= 0:
+        release["size_per_season"] = None
+        release["size_per_season_bytes"] = None
+        return release
+
+    size_per_season_bytes = int(round(size_bytes / covered_season_count))
+    release["size_per_season"] = _format_release_size(size_per_season_bytes)
+    release["size_per_season_bytes"] = size_per_season_bytes
+    return release
+
+
 def _serialize_evaluated_release(
     release: ProwlarrRelease | Any,
     evaluation: ReleaseEvaluation | Any,
@@ -158,9 +233,11 @@ def _serialize_evaluated_release(
     known_total_seasons: int | None = None,
 ) -> dict[str, object]:
     """Serialize a release plus rule evaluation for dashboard responses."""
+    status = "passed" if evaluation.passed else "rejected"
     payload: dict[str, object] = {
         "title": release.title,
         "_size_bytes": release.size,
+        "size_bytes": release.size,
         "size": _format_release_size(release.size),
         "seeders": release.seeders,
         "leechers": release.leechers,
@@ -168,15 +245,22 @@ def _serialize_evaluated_release(
         "resolution": release.resolution,
         "codec": release.codec,
         "release_group": release.release_group,
+        "info_hash": release.info_hash,
         "score": evaluation.total_score,
         "passed": evaluation.passed,
+        "status": status,
+        "status_label": "Passed" if evaluation.passed else "Rejected",
+        "rejection_reason": _normalize_optional_text(getattr(evaluation, "rejection_reason", None)),
         "download_url": release.download_url,
         "magnet_url": release.magnet_url,
+        "publish_date": release.publish_date.isoformat() if release.publish_date else None,
+        "stored_release_id": None,
     }
 
     release_id = getattr(release, "id", None)
     if release_id is not None:
         payload["id"] = release_id
+        payload["stored_release_id"] = release_id
 
     if coverage is not None:
         covered_seasons = list(coverage.season_numbers)
@@ -189,23 +273,32 @@ def _serialize_evaluated_release(
             and (coverage.is_complete_series or len(covered_seasons) >= known_total_seasons)
         )
 
-    return payload
+    return _apply_release_size_per_season_metadata(payload)
 
 
 def _dashboard_release_sort_key(release: dict[str, object]) -> tuple[float, float, int, float, str]:
     """Sort dashboard releases by score desc, size asc, then stable tie-breakers."""
-    score = float(release.get("score") or 0)
+    score = _normalize_float(release.get("score"))
     size_bytes = release.get("_size_bytes")
     normalized_size = (
         float(size_bytes)
         if isinstance(size_bytes, int | float) and size_bytes >= 0
         else float("inf")
     )
-    seeders = int(release.get("seeders") or 0)
+    seeders = _normalize_int(release.get("seeders"))
     publish_date = release.get("publish_date")
     publish_timestamp = 0.0
     if isinstance(publish_date, datetime):
         publish_timestamp = publish_date.timestamp()
+    elif isinstance(publish_date, str):
+        try:
+            publish_timestamp = (
+                datetime.fromisoformat(publish_date.replace("Z", "+00:00"))
+                .astimezone(UTC)
+                .timestamp()
+            )
+        except ValueError:
+            publish_timestamp = 0.0
     title = str(release.get("title") or "").casefold()
     return (-score, normalized_size, -seeders, -publish_timestamp, title)
 
@@ -229,6 +322,171 @@ def _choose_overseerr_display_status(request_status: str, media_status: str) -> 
     if media_status != "unknown":
         return media_status
     return request_status
+
+
+async def _load_request_record(db: AsyncSession, request_id: int) -> RequestModel:
+    """Load a request or raise 404."""
+    result = await db.execute(select(RequestModel).where(RequestModel.id == request_id))
+    request = result.scalar_one_or_none()
+    if not request:
+        raise HTTPException(status_code=404, detail="Request not found")
+    return request
+
+
+def _selection_redirect_url(redirect_to: str | None, request: RequestModel) -> str:
+    """Return a sensible redirect target after release actions."""
+    if redirect_to:
+        return redirect_to
+    return "/?tab=pending" if request.status == RequestStatus.PENDING else "/?tab=active"
+
+
+async def _evaluate_manual_release_for_request(
+    db: AsyncSession,
+    request: RequestModel,
+    release: ProwlarrRelease,
+) -> ReleaseEvaluation:
+    """Evaluate an ad hoc release using the request media type rules."""
+    rules_result = await db.execute(select(Rule))
+    rules = list(rules_result.scalars().all())
+    engine = RuleEngine.from_db_rules(rules=rules, media_type=request.media_type.value)
+    return engine.evaluate(release)
+
+
+async def _select_manual_release_for_request(
+    db: AsyncSession,
+    request: RequestModel,
+    release: ProwlarrRelease,
+) -> dict[str, object]:
+    """Persist and use a manual-search release through the normal selection path."""
+    evaluation = await _evaluate_manual_release_for_request(db, request, release)
+    stored_release = await persist_manual_release(db, request, release, evaluation)
+    return await use_releases(db, request, [stored_release], selection_source="manual")
+
+
+async def _run_background_episode_refresh(request_id: int) -> None:
+    """Refresh TV details in a detached task using a fresh DB session."""
+    if request_id not in _DETAILS_SYNC_TASKS:
+        _DETAILS_SYNC_TASKS.add(request_id)
+    try:
+        async with async_session_maker() as db:
+            effective_settings = await get_effective_settings(db)
+            plex_service = PlexService(settings=effective_settings)
+            try:
+                from app.siftarr.services.episode_sync_service import EpisodeSyncService
+
+                episode_sync = EpisodeSyncService(db, plex=plex_service)
+                await episode_sync.refresh_if_stale(request_id)
+            except Exception:
+                logger.exception("Background episode sync failed for request_id=%s", request_id)
+            finally:
+                await plex_service.close()
+    finally:
+        _DETAILS_SYNC_TASKS.discard(request_id)
+
+
+def _schedule_background_episode_refresh(
+    background_tasks: BackgroundTasks | None,
+    request_id: int,
+) -> bool:
+    """Schedule a lifecycle-managed background refresh once per request."""
+    if background_tasks is None:
+        return False
+    if request_id in _DETAILS_SYNC_TASKS:
+        return False
+
+    _DETAILS_SYNC_TASKS.add(request_id)
+    background_tasks.add_task(_run_background_episode_refresh, request_id)
+    return True
+
+
+def _has_unresolved_partial_tv_data(
+    seasons: list[Any],
+    episodes_by_season: dict[int, list[Any]],
+) -> bool:
+    """Return True when season rows imply Plex enrichment still needs to run."""
+    for season in seasons:
+        if (
+            getattr(season.status, "value", season.status)
+            != RequestStatus.PARTIALLY_AVAILABLE.value
+        ):
+            continue
+        season_episodes = episodes_by_season.get(season.id, [])
+        if not season_episodes:
+            return True
+        has_available_episode = any(
+            getattr(episode.status, "value", episode.status) == RequestStatus.AVAILABLE.value
+            for episode in season_episodes
+        )
+        if not has_available_episode:
+            return True
+    return False
+
+
+def _compute_sync_metadata(
+    seasons: list[Any],
+    episodes_by_season: dict[int, list[Any]],
+    request_id: int,
+    background_tasks: BackgroundTasks | None = None,
+) -> dict[str, object]:
+    """Build lightweight sync-state metadata for the TV details UI."""
+    newest_synced = max((season.synced_at for season in seasons if season.synced_at), default=None)
+    stale = False
+    if newest_synced is None:
+        stale = True
+    else:
+        newest = (
+            newest_synced.replace(tzinfo=UTC) if newest_synced.tzinfo is None else newest_synced
+        )
+        stale = newest < (datetime.now(UTC) - timedelta(hours=24))
+
+    missing = not seasons
+    needs_plex_enrichment = _has_unresolved_partial_tv_data(seasons, episodes_by_season)
+    refresh_in_progress = request_id in _DETAILS_SYNC_TASKS
+    if (missing or stale or needs_plex_enrichment) and not refresh_in_progress:
+        refresh_in_progress = _schedule_background_episode_refresh(background_tasks, request_id)
+
+    return {
+        "has_cached_data": bool(seasons),
+        "stale": stale,
+        "needs_plex_enrichment": needs_plex_enrichment,
+        "refresh_in_progress": refresh_in_progress,
+        "last_synced_at": newest_synced.isoformat() if newest_synced else None,
+    }
+
+
+def _count_season_episode_states(episodes: list[Any]) -> dict[str, int]:
+    """Count TV episode states for UI summaries."""
+    counts = {"available": 0, "pending": 0, "unreleased": 0}
+    for episode in episodes:
+        status = getattr(episode.status, "value", episode.status)
+        if status in counts:
+            counts[status] += 1
+    return counts
+
+
+async def _load_tv_seasons_with_episodes(
+    db: AsyncSession,
+    request_id: int,
+) -> tuple[list[Any], list[Any]]:
+    """Load seasons and episodes without per-season queries."""
+    from app.siftarr.models.episode import Episode
+    from app.siftarr.models.season import Season
+
+    seasons_result = await db.execute(
+        select(Season).where(Season.request_id == request_id).order_by(Season.season_number)
+    )
+    seasons = list(seasons_result.scalars().all())
+    if not seasons:
+        return [], []
+
+    season_ids = [season.id for season in seasons]
+    episodes_result = await db.execute(
+        select(Episode)
+        .where(Episode.season_id.in_(season_ids))
+        .order_by(Episode.season_id, Episode.episode_number)
+    )
+    episodes = list(episodes_result.scalars().all())
+    return seasons, episodes
 
 
 async def _process_request_search(
@@ -451,6 +709,7 @@ async def dashboard(
             "overseerr_request_statuses": overseerr_request_statuses,
             "overseerr_media_statuses": overseerr_media_statuses,
             "overseerr_url": str(effective_settings.overseerr_url or "").rstrip("/"),
+            "staging_mode_enabled": effective_settings.staging_mode_enabled,
             "pending_requests": pending_requests,
             "pending_items_by_request_id": pending_items_by_request_id,
             "staged_torrents": staged_torrents,
@@ -536,11 +795,10 @@ async def bulk_request_action(
 @router.get("/requests/{request_id}/details")
 async def request_details(
     request_id: int,
+    background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
 ) -> JSONResponse:
-    from app.siftarr.models.episode import Episode
     from app.siftarr.models.release import Release
-    from app.siftarr.models.season import Season
 
     result = await db.execute(select(RequestModel).where(RequestModel.id == request_id))
     request = result.scalar_one_or_none()
@@ -560,18 +818,27 @@ async def request_details(
 
     try:
         if request.overseerr_request_id:
-            ov = await overseerr_service.get_request(request.overseerr_request_id)
+            ov_task = asyncio.create_task(
+                overseerr_service.get_request(request.overseerr_request_id)
+            )
+            media_details_task = None
+            if request.media_type.value == "movie" and request.tmdb_id:
+                media_details_task = asyncio.create_task(
+                    overseerr_service.get_media_details("movie", request.tmdb_id)
+                )
+            elif request.media_type.value == "tv" and request.tmdb_id:
+                media_details_task = asyncio.create_task(
+                    overseerr_service.get_media_details("tv", request.tmdb_id)
+                )
+
+            ov = await ov_task
             media: dict[str, object] = {}
             request_status = "unknown"
             if ov:
                 media = ov.get("media") or {}
                 request_status = overseerr_service.normalize_media_status(media.get("status"))
 
-            media_details = None
-            if request.media_type.value == "movie" and request.tmdb_id:
-                media_details = await overseerr_service.get_media_details("movie", request.tmdb_id)
-            elif request.media_type.value == "tv" and request.tmdb_id:
-                media_details = await overseerr_service.get_media_details("tv", request.tmdb_id)
+            media_details = await media_details_task if media_details_task else None
 
             merged_media = {**media, **(media_details or {})}
             poster = _build_poster_url(
@@ -623,7 +890,6 @@ async def request_details(
                 "score": release.score,
                 "passed": release.passed_rules,
                 "downloaded": release.is_downloaded,
-                "publish_date": release.publish_date.isoformat() if release.publish_date else None,
                 "rejection_reason": evaluation.rejection_reason,
                 "season_number": release.season_number,
                 "episode_number": release.episode_number,
@@ -644,39 +910,36 @@ async def request_details(
     details["releases"] = matched
 
     if request.media_type == MediaType.TV:
-        from app.siftarr.services.episode_sync_service import EpisodeSyncService
+        seasons, episodes = await _load_tv_seasons_with_episodes(db, request_id)
 
-        plex_service = PlexService(settings=effective_settings)
-        try:
-            episode_sync = EpisodeSyncService(db, plex=plex_service)
-            await episode_sync.refresh_if_stale(request_id)
-        except Exception:
-            logger.exception("Episode sync failed for request_id=%s", request_id)
-        finally:
-            await plex_service.close()
+        episodes_by_season: dict[int, list[Any]] = {}
+        for episode in episodes:
+            episodes_by_season.setdefault(episode.season_id, []).append(episode)
 
-        seasons_result = await db.execute(
-            select(Season).where(Season.request_id == request_id).order_by(Season.season_number)
+        sync_state = _compute_sync_metadata(
+            seasons,
+            episodes_by_season,
+            request_id,
+            background_tasks,
         )
-        seasons = list(seasons_result.scalars().all())
 
         seasons_data = []
         known_season_numbers: list[int] = []
         for season in seasons:
             known_season_numbers.append(season.season_number)
-            episodes_result = await db.execute(
-                select(Episode)
-                .where(Episode.season_id == season.id)
-                .order_by(Episode.episode_number)
+            season_episodes = episodes_by_season.get(season.id, [])
+            available_count = sum(
+                1 for ep in season_episodes if ep.status == RequestStatus.AVAILABLE
             )
-            episodes = list(episodes_result.scalars().all())
-            available_count = sum(1 for ep in episodes if ep.status == RequestStatus.AVAILABLE)
+            state_counts = _count_season_episode_states(season_episodes)
             season_data = {
                 "id": season.id,
                 "season_number": season.season_number,
                 "status": season.status.value,
                 "available_count": available_count,
-                "total_count": len(episodes),
+                "total_count": len(season_episodes),
+                "pending_count": state_counts["pending"],
+                "unreleased_count": state_counts["unreleased"],
                 "episodes": [
                     {
                         "id": ep.id,
@@ -686,7 +949,7 @@ async def request_details(
                         "status": ep.status.value,
                         "release_id": ep.release_id,
                     }
-                    for ep in episodes
+                    for ep in season_episodes
                 ],
             }
             seasons_data.append(season_data)
@@ -697,51 +960,55 @@ async def request_details(
                 continue
 
             release["known_total_seasons"] = known_total_seasons
-            covered_seasons = release.get("covered_seasons") or []
+            covered_seasons = _coerce_int_list(release.get("covered_seasons"))
             release["covers_all_known_seasons"] = bool(
                 known_total_seasons
                 and (
                     release.get("is_complete_series") or len(covered_seasons) >= known_total_seasons
                 )
             )
+            _apply_release_size_per_season_metadata(release)
 
-        releases_by_season: dict[int, list] = {}
-        releases_by_episode: dict[tuple[int, int], list] = {}
+        releases_by_season: dict[int, list[dict[str, object]]] = {}
+        releases_by_episode: dict[tuple[int, int], list[dict[str, object]]] = {}
         for r in matched:
             sn = r.get("season_number")
             en = r.get("episode_number")
-            covered_seasons = [
-                season for season in r.get("covered_seasons", []) if isinstance(season, int)
-            ]
+            covered_seasons = _coerce_int_list(r.get("covered_seasons"))
             if r.get("covers_all_known_seasons"):
                 covered_seasons = known_season_numbers
-            if en is not None and sn is not None:
-                releases_by_episode.setdefault((sn, en), []).append(r)
+            if isinstance(en, int) and isinstance(sn, int):
+                key = (sn, en)
+                if key not in releases_by_episode:
+                    releases_by_episode[key] = []
+                releases_by_episode[key].append(r)
             elif covered_seasons:
                 for covered_season in covered_seasons:
-                    releases_by_season.setdefault(covered_season, []).append(r)
-            elif sn is not None:
-                releases_by_season.setdefault(sn, []).append(r)
+                    if covered_season not in releases_by_season:
+                        releases_by_season[covered_season] = []
+                    releases_by_season[covered_season].append(r)
+            elif isinstance(sn, int):
+                if sn not in releases_by_season:
+                    releases_by_season[sn] = []
+                releases_by_season[sn].append(r)
 
         details["tv_info"] = {
             "seasons": seasons_data,
             "releases_by_season": {str(k): v for k, v in releases_by_season.items()},
             "releases_by_episode": {f"{k[0]}-{k[1]}": v for k, v in releases_by_episode.items()},
+            "sync_state": sync_state,
         }
 
-    return JSONResponse(details)
+    return JSONResponse(details, background=background_tasks)
 
 
 @router.get("/requests/{request_id}/seasons")
 async def get_request_seasons(
     request_id: int,
+    background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
 ) -> JSONResponse:
     """Get seasons and episodes for a TV request."""
-    from app.siftarr.models.episode import Episode
-    from app.siftarr.models.season import Season
-    from app.siftarr.services.episode_sync_service import EpisodeSyncService
-
     result = await db.execute(select(RequestModel).where(RequestModel.id == request_id))
     request = result.scalar_one_or_none()
     if not request:
@@ -750,33 +1017,28 @@ async def get_request_seasons(
     if request.media_type != MediaType.TV:
         return JSONResponse({"seasons": [], "message": "Request is not a TV show"})
 
-    effective_settings = await get_effective_settings(db)
-    plex_service = PlexService(settings=effective_settings)
-    try:
-        episode_sync = EpisodeSyncService(db, plex=plex_service)
-        await episode_sync.refresh_if_stale(request_id)
-    except Exception:
-        logger.exception("Episode sync failed for request_id=%s", request_id)
-    finally:
-        await plex_service.close()
-
-    seasons_result = await db.execute(
-        select(Season).where(Season.request_id == request_id).order_by(Season.season_number)
+    seasons, episodes = await _load_tv_seasons_with_episodes(db, request_id)
+    episodes_by_season: dict[int, list[Any]] = {}
+    for episode in episodes:
+        episodes_by_season.setdefault(episode.season_id, []).append(episode)
+    sync_state = _compute_sync_metadata(
+        seasons,
+        episodes_by_season,
+        request_id,
+        background_tasks,
     )
-    seasons = list(seasons_result.scalars().all())
 
     seasons_data = []
     for season in seasons:
-        episodes_result = await db.execute(
-            select(Episode).where(Episode.season_id == season.id).order_by(Episode.episode_number)
-        )
-        episodes = list(episodes_result.scalars().all())
+        season_episodes = episodes_by_season.get(season.id, [])
 
         season_data = {
             "id": season.id,
             "season_number": season.season_number,
             "status": season.status.value,
             "synced_at": season.synced_at.isoformat() if season.synced_at else None,
+            "pending_count": _count_season_episode_states(season_episodes)["pending"],
+            "unreleased_count": _count_season_episode_states(season_episodes)["unreleased"],
             "episodes": [
                 {
                     "id": ep.id,
@@ -786,12 +1048,15 @@ async def get_request_seasons(
                     "status": ep.status.value,
                     "release_id": ep.release_id,
                 }
-                for ep in episodes
+                for ep in season_episodes
             ],
         }
         seasons_data.append(season_data)
 
-    return JSONResponse({"seasons": seasons_data})
+    return JSONResponse(
+        {"seasons": seasons_data, "sync_state": sync_state},
+        background=background_tasks,
+    )
 
 
 @router.post("/requests/{request_id}/seasons/{season_number}/search")
@@ -840,7 +1105,7 @@ async def search_season_packs(
             if coverage.season_numbers != (season_number,):
                 continue
             evaluation = engine.evaluate(release)
-            releases.append(_serialize_evaluated_release(release, evaluation))
+            releases.append(_serialize_evaluated_release(release, evaluation, coverage=coverage))
 
         return JSONResponse({"releases": _finalize_dashboard_release_payloads(releases)})
     finally:
@@ -982,10 +1247,7 @@ async def use_request_release(
     db: AsyncSession = Depends(get_db),
 ) -> RedirectResponse:
     """Stage or send a selected stored release for a request."""
-    request_result = await db.execute(select(RequestModel).where(RequestModel.id == request_id))
-    request = request_result.scalar_one_or_none()
-    if not request:
-        raise HTTPException(status_code=404, detail="Request not found")
+    request = await _load_request_record(db, request_id)
 
     from app.siftarr.models.release import Release
 
@@ -997,7 +1259,60 @@ async def use_request_release(
         raise HTTPException(status_code=404, detail="Release not found")
 
     await use_releases(db, request, [release], selection_source="manual")
-    return RedirectResponse(url=redirect_to or "/?tab=active", status_code=303)
+    return RedirectResponse(
+        url=_selection_redirect_url(redirect_to, request),
+        status_code=303,
+    )
+
+
+@router.post("/requests/{request_id}/manual-release/use")
+async def use_manual_release(
+    request_id: int,
+    title: str = Form(...),
+    size: int = Form(...),
+    seeders: int = Form(default=0),
+    leechers: int = Form(default=0),
+    indexer: str = Form(...),
+    download_url: str = Form(default=""),
+    magnet_url: str | None = Form(default=None),
+    info_hash: str | None = Form(default=None),
+    publish_date: str | None = Form(default=None),
+    resolution: str | None = Form(default=None),
+    codec: str | None = Form(default=None),
+    release_group: str | None = Form(default=None),
+    redirect_to: str | None = Form(default=None),
+    db: AsyncSession = Depends(get_db),
+) -> RedirectResponse:
+    """Persist and use an ad hoc manual-search release for a request."""
+    request = await _load_request_record(db, request_id)
+
+    publish_dt = None
+    if publish_date:
+        try:
+            publish_dt = datetime.fromisoformat(publish_date.replace("Z", "+00:00"))
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail="Invalid publish_date") from exc
+
+    release = ProwlarrRelease(
+        title=title,
+        size=size,
+        seeders=seeders,
+        leechers=leechers,
+        download_url=download_url,
+        magnet_url=magnet_url,
+        info_hash=info_hash,
+        indexer=indexer,
+        publish_date=publish_dt,
+        resolution=resolution,
+        codec=codec,
+        release_group=release_group,
+    )
+
+    await _select_manual_release_for_request(db, request, release)
+    return RedirectResponse(
+        url=_selection_redirect_url(redirect_to, request),
+        status_code=303,
+    )
 
 
 @router.post("/requests/{request_id}/deny")
@@ -1046,6 +1361,47 @@ async def refresh_plex(
         logger.exception("Plex refresh failed for request_id=%s", request_id)
         return JSONResponse({"status": "error", "message": "Plex sync failed"}, status_code=500)
     finally:
+        await plex_service.close()
+
+
+@router.post("/requests/{request_id}/mark-available")
+async def mark_series_available(
+    request_id: int,
+    db: AsyncSession = Depends(get_db),
+) -> JSONResponse:
+    """Mark a TV series available in Overseerr and refresh local episode state."""
+    request = await _load_request_record(db, request_id)
+    if request.media_type != MediaType.TV:
+        raise HTTPException(status_code=400, detail="Request is not a TV show")
+
+    effective_settings = await get_effective_settings(db)
+    overseerr_service = OverseerrService(settings=effective_settings)
+    plex_service = PlexService(settings=effective_settings)
+    try:
+        media_id = await overseerr_service.resolve_tv_media_id(
+            overseerr_request_id=request.overseerr_request_id,
+            tmdb_id=request.tmdb_id,
+        )
+        if media_id is None:
+            raise HTTPException(status_code=400, detail="No Overseerr media ID available")
+
+        success = await overseerr_service.mark_series_available(media_id)
+        if not success:
+            return JSONResponse(
+                {"status": "error", "message": "Failed to mark series available in Overseerr"},
+                status_code=502,
+            )
+
+        clear_status_cache()
+        clear_media_details_cache()
+
+        from app.siftarr.services.episode_sync_service import EpisodeSyncService
+
+        episode_sync = EpisodeSyncService(db, plex=plex_service)
+        await episode_sync.sync_episodes(request_id, force_plex_refresh=True)
+        return JSONResponse({"status": "success", "message": "Series marked available"})
+    finally:
+        await overseerr_service.close()
         await plex_service.close()
 
 

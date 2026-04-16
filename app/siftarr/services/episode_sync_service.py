@@ -6,6 +6,7 @@ from datetime import UTC, date, datetime, timedelta
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from app.siftarr.config import get_settings
 from app.siftarr.models.episode import Episode
@@ -24,6 +25,39 @@ OVERSEERR_MEDIA_STATUS_MAP = {
     5: "available",
     6: "deleted",
 }
+
+
+def _episode_needs_unreleased_status(air_date: date | None) -> bool:
+    """Return whether an episode should be treated as unreleased."""
+    return air_date is not None and air_date > datetime.now(UTC).date()
+
+
+def _derive_episode_status(*, is_on_plex: bool, air_date: date | None) -> RequestStatus:
+    """Derive an episode status from Plex availability and air date."""
+    if is_on_plex:
+        return RequestStatus.AVAILABLE
+    if _episode_needs_unreleased_status(air_date):
+        return RequestStatus.UNRELEASED
+    return RequestStatus.PENDING
+
+
+def _derive_season_status(episodes: list[Episode]) -> RequestStatus:
+    """Derive the season status from episode statuses."""
+    if not episodes:
+        return RequestStatus.PENDING
+
+    statuses = {episode.status for episode in episodes}
+    if statuses == {RequestStatus.AVAILABLE}:
+        return RequestStatus.AVAILABLE
+    if statuses == {RequestStatus.UNRELEASED}:
+        return RequestStatus.UNRELEASED
+    if RequestStatus.AVAILABLE in statuses:
+        return RequestStatus.PARTIALLY_AVAILABLE
+    if RequestStatus.PENDING in statuses and RequestStatus.UNRELEASED in statuses:
+        return RequestStatus.PENDING
+    if RequestStatus.PENDING in statuses:
+        return RequestStatus.PENDING
+    return RequestStatus.PARTIALLY_AVAILABLE
 
 
 class EpisodeSyncService:
@@ -65,6 +99,55 @@ class EpisodeSyncService:
     def set_plex(self, plex: PlexService) -> None:
         """Set the Plex service instance."""
         self._plex = plex
+
+    async def _load_request_and_seasons(
+        self, request_id: int
+    ) -> tuple[Request | None, list[Season]]:
+        """Load a request and all seasons with episodes in one round-trip."""
+        request_result = await self.db.execute(select(Request).where(Request.id == request_id))
+        request = request_result.scalar_one_or_none()
+        if request is None:
+            return None, []
+
+        seasons_result = await self.db.execute(
+            select(Season)
+            .where(Season.request_id == request_id)
+            .options(selectinload(Season.episodes))
+            .order_by(Season.season_number)
+        )
+        return request, list(seasons_result.scalars().all())
+
+    async def _apply_plex_to_existing_seasons(
+        self,
+        request: Request,
+        seasons: list[Season],
+    ) -> list[Season]:
+        """Apply Plex availability to already persisted seasons without re-syncing Overseerr."""
+        if self._plex is None or not seasons:
+            return seasons
+        return await self._apply_plex_availability(request, seasons)
+
+    @staticmethod
+    def _needs_plex_enrichment(request: Request, seasons: list[Season]) -> bool:
+        """Detect fresh TV data that still needs episode-level Plex resolution."""
+        if not seasons:
+            return True
+
+        if not getattr(request, "plex_rating_key", None):
+            return True
+
+        for season in seasons:
+            if season.status != RequestStatus.PARTIALLY_AVAILABLE:
+                continue
+
+            episodes = list(getattr(season, "episodes", []) or [])
+            if not episodes:
+                return True
+
+            if not any(episode.status == RequestStatus.AVAILABLE for episode in episodes):
+                return True
+
+        return False
 
     async def _sync_from_overseerr(self, request: Request) -> list[Season]:
         """Sync episode structure (titles, air dates) from Overseerr."""
@@ -163,7 +246,11 @@ class EpisodeSyncService:
                     with contextlib.suppress(ValueError, TypeError):
                         air_date = date.fromisoformat(air_date_str[:10])
 
-                episode_status = overseerr_season_status
+                episode_status = RequestStatus.PENDING
+                if _episode_needs_unreleased_status(air_date):
+                    episode_status = RequestStatus.UNRELEASED
+                elif overseerr_season_status == RequestStatus.AVAILABLE:
+                    episode_status = RequestStatus.AVAILABLE
 
                 if episode is None:
                     episode = Episode(
@@ -282,29 +369,27 @@ class EpisodeSyncService:
                 return seasons
 
             for season in seasons:
-                episodes_result = await self.db.execute(
-                    select(Episode).where(Episode.season_id == season.id)
+                episodes = sorted(
+                    getattr(season, "episodes", []) or [],
+                    key=lambda episode: episode.episode_number,
                 )
-                episodes = list(episodes_result.scalars().all())
+                if not episodes:
+                    episodes_result = await self.db.execute(
+                        select(Episode).where(Episode.season_id == season.id)
+                    )
+                    episodes = list(episodes_result.scalars().all())
 
                 for episode in episodes:
                     is_on_plex = availability.get(
                         (season.season_number, episode.episode_number), False
                     )
-                    if is_on_plex:
-                        episode.status = RequestStatus.AVAILABLE
-                    else:
-                        episode.status = RequestStatus.PENDING
+                    episode.status = _derive_episode_status(
+                        is_on_plex=is_on_plex,
+                        air_date=episode.air_date,
+                    )
 
                 await self.db.flush()
-
-                available_count = sum(1 for ep in episodes if ep.status == RequestStatus.AVAILABLE)
-                if available_count == len(episodes) and len(episodes) > 0:
-                    season.status = RequestStatus.AVAILABLE
-                elif available_count > 0:
-                    season.status = RequestStatus.PARTIALLY_AVAILABLE
-                else:
-                    season.status = RequestStatus.PENDING
+                season.status = _derive_season_status(episodes)
 
             await self.db.commit()
 
@@ -331,19 +416,29 @@ class EpisodeSyncService:
         correctly.
         """
         for season in seasons:
-            if season.status != RequestStatus.PARTIALLY_AVAILABLE:
-                continue
-            episodes_result = await self.db.execute(
-                select(Episode).where(Episode.season_id == season.id)
+            episodes = sorted(
+                getattr(season, "episodes", []) or [],
+                key=lambda episode: episode.episode_number,
             )
-            episodes = list(episodes_result.scalars().all())
+            if not episodes:
+                episodes_result = await self.db.execute(
+                    select(Episode).where(Episode.season_id == season.id)
+                )
+                episodes = list(episodes_result.scalars().all())
+
             for episode in episodes:
-                if episode.status == RequestStatus.PARTIALLY_AVAILABLE:
-                    episode.status = RequestStatus.PENDING
-            available = sum(1 for ep in episodes if ep.status == RequestStatus.AVAILABLE)
-            total = len(episodes)
-            if available == 0 and total > 0:
-                season.status = RequestStatus.PENDING
+                if episode.status == RequestStatus.PARTIALLY_AVAILABLE or episode.status not in {
+                    RequestStatus.AVAILABLE,
+                    RequestStatus.PENDING,
+                    RequestStatus.UNRELEASED,
+                }:
+                    episode.status = (
+                        RequestStatus.UNRELEASED
+                        if _episode_needs_unreleased_status(episode.air_date)
+                        else RequestStatus.PENDING
+                    )
+
+            season.status = _derive_season_status(episodes)
 
     async def sync_episodes(
         self, request_id: int, force_plex_refresh: bool = False
@@ -385,18 +480,16 @@ class EpisodeSyncService:
         PlexService is available, because that means per-episode Plex
         availability was never applied.
         """
-        request_result = await self.db.execute(select(Request).where(Request.id == request_id))
-        request = request_result.scalar_one_or_none()
+        request, seasons = await self._load_request_and_seasons(request_id)
         if not request:
             return []
-
-        result = await self.db.execute(select(Season).where(Season.request_id == request_id))
-        seasons = list(result.scalars().all())
 
         if not seasons:
             return await self.sync_episodes(request_id)
 
-        needs_plex_resolution = self._plex is not None and not request.plex_rating_key
+        needs_plex_resolution = self._plex is not None and self._needs_plex_enrichment(
+            request, seasons
+        )
 
         newest_synced = max(
             (s.synced_at for s in seasons if s.synced_at),
@@ -416,9 +509,9 @@ class EpisodeSyncService:
 
         if needs_plex_resolution and self._plex is not None:
             logger.info(
-                "EpisodeSyncService: request %s has no plex_rating_key, forcing re-sync",
+                "EpisodeSyncService: request %s needs Plex enrichment, applying Plex to local data",
                 request_id,
             )
-            return await self.sync_episodes(request_id)
+            return await self._apply_plex_to_existing_seasons(request, seasons)
 
         return seasons

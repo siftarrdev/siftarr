@@ -585,6 +585,7 @@ details[open] summary .accordion-chevron { transform: rotate(90deg); }
 </div>
 
 <script>
+window.siftarrStagingModeEnabled = {{ 'true' if staging_mode_enabled else 'false' }};
 const tableSortState = {
     active: { column: null, direction: 'asc' },
     pending: { column: null, direction: 'asc' },
@@ -669,34 +670,84 @@ function renderRuleMatches(matches) {
     return `<div class="mt-1 text-xs text-gray-500">Matched: ${ruleSpans.join(' | ')}</div>`;
 }
 
+function formatRelativePublishAge(publishDate) {
+    if (!publishDate) return '';
+
+    const publishedAt = new Date(publishDate);
+    if (Number.isNaN(publishedAt.getTime())) return '';
+
+    const diffMs = Date.now() - publishedAt.getTime();
+    if (diffMs < 0) return 'In the future';
+
+    const minutes = Math.floor(diffMs / 60000);
+    if (minutes < 60) return minutes <= 1 ? '1 minute ago' : `${minutes} minutes ago`;
+
+    const hours = Math.floor(minutes / 60);
+    if (hours < 24) return hours === 1 ? '1 hour ago' : `${hours} hours ago`;
+
+    const days = Math.floor(hours / 24);
+    if (days < 30) return days === 1 ? '1 day ago' : `${days} days ago`;
+
+    const months = Math.floor(days / 30);
+    if (months < 12) return months === 1 ? '1 month ago' : `${months} months ago`;
+
+    const years = Math.floor(days / 365);
+    return years === 1 ? '1 year ago' : `${years} years ago`;
+}
+
 function renderReleaseCard(release, requestId) {
     const statusClass = release.passed ? 'badge-green' : 'badge-yellow';
     const secondaryMeta = [release.size, release.indexer, release.resolution, release.codec, release.release_group].filter(Boolean).join(' \u00B7 ');
     const availability = `Seeders ${release.seeders ?? 0} \u00B7 Leechers ${release.leechers ?? 0}`;
     const downloaded = release.downloaded ? '<span class="badge badge-blue">Already sent</span>' : '';
     const currentTab = new URLSearchParams(window.location.search).get('tab') || 'active';
-    const useLabel = release.passed ? 'Use Release' : 'Force Use';
-    const formAction = release.id ? `/requests/${requestId}/releases/${release.id}/use` : null;
-    const actionHtml = formAction
-        ? `<form action="${formAction}" method="post" class="shrink-0" onsubmit="event.stopPropagation()">
-                <input type="hidden" name="redirect_to" value="/?tab=${currentTab}">
-                <button type="submit" class="btn-primary btn-sm">${useLabel}</button>
-           </form>`
+    const actionVerb = window.siftarrStagingModeEnabled ? 'Stage' : 'Download';
+    const useLabel = release.passed ? actionVerb : `Force ${actionVerb}`;
+    const storedReleaseId = release.stored_release_id || release.id;
+    const formAction = storedReleaseId
+        ? `/requests/${requestId}/releases/${storedReleaseId}/use`
+        : `/requests/${requestId}/manual-release/use`;
+    const manualFieldHtml = storedReleaseId ? '' : `
+                <input type="hidden" name="title" value="${escapeHtml(release.title)}">
+                <input type="hidden" name="size" value="${escapeHtml(release.size_bytes ?? 0)}">
+                <input type="hidden" name="seeders" value="${escapeHtml(release.seeders ?? 0)}">
+                <input type="hidden" name="leechers" value="${escapeHtml(release.leechers ?? 0)}">
+                <input type="hidden" name="indexer" value="${escapeHtml(release.indexer || '')}">
+                <input type="hidden" name="download_url" value="${escapeHtml(release.download_url || '')}">
+                <input type="hidden" name="magnet_url" value="${escapeHtml(release.magnet_url || '')}">
+                <input type="hidden" name="info_hash" value="${escapeHtml(release.info_hash || '')}">
+                <input type="hidden" name="publish_date" value="${escapeHtml(release.publish_date || '')}">
+                <input type="hidden" name="resolution" value="${escapeHtml(release.resolution || '')}">
+                <input type="hidden" name="codec" value="${escapeHtml(release.codec || '')}">
+                <input type="hidden" name="release_group" value="${escapeHtml(release.release_group || '')}">`;
+    const disableAction = !(release.download_url || release.magnet_url);
+    const actionHtml = `<form action="${formAction}" method="post" class="shrink-0" onsubmit="event.stopPropagation()">
+                <input type="hidden" name="redirect_to" value="/?tab=${currentTab}">${manualFieldHtml}
+                <button type="submit" class="btn-primary btn-sm" ${disableAction ? 'disabled title="No download source available"' : ''}>${useLabel}</button>
+           </form>`;
+    const publishAge = formatRelativePublishAge(release.publish_date);
+    const coverageHtml = (Array.isArray(release.covered_seasons) || release.is_complete_series)
+        ? renderCoverageBadge(release)
+        : '';
+    const rejectionHtml = !release.passed && release.rejection_reason
+        ? `<div class="mt-2 max-w-xs text-right text-xs text-red-300" data-release-rejection-reason="true">${escapeHtml(release.rejection_reason)}</div>`
         : '';
 
     return `
         <div class="rounded-xl border border-gray-700/60 bg-surface-800 p-2">
             <div class="flex flex-col gap-2 lg:flex-row lg:items-start lg:justify-between">
                 <div class="min-w-0">
-                    <div class="flex flex-wrap items-center gap-2">
-                        <div class="font-medium text-white text-sm break-words">${escapeHtml(release.title)}</div>
-                        <span class="badge ${statusClass}">${release.passed ? 'Passed' : 'Rejected'}</span>
-                        ${downloaded}
-                    </div>
-                    <div class="mt-1 text-xs text-gray-400">Score <span class="font-semibold text-emerald-400">${release.score}</span> &middot; ${escapeHtml(secondaryMeta || 'No release metadata')} &middot; ${escapeHtml(availability)}</div>
+                    <div class="font-medium text-white text-sm break-words">${escapeHtml(release.title)}</div>
+                    <div class="mt-1 text-xs text-gray-400">Score <span class="font-semibold text-emerald-400">${release.score}</span> &middot; ${escapeHtml(secondaryMeta || 'No release metadata')} &middot; ${escapeHtml(availability)}${publishAge ? ` &middot; <span data-release-upload-age="true">${escapeHtml(publishAge)}</span>` : ''}</div>
+                    ${coverageHtml}
                     ${renderRuleMatches(release.matches)}
                 </div>
-                ${actionHtml}
+                <div class="flex shrink-0 flex-col items-end gap-2 text-right" data-release-status-column="true">
+                    <span class="badge ${statusClass}">${escapeHtml(release.status_label || (release.passed ? 'Passed' : 'Rejected'))}</span>
+                    ${downloaded}
+                    ${actionHtml}
+                    ${rejectionHtml}
+                </div>
             </div>
         </div>
     `;
@@ -714,10 +765,14 @@ function renderCoverageBadge(release) {
     const seriesBadge = release.is_complete_series || release.covers_all_known_seasons
         ? '<span class="badge badge-green">Complete series</span>'
         : '';
+    const sizePerSeason = release.size_per_season
+        ? '<span data-release-size-per-season="true">' + escapeHtml(release.size_per_season) + '/season</span>'
+        : '';
 
     return '<div class="mt-1 flex flex-wrap items-center gap-2 text-xs text-gray-400">' +
         '<span class="badge badge-blue">' + escapeHtml(countText) + '</span>' +
         '<span>' + escapeHtml(coverageText) + '</span>' +
+        sizePerSeason +
         seriesBadge +
     '</div>';
 }
@@ -727,6 +782,7 @@ function episodeStatusBadge(status) {
         'received': 'badge-gray',
         'searching': 'badge-blue',
         'pending': 'badge-yellow',
+        'unreleased': 'badge-purple',
         'staged': 'badge-blue',
         'downloading': 'badge-blue',
         'completed': 'badge-green',
@@ -740,10 +796,24 @@ function episodeStatusBadge(status) {
 function renderSeasonAccordion(data) {
     const tvInfo = data.tv_info;
     const requestId = data.request.id;
+    const syncState = tvInfo.sync_state || {};
 
     if (!tvInfo.seasons || tvInfo.seasons.length === 0) {
-        return '<div class="text-gray-500 text-sm">No season information available.</div>';
+        const emptyState = syncState.refresh_in_progress
+            ? 'No cached season information yet. Background refresh in progress...'
+            : 'No season information available.';
+        return '<div class="text-gray-500 text-sm">' + escapeHtml(emptyState) + '</div>';
     }
+
+    const syncBanner = syncState.stale || syncState.refresh_in_progress || syncState.needs_plex_enrichment
+        ? '<div class="rounded-lg border border-blue-500/30 bg-blue-500/10 px-3 py-2 text-xs text-blue-200">' +
+            (syncState.refresh_in_progress
+                ? 'Showing cached TV details while a background refresh updates Plex/Overseerr data.'
+                : syncState.needs_plex_enrichment
+                    ? 'Showing cached TV details while Plex episode availability is being resolved for partial seasons.'
+                    : 'Showing cached TV details. Reopen after a background refresh for newer availability.') +
+          '</div>'
+        : '';
 
     const searchAllSection = '<div class="rounded-xl border border-gray-700/60 bg-surface-800 p-3 space-y-3">' +
         '<div class="flex items-center justify-between gap-3">' +
@@ -753,15 +823,20 @@ function renderSeasonAccordion(data) {
             '</div>' +
             '<button onclick="searchAllSeasonPacks(' + requestId + '); event.stopPropagation();" class="btn-primary btn-sm">Search Multi Season Packs</button>' +
         '</div>' +
+        '<div class="flex items-center justify-between gap-3 rounded-lg border border-gray-700/40 bg-surface-850/60 px-3 py-2">' +
+            '<div class="text-xs text-gray-400">Update Overseerr request state for the whole series after Plex finishes importing.</div>' +
+            '<button onclick="markSeriesAvailable(' + requestId + '); event.stopPropagation();" class="btn-ghost btn-sm"' +
+                (tvInfo.seasons.every(function(season) { return season.status === 'available'; }) ? ' disabled' : '') +
+            '>Mark Series Available in Overseerr</button>' +
+        '</div>' +
         '<div id="season-packs-all-' + requestId + '" class="space-y-1"><div class="text-gray-500 text-sm">Run Search Multi Season Packs to inspect broad multi-season coverage.</div></div>' +
     '</div>';
 
-    return '<div class="space-y-3">' + searchAllSection + tvInfo.seasons.map(function(season) {
+    return '<div class="space-y-3">' + syncBanner + searchAllSection + tvInfo.seasons.map(function(season) {
         var seasonKey = String(season.season_number);
         var seasonBadgeClass = episodeStatusBadge(season.status);
         var seasonReleases = (tvInfo.releases_by_season && tvInfo.releases_by_season[seasonKey]) || [];
         var seasonReleasesHtml = seasonReleases.map(function(r) { return renderReleaseCard(r, requestId); }).join('');
-
         var episodeHtml = (season.episodes || []).map(function(ep) {
             var epKey = seasonKey + '-' + ep.episode_number;
             var badgeClass = episodeStatusBadge(ep.status);
@@ -788,7 +863,10 @@ function renderSeasonAccordion(data) {
             '</details>';
         }).join('');
 
-        var availableText = season.available_count + '/' + season.total_count + ' available';
+        var summaryBits = [season.available_count + '/' + season.total_count + ' available'];
+        if (season.pending_count) summaryBits.push(season.pending_count + ' pending');
+        if (season.unreleased_count) summaryBits.push(season.unreleased_count + ' unreleased');
+        var availableText = summaryBits.join(' \u00B7 ');
 
         return '<details class="group">' +
             '<summary class="flex items-center justify-between gap-3 cursor-pointer rounded-xl border border-gray-700/60 bg-surface-800 p-3 hover:bg-surface-850/80 transition-colors">' +
@@ -832,20 +910,19 @@ async function searchSeasonPacks(requestId, seasonNumber) {
     }
 }
 
+async function markSeriesAvailable(requestId) {
+    try {
+        const response = await fetch('/requests/' + requestId + '/mark-available', { method: 'POST' });
+        if (!response.ok) throw new Error('Server error: ' + response.status);
+        await openRequestDetails(requestId, currentDetailsIndex);
+    } catch (err) {
+        console.error('Mark series available failed:', err);
+    }
+}
+
 function renderSearchAllResults(releases) {
     return releases.map(function(release) {
-        return '<div class="rounded-xl border border-gray-700/60 bg-surface-800 p-2">' +
-            '<div class="flex flex-col gap-2 lg:flex-row lg:items-start lg:justify-between">' +
-                '<div class="min-w-0">' +
-                    '<div class="flex flex-wrap items-center gap-2">' +
-                        '<div class="font-medium text-white text-sm break-words">' + escapeHtml(release.title) + '</div>' +
-                        '<span class="badge ' + (release.passed ? 'badge-green' : 'badge-yellow') + '">' + (release.passed ? 'Passed' : 'Rejected') + '</span>' +
-                    '</div>' +
-                    '<div class="mt-1 text-xs text-gray-400">Score <span class="font-semibold text-emerald-400">' + escapeHtml(release.score) + '</span> &middot; ' + escapeHtml([release.size, release.indexer, release.resolution, release.codec, release.release_group].filter(Boolean).join(' \u00B7 ') || 'No release metadata') + ' &middot; ' + escapeHtml(`Seeders ${release.seeders ?? 0} \u00B7 Leechers ${release.leechers ?? 0}`) + '</div>' +
-                    renderCoverageBadge(release) +
-                '</div>' +
-            '</div>' +
-        '</div>';
+        return renderReleaseCard(release, currentRequestId);
     }).join('');
 }
 

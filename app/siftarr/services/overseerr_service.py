@@ -10,6 +10,24 @@ from app.siftarr.services.http_client import get_shared_client
 
 _STATUS_CACHE: dict[int, tuple[float, dict]] = {}
 _STATUS_CACHE_TTL = 60.0
+_MEDIA_DETAILS_CACHE: dict[tuple[str, int], tuple[float, dict]] = {}
+_MEDIA_DETAILS_CACHE_TTL = 60.0
+
+
+def _extract_overseerr_media_id(payload: dict[str, Any] | None) -> int | None:
+    """Extract Overseerr's internal media id from supported payload shapes."""
+    if not isinstance(payload, dict):
+        return None
+
+    media = payload.get("media")
+    if isinstance(media, dict) and isinstance(media.get("id"), int):
+        return media["id"]
+
+    media_info = payload.get("mediaInfo")
+    if isinstance(media_info, dict) and isinstance(media_info.get("id"), int):
+        return media_info["id"]
+
+    return None
 
 
 def clear_status_cache() -> int:
@@ -17,6 +35,17 @@ def clear_status_cache() -> int:
     cleared_entries = len(_STATUS_CACHE)
     _STATUS_CACHE.clear()
     return cleared_entries
+
+
+def clear_media_details_cache() -> int:
+    """Clear the app-side Overseerr media-details cache."""
+    cleared_entries = len(_MEDIA_DETAILS_CACHE)
+    _MEDIA_DETAILS_CACHE.clear()
+    return cleared_entries
+
+
+class OverseerrApiError(RuntimeError):
+    """Raised when an Overseerr mutation fails."""
 
 
 class OverseerrService:
@@ -184,6 +213,14 @@ class OverseerrService:
         if not self.base_url or not self.api_key:
             return None
 
+        cache_key = (media_type, external_id)
+        now = time.monotonic()
+        cached = _MEDIA_DETAILS_CACHE.get(cache_key)
+        if cached is not None:
+            ts, data = cached
+            if now - ts < _MEDIA_DETAILS_CACHE_TTL:
+                return data
+
         endpoint = f"{self.base_url}/api/v1/{media_type}/{external_id}"
         client = await self._get_client()
         headers = self._get_headers()
@@ -191,7 +228,9 @@ class OverseerrService:
         try:
             response = await client.get(endpoint, headers=headers, timeout=30.0)
             if response.status_code == 200:
-                return response.json()
+                data = response.json()
+                _MEDIA_DETAILS_CACHE[cache_key] = (now, data)
+                return data
             return None
         except httpx.RequestError:
             return None
@@ -235,6 +274,66 @@ class OverseerrService:
             return response.status_code == 200
         except httpx.RequestError:
             return False
+
+    async def mark_season_available(self, media_id: int, season_number: int) -> bool:
+        """Mark a single TV season as available in Overseerr.
+
+        Best-supported assumption: season-scoped availability mutation under the TV media API.
+        """
+        if not self.base_url or not self.api_key:
+            return False
+
+        endpoint = f"{self.base_url}/api/v1/media/{media_id}/season/{season_number}/available"
+        client = await self._get_client()
+        headers = self._get_headers()
+
+        try:
+            response = await client.post(endpoint, headers=headers)
+            if response.status_code == 200:
+                _STATUS_CACHE.clear()
+                _MEDIA_DETAILS_CACHE.clear()
+                return True
+            return False
+        except httpx.RequestError:
+            return False
+
+    async def mark_series_available(self, media_id: int) -> bool:
+        """Mark an entire TV series as available in Overseerr."""
+        if not self.base_url or not self.api_key:
+            return False
+
+        endpoint = f"{self.base_url}/api/v1/media/{media_id}/available"
+        client = await self._get_client()
+        headers = self._get_headers()
+
+        try:
+            response = await client.post(endpoint, headers=headers)
+            if response.status_code == 200:
+                _STATUS_CACHE.clear()
+                _MEDIA_DETAILS_CACHE.clear()
+                return True
+            return False
+        except httpx.RequestError:
+            return False
+
+    async def resolve_tv_media_id(
+        self,
+        *,
+        overseerr_request_id: int | None,
+        tmdb_id: int | None,
+    ) -> int | None:
+        """Resolve Overseerr's internal TV media id for season-scoped mutations."""
+        if overseerr_request_id is not None:
+            request_payload = await self.get_request(overseerr_request_id)
+            media_id = _extract_overseerr_media_id(request_payload)
+            if media_id is not None:
+                return media_id
+
+        if tmdb_id is None:
+            return None
+
+        media_details = await self.get_media_details("tv", tmdb_id)
+        return _extract_overseerr_media_id(media_details)
 
     async def decline_request(self, request_id: int, reason: str | None = None) -> bool:
         """Decline a request in Overseerr via API."""

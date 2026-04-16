@@ -1,5 +1,6 @@
 """Tests for settings router cache-clearing behavior."""
 
+from typing import cast
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -33,7 +34,7 @@ class TestSettingsRouter:
         )
 
         response = await settings.get_settings_page(MagicMock(), db=mock_db)
-        body = response.body.decode()
+        body = cast(bytes, response.body).decode()
 
         assert "Clear App Search Cache" in body
         assert "releases table" in body
@@ -65,11 +66,12 @@ class TestSettingsRouter:
         monkeypatch.setattr(settings, "clear_status_cache", MagicMock(return_value=3))
 
         response = await settings.clear_cache(MagicMock(), db=mock_db)
+        context = cast(dict, getattr(response, "context", None))
 
-        assert response.context["message_type"] == "success"
-        assert "removed 4 stored release result(s)" in response.context["message"]
-        assert "detached 2 episode link(s)" in response.context["message"]
-        assert "cleared 3 Overseerr status cache entries" in response.context["message"]
+        assert context["message_type"] == "success"
+        assert "removed 4 stored release result(s)" in context["message"]
+        assert "detached 2 episode link(s)" in context["message"]
+        assert "cleared 3 Overseerr status cache entries" in context["message"]
 
     @pytest.mark.asyncio
     async def test_clear_cache_route_reports_failure_and_rolls_back(self, monkeypatch):
@@ -97,8 +99,9 @@ class TestSettingsRouter:
         monkeypatch.setattr(settings, "clear_status_cache", clear_status_cache)
 
         response = await settings.clear_cache(MagicMock(), db=mock_db)
+        context = cast(dict, getattr(response, "context", None))
 
-        assert response.context["message_type"] == "error"
-        assert response.context["message"] == "Failed to clear app search cache: boom"
+        assert context["message_type"] == "error"
+        assert context["message"] == "Failed to clear app search cache: boom"
         mock_db.rollback.assert_awaited_once()
         clear_status_cache.assert_not_called()

@@ -19,6 +19,10 @@ add_size_limit_mode_to_rules = _load_migration_module(
     "2026_04_14_1200-add_size_limit_mode_to_rules.py",
     "add_size_limit_mode_to_rules",
 )
+add_unreleased_status_support = _load_migration_module(
+    "2026_04_16_1015-add_unreleased_status_support.py",
+    "add_unreleased_status_support",
+)
 
 
 class TestAddSizeLimitModeMigration:
@@ -62,3 +66,79 @@ class TestAddSizeLimitModeMigration:
         assert created_enums == [(bind, True)]
         add_column.assert_not_called()
         alter_column.assert_not_called()
+
+
+class TestAddUnreleasedStatusSupportMigration:
+    def test_revision_links_to_latest_prior_head(self):
+        """Migration should continue the existing chain instead of creating another head."""
+        assert add_unreleased_status_support.down_revision == "add_season_coverage_to_releases"
+
+    def test_upgrade_creates_requeststatus_enum_with_unreleased_for_non_sqlite(self, monkeypatch):
+        """Migration should include the unreleased enum value on native-enum databases."""
+        bind = MagicMock()
+        bind.dialect.name = "postgresql"
+        executed_sql = []
+
+        monkeypatch.setattr(add_unreleased_status_support.op, "get_bind", lambda: bind)
+        monkeypatch.setattr(
+            bind, "execute", lambda statement, *args, **kwargs: executed_sql.append(str(statement))
+        )
+
+        add_unreleased_status_support.upgrade()
+
+        assert executed_sql == ["ALTER TYPE requeststatus ADD VALUE IF NOT EXISTS 'UNRELEASED'"]
+
+    def test_upgrade_is_noop_for_sqlite(self, monkeypatch):
+        """SQLite should rebuild constrained status tables to include unreleased."""
+        bind = MagicMock()
+        bind.dialect.name = "sqlite"
+        inspector = MagicMock()
+        inspector.get_table_names.return_value = ["requests", "seasons", "episodes"]
+        rebuilt_tables = []
+
+        monkeypatch.setattr(add_unreleased_status_support.op, "get_bind", lambda: bind)
+        monkeypatch.setattr(add_unreleased_status_support, "inspect", lambda _: inspector)
+        monkeypatch.setattr(
+            add_unreleased_status_support,
+            "_sqlite_status_allows_unreleased",
+            lambda bind, table_name: False,
+        )
+
+        class FakeBatch:
+            def __init__(self, table_name, recreate):
+                self.table_name = table_name
+                self.recreate = recreate
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+            def alter_column(self, column_name, **kwargs):
+                rebuilt_tables.append((self.table_name, column_name, kwargs["existing_nullable"]))
+
+        monkeypatch.setattr(
+            add_unreleased_status_support.op,
+            "batch_alter_table",
+            lambda table_name, recreate: FakeBatch(table_name, recreate),
+        )
+
+        add_unreleased_status_support.upgrade()
+
+        assert rebuilt_tables == [
+            ("requests", "status", False),
+            ("seasons", "status", False),
+            ("episodes", "status", False),
+        ]
+
+    def test_sqlite_status_allows_unreleased_checks_table_sql(self, monkeypatch):
+        """SQLite helper should detect whether the recreated check already allows unreleased."""
+        bind = MagicMock()
+        bind.execute.return_value.fetchone.return_value = (
+            "CREATE TABLE requests (status VARCHAR CHECK (status IN ('PENDING','UNRELEASED')))",
+        )
+
+        assert (
+            add_unreleased_status_support._sqlite_status_allows_unreleased(bind, "requests") is True
+        )

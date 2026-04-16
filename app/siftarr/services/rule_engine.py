@@ -190,6 +190,12 @@ class RuleEngine:
         scaled_max = max_size_bytes * season_count if max_size_bytes is not None else None
         return scaled_min, scaled_max
 
+    @staticmethod
+    def _format_size_gb(size_bytes: int) -> str:
+        """Format bytes using the dashboard's 2-decimal GiB display."""
+        gib = size_bytes / 1024 / 1024 / 1024
+        return f"{gib:.2f} GB"
+
     def evaluate(self, release: ProwlarrRelease) -> ReleaseEvaluation:
         """
         Evaluate a single release against all rules.
@@ -207,7 +213,10 @@ class RuleEngine:
             min_size_bytes, max_size_bytes = self._get_size_limit_bounds(rule, release)
             if min_size_bytes is not None and release.size < min_size_bytes:
                 passed = False
-                rejection_reason = f"Size {release.size} below minimum {min_size_bytes}"
+                rejection_reason = (
+                    f"Size {self._format_size_gb(release.size)} below minimum "
+                    f"{self._format_size_gb(min_size_bytes)}"
+                )
                 matches.append(
                     RuleMatch(
                         rule_id=rule.rule_id,
@@ -218,7 +227,10 @@ class RuleEngine:
                 break
             if max_size_bytes is not None and release.size > max_size_bytes:
                 passed = False
-                rejection_reason = f"Size {release.size} above maximum {max_size_bytes}"
+                rejection_reason = (
+                    f"Size {self._format_size_gb(release.size)} above maximum "
+                    f"{self._format_size_gb(max_size_bytes)}"
+                )
                 matches.append(
                     RuleMatch(
                         rule_id=rule.rule_id,

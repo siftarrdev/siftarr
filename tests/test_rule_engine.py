@@ -148,9 +148,7 @@ class TestRuleEngine:
         result = engine.evaluate(release)
 
         assert result.passed is False
-        assert result.rejection_reason == (
-            f"Size {12 * 1024 * 1024 * 1024} below minimum {15 * 1024 * 1024 * 1024}"
-        )
+        assert result.rejection_reason == "Size 12.00 GB below minimum 15.00 GB"
 
     def test_evaluate_size_limit_per_season_scales_multi_season_pack_maximum(self):
         """Per-season mode should scale maximum by covered season count."""
@@ -178,9 +176,7 @@ class TestRuleEngine:
         result = engine.evaluate(release)
 
         assert result.passed is False
-        assert result.rejection_reason == (
-            f"Size {11 * 1024 * 1024 * 1024} above maximum {10 * 1024 * 1024 * 1024}"
-        )
+        assert result.rejection_reason == "Size 11.00 GB above maximum 10.00 GB"
 
     def test_evaluate_size_limit_per_season_preserves_single_season_pack_behavior(self):
         """Single-season packs should keep total-size behavior in per-season mode."""
@@ -208,9 +204,7 @@ class TestRuleEngine:
         result = engine.evaluate(release)
 
         assert result.passed is False
-        assert result.rejection_reason == (
-            f"Size {4 * 1024 * 1024 * 1024} below minimum {5 * 1024 * 1024 * 1024}"
-        )
+        assert result.rejection_reason == "Size 4.00 GB below minimum 5.00 GB"
 
     def test_evaluate_size_limit_per_season_preserves_episode_behavior(self):
         """Non-pack episode releases should keep total-size behavior in per-season mode."""
@@ -238,9 +232,7 @@ class TestRuleEngine:
         result = engine.evaluate(release)
 
         assert result.passed is False
-        assert result.rejection_reason == (
-            f"Size {1 * 1024 * 1024 * 1024} below minimum {2 * 1024 * 1024 * 1024}"
-        )
+        assert result.rejection_reason == "Size 1.00 GB below minimum 2.00 GB"
 
     def test_evaluate_size_limit_per_season_preserves_movie_behavior(self):
         """Movies should keep total-size behavior in per-season mode."""
@@ -268,9 +260,7 @@ class TestRuleEngine:
         result = engine.evaluate(release)
 
         assert result.passed is False
-        assert result.rejection_reason == (
-            f"Size {4 * 1024 * 1024 * 1024} below minimum {5 * 1024 * 1024 * 1024}"
-        )
+        assert result.rejection_reason == "Size 4.00 GB below minimum 5.00 GB"
 
     def test_evaluate_exclusion_rejection(self):
         """Test exclusion pattern rejection."""

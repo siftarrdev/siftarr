@@ -21,7 +21,7 @@ from app.siftarr.version import __version__
 
 scheduler_service: SchedulerService | None = None
 INITIAL_MIGRATION_REVISION = "bc9c8cfbe08b"
-LATEST_KNOWN_MIGRATION_REVISION = "add_plex_rating_key_to_requests"
+LATEST_KNOWN_MIGRATION_REVISION = "add_unreleased_status_support"
 
 
 def _configure_logging() -> None:
@@ -179,6 +179,25 @@ def _ensure_staged_torrents_selection_source_column() -> None:
         connection.commit()
 
 
+def _ensure_sqlite_requeststatus_allows_unreleased() -> None:
+    """Best-effort SQLite compatibility hook for the new unreleased status value."""
+    db_path = _get_sqlite_db_path()
+    if db_path is None or not db_path.exists():
+        return
+
+    with sqlite3.connect(db_path) as connection:
+        cursor = connection.execute(
+            "SELECT sql FROM sqlite_master WHERE type = 'table' AND name IN ('requests', 'seasons', 'episodes')"
+        )
+        table_sql = " ".join(row[0] for row in cursor.fetchall() if row and row[0])
+        if "UNRELEASED" in table_sql or "unreleased" in table_sql:
+            return
+
+        logging.getLogger(__name__).warning(
+            "SQLite schema may not yet advertise the unreleased request status; apply Alembic migrations before using it."
+        )
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Application lifespan manager for startup/shutdown events."""
@@ -235,6 +254,7 @@ async def lifespan(app: FastAPI):
 
     _ensure_request_rejection_reason_column()
     _ensure_staged_torrents_selection_source_column()
+    _ensure_sqlite_requeststatus_allows_unreleased()
 
     # Initialize database tables
     await init_db()
