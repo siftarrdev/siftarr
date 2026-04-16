@@ -75,6 +75,10 @@ _SEASON_RANGE_PATTERNS = [
         r"(?:^|[.()\s_]+)Season[.\s]?(\d{1,2})\s*-\s*(?:Season[.\s]?)?(\d{1,2})(?![0-9])",
         re.IGNORECASE,
     ),
+    re.compile(
+        r"(?:^|[.()\s_]+)Seasons?[.\s]+(\d{1,2})\s+(?:thru|through)\s+(?:Seasons?[.\s]?)?(\d{1,2})(?![0-9])",
+        re.IGNORECASE,
+    ),
 ]
 
 _SEASON_PACK_PATTERNS = [
@@ -88,6 +92,7 @@ _COMPLETE_SERIES_PATTERNS = [
     ),
     re.compile(r"(?:^|[.()\s_]+)All[.()\s_]+Seasons?(?:$|[.()\s_]+)", re.IGNORECASE),
     re.compile(r"(?:^|[.()\s_]+)Complete[.()\s_]+Seasons?(?:$|[.()\s_]+)", re.IGNORECASE),
+    re.compile(r"(?:^|[.()\s_]+)Complete(?:$|[.()\s_]+)", re.IGNORECASE),
 ]
 
 
@@ -100,6 +105,20 @@ def _append_unique(numbers: list[int], values: tuple[int, ...]) -> None:
     for value in values:
         if value not in numbers:
             numbers.append(value)
+
+
+def _is_complete_series_match(
+    title: str,
+    season_numbers: tuple[int, ...],
+    episode_number: int | None,
+) -> bool:
+    if episode_number is not None:
+        return False
+
+    if not any(pattern.search(title) for pattern in _COMPLETE_SERIES_PATTERNS):
+        return False
+
+    return len(season_numbers) != 1
 
 
 def parse_release_coverage(title: str) -> ParsedReleaseCoverage:
@@ -134,10 +153,16 @@ def parse_release_coverage(title: str) -> ParsedReleaseCoverage:
     for _, _, numbers in sorted(matches):
         _append_unique(season_numbers, numbers)
 
+    parsed_season_numbers = tuple(season_numbers)
+
     return ParsedReleaseCoverage(
-        season_numbers=tuple(season_numbers),
+        season_numbers=parsed_season_numbers,
         episode_number=None,
-        is_complete_series=any(pattern.search(title) for pattern in _COMPLETE_SERIES_PATTERNS),
+        is_complete_series=_is_complete_series_match(
+            title,
+            parsed_season_numbers,
+            None,
+        ),
     )
 
 

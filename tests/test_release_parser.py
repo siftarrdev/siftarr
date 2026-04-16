@@ -92,6 +92,20 @@ class TestParseReleaseCoverage:
         result = parse_release_coverage("Show.S01-S05.1080p")
         assert result == ParsedReleaseCoverage(season_numbers=(1, 2, 3, 4, 5), episode_number=None)
 
+    def test_multi_season_compact_sxx_range_without_repeated_s(self):
+        result = parse_release_coverage("Show.S01-07.1080p")
+        assert result == ParsedReleaseCoverage(
+            season_numbers=(1, 2, 3, 4, 5, 6, 7),
+            episode_number=None,
+        )
+
+    def test_multi_season_compact_single_digit_sxx_range(self):
+        result = parse_release_coverage("Show.S1-7.1080p")
+        assert result == ParsedReleaseCoverage(
+            season_numbers=(1, 2, 3, 4, 5, 6, 7),
+            episode_number=None,
+        )
+
     def test_multi_season_word_range(self):
         result = parse_release_coverage("Show.Season 1-3.1080p")
         assert result == ParsedReleaseCoverage(season_numbers=(1, 2, 3), episode_number=None)
@@ -112,6 +126,14 @@ class TestParseReleaseCoverage:
             is_complete_series=True,
         )
 
+    def test_bare_complete_marks_complete_series(self):
+        result = parse_release_coverage("Show.Complete.1080p")
+        assert result == ParsedReleaseCoverage(
+            season_numbers=(),
+            episode_number=None,
+            is_complete_series=True,
+        )
+
     def test_complete_series_with_season_numbers(self):
         result = parse_release_coverage("Show.S01-S03.Complete.Series.1080p")
         assert result == ParsedReleaseCoverage(
@@ -120,6 +142,55 @@ class TestParseReleaseCoverage:
             is_complete_series=True,
         )
 
+    def test_complete_single_season_prefix_stays_single_season(self):
+        result = parse_release_coverage("Show.Complete.S01.1080p")
+        assert result == ParsedReleaseCoverage(
+            season_numbers=(1,),
+            episode_number=None,
+        )
+
+    def test_complete_single_season_suffix_stays_single_season(self):
+        result = parse_release_coverage("Show.S01.Complete.1080p")
+        assert result == ParsedReleaseCoverage(
+            season_numbers=(1,),
+            episode_number=None,
+        )
+
+    def test_complete_episode_title_stays_exact_episode(self):
+        result = parse_release_coverage("Show.S01E02.Complete.1080p")
+        assert result == ParsedReleaseCoverage(
+            season_numbers=(1,),
+            episode_number=2,
+        )
+
     def test_no_match_returns_empty_coverage(self):
         result = parse_release_coverage("Movie.4K.Bluray")
         assert result == ParsedReleaseCoverage(season_numbers=(), episode_number=None)
+
+    def test_multi_season_thru_range(self):
+        result = parse_release_coverage("Show.Seasons 1 thru 7.1080p")
+        assert result == ParsedReleaseCoverage(
+            season_numbers=(1, 2, 3, 4, 5, 6, 7),
+            episode_number=None,
+        )
+
+    def test_multi_season_through_range(self):
+        result = parse_release_coverage("Show.Season 1 through 5.1080p")
+        assert result == ParsedReleaseCoverage(
+            season_numbers=(1, 2, 3, 4, 5),
+            episode_number=None,
+        )
+
+    def test_multi_season_thru_range_case_insensitive(self):
+        result = parse_release_coverage("Show.SEASONS 2 THRU 9.1080p")
+        assert result == ParsedReleaseCoverage(
+            season_numbers=(2, 3, 4, 5, 6, 7, 8, 9),
+            episode_number=None,
+        )
+
+    def test_multi_season_through_range_with_optional_season_prefix(self):
+        result = parse_release_coverage("Show.Seasons 3 through 6.720p")
+        assert result == ParsedReleaseCoverage(
+            season_numbers=(3, 4, 5, 6),
+            episode_number=None,
+        )
