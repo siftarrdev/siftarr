@@ -2,7 +2,7 @@
 
 from unittest.mock import MagicMock
 
-from app.siftarr.models.rule import Rule, RuleType, SizeLimitMode
+from app.siftarr.models.rule import Rule, RuleType, TVTarget
 from app.siftarr.services.prowlarr_service import ProwlarrRelease
 from app.siftarr.services.rule_engine import ReleaseEvaluation, RuleEngine, RuleMatch, SizeLimitRule
 
@@ -57,14 +57,14 @@ class TestRuleEngine:
         mock_rule.pattern = "size_limit"
         mock_rule.min_size_gb = 1
         mock_rule.max_size_gb = 10
-        mock_rule.size_limit_mode = SizeLimitMode.PER_SEASON
+        mock_rule.tv_target = TVTarget.SEASON_PACK
 
         engine = RuleEngine.from_db_rules(rules=[mock_rule])
 
         assert len(engine.size_limit_rules) == 1
         assert engine.size_limit_rules[0].min_size_bytes == 1 * 1024 * 1024 * 1024
         assert engine.size_limit_rules[0].max_size_bytes == 10 * 1024 * 1024 * 1024
-        assert engine.size_limit_rules[0].mode == SizeLimitMode.PER_SEASON
+        assert engine.size_limit_rules[0].tv_target == TVTarget.SEASON_PACK
 
     def test_evaluate_no_rules(self):
         """Test evaluating with no rules."""
@@ -122,8 +122,8 @@ class TestRuleEngine:
         assert result.rejection_reason is not None
         assert "above maximum" in result.rejection_reason
 
-    def test_evaluate_size_limit_per_season_scales_multi_season_pack_minimum(self):
-        """Per-season mode should scale minimum by covered season count."""
+    def test_evaluate_size_limit_targets_tv_season_packs_only(self):
+        """Season-pack size rules should apply to pack releases only."""
         engine = RuleEngine(
             size_limit_rules=[
                 SizeLimitRule(
@@ -131,69 +131,13 @@ class TestRuleEngine:
                     rule_name="TV Pack Size",
                     min_size_bytes=5 * 1024 * 1024 * 1024,
                     max_size_bytes=20 * 1024 * 1024 * 1024,
-                    mode=SizeLimitMode.PER_SEASON,
+                    tv_target=TVTarget.SEASON_PACK,
                 )
             ]
         )
 
         release = ProwlarrRelease(
             title="Show.S01-S03.1080p",
-            size=12 * 1024 * 1024 * 1024,
-            seeders=10,
-            leechers=2,
-            download_url="http://example.com",
-            indexer="test",
-        )
-
-        result = engine.evaluate(release)
-
-        assert result.passed is False
-        assert result.rejection_reason == "Size 12.00 GB below minimum 15.00 GB"
-
-    def test_evaluate_size_limit_per_season_scales_multi_season_pack_maximum(self):
-        """Per-season mode should scale maximum by covered season count."""
-        engine = RuleEngine(
-            size_limit_rules=[
-                SizeLimitRule(
-                    rule_id=1,
-                    rule_name="TV Pack Size",
-                    min_size_bytes=2 * 1024 * 1024 * 1024,
-                    max_size_bytes=5 * 1024 * 1024 * 1024,
-                    mode=SizeLimitMode.PER_SEASON,
-                )
-            ]
-        )
-
-        release = ProwlarrRelease(
-            title="Show.S01-S02.1080p",
-            size=11 * 1024 * 1024 * 1024,
-            seeders=10,
-            leechers=2,
-            download_url="http://example.com",
-            indexer="test",
-        )
-
-        result = engine.evaluate(release)
-
-        assert result.passed is False
-        assert result.rejection_reason == "Size 11.00 GB above maximum 10.00 GB"
-
-    def test_evaluate_size_limit_per_season_preserves_single_season_pack_behavior(self):
-        """Single-season packs should keep total-size behavior in per-season mode."""
-        engine = RuleEngine(
-            size_limit_rules=[
-                SizeLimitRule(
-                    rule_id=1,
-                    rule_name="TV Pack Size",
-                    min_size_bytes=5 * 1024 * 1024 * 1024,
-                    max_size_bytes=None,
-                    mode=SizeLimitMode.PER_SEASON,
-                )
-            ]
-        )
-
-        release = ProwlarrRelease(
-            title="Show.S01.1080p",
             size=4 * 1024 * 1024 * 1024,
             seeders=10,
             leechers=2,
@@ -206,16 +150,16 @@ class TestRuleEngine:
         assert result.passed is False
         assert result.rejection_reason == "Size 4.00 GB below minimum 5.00 GB"
 
-    def test_evaluate_size_limit_per_season_preserves_episode_behavior(self):
-        """Non-pack episode releases should keep total-size behavior in per-season mode."""
+    def test_evaluate_size_limit_targets_tv_episodes_only(self):
+        """Episode size rules should apply to single-episode releases only."""
         engine = RuleEngine(
             size_limit_rules=[
                 SizeLimitRule(
                     rule_id=1,
-                    rule_name="TV Pack Size",
+                    rule_name="TV Episode Size",
                     min_size_bytes=2 * 1024 * 1024 * 1024,
                     max_size_bytes=None,
-                    mode=SizeLimitMode.PER_SEASON,
+                    tv_target=TVTarget.EPISODE,
                 )
             ]
         )
@@ -234,16 +178,70 @@ class TestRuleEngine:
         assert result.passed is False
         assert result.rejection_reason == "Size 1.00 GB below minimum 2.00 GB"
 
-    def test_evaluate_size_limit_per_season_preserves_movie_behavior(self):
-        """Movies should keep total-size behavior in per-season mode."""
+    def test_evaluate_episode_target_skips_season_pack(self):
+        """Episode-target rules should not reject season packs."""
+        engine = RuleEngine(
+            size_limit_rules=[
+                SizeLimitRule(
+                    rule_id=1,
+                    rule_name="TV Episode Size",
+                    min_size_bytes=5 * 1024 * 1024 * 1024,
+                    max_size_bytes=None,
+                    tv_target=TVTarget.EPISODE,
+                )
+            ]
+        )
+
+        release = ProwlarrRelease(
+            title="Show.S01.1080p",
+            size=4 * 1024 * 1024 * 1024,
+            seeders=10,
+            leechers=2,
+            download_url="http://example.com",
+            indexer="test",
+        )
+
+        result = engine.evaluate(release)
+
+        assert result.passed is True
+
+    def test_evaluate_season_pack_target_skips_episode_release(self):
+        """Season-pack-target rules should not reject single episodes."""
         engine = RuleEngine(
             size_limit_rules=[
                 SizeLimitRule(
                     rule_id=1,
                     rule_name="TV Pack Size",
+                    min_size_bytes=2 * 1024 * 1024 * 1024,
+                    max_size_bytes=None,
+                    tv_target=TVTarget.SEASON_PACK,
+                )
+            ]
+        )
+
+        release = ProwlarrRelease(
+            title="Show.S01E01.1080p",
+            size=1 * 1024 * 1024 * 1024,
+            seeders=10,
+            leechers=2,
+            download_url="http://example.com",
+            indexer="test",
+        )
+
+        result = engine.evaluate(release)
+
+        assert result.passed is True
+
+    def test_evaluate_movie_size_rule_without_tv_target(self):
+        """Movie size rules should still work without a TV target."""
+        engine = RuleEngine(
+            size_limit_rules=[
+                SizeLimitRule(
+                    rule_id=1,
+                    rule_name="Movie Size",
                     min_size_bytes=5 * 1024 * 1024 * 1024,
                     max_size_bytes=None,
-                    mode=SizeLimitMode.PER_SEASON,
+                    tv_target=None,
                 )
             ]
         )
@@ -261,6 +259,162 @@ class TestRuleEngine:
 
         assert result.passed is False
         assert result.rejection_reason == "Size 4.00 GB below minimum 5.00 GB"
+
+    def test_evaluate_both_scope_episode_target_applies_to_movies_and_tv(self):
+        """Both-scoped episode rules should apply to movies and single episodes."""
+        engine = RuleEngine(
+            size_limit_rules=[
+                SizeLimitRule(
+                    rule_id=1,
+                    rule_name="Both Episode Target",
+                    min_size_bytes=5 * 1024 * 1024 * 1024,
+                    max_size_bytes=None,
+                    tv_target=TVTarget.EPISODE,
+                    media_scope="both",
+                )
+            ]
+        )
+
+        movie_release = ProwlarrRelease(
+            title="Movie.2024.1080p",
+            size=4 * 1024 * 1024 * 1024,
+            seeders=10,
+            leechers=2,
+            download_url="http://example.com",
+            indexer="test",
+        )
+        tv_episode_release = ProwlarrRelease(
+            title="Show.S01E01.1080p",
+            size=4 * 1024 * 1024 * 1024,
+            seeders=10,
+            leechers=2,
+            download_url="http://example.com",
+            indexer="test",
+        )
+
+        movie_result = engine.evaluate(movie_release)
+        tv_result = engine.evaluate(tv_episode_release)
+
+        assert movie_result.passed is False
+        assert movie_result.rejection_reason == "Size 4.00 GB below minimum 5.00 GB"
+        assert tv_result.passed is False
+
+    def test_evaluate_both_scope_season_target_applies_to_movies_and_tv(self):
+        """Both-scoped season-pack rules should apply to movies and TV packs."""
+        engine = RuleEngine(
+            size_limit_rules=[
+                SizeLimitRule(
+                    rule_id=1,
+                    rule_name="Both Pack Target",
+                    min_size_bytes=5 * 1024 * 1024 * 1024,
+                    max_size_bytes=None,
+                    tv_target=TVTarget.SEASON_PACK,
+                    media_scope="both",
+                )
+            ]
+        )
+
+        movie_release = ProwlarrRelease(
+            title="Movie.2024.1080p",
+            size=4 * 1024 * 1024 * 1024,
+            seeders=10,
+            leechers=2,
+            download_url="http://example.com",
+            indexer="test",
+        )
+        tv_pack_release = ProwlarrRelease(
+            title="Show.S01-S03.1080p",
+            size=4 * 1024 * 1024 * 1024,
+            seeders=10,
+            leechers=2,
+            download_url="http://example.com",
+            indexer="test",
+        )
+
+        movie_result = engine.evaluate(movie_release)
+        tv_result = engine.evaluate(tv_pack_release)
+
+        assert movie_result.passed is False
+        assert movie_result.rejection_reason == "Size 4.00 GB below minimum 5.00 GB"
+        assert tv_result.passed is False
+
+    def test_evaluate_both_episode_target_still_applies_to_movies(self):
+        """A both-scoped episode-target rule should still apply to movie releases."""
+        engine = RuleEngine(
+            size_limit_rules=[
+                SizeLimitRule(
+                    rule_id=1,
+                    rule_name="Both Episode Target",
+                    min_size_bytes=5 * 1024 * 1024 * 1024,
+                    max_size_bytes=None,
+                    tv_target=TVTarget.EPISODE,
+                    media_scope="both",
+                )
+            ]
+        )
+
+        movie_release = ProwlarrRelease(
+            title="Movie.2024.1080p",
+            size=4 * 1024 * 1024 * 1024,
+            seeders=10,
+            leechers=2,
+            download_url="http://example.com",
+            indexer="test",
+        )
+        tv_pack_release = ProwlarrRelease(
+            title="Show.S01.1080p",
+            size=4 * 1024 * 1024 * 1024,
+            seeders=10,
+            leechers=2,
+            download_url="http://example.com",
+            indexer="test",
+        )
+
+        movie_result = engine.evaluate(movie_release)
+        tv_pack_result = engine.evaluate(tv_pack_release)
+
+        assert movie_result.passed is False
+        assert movie_result.rejection_reason == "Size 4.00 GB below minimum 5.00 GB"
+        assert tv_pack_result.passed is True
+
+    def test_evaluate_both_season_pack_target_still_applies_to_movies(self):
+        """A both-scoped season-pack-target rule should still apply to movie releases."""
+        engine = RuleEngine(
+            size_limit_rules=[
+                SizeLimitRule(
+                    rule_id=1,
+                    rule_name="Both Pack Target",
+                    min_size_bytes=5 * 1024 * 1024 * 1024,
+                    max_size_bytes=None,
+                    tv_target=TVTarget.SEASON_PACK,
+                    media_scope="both",
+                )
+            ]
+        )
+
+        movie_release = ProwlarrRelease(
+            title="Movie.2024.1080p",
+            size=4 * 1024 * 1024 * 1024,
+            seeders=10,
+            leechers=2,
+            download_url="http://example.com",
+            indexer="test",
+        )
+        tv_episode_release = ProwlarrRelease(
+            title="Show.S01E01.1080p",
+            size=4 * 1024 * 1024 * 1024,
+            seeders=10,
+            leechers=2,
+            download_url="http://example.com",
+            indexer="test",
+        )
+
+        movie_result = engine.evaluate(movie_release)
+        tv_episode_result = engine.evaluate(tv_episode_release)
+
+        assert movie_result.passed is False
+        assert movie_result.rejection_reason == "Size 4.00 GB below minimum 5.00 GB"
+        assert tv_episode_result.passed is True
 
     def test_evaluate_exclusion_rejection(self):
         """Test exclusion pattern rejection."""

@@ -3,7 +3,7 @@ from collections.abc import Sequence
 from contextlib import suppress
 from dataclasses import dataclass
 
-from app.siftarr.models.rule import SizeLimitMode
+from app.siftarr.models.rule import TVTarget
 from app.siftarr.services.prowlarr_service import ProwlarrRelease
 from app.siftarr.services.release_parser import parse_release_coverage
 
@@ -14,7 +14,8 @@ class SizeLimitRule:
     rule_name: str
     min_size_bytes: int | None
     max_size_bytes: int | None
-    mode: SizeLimitMode = SizeLimitMode.TOTAL
+    tv_target: TVTarget | None = None
+    media_scope: str = "both"
 
 
 @dataclass
@@ -53,7 +54,7 @@ class RuleEngine:
         self,
         size_limit_rules: Sequence[
             tuple[int, str, int | None, int | None]
-            | tuple[int, str, int | None, int | None, SizeLimitMode]
+            | tuple[int, str, int | None, int | None, TVTarget | None]
             | SizeLimitRule
         ]
         | None = None,
@@ -98,6 +99,42 @@ class RuleEngine:
             return True
         return rule_scope == media_type
 
+    @staticmethod
+    def _release_matches_tv_target(release: ProwlarrRelease, tv_target: TVTarget | None) -> bool:
+        if tv_target is None:
+            return False
+
+        coverage = parse_release_coverage(release.title)
+        is_episode = coverage.episode_number is not None
+        is_pack = (
+            coverage.is_complete_series or len(coverage.season_numbers) >= 1 and not is_episode
+        )
+
+        if tv_target == TVTarget.EPISODE:
+            return is_episode
+        if tv_target == TVTarget.SEASON_PACK:
+            return is_pack
+        return False
+
+    @classmethod
+    def _size_rule_applies_to_release(cls, rule: SizeLimitRule, release: ProwlarrRelease) -> bool:
+        coverage = parse_release_coverage(release.title)
+        is_tv_release = bool(
+            coverage.season_numbers
+            or coverage.is_complete_series
+            or coverage.episode_number is not None
+        )
+
+        if rule.media_scope == "movie" and is_tv_release:
+            return False
+        if rule.media_scope == "tv" and not is_tv_release:
+            return False
+
+        if rule.tv_target is not None and is_tv_release:
+            return cls._release_matches_tv_target(release, rule.tv_target)
+
+        return True
+
     @classmethod
     def from_db_rules(
         cls,
@@ -134,7 +171,8 @@ class RuleEngine:
                             rule_name=rule.name,
                             min_size_bytes=min_bytes,
                             max_size_bytes=max_bytes,
-                            mode=getattr(rule, "size_limit_mode", SizeLimitMode.TOTAL),
+                            tv_target=getattr(rule, "tv_target", None),
+                            media_scope=getattr(rule, "media_scope", "both"),
                         )
                     )
                 elif rule.rule_type.value == "exclusion":
@@ -171,26 +209,6 @@ class RuleEngine:
         return None
 
     @staticmethod
-    def _get_size_limit_bounds(
-        rule: SizeLimitRule,
-        release: ProwlarrRelease,
-    ) -> tuple[int | None, int | None]:
-        min_size_bytes = rule.min_size_bytes
-        max_size_bytes = rule.max_size_bytes
-
-        if rule.mode != SizeLimitMode.PER_SEASON:
-            return min_size_bytes, max_size_bytes
-
-        coverage = parse_release_coverage(release.title)
-        season_count = len(coverage.season_numbers)
-        if coverage.episode_number is not None or season_count <= 1:
-            return min_size_bytes, max_size_bytes
-
-        scaled_min = min_size_bytes * season_count if min_size_bytes is not None else None
-        scaled_max = max_size_bytes * season_count if max_size_bytes is not None else None
-        return scaled_min, scaled_max
-
-    @staticmethod
     def _format_size_gb(size_bytes: int) -> str:
         """Format bytes using the dashboard's 2-decimal GiB display."""
         gib = size_bytes / 1024 / 1024 / 1024
@@ -210,7 +228,11 @@ class RuleEngine:
 
         # Check size limits
         for rule in self.size_limit_rules:
-            min_size_bytes, max_size_bytes = self._get_size_limit_bounds(rule, release)
+            if not self._size_rule_applies_to_release(rule, release):
+                continue
+
+            min_size_bytes = rule.min_size_bytes
+            max_size_bytes = rule.max_size_bytes
             if min_size_bytes is not None and release.size < min_size_bytes:
                 passed = False
                 rejection_reason = (
