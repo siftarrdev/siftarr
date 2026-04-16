@@ -2,7 +2,11 @@
 
 import pytest
 
-from app.siftarr.services.prowlarr_service import ProwlarrSearchResult, ProwlarrService
+from app.siftarr.services.prowlarr_service import (
+    ProwlarrRelease,
+    ProwlarrSearchResult,
+    ProwlarrService,
+)
 
 
 class TestProwlarrService:
@@ -153,3 +157,98 @@ class TestProwlarrService:
         assert calls[0]["query"] == "Example Show {tvdbid:5678} {season:1} {episode:2} {year:2024}"
         assert calls[1]["type"] == "search"
         assert calls[1]["query"] == "Example Show S01E02 2024"
+
+    @pytest.mark.asyncio
+    async def test_search_by_tvdbid_broad_search_tries_multiple_queries(self, monkeypatch) -> None:
+        """Broad TV search (no season, no episode) should try multiple title query strategies."""
+        service = ProwlarrService()
+        calls = []
+
+        async def fake_search(params):
+            calls.append(params)
+            return ProwlarrSearchResult(releases=[], query_time_ms=10)
+
+        monkeypatch.setattr(service, "_search", fake_search)
+
+        await service.search_by_tvdbid(5678, title="The Mentalist", year=2024)
+
+        # First call: metadata query
+        assert calls[0]["type"] == "tvsearch"
+        assert calls[0]["query"] == "The Mentalist {tvdbid:5678} {year:2024}"
+        # Subsequent calls: multiple title query strategies
+        assert calls[1]["type"] == "search"
+        assert calls[1]["query"] == "The Mentalist S01-"
+        assert calls[2]["type"] == "search"
+        assert calls[2]["query"] == "The Mentalist complete"
+        assert calls[3]["type"] == "search"
+        assert calls[3]["query"] == "The Mentalist season 1-"
+
+    @pytest.mark.asyncio
+    async def test_search_by_tvdbid_broad_search_aggregates_unique_releases(
+        self, monkeypatch
+    ) -> None:
+        """Broad TV search should return all unique releases across query strategies."""
+        service = ProwlarrService()
+        call_count = [0]
+
+        def make_release(index: int, title: str) -> ProwlarrRelease:
+            return ProwlarrRelease(
+                title=title,
+                size=1000,
+                seeders=1,
+                leechers=0,
+                download_url=f"http://example.com/{index}",
+                magnet_url=None,
+                indexer="test",
+            )
+
+        async def fake_search(params):
+            call_count[0] += 1
+            query = params.get("query", "")
+            if "S01-" in query:
+                return ProwlarrSearchResult(
+                    releases=[make_release(1, "Show S01-S03")], query_time_ms=10
+                )
+            elif "complete" in query:
+                return ProwlarrSearchResult(
+                    releases=[make_release(2, "Show Complete")], query_time_ms=10
+                )
+            elif "season 1-" in query:
+                return ProwlarrSearchResult(
+                    releases=[make_release(3, "Show Season 1-5")], query_time_ms=10
+                )
+            return ProwlarrSearchResult(releases=[], query_time_ms=10)
+
+        monkeypatch.setattr(service, "_search", fake_search)
+
+        result = await service.search_by_tvdbid(5678, title="The Mentalist", year=2024)
+
+        assert len(result.releases) == 3
+        assert result.query_time_ms == 40  # 10ms * 4 queries
+
+    @pytest.mark.asyncio
+    async def test_search_by_tvdbid_broad_search_deduplicates_by_url(self, monkeypatch) -> None:
+        """Broad TV search should deduplicate releases with the same download URL."""
+        service = ProwlarrService()
+
+        shared_release = ProwlarrRelease(
+            title="Show S01-S03",
+            size=1000,
+            seeders=1,
+            leechers=0,
+            download_url="http://example.com/same",
+            magnet_url=None,
+            indexer="test",
+        )
+
+        async def fake_search(params):
+            # All queries return the same release (same URL)
+            return ProwlarrSearchResult(releases=[shared_release], query_time_ms=10)
+
+        monkeypatch.setattr(service, "_search", fake_search)
+
+        result = await service.search_by_tvdbid(5678, title="The Mentalist", year=2024)
+
+        # Should only have 1 release despite multiple queries returning same URL
+        assert len(result.releases) == 1
+        assert result.releases[0].download_url == "http://example.com/same"
