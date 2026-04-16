@@ -105,3 +105,30 @@ class TestSettingsRouter:
         assert context["message"] == "Failed to clear app search cache: boom"
         mock_db.rollback.assert_awaited_once()
         clear_status_cache.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_settings_page_includes_reseed_default_snapshot_copy(self, monkeypatch):
+        """Settings copy should describe reseeding the checked-in 12-rule snapshot."""
+        mock_db = AsyncMock()
+        rule_service = MagicMock()
+        rule_service.ensure_default_rules = AsyncMock()
+
+        monkeypatch.setattr(settings, "RuleService", lambda db: rule_service)
+        monkeypatch.setattr(
+            settings,
+            "_build_settings_page_context",
+            AsyncMock(
+                return_value={
+                    "request": MagicMock(),
+                    "env": {},
+                    "staging_enabled": True,
+                    "pending_count": 0,
+                    "stats": {"total_requests": 0, "completed": 0, "pending": 0, "failed": 0},
+                }
+            ),
+        )
+
+        response = await settings.get_settings_page(MagicMock(), db=mock_db)
+        body = cast(bytes, response.body).decode()
+
+        assert "checked-in 12-rule default snapshot" in body

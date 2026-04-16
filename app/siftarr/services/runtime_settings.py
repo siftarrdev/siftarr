@@ -11,6 +11,8 @@ SETTING_KEYS = {
     "overseerr_api_key",
     "prowlarr_url",
     "prowlarr_api_key",
+    "plex_url",
+    "plex_token",
     "qbittorrent_url",
     "qbittorrent_username",
     "qbittorrent_password",
@@ -35,6 +37,10 @@ async def get_effective_settings(db: AsyncSession | None = None) -> Settings:
             return fallback
         return value
 
+    def get_optional_env_value(key: str) -> str | None:
+        value = getattr(env_settings, key, None)
+        return value if isinstance(value, str) or value is None else None
+
     def get_bool_value(key: str, fallback: bool) -> bool:
         value = db_settings.get(key)
         if value is None or value == "":
@@ -42,11 +48,15 @@ async def get_effective_settings(db: AsyncSession | None = None) -> Settings:
         return str(value).strip().lower() in {"1", "true", "yes", "on"}
 
     return Settings(
-        overseerr_url=get_value("overseerr_url", env_settings.overseerr_url),
-        overseerr_api_key=get_value("overseerr_api_key", env_settings.overseerr_api_key),
-        prowlarr_url=get_value("prowlarr_url", env_settings.prowlarr_url),
-        prowlarr_api_key=get_value("prowlarr_api_key", env_settings.prowlarr_api_key),
-        qbittorrent_url=get_value("qbittorrent_url", env_settings.qbittorrent_url),
+        overseerr_url=get_value("overseerr_url", get_optional_env_value("overseerr_url")),
+        overseerr_api_key=get_value(
+            "overseerr_api_key", get_optional_env_value("overseerr_api_key")
+        ),
+        prowlarr_url=get_value("prowlarr_url", get_optional_env_value("prowlarr_url")),
+        prowlarr_api_key=get_value("prowlarr_api_key", get_optional_env_value("prowlarr_api_key")),
+        plex_url=get_value("plex_url", get_optional_env_value("plex_url")),
+        plex_token=get_value("plex_token", get_optional_env_value("plex_token")),
+        qbittorrent_url=get_value("qbittorrent_url", get_optional_env_value("qbittorrent_url")),
         qbittorrent_username=get_value("qbittorrent_username", env_settings.qbittorrent_username)
         or env_settings.qbittorrent_username,
         qbittorrent_password=get_value("qbittorrent_password", env_settings.qbittorrent_password)
