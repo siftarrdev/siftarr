@@ -217,11 +217,13 @@ def _apply_release_size_per_season_metadata(release: dict[str, object]) -> dict[
     if size_bytes <= 0 or covered_season_count <= 0:
         release["size_per_season"] = None
         release["size_per_season_bytes"] = None
+        release["size_per_season_passed"] = None
         return release
 
     size_per_season_bytes = int(round(size_bytes / covered_season_count))
     release["size_per_season"] = _format_release_size(size_per_season_bytes)
     release["size_per_season_bytes"] = size_per_season_bytes
+    release["size_per_season_passed"] = True
     return release
 
 
@@ -405,21 +407,39 @@ def _has_unresolved_partial_tv_data(
 ) -> bool:
     """Return True when season rows imply Plex enrichment still needs to run."""
     for season in seasons:
-        if (
-            getattr(season.status, "value", season.status)
-            != RequestStatus.PARTIALLY_AVAILABLE.value
-        ):
-            continue
         season_episodes = episodes_by_season.get(season.id, [])
+        season_status = getattr(season.status, "value", season.status)
+        if season_status not in {
+            RequestStatus.PARTIALLY_AVAILABLE.value,
+            RequestStatus.PENDING.value,
+            RequestStatus.UNRELEASED.value,
+        }:
+            continue
         if not season_episodes:
             return True
-        has_available_episode = any(
-            getattr(episode.status, "value", episode.status) == RequestStatus.AVAILABLE.value
-            for episode in season_episodes
-        )
-        if not has_available_episode:
+
+        episode_statuses = {
+            getattr(episode.status, "value", episode.status) for episode in season_episodes
+        }
+        if RequestStatus.AVAILABLE.value not in episode_statuses and (
+            RequestStatus.PENDING.value in episode_statuses
+            or RequestStatus.UNRELEASED.value in episode_statuses
+            or season_status == RequestStatus.PARTIALLY_AVAILABLE.value
+        ):
             return True
     return False
+
+
+def _count_request_episode_states(seasons_data: list[dict[str, object]]) -> dict[str, int]:
+    """Aggregate TV episode counts across all serialized seasons."""
+    return {
+        "available": sum(_normalize_int(season.get("available_count")) for season in seasons_data),
+        "pending": sum(_normalize_int(season.get("pending_count")) for season in seasons_data),
+        "unreleased": sum(
+            _normalize_int(season.get("unreleased_count")) for season in seasons_data
+        ),
+        "total": sum(_normalize_int(season.get("total_count")) for season in seasons_data),
+    }
 
 
 def _compute_sync_metadata(
@@ -997,6 +1017,7 @@ async def request_details(
             "releases_by_season": {str(k): v for k, v in releases_by_season.items()},
             "releases_by_episode": {f"{k[0]}-{k[1]}": v for k, v in releases_by_episode.items()},
             "sync_state": sync_state,
+            "aggregate_counts": _count_request_episode_states(seasons_data),
         }
 
     return JSONResponse(details, background=background_tasks)

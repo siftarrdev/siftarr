@@ -28,8 +28,10 @@ class TestProwlarrService:
 
         assert service._extract_codec("Movie.2024.1080p.x265-RLSGRP") == "x265"
         assert service._extract_codec("Movie.2024.1080p.H.265-RLSGRP") == "x265"
+        assert service._extract_codec("Movie.2024.1080p.H 265-RLSGRP") == "x265"
         assert service._extract_codec("Movie.2024.1080p.HEVC-RLSGRP") == "x265"
         assert service._extract_codec("Movie.2024.1080p.x264-RLSGRP") == "x264"
+        assert service._extract_codec("Movie.2024.1080p.H 264-RLSGRP") == "x264"
         assert service._extract_codec("Movie.2024.1080p.AV1-RLSGRP") == "AV1"
 
     def test_extract_release_group(self) -> None:

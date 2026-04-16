@@ -226,8 +226,8 @@ class ProwlarrService:
     def _extract_codec(self, title: str) -> str | None:
         """Extract codec from release title."""
         patterns = [
-            (r"x265|H\.?265|HEVC", "x265"),
-            (r"x264|H\.?264|AVC", "x264"),
+            (r"x265|265|HEVC", "x265"),
+            (r"x264|264|AVC", "x264"),
             (r"VP9", "VP9"),
             (r"VP10|AV1", "AV1"),
         ]

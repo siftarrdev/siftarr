@@ -11,6 +11,7 @@ from app.siftarr.models.season import Season
 from app.siftarr.services.episode_sync_service import (
     EpisodeSyncService,
     _derive_episode_status,
+    _derive_request_status_from_seasons,
     _derive_season_status,
 )
 
@@ -433,6 +434,23 @@ class TestEpisodeSyncService:
             _derive_season_status([episode_one, episode_two]) == RequestStatus.PARTIALLY_AVAILABLE
         )
 
+    def test_derive_request_status_from_seasons_supports_partial_and_unreleased(self):
+        """Request aggregate status should roll up from season statuses."""
+        available = _make_season(season_number=1)
+        available.status = RequestStatus.AVAILABLE
+        future = _make_season(season_number=2)
+        future.status = RequestStatus.UNRELEASED
+        pending = _make_season(season_number=3)
+        pending.status = RequestStatus.PENDING
+
+        assert _derive_request_status_from_seasons([available]) == RequestStatus.AVAILABLE
+        assert _derive_request_status_from_seasons([future]) == RequestStatus.UNRELEASED
+        assert (
+            _derive_request_status_from_seasons([available, future])
+            == RequestStatus.PARTIALLY_AVAILABLE
+        )
+        assert _derive_request_status_from_seasons([pending, future]) == RequestStatus.PENDING
+
     @pytest.mark.asyncio
     async def test_apply_fallback_statuses_preserves_unreleased_and_partial_availability(
         self, service
@@ -452,3 +470,47 @@ class TestEpisodeSyncService:
         assert available_episode.status == RequestStatus.AVAILABLE
         assert future_episode.status == RequestStatus.UNRELEASED
         assert season.status == RequestStatus.PARTIALLY_AVAILABLE
+
+    @pytest.mark.asyncio
+    async def test_apply_plex_availability_updates_request_status(self, mock_db, mock_overseerr):
+        """Plex-enriched season state should also persist the request aggregate status."""
+        request = _make_request(id=1)
+        request.title = "The Rookie"
+        request.plex_rating_key = "plex-123"
+        request.status = RequestStatus.PENDING
+
+        season = _make_season(season_number=8)
+        season.status = RequestStatus.PENDING
+        available_episode = _make_episode(season_id=season.id, episode_number=1)
+        available_episode.air_date = date(2024, 1, 1)
+        pending_episode = _make_episode(season_id=season.id, episode_number=2)
+        pending_episode.air_date = date(2024, 1, 8)
+        future_episode = _make_episode(season_id=season.id, episode_number=3)
+        future_episode.air_date = datetime.now(UTC).date() + timedelta(days=7)
+        season.episodes = [available_episode, pending_episode, future_episode]
+
+        plex = AsyncMock()
+        plex.get_episode_availability.return_value = {(8, 1): True, (8, 2): False, (8, 3): False}
+
+        service = EpisodeSyncService(mock_db, overseerr=mock_overseerr, plex=plex)
+        mock_db.flush = AsyncMock()
+        mock_db.commit = AsyncMock()
+
+        seasons = await service._apply_plex_availability(request, [season])
+
+        assert seasons == [season]
+        assert season.status == RequestStatus.PARTIALLY_AVAILABLE
+        assert request.status == RequestStatus.PARTIALLY_AVAILABLE
+        mock_db.commit.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_apply_fallback_request_status_updates_request_aggregate(self, service):
+        """Overseerr-only fallback should keep request-level aggregate semantics."""
+        request = _make_request(id=1)
+        request.status = RequestStatus.PENDING
+        season = _make_season(season_number=8)
+        season.status = RequestStatus.UNRELEASED
+
+        await service._apply_fallback_request_status(request, [season])
+
+        assert request.status == RequestStatus.UNRELEASED

@@ -275,14 +275,17 @@ class TestDashboardRouter:
         assert body["releases"][0]["is_complete_series"] is False
         assert body["releases"][0]["size_per_season"] == "9.33 GB"
         assert body["releases"][0]["size_per_season_bytes"] == round((28 * 1024 * 1024 * 1024) / 3)
+        assert body["releases"][0]["size_per_season_passed"] is True
         assert body["releases"][1]["covered_seasons"] == [1, 2, 3]
         assert body["releases"][1]["covered_season_count"] == 3
         assert body["releases"][1]["covers_all_known_seasons"] is True
         assert body["releases"][1]["is_complete_series"] is False
         assert body["releases"][1]["size_per_season"] == "10.00 GB"
+        assert body["releases"][1]["size_per_season_passed"] is True
         assert body["releases"][2]["covered_seasons"] == []
         assert body["releases"][2]["is_complete_series"] is True
         assert body["releases"][2]["size_per_season"] == "14.00 GB"
+        assert body["releases"][2]["size_per_season_passed"] is True
         assert "Foundation.Complete.S01.1080p.BluRay" not in [
             release["title"] for release in body["releases"]
         ]
@@ -1217,7 +1220,7 @@ class TestDashboardRouter:
         assert body["tv_info"]["seasons"][0]["episodes"][0]["title"] == "Pilot"
         assert body["tv_info"]["sync_state"]["stale"] is True
         assert body["tv_info"]["sync_state"]["refresh_in_progress"] is True
-        assert body["tv_info"]["sync_state"]["needs_plex_enrichment"] is False
+        assert body["tv_info"]["sync_state"]["needs_plex_enrichment"] is True
         assert scheduled == [(background_tasks, 21)]
 
     @pytest.mark.asyncio
@@ -1459,6 +1462,195 @@ class TestDashboardRouter:
         assert body["tv_info"]["sync_state"]["needs_plex_enrichment"] is True
         assert body["tv_info"]["sync_state"]["refresh_in_progress"] is True
         assert scheduled == [(background_tasks, 21)]
+
+    @pytest.mark.asyncio
+    async def test_request_details_flags_pending_unreleased_tv_data_for_plex_enrichment(
+        self, mock_db, monkeypatch, background_tasks
+    ):
+        """Unresolved pending/unreleased TV rows should still report Plex enrichment needed."""
+        request_record = MagicMock()
+        request_record.id = 51
+        request_record.media_type = MediaType.TV
+        request_record.status = RequestStatus.PENDING
+        request_record.title = "The Rookie"
+        request_record.overseerr_request_id = None
+
+        synced_at = datetime.now(UTC).replace(tzinfo=None)
+        season_one = MagicMock(
+            id=101,
+            season_number=8,
+            status=RequestStatus.PENDING,
+            synced_at=synced_at,
+        )
+        pending_episode = MagicMock(
+            id=201,
+            season_id=101,
+            episode_number=1,
+            title="Episode 1",
+            air_date=None,
+            status=RequestStatus.PENDING,
+            release_id=None,
+        )
+        unreleased_episode = MagicMock(
+            id=202,
+            season_id=101,
+            episode_number=2,
+            title="Episode 2",
+            air_date=(datetime.now(UTC) + timedelta(days=7)).date(),
+            status=RequestStatus.UNRELEASED,
+            release_id=None,
+        )
+
+        request_result = MagicMock()
+        request_result.scalar_one_or_none.return_value = request_record
+        release_result = MagicMock()
+        release_result.scalars.return_value.all.return_value = []
+        rules_result = MagicMock()
+        rules_result.scalars.return_value.all.return_value = []
+        seasons_result = MagicMock()
+        seasons_result.scalars.return_value.all.return_value = [season_one]
+        episodes_result = MagicMock()
+        episodes_result.scalars.return_value.all.return_value = [
+            pending_episode,
+            unreleased_episode,
+        ]
+        mock_db.execute.side_effect = [
+            request_result,
+            release_result,
+            rules_result,
+            seasons_result,
+            episodes_result,
+        ]
+
+        monkeypatch.setattr(
+            dashboard, "get_effective_settings", AsyncMock(return_value=MagicMock())
+        )
+
+        class FakeOverseerrService:
+            def __init__(self, settings):
+                pass
+
+            async def close(self):
+                return None
+
+        fake_engine = MagicMock()
+        fake_engine.evaluate.return_value = MagicMock(rejection_reason=None, matches=[])
+        monkeypatch.setattr(dashboard, "OverseerrService", FakeOverseerrService)
+        monkeypatch.setattr(
+            dashboard.RuleEngine,
+            "from_db_rules",
+            MagicMock(return_value=fake_engine),
+        )
+
+        response = await dashboard.request_details(
+            request_id=51, background_tasks=background_tasks, db=mock_db
+        )
+
+        body = json.loads(cast(bytes, response.body))
+        assert body["request"]["status"] == RequestStatus.PENDING.value
+        assert body["tv_info"]["sync_state"]["needs_plex_enrichment"] is True
+
+    @pytest.mark.asyncio
+    async def test_request_details_surfaces_request_level_tv_aggregate_counts(
+        self, mock_db, monkeypatch, background_tasks
+    ):
+        """TV details should surface aggregate episode counts alongside request status."""
+        request_record = MagicMock()
+        request_record.id = 21
+        request_record.media_type = MediaType.TV
+        request_record.status = RequestStatus.PARTIALLY_AVAILABLE
+        request_record.title = "The Rookie"
+        request_record.overseerr_request_id = None
+
+        synced_at = datetime.now(UTC).replace(tzinfo=None)
+        season_one = MagicMock(
+            id=101,
+            season_number=8,
+            status=RequestStatus.PARTIALLY_AVAILABLE,
+            synced_at=synced_at,
+        )
+        available_episode = MagicMock(
+            id=201,
+            season_id=101,
+            episode_number=15,
+            title="Episode 15",
+            air_date=None,
+            status=RequestStatus.AVAILABLE,
+            release_id=None,
+        )
+        pending_episode = MagicMock(
+            id=202,
+            season_id=101,
+            episode_number=16,
+            title="Episode 16",
+            air_date=None,
+            status=RequestStatus.PENDING,
+            release_id=None,
+        )
+        unreleased_episode = MagicMock(
+            id=203,
+            season_id=101,
+            episode_number=17,
+            title="Episode 17",
+            air_date=(datetime.now(UTC) + timedelta(days=7)).date(),
+            status=RequestStatus.UNRELEASED,
+            release_id=None,
+        )
+
+        request_result = MagicMock()
+        request_result.scalar_one_or_none.return_value = request_record
+        release_result = MagicMock()
+        release_result.scalars.return_value.all.return_value = []
+        rules_result = MagicMock()
+        rules_result.scalars.return_value.all.return_value = []
+        seasons_result = MagicMock()
+        seasons_result.scalars.return_value.all.return_value = [season_one]
+        episodes_result = MagicMock()
+        episodes_result.scalars.return_value.all.return_value = [
+            available_episode,
+            pending_episode,
+            unreleased_episode,
+        ]
+        mock_db.execute.side_effect = [
+            request_result,
+            release_result,
+            rules_result,
+            seasons_result,
+            episodes_result,
+        ]
+
+        monkeypatch.setattr(
+            dashboard, "get_effective_settings", AsyncMock(return_value=MagicMock())
+        )
+
+        class FakeOverseerrService:
+            def __init__(self, settings):
+                pass
+
+            async def close(self):
+                return None
+
+        fake_engine = MagicMock()
+        fake_engine.evaluate.return_value = MagicMock(rejection_reason=None, matches=[])
+        monkeypatch.setattr(dashboard, "OverseerrService", FakeOverseerrService)
+        monkeypatch.setattr(
+            dashboard.RuleEngine,
+            "from_db_rules",
+            MagicMock(return_value=fake_engine),
+        )
+
+        response = await dashboard.request_details(
+            request_id=21, background_tasks=background_tasks, db=mock_db
+        )
+
+        body = json.loads(cast(bytes, response.body))
+        assert body["request"]["status"] == RequestStatus.PARTIALLY_AVAILABLE.value
+        assert body["tv_info"]["aggregate_counts"] == {
+            "available": 1,
+            "pending": 1,
+            "unreleased": 1,
+            "total": 3,
+        }
 
     @pytest.mark.asyncio
     async def test_mark_series_available_refreshes_local_state(self, mock_db, monkeypatch):
@@ -1736,6 +1928,8 @@ class TestDashboardRouter:
         assert 'data-release-rejection-reason="true"' in template
         assert 'data-release-upload-age="true"' in template
         assert 'data-release-size-per-season="true"' in template
+        assert 'data-release-resolution="true"' in template
+        assert 'data-release-codec="true"' in template
         assert "function formatRelativePublishAge(publishDate)" in template
         assert "window.siftarrStagingModeEnabled" in template
         assert "/manual-release/use" in template
@@ -1743,3 +1937,14 @@ class TestDashboardRouter:
         assert "Plex episode availability is being resolved for partial seasons" in template
         assert "Mark Series Available in Overseerr" in template
         assert "function markSeriesAvailable(requestId)" in template
+
+    def test_dashboard_template_supports_annotation_highlighting(self):
+        """Torrent annotation highlighting helpers should exist in the template."""
+        template_path = "/home/lucas/9999-personal/siftarr/app/siftarr/templates/dashboard.html"
+        with open(template_path, encoding="utf-8") as handle:
+            template = handle.read()
+
+        assert "function renderAnnotation(" in template
+        assert "function releaseAnnotationTone(" in template
+        assert "text-emerald-400" in template
+        assert "text-red-400" in template

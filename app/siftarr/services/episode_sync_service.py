@@ -60,6 +60,25 @@ def _derive_season_status(episodes: list[Episode]) -> RequestStatus:
     return RequestStatus.PARTIALLY_AVAILABLE
 
 
+def _derive_request_status_from_seasons(seasons: list[Season]) -> RequestStatus:
+    """Derive an aggregate TV request status from season statuses."""
+    if not seasons:
+        return RequestStatus.PENDING
+
+    statuses = {season.status for season in seasons}
+    if statuses == {RequestStatus.AVAILABLE}:
+        return RequestStatus.AVAILABLE
+    if statuses == {RequestStatus.UNRELEASED}:
+        return RequestStatus.UNRELEASED
+    if RequestStatus.AVAILABLE in statuses or RequestStatus.PARTIALLY_AVAILABLE in statuses:
+        return RequestStatus.PARTIALLY_AVAILABLE
+    if RequestStatus.PENDING in statuses and RequestStatus.UNRELEASED in statuses:
+        return RequestStatus.PENDING
+    if RequestStatus.PENDING in statuses:
+        return RequestStatus.PENDING
+    return RequestStatus.PARTIALLY_AVAILABLE
+
+
 class EpisodeSyncService:
     """Sync seasons and episodes from Overseerr into local DB, with per-episode Plex availability."""
 
@@ -137,17 +156,33 @@ class EpisodeSyncService:
             return True
 
         for season in seasons:
-            if season.status != RequestStatus.PARTIALLY_AVAILABLE:
-                continue
-
             episodes = list(getattr(season, "episodes", []) or [])
             if not episodes:
                 return True
 
-            if not any(episode.status == RequestStatus.AVAILABLE for episode in episodes):
+            season_status = getattr(season, "status", None)
+            unresolved_statuses = {
+                RequestStatus.PARTIALLY_AVAILABLE,
+                RequestStatus.PENDING,
+                RequestStatus.UNRELEASED,
+            }
+            if season_status not in unresolved_statuses:
+                continue
+
+            episode_statuses = {episode.status for episode in episodes}
+            if RequestStatus.AVAILABLE not in episode_statuses and (
+                RequestStatus.PENDING in episode_statuses
+                or RequestStatus.UNRELEASED in episode_statuses
+                or season_status == RequestStatus.PARTIALLY_AVAILABLE
+            ):
                 return True
 
         return False
+
+    async def _update_request_status(self, request: Request, seasons: list[Season]) -> None:
+        """Persist aggregate TV request status from current season statuses."""
+        request.status = _derive_request_status_from_seasons(seasons)
+        await self.db.flush()
 
     async def _sync_from_overseerr(self, request: Request) -> list[Season]:
         """Sync episode structure (titles, air dates) from Overseerr."""
@@ -268,6 +303,8 @@ class EpisodeSyncService:
                         episode.air_date = air_date
                     episode.status = episode_status
 
+        await self._update_request_status(request, synced_seasons)
+
         return synced_seasons
 
     async def _resolve_plex_rating_key(self, request: Request) -> str | None:
@@ -353,6 +390,7 @@ class EpisodeSyncService:
                 request.title,
             )
             await self._apply_fallback_statuses(seasons)
+            await self._apply_fallback_request_status(request, seasons)
             await self.db.commit()
             return seasons
 
@@ -365,6 +403,7 @@ class EpisodeSyncService:
                     rating_key,
                 )
                 await self._apply_fallback_statuses(seasons)
+                await self._apply_fallback_request_status(request, seasons)
                 await self.db.commit()
                 return seasons
 
@@ -390,6 +429,8 @@ class EpisodeSyncService:
 
                 await self.db.flush()
                 season.status = _derive_season_status(episodes)
+
+            await self._update_request_status(request, seasons)
 
             await self.db.commit()
 
@@ -439,6 +480,10 @@ class EpisodeSyncService:
                     )
 
             season.status = _derive_season_status(episodes)
+
+    async def _apply_fallback_request_status(self, request: Request, seasons: list[Season]) -> None:
+        """Persist request aggregate when falling back to Overseerr-only episode state."""
+        await self._update_request_status(request, seasons)
 
     async def sync_episodes(
         self, request_id: int, force_plex_refresh: bool = False

@@ -670,6 +670,33 @@ function renderRuleMatches(matches) {
     return `<div class="mt-1 text-xs text-gray-500">Matched: ${ruleSpans.join(' | ')}</div>`;
 }
 
+function renderAnnotation(value, toneClass = 'text-gray-400', dataAttr = '') {
+    if (!value) return '';
+    return `<span class="${toneClass}" ${dataAttr}>${escapeHtml(value)}</span>`;
+}
+
+function matchedRuleNames(matches) {
+    return (matches || [])
+        .filter((match) => match?.matched)
+        .map((match) => String(match.rule_name || '').toLowerCase())
+        .filter(Boolean);
+}
+
+function releaseAnnotationTone(release, field) {
+    const isSizeFailure = !release.passed && typeof release.rejection_reason === 'string' && release.rejection_reason.toLowerCase().startsWith('size ');
+    if (field === 'size') {
+        return isSizeFailure ? 'text-red-400' : 'text-gray-400';
+    }
+    if (field === 'resolution' || field === 'codec') {
+        return release[field] ? 'text-emerald-400' : 'text-gray-400';
+    }
+    return 'text-gray-400';
+}
+
+function hasAnyMatch(names, needles) {
+    return needles.some((needle) => names.some((name) => name.includes(needle)));
+}
+
 function formatRelativePublishAge(publishDate) {
     if (!publishDate) return '';
 
@@ -697,7 +724,13 @@ function formatRelativePublishAge(publishDate) {
 
 function renderReleaseCard(release, requestId) {
     const statusClass = release.passed ? 'badge-green' : 'badge-yellow';
-    const secondaryMeta = [release.size, release.indexer, release.resolution, release.codec, release.release_group].filter(Boolean).join(' \u00B7 ');
+    const secondaryMeta = [
+        renderAnnotation(release.size, releaseAnnotationTone(release, 'size'), 'data-release-size="true"'),
+        renderAnnotation(release.indexer, releaseAnnotationTone(release, 'indexer'), 'data-release-indexer="true"'),
+        renderAnnotation(release.resolution, releaseAnnotationTone(release, 'resolution'), 'data-release-resolution="true"'),
+        renderAnnotation(release.codec, releaseAnnotationTone(release, 'codec'), 'data-release-codec="true"'),
+        renderAnnotation(release.release_group, releaseAnnotationTone(release, 'group'), 'data-release-group="true"'),
+    ].filter(Boolean).join(' \u00B7 ');
     const availability = `Seeders ${release.seeders ?? 0} \u00B7 Leechers ${release.leechers ?? 0}`;
     const downloaded = release.downloaded ? '<span class="badge badge-blue">Already sent</span>' : '';
     const currentTab = new URLSearchParams(window.location.search).get('tab') || 'active';
@@ -729,7 +762,8 @@ function renderReleaseCard(release, requestId) {
     const coverageHtml = (Array.isArray(release.covered_seasons) || release.is_complete_series)
         ? renderCoverageBadge(release)
         : '';
-    const rejectionHtml = !release.passed && release.rejection_reason
+    const rejectionIsSize = typeof release.rejection_reason === 'string' && release.rejection_reason.toLowerCase().startsWith('size ');
+    const rejectionHtml = !release.passed && release.rejection_reason && !rejectionIsSize
         ? `<div class="mt-2 max-w-xs text-right text-xs text-red-300" data-release-rejection-reason="true">${escapeHtml(release.rejection_reason)}</div>`
         : '';
 
@@ -738,7 +772,7 @@ function renderReleaseCard(release, requestId) {
             <div class="flex flex-col gap-2 lg:flex-row lg:items-start lg:justify-between">
                 <div class="min-w-0">
                     <div class="font-medium text-white text-sm break-words">${escapeHtml(release.title)}</div>
-                    <div class="mt-1 text-xs text-gray-400">Score <span class="font-semibold text-emerald-400">${release.score}</span> &middot; ${escapeHtml(secondaryMeta || 'No release metadata')} &middot; ${escapeHtml(availability)}${publishAge ? ` &middot; <span data-release-upload-age="true">${escapeHtml(publishAge)}</span>` : ''}</div>
+                    <div class="mt-1 text-xs text-gray-400">Score <span class="font-semibold text-emerald-400">${release.score}</span> &middot; ${secondaryMeta || '<span class="text-gray-400">No release metadata</span>'} &middot; ${escapeHtml(availability)}${publishAge ? ` &middot; <span data-release-upload-age="true">${escapeHtml(publishAge)}</span>` : ''}</div>
                     ${coverageHtml}
                     ${renderRuleMatches(release.matches)}
                 </div>
@@ -766,7 +800,7 @@ function renderCoverageBadge(release) {
         ? '<span class="badge badge-green">Complete series</span>'
         : '';
     const sizePerSeason = release.size_per_season
-        ? '<span data-release-size-per-season="true">' + escapeHtml(release.size_per_season) + '/season</span>'
+        ? '<span data-release-size-per-season="true" class="' + (release.size_per_season_passed ? 'text-emerald-400' : 'text-red-400') + '">' + escapeHtml(release.size_per_season) + '/season</span>'
         : '';
 
     return '<div class="mt-1 flex flex-wrap items-center gap-2 text-xs text-gray-400">' +
