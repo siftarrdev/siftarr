@@ -10,7 +10,7 @@ from app.siftarr.services.rule_engine import ReleaseEvaluation
 from app.siftarr.services.tv_decision_service import TVDecisionService
 
 
-def _make_release(title="Test.S01E05.1080p", size=1000000000, seeders=10):
+def _make_release(title="Test.S01E05.1080p", size=1000000000, seeders=10, info_hash=None):
     return ProwlarrRelease(
         title=title,
         size=size,
@@ -18,7 +18,7 @@ def _make_release(title="Test.S01E05.1080p", size=1000000000, seeders=10):
         leechers=1,
         download_url="http://example.com/test",
         magnet_url=None,
-        info_hash="abc123",
+        info_hash=info_hash,
         indexer="test",
     )
 
@@ -317,27 +317,23 @@ class TestProcessRequest:
         assert "Show.S01.1080p" in selected_titles
 
     @pytest.mark.asyncio
-    async def test_multi_season_pack_covers_requested_seasons_before_episode_fallback(
+    async def test_single_season_request_rejects_broad_pack_from_season_search(
         self, service, mock_db
     ):
         request = _make_request(
-            requested_seasons="[1, 2]",
-            requested_episodes='{"1": [1], "2": [1]}',
+            requested_seasons="[1]",
+            requested_episodes='{"1": [1]}',
         )
         mock_db.execute.return_value = MagicMock(scalar_one_or_none=MagicMock(return_value=request))
         mock_db.commit = AsyncMock()
         mock_db.flush = AsyncMock()
 
-        broad_pack = _make_release(title="Show.S01-S02.1080p")
-        season_one_pack = _make_release(title="Show.S01.1080p")
-        episode_release = _make_release(title="Show.S01E01.1080p")
+        broad_pack = _make_release(title="Show.S01-S07.1080p", info_hash="season-broad-pack")
+        episode_release = _make_release(title="Show.S01E01.1080p", info_hash="season-episode")
 
         service.prowlarr.search_by_tvdbid = AsyncMock(
             side_effect=[
                 ProwlarrSearchResult(releases=[broad_pack], query_time_ms=100),
-                ProwlarrSearchResult(releases=[season_one_pack], query_time_ms=100),
-                ProwlarrSearchResult(releases=[], query_time_ms=100),
-                ProwlarrSearchResult(releases=[episode_release], query_time_ms=100),
                 ProwlarrSearchResult(releases=[episode_release], query_time_ms=100),
             ]
         )
@@ -345,9 +341,7 @@ class TestProcessRequest:
         rule_engine = MagicMock()
         rule_engine.evaluate.side_effect = [
             _passing_eval(broad_pack, score=95),
-            _passing_eval(season_one_pack, score=80),
             _passing_eval(episode_release, score=50),
-            _passing_eval(episode_release, score=45),
         ]
 
         with (
@@ -366,10 +360,12 @@ class TestProcessRequest:
             result = await service.process_request(1)
 
         selected_titles = [r["title"] for r in result.get("selected_releases", [])]
-        assert selected_titles == ["Show.S01-S02.1080p"]
+        assert selected_titles == ["Show.S01E01.1080p"]
 
     @pytest.mark.asyncio
-    async def test_episode_fallback_still_used_for_uncovered_seasons(self, service, mock_db):
+    async def test_multi_season_request_accepts_broad_pack_from_broad_search(
+        self, service, mock_db
+    ):
         request = _make_request(
             requested_seasons="[1, 2]",
             requested_episodes='{"1": [1], "2": [1]}',
@@ -378,14 +374,17 @@ class TestProcessRequest:
         mock_db.commit = AsyncMock()
         mock_db.flush = AsyncMock()
 
-        season_one_pack = _make_release(title="Show.S01.1080p")
-        season_two_episode = _make_release(title="Show.S02E01.1080p")
+        complete_series = _make_release(
+            title="Show.Complete.Series.1080p", info_hash="broad-complete-series"
+        )
+        season_one_episode = _make_release(title="Show.S01E01.1080p", info_hash="broad-s01e01")
+        season_two_episode = _make_release(title="Show.S02E01.1080p", info_hash="broad-s02e01")
 
         service.prowlarr.search_by_tvdbid = AsyncMock(
             side_effect=[
+                ProwlarrSearchResult(releases=[complete_series], query_time_ms=100),
                 ProwlarrSearchResult(releases=[], query_time_ms=100),
-                ProwlarrSearchResult(releases=[season_one_pack], query_time_ms=100),
-                ProwlarrSearchResult(releases=[], query_time_ms=100),
+                ProwlarrSearchResult(releases=[season_one_episode], query_time_ms=100),
                 ProwlarrSearchResult(releases=[], query_time_ms=100),
                 ProwlarrSearchResult(releases=[season_two_episode], query_time_ms=100),
             ]
@@ -393,7 +392,61 @@ class TestProcessRequest:
 
         rule_engine = MagicMock()
         rule_engine.evaluate.side_effect = [
+            _passing_eval(complete_series, score=95),
+            _passing_eval(season_one_episode, score=50),
+            _passing_eval(season_two_episode, score=45),
+        ]
+
+        with (
+            patch.object(
+                service, "_get_rule_engine", new_callable=AsyncMock, return_value=rule_engine
+            ),
+            patch(
+                "app.siftarr.services.tv_decision_service.store_search_results",
+                new_callable=AsyncMock,
+            ),
+            patch(
+                "app.siftarr.services.tv_decision_service.use_releases", new_callable=AsyncMock
+            ) as mock_use,
+        ):
+            mock_use.return_value = {"status": "downloading", "message": "ok"}
+            result = await service.process_request(1)
+
+        selected_titles = [r["title"] for r in result.get("selected_releases", [])]
+        assert selected_titles == ["Show.Complete.Series.1080p"]
+
+    @pytest.mark.asyncio
+    async def test_episode_fallback_used_for_uncovered_season_when_season_search_returns_broad_pack(
+        self, service, mock_db
+    ):
+        request = _make_request(
+            requested_seasons="[1, 2]",
+            requested_episodes='{"1": [1], "2": [1]}',
+        )
+        mock_db.execute.return_value = MagicMock(scalar_one_or_none=MagicMock(return_value=request))
+        mock_db.commit = AsyncMock()
+        mock_db.flush = AsyncMock()
+
+        season_one_pack = _make_release(title="Show.S01.1080p", info_hash="fallback-s01-pack")
+        invalid_broad_pack = _make_release(
+            title="Show.S01-S07.1080p", info_hash="fallback-invalid-broad"
+        )
+        season_two_episode = _make_release(title="Show.S02E01.1080p", info_hash="fallback-s02e01")
+
+        service.prowlarr.search_by_tvdbid = AsyncMock(
+            side_effect=[
+                ProwlarrSearchResult(releases=[], query_time_ms=100),
+                ProwlarrSearchResult(releases=[season_one_pack], query_time_ms=100),
+                ProwlarrSearchResult(releases=[], query_time_ms=100),
+                ProwlarrSearchResult(releases=[invalid_broad_pack], query_time_ms=100),
+                ProwlarrSearchResult(releases=[season_two_episode], query_time_ms=100),
+            ]
+        )
+
+        rule_engine = MagicMock()
+        rule_engine.evaluate.side_effect = [
             _passing_eval(season_one_pack, score=80),
+            _passing_eval(invalid_broad_pack, score=90),
             _passing_eval(season_two_episode, score=55),
         ]
 
@@ -414,6 +467,54 @@ class TestProcessRequest:
 
         selected_titles = [r["title"] for r in result.get("selected_releases", [])]
         assert selected_titles == ["Show.S01.1080p", "Show.S02E01.1080p"]
+
+    @pytest.mark.asyncio
+    async def test_single_season_request_rejects_complete_series_from_season_search(
+        self, service, mock_db
+    ):
+        request = _make_request(
+            requested_seasons="[1]",
+            requested_episodes='{"1": [1]}',
+        )
+        mock_db.execute.return_value = MagicMock(scalar_one_or_none=MagicMock(return_value=request))
+        mock_db.commit = AsyncMock()
+        mock_db.flush = AsyncMock()
+
+        complete_series = _make_release(
+            title="Show.Complete.Series.1080p", info_hash="season-complete-series"
+        )
+        episode_release = _make_release(title="Show.S01E01.1080p", info_hash="complete-fallback")
+
+        service.prowlarr.search_by_tvdbid = AsyncMock(
+            side_effect=[
+                ProwlarrSearchResult(releases=[complete_series], query_time_ms=100),
+                ProwlarrSearchResult(releases=[episode_release], query_time_ms=100),
+            ]
+        )
+
+        rule_engine = MagicMock()
+        rule_engine.evaluate.side_effect = [
+            _passing_eval(complete_series, score=95),
+            _passing_eval(episode_release, score=50),
+        ]
+
+        with (
+            patch.object(
+                service, "_get_rule_engine", new_callable=AsyncMock, return_value=rule_engine
+            ),
+            patch(
+                "app.siftarr.services.tv_decision_service.store_search_results",
+                new_callable=AsyncMock,
+            ),
+            patch(
+                "app.siftarr.services.tv_decision_service.use_releases", new_callable=AsyncMock
+            ) as mock_use,
+        ):
+            mock_use.return_value = {"status": "downloading", "message": "ok"}
+            result = await service.process_request(1)
+
+        selected_titles = [r["title"] for r in result.get("selected_releases", [])]
+        assert selected_titles == ["Show.S01E01.1080p"]
 
     @pytest.mark.asyncio
     async def test_episode_discovery_range_respected(self, service, mock_db):

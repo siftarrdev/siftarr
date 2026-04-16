@@ -2,6 +2,7 @@ import asyncio
 import json
 import logging
 from collections.abc import Iterable
+from dataclasses import dataclass
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -22,6 +23,13 @@ from app.siftarr.services.rule_engine import ReleaseEvaluation, RuleEngine
 MAX_CONCURRENT_SEARCHES = 5
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class PackCandidate:
+    evaluation: ReleaseEvaluation
+    search_context: str
+    requested_season: int | None = None
 
 
 class TVDecisionService:
@@ -89,26 +97,46 @@ class TVDecisionService:
 
     @staticmethod
     def _get_release_season_coverage(
-        evaluation: ReleaseEvaluation, requested_seasons: Iterable[int]
+        candidate: PackCandidate, requested_seasons: Iterable[int]
     ) -> set[int]:
         requested_season_set = set(requested_seasons)
-        coverage = parse_release_coverage(evaluation.release.title)
+        coverage = parse_release_coverage(candidate.evaluation.release.title)
         if coverage.episode_number is not None:
             return set()
+
+        if candidate.search_context == "broad_pack":
+            if coverage.is_complete_series:
+                return requested_season_set
+            return set(coverage.season_numbers).intersection(requested_season_set)
+
+        if candidate.search_context != "season_pack" or candidate.requested_season is None:
+            return set()
+
         if coverage.is_complete_series:
-            return requested_season_set
-        return set(coverage.season_numbers).intersection(requested_season_set)
+            return set()
+
+        if (
+            len(coverage.season_numbers) != 1
+            or coverage.season_numbers[0] != candidate.requested_season
+        ):
+            return set()
+
+        if candidate.requested_season not in requested_season_set:
+            return set()
+
+        return {candidate.requested_season}
 
     def _select_pack_releases(
-        self, pack_evaluations: list[ReleaseEvaluation], requested_seasons: list[int]
+        self, pack_candidates: list[PackCandidate], requested_seasons: list[int]
     ) -> tuple[list[tuple[ReleaseEvaluation, set[int]]], set[int]]:
         deduped_candidates: dict[str, tuple[ReleaseEvaluation, set[int]]] = {}
 
-        for evaluation in pack_evaluations:
-            season_coverage = self._get_release_season_coverage(evaluation, requested_seasons)
+        for candidate in pack_candidates:
+            season_coverage = self._get_release_season_coverage(candidate, requested_seasons)
             if not season_coverage:
                 continue
 
+            evaluation = candidate.evaluation
             key = self._release_key(evaluation)
             existing = deduped_candidates.get(key)
             if existing is None or (
@@ -271,7 +299,7 @@ class TVDecisionService:
 
         all_evaluated_releases: list[ReleaseEvaluation] = []
         all_search_errors: list[str] = []
-        pack_evaluations: list[ReleaseEvaluation] = []
+        pack_candidates: list[PackCandidate] = []
         episode_evaluations: list[tuple[int, int, ReleaseEvaluation]] = []
 
         for i, sr in enumerate(all_results):
@@ -310,7 +338,13 @@ class TVDecisionService:
                     if coverage.episode_number is None and (
                         coverage.season_numbers or coverage.is_complete_series
                     ):
-                        pack_evaluations.append(evaluation)
+                        pack_candidates.append(
+                            PackCandidate(
+                                evaluation=evaluation,
+                                search_context=task_type,
+                                requested_season=season if task_type == "season_pack" else None,
+                            )
+                        )
                     elif task_type == "episode":
                         assert season is not None
                         assert episode is not None
@@ -320,7 +354,7 @@ class TVDecisionService:
             "TV search completed: request_id=%s total_results=%s passing_packs=%s passing_episodes=%s errors=%s",
             request.id,
             len(all_evaluated_releases),
-            len(pack_evaluations),
+            len(pack_candidates),
             len(episode_evaluations),
             len(all_search_errors),
         )
@@ -328,7 +362,7 @@ class TVDecisionService:
         all_selected_releases: list[ReleaseEvaluation] = []
 
         selected_pack_releases, uncovered_seasons = self._select_pack_releases(
-            pack_evaluations, requested_seasons
+            pack_candidates, requested_seasons
         )
         seasons_with_packs: set[int] = set()
 
