@@ -2,6 +2,8 @@
 
 import asyncio
 import logging
+import re
+from datetime import datetime
 from typing import Any
 
 import httpx
@@ -28,7 +30,6 @@ from app.siftarr.services.qbittorrent_service import QbittorrentService
 from app.siftarr.services.release_parser import (
     ParsedReleaseCoverage,
     parse_release_coverage,
-    parse_season_episode,
     parse_stored_release_coverage,
 )
 from app.siftarr.services.release_selection_service import build_prowlarr_release, use_releases
@@ -42,6 +43,19 @@ templates = Jinja2Templates(directory="app/siftarr/templates")
 
 
 _OVERSEERR_SEMAPHORE = asyncio.Semaphore(10)
+
+_SINGLE_EPISODE_RELEASE_PATTERN = re.compile(
+    r"(?:^|[.()\s_]+)S(?P<season>\d{1,2})E(?P<episode>\d{1,3})(?!\d)",
+    re.IGNORECASE,
+)
+_FOLLOWUP_EPISODE_TOKEN_PATTERN = re.compile(
+    r"^[.()\s_-]*(?:E\d{1,3}|-\s*E?\d{1,3})(?!\d)",
+    re.IGNORECASE,
+)
+_ADDITIONAL_EPISODE_TOKEN_PATTERN = re.compile(
+    r"(?:^|[.()\s_-]+)E\d{1,3}(?!\d)",
+    re.IGNORECASE,
+)
 
 
 def _extract_poster_path(poster_path: object) -> str | None:
@@ -87,6 +101,25 @@ def _extract_poster_path(poster_path: object) -> str | None:
     return None
 
 
+def _is_exact_single_episode_release(title: str, season_number: int, episode_number: int) -> bool:
+    """Return True when the title identifies exactly one requested episode."""
+    match = _SINGLE_EPISODE_RELEASE_PATTERN.search(title)
+    if not match:
+        return False
+
+    if int(match.group("season")) != season_number:
+        return False
+    if int(match.group("episode")) != episode_number:
+        return False
+
+    remainder = title[match.end() :]
+    if _FOLLOWUP_EPISODE_TOKEN_PATTERN.match(remainder):
+        return False
+    if _SINGLE_EPISODE_RELEASE_PATTERN.search(remainder):
+        return False
+    return not _ADDITIONAL_EPISODE_TOKEN_PATTERN.search(remainder)
+
+
 def _build_poster_url(poster_path: object) -> str | None:
     """Build a proxied poster URL that the browser can always reach."""
     tmdb_path = _extract_poster_path(poster_path)
@@ -127,6 +160,7 @@ def _serialize_evaluated_release(
     """Serialize a release plus rule evaluation for dashboard responses."""
     payload: dict[str, object] = {
         "title": release.title,
+        "_size_bytes": release.size,
         "size": _format_release_size(release.size),
         "seeders": release.seeders,
         "leechers": release.leechers,
@@ -156,6 +190,34 @@ def _serialize_evaluated_release(
         )
 
     return payload
+
+
+def _dashboard_release_sort_key(release: dict[str, object]) -> tuple[float, float, int, float, str]:
+    """Sort dashboard releases by score desc, size asc, then stable tie-breakers."""
+    score = float(release.get("score") or 0)
+    size_bytes = release.get("_size_bytes")
+    normalized_size = (
+        float(size_bytes)
+        if isinstance(size_bytes, int | float) and size_bytes >= 0
+        else float("inf")
+    )
+    seeders = int(release.get("seeders") or 0)
+    publish_date = release.get("publish_date")
+    publish_timestamp = 0.0
+    if isinstance(publish_date, datetime):
+        publish_timestamp = publish_date.timestamp()
+    title = str(release.get("title") or "").casefold()
+    return (-score, normalized_size, -seeders, -publish_timestamp, title)
+
+
+def _finalize_dashboard_release_payloads(
+    releases: list[dict[str, object]],
+) -> list[dict[str, object]]:
+    """Apply shared dashboard ordering and remove internal sort metadata."""
+    ordered = sorted(releases, key=_dashboard_release_sort_key)
+    for release in ordered:
+        release.pop("_size_bytes", None)
+    return ordered
 
 
 def _choose_overseerr_display_status(request_status: str, media_status: str) -> str:
@@ -532,7 +594,12 @@ async def request_details(
     release_result = await db.execute(
         select(Release)
         .where(Release.request_id == request_id)
-        .order_by(Release.score.desc(), Release.seeders.desc(), Release.created_at.desc())
+        .order_by(
+            Release.score.desc(),
+            Release.size.asc(),
+            Release.seeders.desc(),
+            Release.created_at.desc(),
+        )
     )
     releases = list(release_result.scalars().all())
     rules = await db.execute(select(Rule))
@@ -571,6 +638,8 @@ async def request_details(
             }
         )
         matched.append(payload)
+
+    matched = _finalize_dashboard_release_payloads(matched)
 
     details["releases"] = matched
 
@@ -763,15 +832,17 @@ async def search_season_packs(
 
         releases = []
         for release in search_result.releases:
-            parsed = parse_season_episode(release.title)
-            if parsed.episode_number is not None:
+            coverage = parse_release_coverage(release.title)
+            if coverage.episode_number is not None:
                 continue
-            if parsed.season_number is not None and parsed.season_number != season_number:
+            if coverage.is_complete_series:
+                continue
+            if coverage.season_numbers != (season_number,):
                 continue
             evaluation = engine.evaluate(release)
             releases.append(_serialize_evaluated_release(release, evaluation))
 
-        return JSONResponse({"releases": releases})
+        return JSONResponse({"releases": _finalize_dashboard_release_payloads(releases)})
     finally:
         pass
 
@@ -823,7 +894,7 @@ async def search_all_season_packs(
             coverage = parse_release_coverage(release.title)
             if coverage.episode_number is not None:
                 continue
-            if not coverage.season_numbers and not coverage.is_complete_series:
+            if not coverage.is_complete_series and len(coverage.season_numbers) <= 1:
                 continue
 
             evaluation = engine.evaluate(release)
@@ -836,7 +907,12 @@ async def search_all_season_packs(
                 )
             )
 
-        return JSONResponse({"releases": releases, "known_total_seasons": known_total_seasons})
+        return JSONResponse(
+            {
+                "releases": _finalize_dashboard_release_payloads(releases),
+                "known_total_seasons": known_total_seasons,
+            }
+        )
     finally:
         pass
 
@@ -881,15 +957,19 @@ async def search_episode(
 
         releases = []
         for release in search_result.releases:
-            parsed = parse_season_episode(release.title)
-            if parsed.season_number is not None and parsed.season_number != season_number:
+            coverage = parse_release_coverage(release.title)
+            if coverage.is_complete_series:
                 continue
-            if parsed.episode_number is not None and parsed.episode_number != episode_number:
+            if coverage.season_numbers != (season_number,):
+                continue
+            if coverage.episode_number != episode_number:
+                continue
+            if not _is_exact_single_episode_release(release.title, season_number, episode_number):
                 continue
             evaluation = engine.evaluate(release)
             releases.append(_serialize_evaluated_release(release, evaluation))
 
-        return JSONResponse({"releases": releases})
+        return JSONResponse({"releases": _finalize_dashboard_release_payloads(releases)})
     finally:
         pass
 

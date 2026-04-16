@@ -748,12 +748,12 @@ function renderSeasonAccordion(data) {
     const searchAllSection = '<div class="rounded-xl border border-gray-700/60 bg-surface-800 p-3 space-y-3">' +
         '<div class="flex items-center justify-between gap-3">' +
             '<div>' +
-                '<div class="text-white font-medium">Search All Season Packs</div>' +
-                '<div class="text-xs text-gray-500">Broad search for multi-season and complete-series packs without downloading.</div>' +
+                '<div class="text-white font-medium">Search Multi Season Packs</div>' +
+                '<div class="text-xs text-gray-500">Broad search for multi-season ranges and complete-series packs without downloading.</div>' +
             '</div>' +
-            '<button onclick="searchAllSeasonPacks(' + requestId + '); event.stopPropagation();" class="btn-primary btn-sm">Search All</button>' +
+            '<button onclick="searchAllSeasonPacks(' + requestId + '); event.stopPropagation();" class="btn-primary btn-sm">Search Multi Season Packs</button>' +
         '</div>' +
-        '<div id="season-packs-all-' + requestId + '" class="space-y-1"><div class="text-gray-500 text-sm">Run Search All to inspect broad season-pack coverage.</div></div>' +
+        '<div id="season-packs-all-' + requestId + '" class="space-y-1"><div class="text-gray-500 text-sm">Run Search Multi Season Packs to inspect broad multi-season coverage.</div></div>' +
     '</div>';
 
     return '<div class="space-y-3">' + searchAllSection + tvInfo.seasons.map(function(season) {
@@ -861,7 +861,7 @@ async function searchAllSeasonPacks(requestId = null) {
 
     container.innerHTML = '<div class="flex items-center gap-2 text-gray-400 text-sm py-2">' +
         '<svg class="animate-spin h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>' +
-        ' Searching all season packs...</div>';
+        ' Searching multi season packs...</div>';
 
     try {
         var response = await fetch('/requests/' + targetRequestId + '/seasons/search-all', { method: 'POST' });
@@ -871,7 +871,7 @@ async function searchAllSeasonPacks(requestId = null) {
         if (data.releases && data.releases.length > 0) {
             container.innerHTML = renderSearchAllResults(data.releases);
         } else {
-            container.innerHTML = '<div class="text-gray-500 text-sm py-2">No multi-season or complete-series results found.</div>';
+            container.innerHTML = '<div class="text-gray-500 text-sm py-2">No multi season or complete-series results found.</div>';
         }
     } catch (err) {
         container.innerHTML = '<div class="text-red-400 text-sm py-2">Error: ' + escapeHtml(err.message) + '</div>';
