@@ -8,7 +8,7 @@ from apscheduler.triggers.interval import IntervalTrigger
 from sqlalchemy import select
 
 from app.siftarr.models.pending_queue import PendingQueue
-from app.siftarr.models.request import MediaType, Request
+from app.siftarr.models.request import MediaType, Request, RequestStatus
 from app.siftarr.services.lifecycle_service import LifecycleService
 from app.siftarr.services.media_helpers import extract_media_title_and_year
 from app.siftarr.services.movie_decision_service import MovieDecisionService
@@ -18,6 +18,7 @@ from app.siftarr.services.prowlarr_service import ProwlarrService
 from app.siftarr.services.qbittorrent_service import QbittorrentService
 from app.siftarr.services.runtime_settings import get_effective_settings
 from app.siftarr.services.tv_decision_service import TVDecisionService
+from app.siftarr.services.unreleased_service import UnreleasedEvaluator
 
 
 class SchedulerService:
@@ -66,8 +67,6 @@ class SchedulerService:
             )
 
             runtime_settings = await get_effective_settings(db)
-            prowlarr = ProwlarrService(settings=runtime_settings)
-            qbittorrent = QbittorrentService(settings=runtime_settings)
 
             if request.year is None and (request.tmdb_id or request.tvdb_id):
                 media_id = request.tmdb_id or request.tvdb_id
@@ -88,6 +87,24 @@ class SchedulerService:
                     pass
                 finally:
                     await overseerr.close()
+
+            overseerr_eval = OverseerrService(settings=runtime_settings)
+            try:
+                evaluator = UnreleasedEvaluator(db, overseerr_eval)
+                try:
+                    new_status = await evaluator.evaluate_and_apply(request)
+                except Exception:
+                    logger.exception("Unreleased evaluation failed for request_id=%s", request.id)
+                    new_status = None
+                if new_status == RequestStatus.UNRELEASED:
+                    await PendingQueueService(db).remove_from_queue(request.id)
+                    logger.info("Request %s now unreleased; removed from pending queue", request.id)
+                    return
+            finally:
+                await overseerr_eval.close()
+
+            prowlarr = ProwlarrService(settings=runtime_settings)
+            qbittorrent = QbittorrentService(settings=runtime_settings)
 
             if request.media_type == MediaType.TV:
                 decision_service = TVDecisionService(db, prowlarr, qbittorrent)
@@ -135,6 +152,44 @@ class SchedulerService:
                 except Exception as e:
                     logger.error("Error processing pending item %s: %s", item.request_id, e)
 
+    async def _reevaluate_unreleased(self) -> int:
+        """
+        Re-evaluate all requests currently in UNRELEASED status.
+
+        For each request, runs the UnreleasedEvaluator. If a request transitions
+        to PENDING, it is enqueued in the pending queue so the normal retry path
+        picks it up on the next scheduler sweep.
+
+        Returns:
+            The number of UNRELEASED requests that were examined.
+        """
+        logger = self._logger
+        async with self.db_session_factory() as db:
+            lifecycle = LifecycleService(db)
+            unreleased = await lifecycle.get_unreleased_requests(limit=500)
+            if not unreleased:
+                return 0
+
+            runtime_settings = await get_effective_settings(db)
+            overseerr = OverseerrService(settings=runtime_settings)
+            try:
+                evaluator = UnreleasedEvaluator(db, overseerr)
+                for req in unreleased:
+                    try:
+                        new_status = await evaluator.evaluate_and_apply(req)
+                        if new_status == RequestStatus.PENDING:
+                            await PendingQueueService(db).add_to_queue(req.id)
+                            logger.info(
+                                "Request %s transitioned UNRELEASED -> PENDING; enqueued",
+                                req.id,
+                            )
+                    except Exception:
+                        logger.exception("Re-evaluate failed for request_id=%s", req.id)
+            finally:
+                await overseerr.close()
+
+            return len(unreleased)
+
     async def _poll_overseerr(self) -> None:
         """
         Poll Overseerr for new approved requests.
@@ -174,6 +229,14 @@ class SchedulerService:
             replace_existing=True,
         )
 
+        self.scheduler.add_job(
+            self._reevaluate_unreleased,
+            trigger=IntervalTrigger(hours=6),
+            id="reevaluate_unreleased",
+            name="Re-evaluate unreleased requests",
+            replace_existing=True,
+        )
+
         self.scheduler.start()
         logger.info("Background scheduler started")
 
@@ -201,3 +264,12 @@ class SchedulerService:
                     await self._process_pending_item(item)
 
             return len(pending_items)
+
+    async def trigger_reevaluate_unreleased_now(self) -> int:
+        """
+        Manually trigger re-evaluation of all UNRELEASED requests.
+
+        Returns:
+            Number of requests that were re-evaluated.
+        """
+        return await self._reevaluate_unreleased()

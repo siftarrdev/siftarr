@@ -255,3 +255,77 @@ class TestLifecycleService:
             await service.mark_as_pending(1)
 
             mock_transition.assert_called_once_with(1, RequestStatus.PENDING)
+
+    def test_can_transition_pending_to_unreleased(self, service):
+        """PENDING should be able to transition to UNRELEASED."""
+        assert service.can_transition(RequestStatus.PENDING, RequestStatus.UNRELEASED)
+        assert service.can_transition(RequestStatus.RECEIVED, RequestStatus.UNRELEASED)
+        assert service.can_transition(RequestStatus.SEARCHING, RequestStatus.UNRELEASED)
+
+    def test_can_transition_unreleased_to_pending(self, service):
+        """UNRELEASED should be able to transition back to PENDING/SEARCHING/FAILED."""
+        assert service.can_transition(RequestStatus.UNRELEASED, RequestStatus.PENDING)
+        assert service.can_transition(RequestStatus.UNRELEASED, RequestStatus.SEARCHING)
+        assert service.can_transition(RequestStatus.UNRELEASED, RequestStatus.FAILED)
+
+    @pytest.mark.asyncio
+    async def test_unreleased_cannot_transition_to_staged(self, mock_db, service):
+        """UNRELEASED → STAGED should be rejected as an invalid transition."""
+        assert not service.can_transition(RequestStatus.UNRELEASED, RequestStatus.STAGED)
+
+        mock_request = MagicMock(spec=Request)
+        mock_request.status = RequestStatus.UNRELEASED
+        mock_request.id = 1
+
+        mock_result = MagicMock()
+        mock_result.scalar_one_or_none.return_value = mock_request
+        mock_db.execute.return_value = mock_result
+
+        with pytest.raises(ValueError, match="Invalid transition"):
+            await service.transition(1, RequestStatus.STAGED)
+
+    @pytest.mark.asyncio
+    async def test_get_active_requests_excludes_unreleased(self, mock_db, service):
+        """get_active_requests should not include UNRELEASED status in its filter."""
+        mock_result = MagicMock()
+        mock_result.scalars.return_value.all.return_value = []
+        mock_db.execute.return_value = mock_result
+
+        await service.get_active_requests()
+
+        # Inspect the executed statement and ensure UNRELEASED isn't part of the IN-clause.
+        called_stmt = mock_db.execute.call_args.args[0]
+        compiled = str(called_stmt.compile(compile_kwargs={"literal_binds": True}))
+        assert "unreleased" not in compiled.lower()
+
+    @pytest.mark.asyncio
+    async def test_get_unreleased_requests_returns_only_unreleased(self, mock_db, service):
+        """get_unreleased_requests should return only UNRELEASED requests."""
+        mock_requests = [
+            MagicMock(spec=Request, id=1, status=RequestStatus.UNRELEASED),
+            MagicMock(spec=Request, id=2, status=RequestStatus.UNRELEASED),
+        ]
+        mock_result = MagicMock()
+        mock_result.scalars.return_value.all.return_value = mock_requests
+        mock_db.execute.return_value = mock_result
+
+        result = await service.get_unreleased_requests()
+
+        assert len(result) == 2
+        assert all(r.status == RequestStatus.UNRELEASED for r in result)
+        called_stmt = mock_db.execute.call_args.args[0]
+        compiled = str(called_stmt.compile(compile_kwargs={"literal_binds": True}))
+        assert "unreleased" in compiled.lower()
+
+    @pytest.mark.asyncio
+    async def test_mark_as_unreleased_transitions_from_pending(self, mock_db, service):
+        """mark_as_unreleased should delegate to transition with UNRELEASED status."""
+        mock_request = MagicMock(spec=Request)
+        mock_request.status = RequestStatus.PENDING
+        mock_request.id = 1
+
+        with patch.object(service, "transition", return_value=mock_request) as mock_transition:
+            result = await service.mark_as_unreleased(1, reason="not yet aired")
+
+            mock_transition.assert_called_once_with(1, RequestStatus.UNRELEASED, "not yet aired")
+            assert result == mock_request

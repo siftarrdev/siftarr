@@ -24,12 +24,17 @@ class LifecycleService:
     """
 
     VALID_TRANSITIONS: dict[RequestStatus, list[RequestStatus]] = {
-        RequestStatus.RECEIVED: [RequestStatus.SEARCHING, RequestStatus.FAILED],
+        RequestStatus.RECEIVED: [
+            RequestStatus.SEARCHING,
+            RequestStatus.UNRELEASED,
+            RequestStatus.FAILED,
+        ],
         RequestStatus.SEARCHING: [
             RequestStatus.PENDING,
             RequestStatus.STAGED,
             RequestStatus.DOWNLOADING,
             RequestStatus.COMPLETED,
+            RequestStatus.UNRELEASED,
             RequestStatus.FAILED,
         ],
         RequestStatus.PENDING: [
@@ -37,6 +42,12 @@ class LifecycleService:
             RequestStatus.STAGED,
             RequestStatus.DOWNLOADING,
             RequestStatus.COMPLETED,
+            RequestStatus.UNRELEASED,
+            RequestStatus.FAILED,
+        ],
+        RequestStatus.UNRELEASED: [
+            RequestStatus.PENDING,
+            RequestStatus.SEARCHING,
             RequestStatus.FAILED,
         ],
         RequestStatus.STAGED: [
@@ -212,6 +223,24 @@ class LifecycleService:
     async def mark_as_pending(self, request_id: int) -> Request | None:
         """Convenience method to mark a request as pending."""
         return await self.transition(request_id, RequestStatus.PENDING)
+
+    async def mark_as_unreleased(
+        self,
+        request_id: int,
+        reason: str | None = None,
+    ) -> Request | None:
+        """Convenience method to mark a request as unreleased."""
+        return await self.transition(request_id, RequestStatus.UNRELEASED, reason)
+
+    async def get_unreleased_requests(self, limit: int = 500) -> list[Request]:
+        """Get all requests currently in the UNRELEASED status."""
+        result = await self.db.execute(
+            select(Request)
+            .where(Request.status == RequestStatus.UNRELEASED)
+            .order_by(Request.updated_at.desc())
+            .limit(limit)
+        )
+        return list(result.scalars().all())
 
     async def mark_as_replacing(
         self,

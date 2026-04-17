@@ -18,6 +18,7 @@ from app.siftarr.services.prowlarr_service import ProwlarrService
 from app.siftarr.services.qbittorrent_service import QbittorrentService
 from app.siftarr.services.runtime_settings import get_effective_settings
 from app.siftarr.services.tv_decision_service import TVDecisionService
+from app.siftarr.services.unreleased_service import UnreleasedEvaluator
 
 logger = logging.getLogger(__name__)
 
@@ -161,6 +162,24 @@ async def process_request_background(request_id: int) -> None:
                     logger.exception("Episode sync failed for request_id=%s", request_id)
                 finally:
                     await plex_service.close()
+
+            # Release availability gate (fail-open).
+            settings = await get_effective_settings(db)
+            overseerr = OverseerrService(settings=settings)
+            try:
+                evaluator = UnreleasedEvaluator(db, overseerr)
+                try:
+                    new_status = await evaluator.evaluate_and_apply(request)
+                except Exception:
+                    logger.exception("Unreleased evaluation failed for request_id=%s", request_id)
+                    new_status = None
+                if new_status == RequestStatus.UNRELEASED:
+                    logger.info("Request %s classified as unreleased; skipping search", request_id)
+                    return
+                # Refresh request state from DB in case the evaluator transitioned it.
+                await db.refresh(request)
+            finally:
+                await overseerr.close()
 
             settings = await get_effective_settings(db)
             prowlarr = ProwlarrService(settings=settings)

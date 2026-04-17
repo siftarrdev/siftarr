@@ -9,7 +9,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.siftarr.database import get_db
-from app.siftarr.models.request import MediaType
+from app.siftarr.models.request import MediaType, RequestStatus
 from app.siftarr.models.request import Request as RequestModel
 from app.siftarr.models.rule import Rule
 from app.siftarr.services.lifecycle_service import LifecycleService
@@ -29,6 +29,7 @@ from app.siftarr.services.request_service import (
 )
 from app.siftarr.services.rule_engine import ReleaseEvaluation, RuleEngine
 from app.siftarr.services.runtime_settings import get_effective_settings
+from app.siftarr.services.unreleased_service import UnreleasedEvaluator
 
 logger = logging.getLogger(__name__)
 
@@ -288,3 +289,26 @@ async def deny_request(
 
     await _deny_request_record(request, db, reason=reason)
     return RedirectResponse(url=redirect_to or "/", status_code=303)
+
+
+@router.post("/{request_id}/recheck-release")
+async def recheck_release(
+    request_id: int,
+    db: AsyncSession = Depends(get_db),
+) -> RedirectResponse:
+    """Re-evaluate an unreleased request's availability and transition if ready."""
+    request = await load_request_or_404(db, request_id)
+
+    effective_settings = await get_effective_settings(db)
+    overseerr_service = OverseerrService(settings=effective_settings)
+    try:
+        evaluator = UnreleasedEvaluator(db, overseerr_service)
+        new_status = await evaluator.evaluate_and_apply(request)
+    finally:
+        await overseerr_service.close()
+
+    if new_status == RequestStatus.PENDING:
+        await PendingQueueService(db).add_to_queue(request.id)
+        return RedirectResponse(url="/?tab=pending", status_code=303)
+
+    return RedirectResponse(url="/?tab=unreleased", status_code=303)

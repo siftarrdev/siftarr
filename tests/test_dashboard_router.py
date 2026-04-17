@@ -2043,3 +2043,90 @@ class TestDashboardRouter:
         assert "function releaseAnnotationTone(" in template
         assert "text-emerald-400" in template
         assert "text-red-400" in template
+
+    @staticmethod
+    def _build_dashboard_mocks(monkeypatch, mock_db, unreleased_requests):
+        """Wire up the stock monkeypatches for calling dashboard.dashboard()."""
+        lifecycle_service = AsyncMock()
+        lifecycle_service.get_active_requests.return_value = []
+        lifecycle_service.get_requests_by_status.return_value = []
+        lifecycle_service.get_requests_stats.return_value = {"by_status": {}}
+        lifecycle_service.get_unreleased_requests.return_value = unreleased_requests
+        monkeypatch.setattr(dashboard, "LifecycleService", lambda db: lifecycle_service)
+
+        class FakeOverseerrService:
+            def __init__(self, settings):
+                pass
+
+            async def get_request_status_cached(self, request_id):
+                return None
+
+            async def get_media_details(self, media_type, external_id):
+                return None
+
+            def normalize_request_status(self, value):
+                return value
+
+            def normalize_media_status(self, value):
+                return value
+
+            async def close(self):
+                return None
+
+        monkeypatch.setattr(dashboard, "OverseerrService", FakeOverseerrService)
+        monkeypatch.setattr(
+            dashboard,
+            "PendingQueueService",
+            lambda db: AsyncMock(get_all_pending=AsyncMock(return_value=[])),
+        )
+        mock_db.execute.return_value = MagicMock(
+            scalars=MagicMock(return_value=MagicMock(all=MagicMock(return_value=[]))),
+            first=MagicMock(return_value=None),
+        )
+
+    @pytest.mark.asyncio
+    async def test_dashboard_includes_unreleased_requests_and_stat(self, mock_db, monkeypatch):
+        """Dashboard should expose unreleased requests and count them in stats."""
+        unreleased_one = MagicMock()
+        unreleased_one.id = 101
+        unreleased_one.media_type = MediaType.MOVIE
+        unreleased_one.tmdb_id = None
+        unreleased_one.tvdb_id = None
+        unreleased_two = MagicMock()
+        unreleased_two.id = 102
+        unreleased_two.media_type = MediaType.TV
+        unreleased_two.tmdb_id = None
+        unreleased_two.tvdb_id = None
+
+        self._build_dashboard_mocks(monkeypatch, mock_db, [unreleased_one, unreleased_two])
+
+        response = await dashboard.dashboard(MagicMock(), db=mock_db)
+
+        context = response.context
+        assert len(context["unreleased_requests"]) == 2
+        assert context["stats"]["unreleased"] == 2
+        assert context["unreleased_earliest"] == {101: None, 102: None}
+
+    @pytest.mark.asyncio
+    async def test_dashboard_unreleased_stat_zero_when_none(self, mock_db, monkeypatch):
+        """With no unreleased requests, the stat should be zero and dict empty."""
+        self._build_dashboard_mocks(monkeypatch, mock_db, [])
+
+        response = await dashboard.dashboard(MagicMock(), db=mock_db)
+
+        context = response.context
+        assert context["unreleased_requests"] == []
+        assert context["stats"]["unreleased"] == 0
+        assert context["unreleased_earliest"] == {}
+
+    @pytest.mark.asyncio
+    async def test_dashboard_tab_unreleased_query_param_accepted(self, mock_db, monkeypatch):
+        """The dashboard handler should render successfully with ?tab=unreleased."""
+        self._build_dashboard_mocks(monkeypatch, mock_db, [])
+
+        # FastAPI ignores unknown query params at the handler level; calling the
+        # handler directly is the equivalent of a GET /?tab=unreleased request.
+        response = await dashboard.dashboard(MagicMock(), db=mock_db)
+
+        assert response.status_code == 200
+        assert "unreleased_requests" in response.context
