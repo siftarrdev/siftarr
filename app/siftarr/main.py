@@ -14,7 +14,15 @@ from fastapi.staticfiles import StaticFiles
 
 from app.siftarr.config import get_settings
 from app.siftarr.database import async_session_maker, init_db
-from app.siftarr.routers import dashboard, rules, settings, staged, webhooks
+from app.siftarr.routers import (
+    dashboard,
+    dashboard_actions,
+    dashboard_api,
+    rules,
+    settings,
+    staged,
+    webhooks,
+)
 from app.siftarr.services.http_client import close_shared_client
 from app.siftarr.services.scheduler_service import SchedulerService
 from app.siftarr.version import __version__
@@ -281,6 +289,8 @@ def create_app() -> FastAPI:
 
     # Include routers
     app.include_router(dashboard.router)
+    app.include_router(dashboard_api.router)
+    app.include_router(dashboard_actions.router)
     app.include_router(webhooks.router)
     app.include_router(rules.router)
     app.include_router(settings.router)

@@ -3,6 +3,7 @@
 from app.siftarr.services.release_parser import (
     ParsedReleaseCoverage,
     ParsedSeasonEpisode,
+    is_exact_single_episode_release,
     parse_release_coverage,
     parse_season_episode,
 )
@@ -194,3 +195,44 @@ class TestParseReleaseCoverage:
             season_numbers=(3, 4, 5, 6),
             episode_number=None,
         )
+
+
+class TestIsExactSingleEpisodeRelease:
+    def test_exact_single_episode_match(self):
+        assert is_exact_single_episode_release("Show.S01E02.1080p", 1, 2) is True
+
+    def test_wrong_season(self):
+        assert is_exact_single_episode_release("Show.S01E02.1080p", 2, 2) is False
+
+    def test_wrong_episode(self):
+        assert is_exact_single_episode_release("Show.S01E02.1080p", 1, 3) is False
+
+    def test_multi_episode_e01e02(self):
+        assert is_exact_single_episode_release("Show.S01E01E02.1080p", 1, 1) is False
+
+    def test_range_episode_dash_e02(self):
+        assert is_exact_single_episode_release("Show.S01E01-E02.1080p", 1, 1) is False
+
+    def test_season_pack_no_episode(self):
+        assert is_exact_single_episode_release("Show.S01.1080p", 1, 1) is False
+
+    def test_complete_series(self):
+        assert is_exact_single_episode_release("Show.Complete.1080p", 1, 1) is False
+
+    def test_no_pattern_at_all(self):
+        assert is_exact_single_episode_release("Some.Random.Title", 1, 1) is False
+
+    def test_exact_match_with_resolution_suffix(self):
+        assert is_exact_single_episode_release("Show.S03E07.720p.WEB-DL", 3, 7) is True
+
+    def test_multi_episode_with_additional_token(self):
+        assert is_exact_single_episode_release("Show.S01E02.E03.1080p", 1, 2) is False
+
+    def test_case_insensitive(self):
+        assert is_exact_single_episode_release("show.s01e02.1080p", 1, 2) is True
+
+    def test_two_digit_season(self):
+        assert is_exact_single_episode_release("Show.S12E05.1080p", 12, 5) is True
+
+    def test_three_digit_episode(self):
+        assert is_exact_single_episode_release("Show.S01E100.1080p", 1, 100) is True

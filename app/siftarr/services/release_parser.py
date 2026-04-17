@@ -65,6 +65,39 @@ def parse_stored_release_coverage(
     return ParsedReleaseCoverage(season_numbers=(), episode_number=None)
 
 
+SINGLE_EPISODE_RELEASE_PATTERN = re.compile(
+    r"(?:^|[.()\s_]+)S(?P<season>\d{1,2})E(?P<episode>\d{1,3})(?!\d)",
+    re.IGNORECASE,
+)
+FOLLOWUP_EPISODE_TOKEN_PATTERN = re.compile(
+    r"^[.()\s_-]*(?:E\d{1,3}|-\s*E?\d{1,3})(?!\d)",
+    re.IGNORECASE,
+)
+ADDITIONAL_EPISODE_TOKEN_PATTERN = re.compile(
+    r"(?:^|[.()\s_-]+)E\d{1,3}(?!\d)",
+    re.IGNORECASE,
+)
+
+
+def is_exact_single_episode_release(title: str, season_number: int, episode_number: int) -> bool:
+    """Return True when the title identifies exactly one requested episode."""
+    match = SINGLE_EPISODE_RELEASE_PATTERN.search(title)
+    if not match:
+        return False
+
+    if int(match.group("season")) != season_number:
+        return False
+    if int(match.group("episode")) != episode_number:
+        return False
+
+    remainder = title[match.end() :]
+    if FOLLOWUP_EPISODE_TOKEN_PATTERN.match(remainder):
+        return False
+    if SINGLE_EPISODE_RELEASE_PATTERN.search(remainder):
+        return False
+    return not ADDITIONAL_EPISODE_TOKEN_PATTERN.search(remainder)
+
+
 _SEASON_EPISODE_PATTERNS = [
     re.compile(r"(?:^|[.()\s_]+)S(\d{1,2})E(\d{1,3})(?![0-9])", re.IGNORECASE),
 ]

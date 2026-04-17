@@ -10,7 +10,9 @@ from fastapi import BackgroundTasks, HTTPException
 
 from app.siftarr.models.release import Release
 from app.siftarr.models.request import MediaType, RequestStatus
-from app.siftarr.routers import dashboard
+from app.siftarr.routers import dashboard, dashboard_actions, dashboard_api
+from app.siftarr.services import tv_details_service
+from app.siftarr.services.background_tasks import DETAILS_SYNC_TASKS
 from app.siftarr.services.prowlarr_service import ProwlarrRelease, ProwlarrSearchResult
 
 
@@ -28,9 +30,9 @@ class TestDashboardRouter:
 
     @pytest.fixture(autouse=True)
     def clear_details_sync_tasks(self):
-        dashboard._DETAILS_SYNC_TASKS.clear()
+        DETAILS_SYNC_TASKS.clear()
         yield
-        dashboard._DETAILS_SYNC_TASKS.clear()
+        DETAILS_SYNC_TASKS.clear()
 
     @pytest.mark.asyncio
     async def test_bulk_request_action_redirects_to_requested_tab(self, mock_db, monkeypatch):
@@ -43,9 +45,9 @@ class TestDashboardRouter:
         mock_db.execute.return_value = execute_result
 
         process_request_search = AsyncMock()
-        monkeypatch.setattr(dashboard, "_process_request_search", process_request_search)
+        monkeypatch.setattr(dashboard_actions, "_process_request_search", process_request_search)
 
-        response = await dashboard.bulk_request_action(
+        response = await dashboard_actions.bulk_request_action(
             action="search",
             request_ids=[1],
             redirect_to="/?tab=active",
@@ -59,7 +61,7 @@ class TestDashboardRouter:
     @pytest.mark.asyncio
     async def test_bulk_request_action_defaults_to_pending_tab(self, mock_db):
         """Bulk actions default back to the pending tab."""
-        response = await dashboard.bulk_request_action(
+        response = await dashboard_actions.bulk_request_action(
             action="search",
             request_ids=[],
             redirect_to=None,
@@ -74,7 +76,7 @@ class TestDashboardRouter:
         """Pending tab should keep in-flight searches visible."""
         active_request = MagicMock()
         active_request.id = 1
-        active_request.status = dashboard.RequestStatus.SEARCHING
+        active_request.status = RequestStatus.SEARCHING
         active_request.overseerr_request_id = 10
         active_request.title = "The Rookie"
         active_request.media_type.value = "tv"
@@ -171,7 +173,7 @@ class TestDashboardRouter:
         """Search-all endpoint should surface season coverage for broad TV packs."""
         request_record = MagicMock()
         request_record.id = 12
-        request_record.media_type = dashboard.MediaType.TV
+        request_record.media_type = MediaType.TV
         request_record.tvdb_id = 999
         request_record.title = "Foundation"
         request_record.year = 2023
@@ -247,20 +249,20 @@ class TestDashboardRouter:
             ],
             query_time_ms=5,
         )
-        monkeypatch.setattr(dashboard, "ProwlarrService", lambda settings: prowlarr_service)
+        monkeypatch.setattr(dashboard_api, "ProwlarrService", lambda settings: prowlarr_service)
         monkeypatch.setattr(
-            dashboard, "get_effective_settings", AsyncMock(return_value=MagicMock())
+            dashboard_api, "get_effective_settings", AsyncMock(return_value=MagicMock())
         )
 
         fake_evaluation = MagicMock(total_score=12.5, passed=True)
         fake_engine = MagicMock(evaluate=MagicMock(return_value=fake_evaluation))
         monkeypatch.setattr(
-            dashboard.RuleEngine,
+            dashboard_api.RuleEngine,
             "from_db_rules",
             MagicMock(return_value=fake_engine),
         )
 
-        response = await dashboard.search_all_season_packs(request_id=12, db=mock_db)
+        response = await dashboard_api.search_all_season_packs(request_id=12, db=mock_db)
 
         body = json.loads(cast(bytes, response.body))
         assert body["known_total_seasons"] == 3
@@ -300,7 +302,7 @@ class TestDashboardRouter:
         """Season search should only keep exact single-season packs."""
         request_record = MagicMock()
         request_record.id = 12
-        request_record.media_type = dashboard.MediaType.TV
+        request_record.media_type = MediaType.TV
         request_record.tvdb_id = 999
         request_record.title = "Foundation"
         request_record.year = 2023
@@ -363,20 +365,22 @@ class TestDashboardRouter:
             ],
             query_time_ms=5,
         )
-        monkeypatch.setattr(dashboard, "ProwlarrService", lambda settings: prowlarr_service)
+        monkeypatch.setattr(dashboard_api, "ProwlarrService", lambda settings: prowlarr_service)
         monkeypatch.setattr(
-            dashboard, "get_effective_settings", AsyncMock(return_value=MagicMock())
+            dashboard_api, "get_effective_settings", AsyncMock(return_value=MagicMock())
         )
 
         fake_evaluation = MagicMock(total_score=12.5, passed=True)
         fake_engine = MagicMock(evaluate=MagicMock(return_value=fake_evaluation))
         monkeypatch.setattr(
-            dashboard.RuleEngine,
+            dashboard_api.RuleEngine,
             "from_db_rules",
             MagicMock(return_value=fake_engine),
         )
 
-        response = await dashboard.search_season_packs(request_id=12, season_number=1, db=mock_db)
+        response = await dashboard_api.search_season_packs(
+            request_id=12, season_number=1, db=mock_db
+        )
 
         body = json.loads(cast(bytes, response.body))
         assert [release["title"] for release in body["releases"]] == [
@@ -389,7 +393,7 @@ class TestDashboardRouter:
         """Season search results should prefer higher score, then smaller size."""
         request_record = MagicMock()
         request_record.id = 12
-        request_record.media_type = dashboard.MediaType.TV
+        request_record.media_type = MediaType.TV
         request_record.tvdb_id = 999
         request_record.title = "Foundation"
         request_record.year = 2023
@@ -430,9 +434,9 @@ class TestDashboardRouter:
             releases=[larger_high_score, lower_score, smaller_high_score],
             query_time_ms=5,
         )
-        monkeypatch.setattr(dashboard, "ProwlarrService", lambda settings: prowlarr_service)
+        monkeypatch.setattr(dashboard_api, "ProwlarrService", lambda settings: prowlarr_service)
         monkeypatch.setattr(
-            dashboard, "get_effective_settings", AsyncMock(return_value=MagicMock())
+            dashboard_api, "get_effective_settings", AsyncMock(return_value=MagicMock())
         )
 
         score_by_title = {
@@ -448,12 +452,14 @@ class TestDashboardRouter:
             )
         )
         monkeypatch.setattr(
-            dashboard.RuleEngine,
+            dashboard_api.RuleEngine,
             "from_db_rules",
             MagicMock(return_value=fake_engine),
         )
 
-        response = await dashboard.search_season_packs(request_id=12, season_number=1, db=mock_db)
+        response = await dashboard_api.search_season_packs(
+            request_id=12, season_number=1, db=mock_db
+        )
 
         body = json.loads(cast(bytes, response.body))
         assert [release["title"] for release in body["releases"]] == [
@@ -464,13 +470,94 @@ class TestDashboardRouter:
         assert all("_size_bytes" not in release for release in body["releases"])
 
     @pytest.mark.asyncio
+    async def test_search_season_packs_prioritizes_size_limit_passes(self, mock_db, monkeypatch):
+        """Season search should keep non-size failures green and size failures red."""
+        request_record = MagicMock()
+        request_record.id = 12
+        request_record.media_type = MediaType.TV
+        request_record.tvdb_id = 999
+        request_record.title = "Foundation"
+        request_record.year = 2023
+
+        request_result = MagicMock()
+        request_result.scalar_one_or_none.return_value = request_record
+        rules_result = MagicMock()
+        rules_result.scalars.return_value.all.return_value = []
+        mock_db.execute.side_effect = [request_result, rules_result]
+
+        passing_size_but_other_rule_fail = ProwlarrRelease(
+            title="Foundation.S01.1080p.WEB-DL.BADTAG",
+            size=14 * 1024 * 1024 * 1024,
+            indexer="IndexerA",
+            download_url="https://example.test/passing-other-rule",
+            seeders=20,
+            leechers=2,
+        )
+        size_limit_fail = ProwlarrRelease(
+            title="Foundation.S01.2160p.REMUX",
+            size=40 * 1024 * 1024 * 1024,
+            indexer="IndexerB",
+            download_url="https://example.test/size-fail",
+            seeders=99,
+            leechers=0,
+        )
+
+        prowlarr_service = AsyncMock()
+        prowlarr_service.search_by_tvdbid.return_value = ProwlarrSearchResult(
+            releases=[size_limit_fail, passing_size_but_other_rule_fail],
+            query_time_ms=5,
+        )
+        monkeypatch.setattr(dashboard_api, "ProwlarrService", lambda settings: prowlarr_service)
+        monkeypatch.setattr(
+            dashboard_api, "get_effective_settings", AsyncMock(return_value=MagicMock())
+        )
+
+        score_by_title = {
+            passing_size_but_other_rule_fail.title: 80,
+            size_limit_fail.title: 100,
+        }
+
+        def evaluate_release(release):
+            if release.title == size_limit_fail.title:
+                return MagicMock(
+                    total_score=score_by_title[release.title],
+                    passed=False,
+                    rejection_reason="Size 40.00 GB above maximum 20.00 GB",
+                )
+            return MagicMock(
+                total_score=score_by_title[release.title],
+                passed=False,
+                rejection_reason="Matched exclusion pattern: Bad Tag",
+            )
+
+        fake_engine = MagicMock(evaluate=MagicMock(side_effect=evaluate_release))
+        monkeypatch.setattr(
+            dashboard_api.RuleEngine,
+            "from_db_rules",
+            MagicMock(return_value=fake_engine),
+        )
+
+        response = await dashboard_api.search_season_packs(
+            request_id=12, season_number=1, db=mock_db
+        )
+
+        body = json.loads(cast(bytes, response.body))
+        assert [release["title"] for release in body["releases"]] == [
+            "Foundation.S01.1080p.WEB-DL.BADTAG",
+            "Foundation.S01.2160p.REMUX",
+        ]
+        assert body["releases"][0]["passed"] is False
+        assert body["releases"][0]["size_per_season_passed"] is True
+        assert body["releases"][1]["size_per_season_passed"] is False
+
+    @pytest.mark.asyncio
     async def test_search_episode_excludes_packs_and_multi_season_results(
         self, mock_db, monkeypatch
     ):
         """Episode search should only keep exact episode releases."""
         request_record = MagicMock()
         request_record.id = 12
-        request_record.media_type = dashboard.MediaType.TV
+        request_record.media_type = MediaType.TV
         request_record.tvdb_id = 999
         request_record.title = "Foundation"
         request_record.year = 2023
@@ -560,20 +647,20 @@ class TestDashboardRouter:
             ],
             query_time_ms=5,
         )
-        monkeypatch.setattr(dashboard, "ProwlarrService", lambda settings: prowlarr_service)
+        monkeypatch.setattr(dashboard_api, "ProwlarrService", lambda settings: prowlarr_service)
         monkeypatch.setattr(
-            dashboard, "get_effective_settings", AsyncMock(return_value=MagicMock())
+            dashboard_api, "get_effective_settings", AsyncMock(return_value=MagicMock())
         )
 
         fake_evaluation = MagicMock(total_score=12.5, passed=True)
         fake_engine = MagicMock(evaluate=MagicMock(return_value=fake_evaluation))
         monkeypatch.setattr(
-            dashboard.RuleEngine,
+            dashboard_api.RuleEngine,
             "from_db_rules",
             MagicMock(return_value=fake_engine),
         )
 
-        response = await dashboard.search_episode(
+        response = await dashboard_api.search_episode(
             request_id=12,
             season_number=1,
             episode_number=1,
@@ -590,7 +677,7 @@ class TestDashboardRouter:
         """Broad season-pack search should prefer higher score, then smaller size."""
         request_record = MagicMock()
         request_record.id = 12
-        request_record.media_type = dashboard.MediaType.TV
+        request_record.media_type = MediaType.TV
         request_record.tvdb_id = 999
         request_record.title = "Foundation"
         request_record.year = 2023
@@ -638,9 +725,9 @@ class TestDashboardRouter:
             releases=[larger_high_score, lower_score, smaller_high_score],
             query_time_ms=5,
         )
-        monkeypatch.setattr(dashboard, "ProwlarrService", lambda settings: prowlarr_service)
+        monkeypatch.setattr(dashboard_api, "ProwlarrService", lambda settings: prowlarr_service)
         monkeypatch.setattr(
-            dashboard, "get_effective_settings", AsyncMock(return_value=MagicMock())
+            dashboard_api, "get_effective_settings", AsyncMock(return_value=MagicMock())
         )
 
         score_by_title = {
@@ -656,12 +743,12 @@ class TestDashboardRouter:
             )
         )
         monkeypatch.setattr(
-            dashboard.RuleEngine,
+            dashboard_api.RuleEngine,
             "from_db_rules",
             MagicMock(return_value=fake_engine),
         )
 
-        response = await dashboard.search_all_season_packs(request_id=12, db=mock_db)
+        response = await dashboard_api.search_all_season_packs(request_id=12, db=mock_db)
 
         body = json.loads(cast(bytes, response.body))
         assert [release["title"] for release in body["releases"]] == [
@@ -676,7 +763,7 @@ class TestDashboardRouter:
         """Episode search results should prefer higher score, then smaller size."""
         request_record = MagicMock()
         request_record.id = 12
-        request_record.media_type = dashboard.MediaType.TV
+        request_record.media_type = MediaType.TV
         request_record.tvdb_id = 999
         request_record.title = "Foundation"
         request_record.year = 2023
@@ -717,9 +804,9 @@ class TestDashboardRouter:
             releases=[larger_high_score, lower_score, smaller_high_score],
             query_time_ms=5,
         )
-        monkeypatch.setattr(dashboard, "ProwlarrService", lambda settings: prowlarr_service)
+        monkeypatch.setattr(dashboard_api, "ProwlarrService", lambda settings: prowlarr_service)
         monkeypatch.setattr(
-            dashboard, "get_effective_settings", AsyncMock(return_value=MagicMock())
+            dashboard_api, "get_effective_settings", AsyncMock(return_value=MagicMock())
         )
 
         score_by_title = {
@@ -735,12 +822,12 @@ class TestDashboardRouter:
             )
         )
         monkeypatch.setattr(
-            dashboard.RuleEngine,
+            dashboard_api.RuleEngine,
             "from_db_rules",
             MagicMock(return_value=fake_engine),
         )
 
-        response = await dashboard.search_episode(
+        response = await dashboard_api.search_episode(
             request_id=12,
             season_number=1,
             episode_number=1,
@@ -759,14 +846,14 @@ class TestDashboardRouter:
     async def test_search_all_season_packs_rejects_non_tv_requests(self, mock_db):
         """Search-all endpoint should reject non-TV requests."""
         request_record = MagicMock()
-        request_record.media_type = dashboard.MediaType.MOVIE
+        request_record.media_type = MediaType.MOVIE
 
         request_result = MagicMock()
         request_result.scalar_one_or_none.return_value = request_record
         mock_db.execute.return_value = request_result
 
         with pytest.raises(HTTPException) as exc_info:
-            await dashboard.search_all_season_packs(request_id=44, db=mock_db)
+            await dashboard_api.search_all_season_packs(request_id=44, db=mock_db)
 
         assert exc_info.value.status_code == 400
         assert exc_info.value.detail == "Request is not a TV show"
@@ -835,7 +922,7 @@ class TestDashboardRouter:
         ]
 
         monkeypatch.setattr(
-            dashboard, "get_effective_settings", AsyncMock(return_value=MagicMock())
+            dashboard_api, "get_effective_settings", AsyncMock(return_value=MagicMock())
         )
 
         class FakeOverseerrService:
@@ -852,10 +939,10 @@ class TestDashboardRouter:
         fake_engine = MagicMock()
         fake_engine.evaluate.return_value = MagicMock(rejection_reason=None, matches=[])
 
-        monkeypatch.setattr(dashboard, "OverseerrService", FakeOverseerrService)
-        monkeypatch.setattr(dashboard, "PlexService", lambda settings: FakePlexService())
+        monkeypatch.setattr(dashboard_api, "OverseerrService", FakeOverseerrService)
+        monkeypatch.setattr(dashboard_api, "PlexService", lambda settings: FakePlexService())
         monkeypatch.setattr(
-            dashboard.RuleEngine,
+            dashboard_api.RuleEngine,
             "from_db_rules",
             MagicMock(return_value=fake_engine),
         )
@@ -873,7 +960,7 @@ class TestDashboardRouter:
                 "app.siftarr.services.episode_sync_service.EpisodeSyncService",
                 FakeEpisodeSyncService,
             )
-            response = await dashboard.request_details(
+            response = await dashboard_api.request_details(
                 request_id=21, background_tasks=background_tasks, db=mock_db
             )
 
@@ -1001,7 +1088,7 @@ class TestDashboardRouter:
         ]
 
         monkeypatch.setattr(
-            dashboard, "get_effective_settings", AsyncMock(return_value=MagicMock())
+            dashboard_api, "get_effective_settings", AsyncMock(return_value=MagicMock())
         )
 
         class FakeOverseerrService:
@@ -1018,10 +1105,10 @@ class TestDashboardRouter:
         fake_engine = MagicMock()
         fake_engine.evaluate.return_value = MagicMock(rejection_reason=None, matches=[])
 
-        monkeypatch.setattr(dashboard, "OverseerrService", FakeOverseerrService)
-        monkeypatch.setattr(dashboard, "PlexService", lambda settings: FakePlexService())
+        monkeypatch.setattr(dashboard_api, "OverseerrService", FakeOverseerrService)
+        monkeypatch.setattr(dashboard_api, "PlexService", lambda settings: FakePlexService())
         monkeypatch.setattr(
-            dashboard.RuleEngine,
+            dashboard_api.RuleEngine,
             "from_db_rules",
             MagicMock(return_value=fake_engine),
         )
@@ -1039,7 +1126,7 @@ class TestDashboardRouter:
                 "app.siftarr.services.episode_sync_service.EpisodeSyncService",
                 FakeEpisodeSyncService,
             )
-            response = await dashboard.request_details(
+            response = await dashboard_api.request_details(
                 request_id=21, background_tasks=background_tasks, db=mock_db
             )
 
@@ -1105,7 +1192,7 @@ class TestDashboardRouter:
         mock_db.execute.side_effect = [request_result, release_result, rules_result]
 
         monkeypatch.setattr(
-            dashboard, "get_effective_settings", AsyncMock(return_value=MagicMock())
+            dashboard_api, "get_effective_settings", AsyncMock(return_value=MagicMock())
         )
 
         class FakeOverseerrService:
@@ -1123,14 +1210,14 @@ class TestDashboardRouter:
             passed=False,
         )
 
-        monkeypatch.setattr(dashboard, "OverseerrService", FakeOverseerrService)
+        monkeypatch.setattr(dashboard_api, "OverseerrService", FakeOverseerrService)
         monkeypatch.setattr(
-            dashboard.RuleEngine,
+            dashboard_api.RuleEngine,
             "from_db_rules",
             MagicMock(return_value=fake_engine),
         )
 
-        response = await dashboard.request_details(
+        response = await dashboard_api.request_details(
             request_id=21, background_tasks=background_tasks, db=mock_db
         )
 
@@ -1187,7 +1274,7 @@ class TestDashboardRouter:
         ]
 
         monkeypatch.setattr(
-            dashboard, "get_effective_settings", AsyncMock(return_value=MagicMock())
+            dashboard_api, "get_effective_settings", AsyncMock(return_value=MagicMock())
         )
 
         class FakeOverseerrService:
@@ -1200,19 +1287,19 @@ class TestDashboardRouter:
         fake_engine = MagicMock()
         fake_engine.evaluate.return_value = MagicMock(rejection_reason=None, matches=[])
         scheduled = []
-        monkeypatch.setattr(dashboard, "OverseerrService", FakeOverseerrService)
+        monkeypatch.setattr(dashboard_api, "OverseerrService", FakeOverseerrService)
         monkeypatch.setattr(
-            dashboard.RuleEngine,
+            dashboard_api.RuleEngine,
             "from_db_rules",
             MagicMock(return_value=fake_engine),
         )
         monkeypatch.setattr(
-            dashboard,
-            "_schedule_background_episode_refresh",
+            tv_details_service,
+            "schedule_background_episode_refresh",
             lambda tasks, request_id: scheduled.append((tasks, request_id)) or True,
         )
 
-        response = await dashboard.request_details(
+        response = await dashboard_api.request_details(
             request_id=21, background_tasks=background_tasks, db=mock_db
         )
 
@@ -1256,12 +1343,12 @@ class TestDashboardRouter:
 
         scheduled = []
         monkeypatch.setattr(
-            dashboard,
-            "_schedule_background_episode_refresh",
+            tv_details_service,
+            "schedule_background_episode_refresh",
             lambda tasks, request_id: scheduled.append((tasks, request_id)) or True,
         )
 
-        response = await dashboard.get_request_seasons(
+        response = await dashboard_api.get_request_seasons(
             request_id=21, background_tasks=background_tasks, db=mock_db
         )
 
@@ -1328,7 +1415,7 @@ class TestDashboardRouter:
         ]
 
         monkeypatch.setattr(
-            dashboard, "get_effective_settings", AsyncMock(return_value=MagicMock())
+            dashboard_api, "get_effective_settings", AsyncMock(return_value=MagicMock())
         )
 
         class FakeOverseerrService:
@@ -1340,14 +1427,14 @@ class TestDashboardRouter:
 
         fake_engine = MagicMock()
         fake_engine.evaluate.return_value = MagicMock(rejection_reason=None, matches=[])
-        monkeypatch.setattr(dashboard, "OverseerrService", FakeOverseerrService)
+        monkeypatch.setattr(dashboard_api, "OverseerrService", FakeOverseerrService)
         monkeypatch.setattr(
-            dashboard.RuleEngine,
+            dashboard_api.RuleEngine,
             "from_db_rules",
             MagicMock(return_value=fake_engine),
         )
 
-        response = await dashboard.request_details(
+        response = await dashboard_api.request_details(
             request_id=21, background_tasks=background_tasks, db=mock_db
         )
 
@@ -1422,7 +1509,7 @@ class TestDashboardRouter:
         ]
 
         monkeypatch.setattr(
-            dashboard, "get_effective_settings", AsyncMock(return_value=MagicMock())
+            dashboard_api, "get_effective_settings", AsyncMock(return_value=MagicMock())
         )
 
         class FakeOverseerrService:
@@ -1435,19 +1522,19 @@ class TestDashboardRouter:
         fake_engine = MagicMock()
         fake_engine.evaluate.return_value = MagicMock(rejection_reason=None, matches=[])
         scheduled = []
-        monkeypatch.setattr(dashboard, "OverseerrService", FakeOverseerrService)
+        monkeypatch.setattr(dashboard_api, "OverseerrService", FakeOverseerrService)
         monkeypatch.setattr(
-            dashboard.RuleEngine,
+            dashboard_api.RuleEngine,
             "from_db_rules",
             MagicMock(return_value=fake_engine),
         )
         monkeypatch.setattr(
-            dashboard,
-            "_schedule_background_episode_refresh",
+            tv_details_service,
+            "schedule_background_episode_refresh",
             lambda tasks, request_id: scheduled.append((tasks, request_id)) or True,
         )
 
-        response = await dashboard.request_details(
+        response = await dashboard_api.request_details(
             request_id=21, background_tasks=background_tasks, db=mock_db
         )
 
@@ -1523,7 +1610,7 @@ class TestDashboardRouter:
         ]
 
         monkeypatch.setattr(
-            dashboard, "get_effective_settings", AsyncMock(return_value=MagicMock())
+            dashboard_api, "get_effective_settings", AsyncMock(return_value=MagicMock())
         )
 
         class FakeOverseerrService:
@@ -1535,14 +1622,14 @@ class TestDashboardRouter:
 
         fake_engine = MagicMock()
         fake_engine.evaluate.return_value = MagicMock(rejection_reason=None, matches=[])
-        monkeypatch.setattr(dashboard, "OverseerrService", FakeOverseerrService)
+        monkeypatch.setattr(dashboard_api, "OverseerrService", FakeOverseerrService)
         monkeypatch.setattr(
-            dashboard.RuleEngine,
+            dashboard_api.RuleEngine,
             "from_db_rules",
             MagicMock(return_value=fake_engine),
         )
 
-        response = await dashboard.request_details(
+        response = await dashboard_api.request_details(
             request_id=51, background_tasks=background_tasks, db=mock_db
         )
 
@@ -1620,7 +1707,7 @@ class TestDashboardRouter:
         ]
 
         monkeypatch.setattr(
-            dashboard, "get_effective_settings", AsyncMock(return_value=MagicMock())
+            dashboard_api, "get_effective_settings", AsyncMock(return_value=MagicMock())
         )
 
         class FakeOverseerrService:
@@ -1632,14 +1719,14 @@ class TestDashboardRouter:
 
         fake_engine = MagicMock()
         fake_engine.evaluate.return_value = MagicMock(rejection_reason=None, matches=[])
-        monkeypatch.setattr(dashboard, "OverseerrService", FakeOverseerrService)
+        monkeypatch.setattr(dashboard_api, "OverseerrService", FakeOverseerrService)
         monkeypatch.setattr(
-            dashboard.RuleEngine,
+            dashboard_api.RuleEngine,
             "from_db_rules",
             MagicMock(return_value=fake_engine),
         )
 
-        response = await dashboard.request_details(
+        response = await dashboard_api.request_details(
             request_id=21, background_tasks=background_tasks, db=mock_db
         )
 
@@ -1666,16 +1753,16 @@ class TestDashboardRouter:
         mock_db.execute.return_value = request_result
 
         monkeypatch.setattr(
-            dashboard, "get_effective_settings", AsyncMock(return_value=MagicMock())
+            dashboard_api, "get_effective_settings", AsyncMock(return_value=MagicMock())
         )
 
         overseerr_service = AsyncMock()
         overseerr_service.resolve_tv_media_id.return_value = 4321
         overseerr_service.mark_series_available.return_value = True
-        monkeypatch.setattr(dashboard, "OverseerrService", lambda settings: overseerr_service)
+        monkeypatch.setattr(dashboard_api, "OverseerrService", lambda settings: overseerr_service)
 
         plex_service = AsyncMock()
-        monkeypatch.setattr(dashboard, "PlexService", lambda settings: plex_service)
+        monkeypatch.setattr(dashboard_api, "PlexService", lambda settings: plex_service)
 
         sync_episodes = AsyncMock()
 
@@ -1687,15 +1774,15 @@ class TestDashboardRouter:
             async def sync_episodes(self, request_id, force_plex_refresh=False):
                 return await sync_episodes(request_id, force_plex_refresh=force_plex_refresh)
 
-        monkeypatch.setattr(dashboard, "clear_status_cache", MagicMock(return_value=1))
-        monkeypatch.setattr(dashboard, "clear_media_details_cache", MagicMock(return_value=1))
+        monkeypatch.setattr(dashboard_api, "clear_status_cache", MagicMock(return_value=1))
+        monkeypatch.setattr(dashboard_api, "clear_media_details_cache", MagicMock(return_value=1))
 
         with pytest.MonkeyPatch.context() as inner_monkeypatch:
             inner_monkeypatch.setattr(
                 "app.siftarr.services.episode_sync_service.EpisodeSyncService",
                 FakeEpisodeSyncService,
             )
-            response = await dashboard.mark_series_available(
+            response = await dashboard_api.mark_series_available(
                 request_id=21,
                 db=mock_db,
             )
@@ -1725,16 +1812,16 @@ class TestDashboardRouter:
         mock_db.execute.return_value = request_result
 
         monkeypatch.setattr(
-            dashboard, "get_effective_settings", AsyncMock(return_value=MagicMock())
+            dashboard_api, "get_effective_settings", AsyncMock(return_value=MagicMock())
         )
 
         overseerr_service = AsyncMock()
         overseerr_service.resolve_tv_media_id.return_value = 4321
         overseerr_service.mark_series_available.return_value = False
-        monkeypatch.setattr(dashboard, "OverseerrService", lambda settings: overseerr_service)
-        monkeypatch.setattr(dashboard, "PlexService", lambda settings: AsyncMock())
+        monkeypatch.setattr(dashboard_api, "OverseerrService", lambda settings: overseerr_service)
+        monkeypatch.setattr(dashboard_api, "PlexService", lambda settings: AsyncMock())
 
-        response = await dashboard.mark_series_available(
+        response = await dashboard_api.mark_series_available(
             request_id=21,
             db=mock_db,
         )
@@ -1755,16 +1842,16 @@ class TestDashboardRouter:
         mock_db.execute.return_value = request_result
 
         monkeypatch.setattr(
-            dashboard, "get_effective_settings", AsyncMock(return_value=MagicMock())
+            dashboard_api, "get_effective_settings", AsyncMock(return_value=MagicMock())
         )
 
         overseerr_service = AsyncMock()
         overseerr_service.resolve_tv_media_id.return_value = None
-        monkeypatch.setattr(dashboard, "OverseerrService", lambda settings: overseerr_service)
-        monkeypatch.setattr(dashboard, "PlexService", lambda settings: AsyncMock())
+        monkeypatch.setattr(dashboard_api, "OverseerrService", lambda settings: overseerr_service)
+        monkeypatch.setattr(dashboard_api, "PlexService", lambda settings: AsyncMock())
 
         with pytest.raises(HTTPException) as exc_info:
-            await dashboard.mark_series_available(
+            await dashboard_api.mark_series_available(
                 request_id=21,
                 db=mock_db,
             )
@@ -1789,9 +1876,9 @@ class TestDashboardRouter:
         mock_db.execute.side_effect = [request_result, release_result]
 
         use_releases = AsyncMock()
-        monkeypatch.setattr(dashboard, "use_releases", use_releases)
+        monkeypatch.setattr(dashboard_actions, "use_releases", use_releases)
 
-        response = await dashboard.use_request_release(
+        response = await dashboard_actions.use_request_release(
             request_id=21,
             release_id=99,
             redirect_to=None,
@@ -1827,14 +1914,14 @@ class TestDashboardRouter:
         use_releases = AsyncMock(return_value={"status": "downloading"})
 
         monkeypatch.setattr(
-            dashboard.RuleEngine,
+            dashboard_actions.RuleEngine,
             "from_db_rules",
             MagicMock(return_value=fake_engine),
         )
-        monkeypatch.setattr(dashboard, "persist_manual_release", persist_manual_release)
-        monkeypatch.setattr(dashboard, "use_releases", use_releases)
+        monkeypatch.setattr(dashboard_actions, "persist_manual_release", persist_manual_release)
+        monkeypatch.setattr(dashboard_actions, "use_releases", use_releases)
 
-        response = await dashboard.use_manual_release(
+        response = await dashboard_actions.use_manual_release(
             request_id=21,
             title="Foundation.S01E01.1080p.WEB-DL",
             size=2,
@@ -1874,7 +1961,7 @@ class TestDashboardRouter:
         mock_db.execute.return_value = request_result
 
         with pytest.raises(HTTPException) as exc_info:
-            await dashboard.use_manual_release(
+            await dashboard_actions.use_manual_release(
                 request_id=21,
                 title="Foundation.S01E01.1080p.WEB-DL",
                 size=2,

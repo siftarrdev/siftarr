@@ -44,6 +44,81 @@ def clear_media_details_cache() -> int:
     return cleared_entries
 
 
+def extract_poster_path(poster_path: object) -> str | None:
+    """Extract a clean TMDB poster path from various Overseerr response formats.
+
+    Returns a TMDB-relative path like ``/abc123.jpg`` or *None*.
+    """
+    if not poster_path:
+        return None
+
+    poster = str(poster_path).strip()
+    if not poster:
+        return None
+
+    # Already a bare TMDB path, e.g. "/kSf9svfD2WiLhrs9AP2Uih2Wq3T.jpg"
+    if poster.startswith("/") and not poster.startswith("/images"):
+        return poster
+
+    # Overseerr proxied form: "/images/original/kSf9sv...jpg"
+    if poster.startswith("/images/"):
+        # Strip the /images/<size> prefix
+        parts = poster.split("/", 3)  # ['', 'images', 'original', 'rest.jpg']
+        if len(parts) >= 4:
+            return f"/{parts[3]}"
+        return None
+
+    # Full URL pointing to TMDB
+    if "image.tmdb.org" in poster:
+        # e.g. https://image.tmdb.org/t/p/original/abc.jpg -> /abc.jpg
+        idx = poster.find("/t/p/")
+        if idx != -1:
+            after = poster[idx + 4 :]  # "/original/abc.jpg"
+            parts = after.split("/", 2)  # ['', 'original', 'abc.jpg']
+            if len(parts) >= 3:
+                return f"/{parts[2]}"
+        return None
+
+    # Full URL pointing to Overseerr instance – extract the TMDB portion
+    if poster.startswith(("http://", "https://")) and "/images/" in poster:
+        idx = poster.find("/images/")
+        return extract_poster_path(poster[idx:])
+
+    return None
+
+
+def build_poster_url(poster_path: object) -> str | None:
+    """Build a proxied poster URL that the browser can always reach."""
+    tmdb_path = extract_poster_path(poster_path)
+    if not tmdb_path:
+        return None
+    from urllib.parse import quote
+
+    return f"/api/poster?path={quote(tmdb_path, safe='')}"
+
+
+def build_overseerr_media_url(
+    overseerr_url: str | None,
+    media_type: str,
+    tmdb_id: int | None,
+) -> str | None:
+    """Build an Overseerr media URL for movie or TV pages."""
+    if not overseerr_url or not tmdb_id:
+        return None
+    return f"{str(overseerr_url).rstrip('/')}/{media_type}/{tmdb_id}"
+
+
+def choose_display_status(request_status: str, media_status: str) -> str:
+    """Choose the most useful Overseerr status label for UI display."""
+    if media_status in {"processing", "partially_available", "available", "deleted"}:
+        return media_status
+    if request_status not in {"unknown", "no_overseerr_id"}:
+        return request_status
+    if media_status != "unknown":
+        return media_status
+    return request_status
+
+
 class OverseerrApiError(RuntimeError):
     """Raised when an Overseerr mutation fails."""
 

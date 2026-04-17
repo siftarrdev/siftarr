@@ -323,29 +323,8 @@ async def sync_overseerr(
     db: AsyncSession = Depends(get_db),
 ) -> HTMLResponse:
     """Sync with Overseerr for new requests."""
-    eff_settings = await _build_effective_settings(db)
-
-    # Get staging mode setting
-    result = await db.execute(
-        select(DBSettings).where(DBSettings.key == "staging_mode_enabled"),
-    )
-    staging_setting = result.scalar_one_or_none()
-    staging_enabled = staging_setting.value == "true" if staging_setting else True
-
-    # Get pending queue count
-    queue_service = PendingQueueService(db)
-    ready = await queue_service.get_ready_for_retry()
-    pending_count = len(ready)
-
-    # Get request stats using SQL aggregates
-    status_counts = (
-        await db.execute(select(RequestModel.status, func.count()).group_by(RequestModel.status))
-    ).all()
-    stats_by_status = {s.value: c for s, c in status_counts}
-    total_requests = sum(stats_by_status.values())
-    completed = stats_by_status.get(RequestStatus.COMPLETED.value, 0)
-    pending = stats_by_status.get(RequestStatus.PENDING.value, 0)
-    failed = stats_by_status.get(RequestStatus.FAILED.value, 0)
+    context = await _build_settings_page_context(request, db)
+    eff_settings = context["env"]
 
     # Sync logic
     message = "Overseerr sync completed"
@@ -495,23 +474,13 @@ async def sync_overseerr(
         finally:
             await overseerr_service.close()
 
+    context["message"] = message
+    context["message_type"] = message_type
+
     return templates.TemplateResponse(
         request,
         "settings.html",
-        {
-            "request": request,
-            "message": message,
-            "message_type": message_type,
-            "env": eff_settings,
-            "staging_enabled": staging_enabled,
-            "pending_count": pending_count,
-            "stats": {
-                "total_requests": total_requests,
-                "completed": completed,
-                "pending": pending,
-                "failed": failed,
-            },
-        },
+        context,
     )
 
 

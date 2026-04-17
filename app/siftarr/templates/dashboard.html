@@ -800,7 +800,7 @@ function renderCoverageBadge(release) {
         ? '<span class="badge badge-green">Complete series</span>'
         : '';
     const sizePerSeason = release.size_per_season
-        ? '<span data-release-size-per-season="true" class="' + (release.size_per_season_passed ? 'text-emerald-400' : 'text-red-400') + '">' + escapeHtml(release.size_per_season) + '/season</span>'
+        ? '<span data-release-size-per-season="true" class="' + (release.size_per_season_passed === false ? 'text-red-400' : 'text-emerald-400') + '">' + escapeHtml(release.size_per_season) + '/season</span>'
         : '';
 
     return '<div class="mt-1 flex flex-wrap items-center gap-2 text-xs text-gray-400">' +
