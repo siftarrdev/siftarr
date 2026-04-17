@@ -1881,8 +1881,6 @@ class TestDashboardRouter:
         assert "/manual-release/use" in template
         assert "background refresh updates Plex/Overseerr data" in template
         assert "Plex episode availability is being resolved for partial seasons" in template
-        assert "Mark Series Available in Overseerr" in template
-        assert "function markSeriesAvailable(requestId)" in template
 
     def test_dashboard_template_supports_annotation_highlighting(self):
         """Torrent annotation highlighting helpers should exist in the template."""

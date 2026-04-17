@@ -8,17 +8,8 @@ import httpx
 from app.siftarr.config import Settings, get_settings
 from app.siftarr.services.http_client import get_shared_client
 
-_STATUS_CACHE: dict[int, tuple[float, dict]] = {}
-_STATUS_CACHE_TTL = 60.0
 _MEDIA_DETAILS_CACHE: dict[tuple[str, int], tuple[float, dict]] = {}
 _MEDIA_DETAILS_CACHE_TTL = 60.0
-
-
-def clear_status_cache() -> int:
-    """Clear the app-side Overseerr request-status cache."""
-    cleared_entries = len(_STATUS_CACHE)
-    _STATUS_CACHE.clear()
-    return cleared_entries
 
 
 def clear_media_details_cache() -> int:
@@ -90,17 +81,6 @@ def build_overseerr_media_url(
     if not overseerr_url or not tmdb_id:
         return None
     return f"{str(overseerr_url).rstrip('/')}/{media_type}/{tmdb_id}"
-
-
-def choose_display_status(request_status: str, media_status: str) -> str:
-    """Choose the most useful Overseerr status label for UI display."""
-    if media_status in {"processing", "partially_available", "available", "deleted"}:
-        return media_status
-    if request_status not in {"unknown", "no_overseerr_id"}:
-        return request_status
-    if media_status != "unknown":
-        return media_status
-    return request_status
 
 
 class OverseerrApiError(RuntimeError):
@@ -334,34 +314,3 @@ class OverseerrService:
             return response.status_code == 200
         except httpx.RequestError:
             return False
-
-    async def get_request_status(self, request_id: int) -> dict | None:
-        """Get request status from Overseerr API."""
-        if not self.base_url or not self.api_key:
-            return None
-
-        endpoint = f"{self.base_url}/api/v1/request/{request_id}"
-        client = await self._get_client()
-        headers = self._get_headers()
-
-        try:
-            response = await client.get(endpoint, headers=headers)
-            if response.status_code == 200:
-                return response.json()
-            return None
-        except httpx.RequestError:
-            return None
-
-    async def get_request_status_cached(self, request_id: int) -> dict | None:
-        """Get request status with a 60-second in-memory TTL cache."""
-        now = time.monotonic()
-        cached = _STATUS_CACHE.get(request_id)
-        if cached is not None:
-            ts, data = cached
-            if now - ts < _STATUS_CACHE_TTL:
-                return data
-
-        data = await self.get_request_status(request_id)
-        if data is not None:
-            _STATUS_CACHE[request_id] = (now, data)
-        return data

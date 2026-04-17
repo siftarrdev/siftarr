@@ -63,7 +63,6 @@ class TestSettingsRouter:
             "clear_release_search_cache",
             AsyncMock(return_value={"deleted_releases": 4, "detached_episode_refs": 2}),
         )
-        monkeypatch.setattr(settings, "clear_status_cache", MagicMock(return_value=3))
 
         response = await settings.clear_cache(MagicMock(), db=mock_db)
         context = cast(dict, getattr(response, "context", None))
@@ -71,7 +70,6 @@ class TestSettingsRouter:
         assert context["message_type"] == "success"
         assert "removed 4 stored release result(s)" in context["message"]
         assert "detached 2 episode link(s)" in context["message"]
-        assert "cleared 3 Overseerr status cache entries" in context["message"]
 
     @pytest.mark.asyncio
     async def test_clear_cache_route_reports_failure_and_rolls_back(self, monkeypatch):
@@ -95,8 +93,6 @@ class TestSettingsRouter:
             "clear_release_search_cache",
             AsyncMock(side_effect=RuntimeError("boom")),
         )
-        clear_status_cache = MagicMock()
-        monkeypatch.setattr(settings, "clear_status_cache", clear_status_cache)
 
         response = await settings.clear_cache(MagicMock(), db=mock_db)
         context = cast(dict, getattr(response, "context", None))
@@ -104,7 +100,6 @@ class TestSettingsRouter:
         assert context["message_type"] == "error"
         assert context["message"] == "Failed to clear app search cache: boom"
         mock_db.rollback.assert_awaited_once()
-        clear_status_cache.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_settings_page_includes_reseed_default_snapshot_copy(self, monkeypatch):

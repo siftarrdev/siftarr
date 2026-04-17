@@ -811,12 +811,6 @@ function renderSeasonAccordion(data) {
             '</div>' +
             '<button onclick="searchAllSeasonPacks(' + requestId + '); event.stopPropagation();" class="btn-primary btn-sm">Search Multi Season Packs</button>' +
         '</div>' +
-        '<div class="flex items-center justify-between gap-3 rounded-lg border border-gray-700/40 bg-surface-850/60 px-3 py-2">' +
-            '<div class="text-xs text-gray-400">Update Overseerr request state for the whole series after Plex finishes importing.</div>' +
-            '<button onclick="markSeriesAvailable(' + requestId + '); event.stopPropagation();" class="btn-ghost btn-sm"' +
-                (tvInfo.seasons.every(function(season) { return season.status === 'available'; }) ? ' disabled' : '') +
-            '>Mark Series Available in Overseerr</button>' +
-        '</div>' +
         '<div id="season-packs-all-' + requestId + '" class="space-y-1"><div class="text-gray-500 text-sm">Run Search Multi Season Packs to inspect broad multi-season coverage.</div></div>' +
     '</div>';
 
@@ -895,16 +889,6 @@ async function searchSeasonPacks(requestId, seasonNumber) {
         }
     } catch (err) {
         container.innerHTML = '<div class="text-red-400 text-sm py-2">Error: ' + escapeHtml(err.message) + '</div>';
-    }
-}
-
-async function markSeriesAvailable(requestId) {
-    try {
-        const response = await fetch('/requests/' + requestId + '/mark-available', { method: 'POST' });
-        if (!response.ok) throw new Error('Server error: ' + response.status);
-        await openRequestDetails(requestId, currentDetailsIndex);
-    } catch (err) {
-        console.error('Mark series available failed:', err);
     }
 }
 

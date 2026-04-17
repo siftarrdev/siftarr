@@ -1,6 +1,5 @@
 """Background task management for episode refresh operations."""
 
-import asyncio
 import logging
 
 from fastapi import BackgroundTasks
@@ -12,9 +11,6 @@ logger = logging.getLogger(__name__)
 
 # Module-level mutable state for tracking active refresh tasks
 DETAILS_SYNC_TASKS: set[int] = set()
-
-# Concurrency limiter for Overseerr status fetches
-OVERSEERR_SEMAPHORE = asyncio.Semaphore(10)
 
 
 async def run_background_episode_refresh(request_id: int) -> None:

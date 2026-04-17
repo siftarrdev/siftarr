@@ -16,7 +16,7 @@ from app.siftarr.models.request import Request as RequestModel
 from app.siftarr.models.settings import Settings as DBSettings
 from app.siftarr.services.connection_tester import ConnectionTester, ConnectionTestResult
 from app.siftarr.services.media_helpers import extract_media_title_and_year
-from app.siftarr.services.overseerr_service import OverseerrService, clear_status_cache
+from app.siftarr.services.overseerr_service import OverseerrService
 from app.siftarr.services.pending_queue_service import PendingQueueService
 from app.siftarr.services.release_selection_service import clear_release_search_cache
 from app.siftarr.services.rule_service import RuleService
@@ -494,12 +494,10 @@ async def clear_cache(
 
     try:
         release_result = await clear_release_search_cache(db)
-        cleared_status_entries = clear_status_cache()
         context["message"] = (
             "Cleared app search cache: "
-            f"removed {release_result['deleted_releases']} stored release result(s), "
-            f"detached {release_result['detached_episode_refs']} episode link(s), and "
-            f"cleared {cleared_status_entries} Overseerr status cache entr{'y' if cleared_status_entries == 1 else 'ies'}."
+            f"removed {release_result['deleted_releases']} stored release result(s) and "
+            f"detached {release_result['detached_episode_refs']} episode link(s)."
         )
         context["message_type"] = "success"
     except Exception as exc:

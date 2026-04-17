@@ -9,7 +9,6 @@ from app.siftarr.services.overseerr_service import (
     OverseerrService,
     build_overseerr_media_url,
     build_poster_url,
-    choose_display_status,
     extract_poster_path,
 )
 
@@ -362,68 +361,6 @@ class TestOverseerrService:
             assert result is False
 
     @pytest.mark.asyncio
-    async def test_get_request_status_success(self):
-        """Test getting request status successfully."""
-        with patch("app.siftarr.services.overseerr_service.get_settings") as mock_get_settings:
-            mock_settings = MagicMock()
-            mock_settings.overseerr_url = "http://localhost:5055"
-            mock_settings.overseerr_api_key = "test"
-            mock_get_settings.return_value = mock_settings
-
-            service = OverseerrService()
-            mock_client = AsyncMock()
-            mock_response = MagicMock()
-            mock_response.status_code = 200
-            mock_response.json.return_value = {"id": 123, "status": "approved"}
-            mock_client.get = AsyncMock(return_value=mock_response)
-
-            with patch(
-                "app.siftarr.services.overseerr_service.get_shared_client",
-                return_value=mock_client,
-            ):
-                result = await service.get_request_status(123)
-
-            assert result == {"id": 123, "status": "approved"}
-
-    @pytest.mark.asyncio
-    async def test_get_request_status_failure(self):
-        """Test get_request_status returns None on failure."""
-        with patch("app.siftarr.services.overseerr_service.get_settings") as mock_get_settings:
-            mock_settings = MagicMock()
-            mock_settings.overseerr_url = "http://localhost:5055"
-            mock_settings.overseerr_api_key = "test"
-            mock_get_settings.return_value = mock_settings
-
-            service = OverseerrService()
-            mock_client = AsyncMock()
-            mock_response = MagicMock()
-            mock_response.status_code = 404
-            mock_client.get = AsyncMock(return_value=mock_response)
-
-            with patch(
-                "app.siftarr.services.overseerr_service.get_shared_client",
-                return_value=mock_client,
-            ):
-                result = await service.get_request_status(999)
-
-            assert result is None
-
-    def test_clear_status_cache_empties_app_side_cache(self):
-        """Clear helper should empty the in-memory Overseerr status cache."""
-        overseerr_service._STATUS_CACHE.clear()
-        overseerr_service._STATUS_CACHE.update(
-            {
-                1: (1.0, {"status": "approved"}),
-                2: (2.0, {"status": "pending"}),
-            }
-        )
-
-        cleared = overseerr_service.clear_status_cache()
-
-        assert cleared == 2
-        assert overseerr_service._STATUS_CACHE == {}
-
-    @pytest.mark.asyncio
     async def test_get_media_details_uses_ttl_cache(self):
         """Media details should reuse a cached response within the TTL window."""
         overseerr_service._MEDIA_DETAILS_CACHE.clear()
@@ -612,55 +549,3 @@ class TestBuildOverseerrMediaUrl:
             build_overseerr_media_url("http://overseerr:5055/", "movie", 123)
             == "http://overseerr:5055/movie/123"
         )
-
-
-class TestChooseDisplayStatus:
-    """Tests for choose_display_status helper."""
-
-    def test_media_processing_wins(self):
-        """Media status 'processing' should take priority over any request status."""
-        assert choose_display_status("approved", "processing") == "processing"
-
-    def test_media_partially_available_wins(self):
-        """Media status 'partially_available' should take priority."""
-        assert choose_display_status("approved", "partially_available") == "partially_available"
-
-    def test_media_available_wins(self):
-        """Media status 'available' should take priority."""
-        assert choose_display_status("pending", "available") == "available"
-
-    def test_media_deleted_wins(self):
-        """Media status 'deleted' should take priority."""
-        assert choose_display_status("approved", "deleted") == "deleted"
-
-    def test_request_approved_when_media_not_priority(self):
-        """Request status should be used when media status is not in priority set."""
-        assert choose_display_status("approved", "pending") == "approved"
-
-    def test_request_pending_when_media_not_priority(self):
-        """Request status 'pending' should be used when media is not in priority set."""
-        assert choose_display_status("pending", "pending") == "pending"
-
-    def test_request_status_ignored_when_unknown(self):
-        """When request status is 'unknown', fall through to media status."""
-        assert choose_display_status("unknown", "pending") == "pending"
-
-    def test_request_status_ignored_when_no_overseerr_id(self):
-        """When request status is 'no_overseerr_id', fall through to media status."""
-        assert choose_display_status("no_overseerr_id", "pending") == "pending"
-
-    def test_media_unknown_returns_request_unknown(self):
-        """When both are unknown, return request status."""
-        assert choose_display_status("unknown", "unknown") == "unknown"
-
-    def test_no_overseerr_id_with_unknown_media(self):
-        """When request has no overseerr id and media is unknown, return request status."""
-        assert choose_display_status("no_overseerr_id", "unknown") == "no_overseerr_id"
-
-    def test_media_not_unknown_when_request_unknown(self):
-        """When request is unknown but media is not, return media status."""
-        assert choose_display_status("unknown", "pending") == "pending"
-
-    def test_completed_request_with_pending_media(self):
-        """Completed request status should be used when media is only pending."""
-        assert choose_display_status("completed", "pending") == "completed"
