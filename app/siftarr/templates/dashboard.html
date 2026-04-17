@@ -79,8 +79,8 @@ details[open] summary .accordion-chevron { transform: rotate(90deg); }
         </button>
         <button onclick="showTab('rejected')" class="card group text-left hover:border-gray-600 transition-colors">
             <div class="px-4 py-3.5">
-                <div class="text-xs font-medium uppercase tracking-wider text-gray-500 group-hover:text-gray-400">Rejected</div>
-                <div class="mt-1 text-2xl font-bold text-red-400 tabular-nums">{{ stats.rejected }}</div>
+                <div class="text-xs font-medium uppercase tracking-wider text-gray-500 group-hover:text-gray-400">Denied</div>
+                <div class="mt-1 text-2xl font-bold text-red-400 tabular-nums">{{ stats.denied }}</div>
             </div>
         </button>
     </div>
@@ -97,7 +97,7 @@ details[open] summary .accordion-chevron { transform: rotate(90deg); }
             <button onclick="showTab('finished')" id="tab-finished"
                     class="tab-button border-b-2 border-transparent pb-3 text-sm font-medium text-gray-500 hover:text-gray-300 whitespace-nowrap">Finished</button>
             <button onclick="showTab('rejected')" id="tab-rejected"
-                    class="tab-button border-b-2 border-transparent pb-3 text-sm font-medium text-gray-500 hover:text-gray-300 whitespace-nowrap">Rejected</button>
+                    class="tab-button border-b-2 border-transparent pb-3 text-sm font-medium text-gray-500 hover:text-gray-300 whitespace-nowrap">Denied</button>
         </nav>
     </div>
 
@@ -121,17 +121,6 @@ details[open] summary .accordion-chevron { transform: rotate(90deg); }
                     </div>
                     <div class="mt-4 flex flex-col gap-2 lg:flex-row lg:items-center">
                         <input type="text" id="filter-input" placeholder="Filter active requests..." class="form-input lg:flex-1">
-                        <select id="overseerr-status-filter" class="form-select lg:w-56">
-                            <option value="">All Overseerr Statuses</option>
-                            <option value="approved">Approved</option>
-                            <option value="pending">Pending</option>
-                            <option value="processing">Processing</option>
-                            <option value="partially_available">Partially Available</option>
-                            <option value="available">Available</option>
-                            <option value="declined">Declined</option>
-                            <option value="completed">Completed</option>
-                            <option value="deleted">Deleted</option>
-                        </select>
                     </div>
                 </div>
                 <div class="overflow-x-auto">
@@ -144,7 +133,6 @@ details[open] summary .accordion-chevron { transform: rotate(90deg); }
                         <col data-col-key="status" style="width: 100px;">
                         <col data-col-key="requested" style="width: 140px;">
                         <col data-col-key="requestedby" style="width: 120px;">
-                        <col data-col-key="ovstatus" style="width: 120px;">
                         <col data-col-key="actions" style="width: 120px;">
                     </colgroup>
                     <thead>
@@ -159,13 +147,12 @@ details[open] summary .accordion-chevron { transform: rotate(90deg); }
                             <th class="px-5 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500" data-table="active" data-sort="status" data-col-key="status" style="position: relative;"><span class="sort-title cursor-pointer hover:text-gray-300">Status <span class="sort-indicator"></span></span><div class="resize-handle"></div></th>
                             <th class="px-5 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500" data-table="active" data-sort="requested" data-col-key="requested" style="position: relative;"><span class="sort-title cursor-pointer hover:text-gray-300">Requested <span class="sort-indicator"></span></span><div class="resize-handle"></div></th>
                             <th class="px-5 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500" data-table="active" data-sort="requestedby" data-col-key="requestedby" style="position: relative;"><span class="sort-title cursor-pointer hover:text-gray-300">Requested By <span class="sort-indicator"></span></span><div class="resize-handle"></div></th>
-                            <th class="px-5 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500" data-table="active" data-sort="ovstatus" data-col-key="ovstatus" style="position: relative;"><span class="sort-title cursor-pointer hover:text-gray-300">Overseerr <span class="sort-indicator"></span></span><div class="resize-handle"></div></th>
                             <th class="px-5 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500" data-col-key="actions" style="position: relative;"><span class="sort-title">Actions</span><div class="resize-handle"></div></th>
                         </tr>
                     </thead>
                     <tbody class="divide-y divide-gray-700/40" id="active-requests-body">
                         {% for req in active_requests %}
-                        <tr class="hover:bg-surface-850/80 cursor-pointer transition-colors" onclick="openRequestDetails({{ req.id }})" data-request-id="{{ req.id }}" data-overseerr="{{ 'true' if req.overseerr_request_id else 'false' }}" data-status="{{ req.status.value }}" data-title="{{ req.title|lower }}" data-type="{{ req.media_type.value|lower }}" data-status-low="{{ req.status.value|lower }}" data-requestedby="{{ req.requester_username|default('Unknown')|lower }}" data-requested="{{ req.created_at.strftime('%Y-%m-%d %H:%M') }}" data-ovstatus="{{ overseerr_statuses.get(req.id, 'unknown') }}" data-ovrank="{{ {'approved':0,'pending':1,'processing':2,'partially_available':3,'available':4,'completed':5,'declined':6,'deleted':7}.get(overseerr_statuses.get(req.id, 'unknown'), 99) }}" data-year="{{ req.year or 0 }}">
+                        <tr class="hover:bg-surface-850/80 cursor-pointer transition-colors" onclick="openRequestDetails({{ req.id }})" data-request-id="{{ req.id }}" data-overseerr="{{ 'true' if req.overseerr_request_id else 'false' }}" data-status="{{ req.status.value }}" data-title="{{ req.title|lower }}" data-type="{{ req.media_type.value|lower }}" data-status-low="{{ req.status.value|lower }}" data-requestedby="{{ req.requester_username|default('Unknown')|lower }}" data-requested="{{ req.created_at.strftime('%Y-%m-%d %H:%M') }}" data-year="{{ req.year or 0 }}">
                             <td class="px-5 py-3.5 whitespace-nowrap text-sm" onclick="event.stopPropagation()">
                                 <input name="request_ids" value="{{ req.id }}" type="checkbox" class="active-request-checkbox rounded border-gray-600 bg-surface-900 text-brand-500 focus:ring-brand-500">
                             </td>
@@ -175,16 +162,6 @@ details[open] summary .accordion-chevron { transform: rotate(90deg); }
                             <td class="px-5 py-3.5 whitespace-nowrap text-sm"><span class="badge {% if req.status.value == 'searching' %}badge-yellow{% elif req.status.value == 'downloading' %}badge-blue{% else %}badge-gray{% endif %}">{{ req.status.value }}</span></td>
                             <td class="px-5 py-3.5 whitespace-nowrap text-sm text-gray-500 tabular-nums" data-sort-value="{{ req.created_at.strftime('%Y-%m-%d %H:%M') }}">{{ req.created_at.strftime('%Y-%m-%d %H:%M') }}</td>
                             <td class="px-5 py-3.5 whitespace-nowrap text-sm text-gray-400">{{ req.requester_username or 'Unknown' }}</td>
-                            <td class="px-5 py-3.5 whitespace-nowrap text-sm" onclick="event.stopPropagation()">
-                                {% if req.overseerr_request_id %}
-                                {% set ov_status = overseerr_statuses.get(req.id, 'unknown') %}
-                                {% if overseerr_url and req.tmdb_id %}
-                                <a href="{{ overseerr_url }}/{{ req.media_type.value }}/{{ req.tmdb_id }}" target="_blank" rel="noopener noreferrer" class="badge hover:opacity-80 transition-opacity {% if ov_status == 'approved' %}badge-green{% elif ov_status == 'declined' %}badge-yellow{% elif ov_status == 'pending' %}badge-yellow{% elif ov_status in ('processing', 'available') %}badge-blue{% elif ov_status == 'partially_available' %}badge-green{% elif ov_status == 'completed' %}badge-green{% elif ov_status == 'deleted' %}badge-gray{% else %}badge-gray{% endif %}">{{ ov_status or 'unknown' }} &#8599;</a>
-                                {% else %}
-                                <span class="badge {% if ov_status == 'approved' %}badge-green{% elif ov_status == 'declined' %}badge-yellow{% elif ov_status == 'pending' %}badge-yellow{% elif ov_status in ('processing', 'available') %}badge-blue{% elif ov_status == 'partially_available' %}badge-green{% elif ov_status == 'completed' %}badge-green{% elif ov_status == 'deleted' %}badge-gray{% else %}badge-gray{% endif %}">{{ ov_status or 'unknown' }}</span>
-                                {% endif %}
-                                {% endif %}
-                            </td>
                             <td class="px-5 py-3.5 whitespace-nowrap text-sm" onclick="event.stopPropagation()">
                                 <div class="flex items-center gap-3">
                                     <button type="button" onclick="openRequestDetails({{ req.id }})" class="text-brand-400 hover:text-brand-300 font-medium">Details</button>
@@ -214,7 +191,7 @@ details[open] summary .accordion-chevron { transform: rotate(90deg); }
                     <div class="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
                         <div class="min-w-0">
                             <div class="section-title">Pending Search Queue</div>
-                            <div class="section-subtitle">Approved or partially available Overseerr requests that still need a torrent search.</div>
+                            <div class="section-subtitle">Pending and searching requests that still need a torrent search.</div>
                         </div>
                         <div class="flex flex-wrap gap-2">
                             <button type="submit" name="action" value="search" class="btn-primary btn-sm">Search Selected</button>
@@ -224,11 +201,6 @@ details[open] summary .accordion-chevron { transform: rotate(90deg); }
                     </div>
                     <div class="mt-4 flex flex-col gap-2 lg:flex-row lg:items-center">
                         <input type="text" id="pending-filter-input" placeholder="Filter pending requests..." class="form-input lg:flex-1">
-                        <select id="pending-overseerr-filter" class="form-select lg:w-56">
-                            <option value="">All Overseerr Statuses</option>
-                            <option value="approved">Approved</option>
-                            <option value="partially_available">Partially Available</option>
-                        </select>
                     </div>
                 </div>
                 <div class="overflow-x-auto">
@@ -239,7 +211,6 @@ details[open] summary .accordion-chevron { transform: rotate(90deg); }
                             <col data-col-key="year" style="width: 70px;">
                             <col data-col-key="type" style="width: 80px;">
                             <col data-col-key="requestedby" style="width: 120px;">
-                            <col data-col-key="ovstatus" style="width: 130px;">
                             <col data-col-key="nextretry" style="width: 140px;">
                             <col data-col-key="lasterror" style="width: 192px;">
                             <col data-col-key="actions" style="width: 256px;">
@@ -254,7 +225,6 @@ details[open] summary .accordion-chevron { transform: rotate(90deg); }
                                 <th class="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500" data-table="pending" data-sort="year" data-col-key="year" style="position: relative;"><span class="sort-title cursor-pointer hover:text-gray-300">Year <span class="sort-indicator"></span></span><div class="resize-handle"></div></th>
                                 <th class="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500" data-table="pending" data-sort="type" data-col-key="type" style="position: relative;"><span class="sort-title cursor-pointer hover:text-gray-300">Type <span class="sort-indicator"></span></span><div class="resize-handle"></div></th>
                                 <th class="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500" data-table="pending" data-sort="requestedby" data-col-key="requestedby" style="position: relative;"><span class="sort-title cursor-pointer hover:text-gray-300">Requested By <span class="sort-indicator"></span></span><div class="resize-handle"></div></th>
-                                <th class="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500" data-table="pending" data-sort="ovstatus" data-col-key="ovstatus" style="position: relative;"><span class="sort-title cursor-pointer hover:text-gray-300">Overseerr <span class="sort-indicator"></span></span><div class="resize-handle"></div></th>
                                 <th class="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500" data-table="pending" data-sort="nextretry" data-col-key="nextretry" style="position: relative;"><span class="sort-title cursor-pointer hover:text-gray-300">Next Retry <span class="sort-indicator"></span></span><div class="resize-handle"></div></th>
                                 <th class="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 w-48" data-table="pending" data-sort="lasterror" data-col-key="lasterror" style="position: relative;"><span class="sort-title cursor-pointer hover:text-gray-300">Last Error <span class="sort-indicator"></span></span><div class="resize-handle"></div></th>
                                 <th class="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 w-64" data-col-key="actions" style="position: relative;"><span class="sort-title">Actions</span><div class="resize-handle"></div></th>
@@ -263,8 +233,7 @@ details[open] summary .accordion-chevron { transform: rotate(90deg); }
                         <tbody class="divide-y divide-gray-700/40" id="pending-requests-body">
                             {% for req in pending_requests %}
                             {% set pending_item = pending_items_by_request_id.get(req.id) %}
-                            {% set pending_ov_status = overseerr_statuses.get(req.id, 'unknown') %}
-                            <tr class="hover:bg-surface-850/80 cursor-pointer transition-colors" onclick="openRequestDetails({{ req.id }})" data-request-id="{{ req.id }}" data-title="{{ req.title|lower }}" data-type="{{ req.media_type.value|lower }}" data-requestedby="{{ req.requester_username|default('Unknown')|lower }}" data-ovstatus="{{ pending_ov_status }}" data-ovrank="{{ {'approved':0,'partially_available':1}.get(pending_ov_status, 99) }}" data-nextretry="{{ pending_item.next_retry_at.strftime('%Y-%m-%d %H:%M') if pending_item and pending_item.next_retry_at else '0000-00-00 00:00' }}" data-lasterror="{{ (pending_item.last_error or '-')|lower if pending_item else '-' }}" data-year="{{ req.year or 0 }}">
+                            <tr class="hover:bg-surface-850/80 cursor-pointer transition-colors" onclick="openRequestDetails({{ req.id }})" data-request-id="{{ req.id }}" data-title="{{ req.title|lower }}" data-type="{{ req.media_type.value|lower }}" data-requestedby="{{ req.requester_username|default('Unknown')|lower }}" data-nextretry="{{ pending_item.next_retry_at.strftime('%Y-%m-%d %H:%M') if pending_item and pending_item.next_retry_at else '0000-00-00 00:00' }}" data-lasterror="{{ (pending_item.last_error or '-')|lower if pending_item else '-' }}" data-year="{{ req.year or 0 }}">
                                 <td class="px-4 py-3.5 whitespace-nowrap text-sm" onclick="event.stopPropagation()">
                                     <input name="request_ids" value="{{ req.id }}" type="checkbox" class="pending-request-checkbox rounded border-gray-600 bg-surface-900 text-brand-500 focus:ring-brand-500">
                                 </td>
@@ -272,13 +241,6 @@ details[open] summary .accordion-chevron { transform: rotate(90deg); }
                                 <td class="px-4 py-3.5 whitespace-nowrap text-sm text-gray-500 tabular-nums" data-sort-value="{{ req.year or 0 }}">{{ req.year or '-' }}</td>
                                 <td class="px-4 py-3.5 whitespace-nowrap text-sm capitalize text-gray-400">{{ req.media_type.value }}</td>
                                 <td class="px-4 py-3.5 whitespace-nowrap text-sm text-gray-400">{{ req.requester_username or 'Unknown' }}</td>
-                                <td class="px-4 py-3.5 whitespace-nowrap text-sm" onclick="event.stopPropagation()">
-                                    {% if overseerr_url and req.tmdb_id %}
-                                    <a href="{{ overseerr_url }}/{{ req.media_type.value }}/{{ req.tmdb_id }}" target="_blank" rel="noopener noreferrer" class="badge hover:opacity-80 transition-opacity {% if pending_ov_status == 'approved' %}badge-green{% elif pending_ov_status == 'partially_available' %}badge-green{% else %}badge-gray{% endif %}">{{ pending_ov_status }} &#8599;</a>
-                                    {% else %}
-                                    <span class="badge {% if pending_ov_status == 'approved' %}badge-green{% elif pending_ov_status == 'partially_available' %}badge-green{% else %}badge-gray{% endif %}">{{ pending_ov_status }}</span>
-                                    {% endif %}
-                                </td>
                                 <td class="px-4 py-3.5 whitespace-nowrap text-sm text-gray-500 tabular-nums">{{ pending_item.next_retry_at.strftime('%Y-%m-%d %H:%M') if pending_item and pending_item.next_retry_at else 'Ready now' }}</td>
                                 <td class="px-4 py-3.5 text-sm max-w-[12rem] overflow-hidden text-ellipsis {% if pending_item and pending_item.last_error %}text-red-400{% else %}text-gray-600{% endif %}">{{ pending_item.last_error if pending_item and pending_item.last_error else '-' }}</td>
                                 <td class="px-4 py-3.5 whitespace-nowrap text-sm" onclick="event.stopPropagation()">
@@ -432,15 +394,15 @@ details[open] summary .accordion-chevron { transform: rotate(90deg); }
         {% else %}<p class="text-gray-500">No finished requests.</p>{% endif %}
     </div>
 
-    {# ═══════════════ REJECTED TAB ═══════════════ #}
+    {# ═══════════════ DENIED TAB ═══════════════ #}
     <div id="content-rejected" class="tab-content hidden">
-        {% if rejected_requests %}
+        {% if denied_requests %}
         <div class="card overflow-hidden">
             <div class="card-header">
-                <div class="section-title">Rejected Requests</div>
-                <div class="section-subtitle">Requests that have been denied, along with the reason for rejection.</div>
+                <div class="section-title">Denied Requests</div>
+                <div class="section-subtitle">Requests that have been denied, along with the reason for denial. Showing last 30 days.</div>
                 <div class="mt-4">
-                    <input type="text" id="rejected-filter-input" placeholder="Filter rejected requests..." class="form-input lg:w-96">
+                    <input type="text" id="rejected-filter-input" placeholder="Filter denied requests..." class="form-input lg:w-96">
                 </div>
             </div>
             <div class="overflow-x-auto">
@@ -461,12 +423,12 @@ details[open] summary .accordion-chevron { transform: rotate(90deg); }
                             <th class="px-5 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 cursor-pointer hover:text-gray-300" data-table="rejected" data-sort="type" data-col-key="type" style="position: relative;"><span class="sort-title">Type <span class="sort-indicator"></span></span><div class="resize-handle"></div></th>
                             <th class="px-5 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 cursor-pointer hover:text-gray-300" data-table="rejected" data-sort="requestedby" data-col-key="requestedby" style="position: relative;"><span class="sort-title">Requested By <span class="sort-indicator"></span></span><div class="resize-handle"></div></th>
                             <th class="px-5 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 cursor-pointer hover:text-gray-300" data-table="rejected" data-sort="reason" data-col-key="reason" style="position: relative;"><span class="sort-title">Reason <span class="sort-indicator"></span></span><div class="resize-handle"></div></th>
-                            <th class="px-5 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 cursor-pointer hover:text-gray-300" data-table="rejected" data-sort="rejectedat" data-col-key="rejectedat" style="position: relative;"><span class="sort-title">Rejected <span class="sort-indicator"></span></span><div class="resize-handle"></div></th>
+                            <th class="px-5 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 cursor-pointer hover:text-gray-300" data-table="rejected" data-sort="rejectedat" data-col-key="rejectedat" style="position: relative;"><span class="sort-title">Denied <span class="sort-indicator"></span></span><div class="resize-handle"></div></th>
                             <th class="px-5 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500" data-col-key="actions" style="position: relative;"><span class="sort-title">Actions</span><div class="resize-handle"></div></th>
                         </tr>
                     </thead>
                     <tbody class="divide-y divide-gray-700/40" id="rejected-requests-body">
-                        {% for req in rejected_requests %}
+                        {% for req in denied_requests %}
                         <tr class="hover:bg-surface-850/80 cursor-pointer transition-colors" onclick="openRequestDetails({{ req.id }})" data-request-id="{{ req.id }}" data-title="{{ req.title|lower }}" data-type="{{ req.media_type.value|lower }}" data-requestedby="{{ req.requester_username|default('Unknown')|lower }}" data-reason="{{ (req.rejection_reason or '')|lower }}" data-rejectedat="{{ req.updated_at.strftime('%Y-%m-%d %H:%M') }}" data-year="{{ req.year or 0 }}">
                             <td class="px-5 py-3.5 whitespace-nowrap text-sm font-medium text-white">{{ req.title }}</td>
                             <td class="px-5 py-3.5 whitespace-nowrap text-sm text-gray-500 tabular-nums" data-sort-value="{{ req.year or 0 }}">{{ req.year or '-' }}</td>

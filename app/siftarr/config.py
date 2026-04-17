@@ -45,6 +45,7 @@ class Settings(BaseSettings):
     max_retry_duration_days: int = 7
     episode_sync_stale_hours: int = 24
     max_episode_discovery: int = 30
+    plex_poll_interval_minutes: int = 15
 
     database_url: str = Field(
         default_factory=lambda: (

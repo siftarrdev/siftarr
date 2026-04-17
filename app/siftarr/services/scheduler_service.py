@@ -14,6 +14,8 @@ from app.siftarr.services.media_helpers import extract_media_title_and_year
 from app.siftarr.services.movie_decision_service import MovieDecisionService
 from app.siftarr.services.overseerr_service import OverseerrService
 from app.siftarr.services.pending_queue_service import PendingQueueService
+from app.siftarr.services.plex_polling_service import PlexPollingService
+from app.siftarr.services.plex_service import PlexService
 from app.siftarr.services.prowlarr_service import ProwlarrService
 from app.siftarr.services.qbittorrent_service import QbittorrentService
 from app.siftarr.services.runtime_settings import get_effective_settings
@@ -135,6 +137,20 @@ class SchedulerService:
                 except Exception as e:
                     logger.error("Error processing pending item %s: %s", item.request_id, e)
 
+    async def _poll_plex_availability(self) -> None:
+        """Poll Plex to check if any active requests have become available."""
+        logger = self._logger
+        try:
+            async with self.db_session_factory() as db:
+                runtime_settings = await get_effective_settings(db)
+                plex = PlexService(settings=runtime_settings)
+                polling_service = PlexPollingService(db, plex)
+                completed = await polling_service.poll()
+                if completed:
+                    logger.info("Plex polling completed %d request(s)", completed)
+        except Exception:
+            logger.exception("Error during Plex availability polling")
+
     async def _poll_overseerr(self) -> None:
         """
         Poll Overseerr for new approved requests.
@@ -171,6 +187,17 @@ class SchedulerService:
             trigger=IntervalTrigger(hours=1),
             id="poll_overseerr",
             name="Poll Overseerr for new requests",
+            replace_existing=True,
+        )
+
+        from app.siftarr.config import get_settings
+
+        settings = get_settings()
+        self.scheduler.add_job(
+            self._poll_plex_availability,
+            trigger=IntervalTrigger(minutes=settings.plex_poll_interval_minutes),
+            id="poll_plex_availability",
+            name="Poll Plex for media availability",
             replace_existing=True,
         )
 

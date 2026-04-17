@@ -4,7 +4,7 @@ import asyncio
 import logging
 from typing import Any
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Depends
 from fastapi.responses import JSONResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -16,8 +16,6 @@ from app.siftarr.services.overseerr_service import (
     OverseerrService,
     build_overseerr_media_url,
     build_poster_url,
-    clear_media_details_cache,
-    clear_status_cache,
 )
 from app.siftarr.services.plex_service import PlexService
 from app.siftarr.services.prowlarr_service import ProwlarrService
@@ -500,44 +498,4 @@ async def refresh_plex(
         logger.exception("Plex refresh failed for request_id=%s", request_id)
         return JSONResponse({"status": "error", "message": "Plex sync failed"}, status_code=500)
     finally:
-        await plex_service.close()
-
-
-@router.post("/{request_id}/mark-available")
-async def mark_series_available(
-    request_id: int,
-    db: AsyncSession = Depends(get_db),
-) -> JSONResponse:
-    """Mark a TV series available in Overseerr and refresh local episode state."""
-    request = await load_request_or_404(db, request_id)
-    validate_tv_request(request)
-
-    effective_settings = await get_effective_settings(db)
-    overseerr_service = OverseerrService(settings=effective_settings)
-    plex_service = PlexService(settings=effective_settings)
-    try:
-        media_id = await overseerr_service.resolve_tv_media_id(
-            overseerr_request_id=request.overseerr_request_id,
-            tmdb_id=request.tmdb_id,
-        )
-        if media_id is None:
-            raise HTTPException(status_code=400, detail="No Overseerr media ID available")
-
-        success = await overseerr_service.mark_series_available(media_id)
-        if not success:
-            return JSONResponse(
-                {"status": "error", "message": "Failed to mark series available in Overseerr"},
-                status_code=502,
-            )
-
-        clear_status_cache()
-        clear_media_details_cache()
-
-        from app.siftarr.services.episode_sync_service import EpisodeSyncService
-
-        episode_sync = EpisodeSyncService(db, plex=plex_service)
-        await episode_sync.sync_episodes(request_id, force_plex_refresh=True)
-        return JSONResponse({"status": "success", "message": "Series marked available"})
-    finally:
-        await overseerr_service.close()
         await plex_service.close()
