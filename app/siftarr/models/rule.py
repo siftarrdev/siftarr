@@ -22,6 +22,11 @@ class RuleType(enum.StrEnum):
     SIZE_LIMIT = "size_limit"  # Reject if outside configured size range
 
 
+class TVTarget(enum.StrEnum):
+    EPISODE = "episode"
+    SEASON_PACK = "season_pack"
+
+
 class Rule(Base):
     __tablename__ = "rules"
 
@@ -33,6 +38,10 @@ class Rule(Base):
     score: Mapped[int] = mapped_column(Integer, default=0)  # Only used for SCORER type
     min_size_gb: Mapped[float | None] = mapped_column(Float, nullable=True)
     max_size_gb: Mapped[float | None] = mapped_column(Float, nullable=True)
+    tv_target: Mapped[TVTarget | None] = mapped_column(
+        SQLEnum(TVTarget),
+        nullable=True,
+    )
     priority: Mapped[int] = mapped_column(Integer, default=0)  # Lower = checked first
     is_enabled: Mapped[bool] = mapped_column(Boolean, default=True)
     description: Mapped[str | None] = mapped_column(String(500), nullable=True)

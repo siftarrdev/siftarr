@@ -3,21 +3,76 @@
 import logging
 from datetime import UTC, datetime
 
-from sqlalchemy import delete, select
+from sqlalchemy import delete, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.siftarr.models.episode import Episode
 from app.siftarr.models.release import Release
 from app.siftarr.models.request import MediaType, Request, RequestStatus
 from app.siftarr.models.staged_torrent import StagedTorrent
 from app.siftarr.services.pending_queue_service import PendingQueueService
 from app.siftarr.services.prowlarr_service import ProwlarrRelease
 from app.siftarr.services.qbittorrent_service import MediaCategory, QbittorrentService
-from app.siftarr.services.release_parser import parse_season_episode
+from app.siftarr.services.release_parser import (
+    parse_release_coverage,
+    parse_season_episode,
+    serialize_release_coverage,
+)
 from app.siftarr.services.rule_engine import ReleaseEvaluation
 from app.siftarr.services.runtime_settings import get_effective_settings
 from app.siftarr.services.staging_service import StagingService
 
 logger = logging.getLogger(__name__)
+
+
+async def _purge_releases(
+    db: AsyncSession,
+    *,
+    request_id: int | None = None,
+    commit: bool = True,
+) -> dict[str, int]:
+    """Detach episode links and delete stored releases, optionally for one request."""
+    release_ids_query = select(Release.id)
+    release_delete_query = delete(Release)
+    if request_id is not None:
+        release_ids_query = release_ids_query.where(Release.request_id == request_id)
+        release_delete_query = release_delete_query.where(Release.request_id == request_id)
+
+    detached_episode_count = (
+        await db.scalar(
+            select(func.count())
+            .select_from(Episode)
+            .where(Episode.release_id.in_(release_ids_query))
+        )
+        or 0
+    )
+
+    if detached_episode_count:
+        await db.execute(
+            update(Episode).where(Episode.release_id.in_(release_ids_query)).values(release_id=None)
+        )
+
+    deleted_release_count = detached_episode_count
+    await db.execute(release_delete_query)
+    if commit:
+        await db.commit()
+
+    return {
+        "deleted_releases": deleted_release_count,
+        "detached_episode_refs": detached_episode_count,
+    }
+
+
+async def clear_release_search_cache(db: AsyncSession) -> dict[str, int]:
+    """Clear persisted search results and detach stale episode release links."""
+    result = await _purge_releases(db)
+
+    logger.info(
+        "Cleared persisted release search cache: deleted_releases=%s detached_episode_refs=%s",
+        result["deleted_releases"],
+        result["detached_episode_refs"],
+    )
+    return result
 
 
 def build_prowlarr_release(release: Release) -> ProwlarrRelease:
@@ -44,7 +99,7 @@ async def store_search_results(
     evaluations: list[ReleaseEvaluation],
 ) -> dict[str, Release]:
     """Replace stored search results for a request with the latest evaluations."""
-    await db.execute(delete(Release).where(Release.request_id == request_id))
+    await _purge_releases(db, request_id=request_id, commit=False)
 
     records_by_title: dict[str, Release] = {}
     seen_keys: set[str] = set()
@@ -56,6 +111,7 @@ async def store_search_results(
         seen_keys.add(dedupe_key)
 
         parsed = parse_season_episode(release.title)
+        coverage = parse_release_coverage(release.title)
         record = Release(
             request_id=request_id,
             title=release.title,
@@ -72,6 +128,7 @@ async def store_search_results(
             release_group=release.release_group,
             season_number=parsed.season_number,
             episode_number=parsed.episode_number,
+            season_coverage=serialize_release_coverage(coverage),
             score=evaluation.total_score,
             passed_rules=evaluation.passed,
         )
@@ -82,6 +139,74 @@ async def store_search_results(
     for record in records_by_title.values():
         await db.refresh(record)
     return records_by_title
+
+
+async def persist_manual_release(
+    db: AsyncSession,
+    request: Request,
+    release: ProwlarrRelease,
+    evaluation: ReleaseEvaluation,
+) -> Release:
+    """Persist or update a manually selected release so existing use logic can reuse it."""
+    if not (release.magnet_url or release.download_url):
+        raise RuntimeError(f"Release '{release.title}' has no usable download source.")
+
+    parsed = parse_season_episode(release.title)
+    coverage = parse_release_coverage(release.title)
+
+    filters = [Release.request_id == request.id, Release.title == release.title]
+    if release.info_hash:
+        filters = [
+            Release.request_id == request.id,
+            or_(Release.info_hash == release.info_hash, Release.title == release.title),
+        ]
+
+    existing_result = await db.execute(select(Release).where(*filters))
+    record = existing_result.scalar_one_or_none()
+
+    if record is None:
+        record = Release(
+            request_id=request.id,
+            title=release.title,
+            size=release.size,
+            seeders=release.seeders,
+            leechers=release.leechers,
+            download_url=release.download_url,
+            magnet_url=release.magnet_url,
+            info_hash=release.info_hash,
+            indexer=release.indexer,
+            publish_date=release.publish_date,
+            resolution=release.resolution,
+            codec=release.codec,
+            release_group=release.release_group,
+            season_number=parsed.season_number,
+            episode_number=parsed.episode_number,
+            season_coverage=serialize_release_coverage(coverage),
+            score=evaluation.total_score,
+            passed_rules=evaluation.passed,
+        )
+        db.add(record)
+    else:
+        record.size = release.size
+        record.seeders = release.seeders
+        record.leechers = release.leechers
+        record.download_url = release.download_url
+        record.magnet_url = release.magnet_url
+        record.info_hash = release.info_hash
+        record.indexer = release.indexer
+        record.publish_date = release.publish_date
+        record.resolution = release.resolution
+        record.codec = release.codec
+        record.release_group = release.release_group
+        record.season_number = parsed.season_number
+        record.episode_number = parsed.episode_number
+        record.season_coverage = serialize_release_coverage(coverage)
+        record.score = evaluation.total_score
+        record.passed_rules = evaluation.passed
+
+    await db.commit()
+    await db.refresh(record)
+    return record
 
 
 async def _set_request_status(
@@ -172,7 +297,12 @@ async def use_releases(
 
     qbittorrent = QbittorrentService(settings=runtime_settings)
     added_hashes: list[str] = []
+    already_sent_titles: list[str] = []
     for release in usable_releases:
+        if release.is_downloaded:
+            already_sent_titles.append(release.title)
+            continue
+
         source = release.magnet_url or release.download_url
         if not source:
             raise RuntimeError(f"Release '{release.title}' has no usable download source.")
@@ -196,6 +326,16 @@ async def use_releases(
         )
 
     await db.commit()
+    if not added_hashes and already_sent_titles:
+        await _set_request_status(db, request, RequestStatus.DOWNLOADING)
+        await queue_service.remove_from_queue(request.id)
+        return {
+            "status": "downloading",
+            "message": f"Release already sent: {', '.join(already_sent_titles)}.",
+            "torrent_hashes": [],
+            "already_sent_titles": already_sent_titles,
+        }
+
     await _set_request_status(db, request, RequestStatus.DOWNLOADING)
     await queue_service.remove_from_queue(request.id)
     logger.info(

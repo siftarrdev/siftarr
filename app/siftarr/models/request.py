@@ -30,6 +30,7 @@ class RequestStatus(enum.StrEnum):
     RECEIVED = "received"
     SEARCHING = "searching"
     PENDING = "pending"
+    UNRELEASED = "unreleased"
     STAGED = "staged"
     DOWNLOADING = "downloading"
     COMPLETED = "completed"

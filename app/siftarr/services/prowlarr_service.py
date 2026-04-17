@@ -226,8 +226,8 @@ class ProwlarrService:
     def _extract_codec(self, title: str) -> str | None:
         """Extract codec from release title."""
         patterns = [
-            (r"x265|H\.?265|HEVC", "x265"),
-            (r"x264|H\.?264|AVC", "x264"),
+            (r"x265|265|HEVC", "x265"),
+            (r"x264|264|AVC", "x264"),
             (r"VP9", "VP9"),
             (r"VP10|AV1", "AV1"),
         ]
@@ -329,6 +329,12 @@ class ProwlarrService:
         if metadata_result.releases or not title:
             return metadata_result
 
+        # Broad search (no season, no episode) requires multiple query strategies
+        if season is None and episode is None:
+            return await self._broad_tv_search(
+                title, tvdbid, year, categories, metadata_result.query_time_ms
+            )
+
         fallback_params = {
             "type": "search",
             "query": self._build_tv_title_query(title, season, episode, year),
@@ -337,3 +343,56 @@ class ProwlarrService:
         fallback_result = await self._search(fallback_params)
         fallback_result.query_time_ms += metadata_result.query_time_ms
         return fallback_result
+
+    async def _broad_tv_search(
+        self,
+        title: str,
+        tvdbid: int,
+        year: int | None,
+        categories: list[int],
+        metadata_query_time_ms: int,
+    ) -> ProwlarrSearchResult:
+        """Execute multiple query strategies for broad TV searches and aggregate results.
+
+        Args:
+            title: Show title
+            tvdbid: TVDB ID (unused in title queries but kept for API parity)
+            year: Optional year
+            categories: Category IDs
+            metadata_query_time_ms: Time spent on metadata query
+
+        Returns:
+            ProwlarrSearchResult with all unique releases found
+        """
+        # Track seen releases by download_url to avoid duplicates
+        seen_urls: set[str] = set()
+        all_releases: list[ProwlarrRelease] = []
+        total_query_time_ms = metadata_query_time_ms
+
+        # Query strategies for broad TV searches
+        title_queries = [
+            f"{title} S01-".strip(),  # e.g. "The Mentalist S01-"
+            f"{title} complete".strip(),  # e.g. "The Mentalist complete"
+            f"{title} season 1-".strip(),  # e.g. "The Mentalist season 1-"
+        ]
+
+        for query in title_queries:
+            params = {
+                "type": "search",
+                "query": query,
+                "categories": categories,
+            }
+            result = await self._search(params)
+            total_query_time_ms += result.query_time_ms
+
+            # Add unique releases
+            for release in result.releases:
+                if release.download_url not in seen_urls:
+                    seen_urls.add(release.download_url)
+                    all_releases.append(release)
+
+        return ProwlarrSearchResult(
+            releases=all_releases,
+            query_time_ms=total_query_time_ms,
+            error=None if all_releases else "No releases found",
+        )

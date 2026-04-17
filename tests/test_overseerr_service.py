@@ -4,7 +4,15 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from app.siftarr.services.overseerr_service import OverseerrService
+from app.siftarr.services import overseerr_service
+from app.siftarr.services.overseerr_service import (
+    OverseerrService,
+    _extract_overseerr_media_id,
+    build_overseerr_media_url,
+    build_poster_url,
+    choose_display_status,
+    extract_poster_path,
+)
 
 
 class TestOverseerrService:
@@ -402,6 +410,172 @@ class TestOverseerrService:
             assert result is False
 
     @pytest.mark.asyncio
+    async def test_mark_season_available_success(self):
+        """Season availability mutation should hit the season-scoped endpoint."""
+        overseerr_service._STATUS_CACHE.update({1: (1.0, {"status": "approved"})})
+        overseerr_service._MEDIA_DETAILS_CACHE.update({("tv", 1): (1.0, {"id": 1})})
+        with patch("app.siftarr.services.overseerr_service.get_settings") as mock_get_settings:
+            mock_settings = MagicMock()
+            mock_settings.overseerr_url = "http://localhost:5055"
+            mock_settings.overseerr_api_key = "test"
+            mock_get_settings.return_value = mock_settings
+
+            service = OverseerrService()
+            mock_client = AsyncMock()
+            mock_response = MagicMock()
+            mock_response.status_code = 200
+            mock_client.post = AsyncMock(return_value=mock_response)
+
+            with patch(
+                "app.siftarr.services.overseerr_service.get_shared_client",
+                return_value=mock_client,
+            ):
+                result = await service.mark_season_available(321, 4)
+
+            assert result is True
+            mock_client.post.assert_awaited_once()
+            call_args = mock_client.post.call_args
+            assert call_args.args[0] == "http://localhost:5055/api/v1/media/321/season/4/available"
+            assert overseerr_service._STATUS_CACHE == {}
+            assert overseerr_service._MEDIA_DETAILS_CACHE == {}
+
+    @pytest.mark.asyncio
+    async def test_mark_season_available_failure(self):
+        """Season availability mutation should return False on API failure."""
+        with patch("app.siftarr.services.overseerr_service.get_settings") as mock_get_settings:
+            mock_settings = MagicMock()
+            mock_settings.overseerr_url = "http://localhost:5055"
+            mock_settings.overseerr_api_key = "test"
+            mock_get_settings.return_value = mock_settings
+
+            service = OverseerrService()
+            mock_client = AsyncMock()
+            mock_response = MagicMock()
+            mock_response.status_code = 500
+            mock_client.post = AsyncMock(return_value=mock_response)
+
+            with patch(
+                "app.siftarr.services.overseerr_service.get_shared_client",
+                return_value=mock_client,
+            ):
+                result = await service.mark_season_available(321, 4)
+
+            assert result is False
+
+    @pytest.mark.asyncio
+    async def test_mark_series_available_success(self):
+        """Series availability mutation should hit the series-scoped endpoint."""
+        overseerr_service._STATUS_CACHE.update({1: (1.0, {"status": "approved"})})
+        overseerr_service._MEDIA_DETAILS_CACHE.update({("tv", 1): (1.0, {"id": 1})})
+        with patch("app.siftarr.services.overseerr_service.get_settings") as mock_get_settings:
+            mock_settings = MagicMock()
+            mock_settings.overseerr_url = "http://localhost:5055"
+            mock_settings.overseerr_api_key = "test"
+            mock_get_settings.return_value = mock_settings
+
+            service = OverseerrService()
+            mock_client = AsyncMock()
+            mock_response = MagicMock()
+            mock_response.status_code = 200
+            mock_client.post = AsyncMock(return_value=mock_response)
+
+            with patch(
+                "app.siftarr.services.overseerr_service.get_shared_client",
+                return_value=mock_client,
+            ):
+                result = await service.mark_series_available(321)
+
+            assert result is True
+            mock_client.post.assert_awaited_once()
+            call_args = mock_client.post.call_args
+            assert call_args.args[0] == "http://localhost:5055/api/v1/media/321/available"
+            assert overseerr_service._STATUS_CACHE == {}
+            assert overseerr_service._MEDIA_DETAILS_CACHE == {}
+
+    @pytest.mark.asyncio
+    async def test_mark_series_available_failure(self):
+        """Series availability mutation should return False on API failure."""
+        with patch("app.siftarr.services.overseerr_service.get_settings") as mock_get_settings:
+            mock_settings = MagicMock()
+            mock_settings.overseerr_url = "http://localhost:5055"
+            mock_settings.overseerr_api_key = "test"
+            mock_get_settings.return_value = mock_settings
+
+            service = OverseerrService()
+            mock_client = AsyncMock()
+            mock_response = MagicMock()
+            mock_response.status_code = 500
+            mock_client.post = AsyncMock(return_value=mock_response)
+
+            with patch(
+                "app.siftarr.services.overseerr_service.get_shared_client",
+                return_value=mock_client,
+            ):
+                result = await service.mark_series_available(321)
+
+            assert result is False
+
+    @pytest.mark.asyncio
+    async def test_resolve_tv_media_id_prefers_request_media_id(self):
+        """Season mutations should use Overseerr's internal media id from the request payload."""
+        with patch("app.siftarr.services.overseerr_service.get_settings") as mock_get_settings:
+            mock_settings = MagicMock()
+            mock_settings.overseerr_url = "http://localhost:5055"
+            mock_settings.overseerr_api_key = "test"
+            mock_get_settings.return_value = mock_settings
+
+            service = OverseerrService()
+            get_request = AsyncMock(return_value={"media": {"id": 999, "tmdbId": 1234}})
+            get_media_details = AsyncMock(return_value={"mediaInfo": {"id": 777}})
+
+            with (
+                patch.object(service, "get_request", get_request),
+                patch.object(
+                    service,
+                    "get_media_details",
+                    get_media_details,
+                ),
+            ):
+                media_id = await service.resolve_tv_media_id(overseerr_request_id=55, tmdb_id=1234)
+
+            assert media_id == 999
+            get_request.assert_awaited_once_with(55)
+            get_media_details.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_resolve_tv_media_id_falls_back_to_tv_details(self):
+        """Season mutations should fall back to tv media details when request payload lacks media id."""
+        with patch("app.siftarr.services.overseerr_service.get_settings") as mock_get_settings:
+            mock_settings = MagicMock()
+            mock_settings.overseerr_url = "http://localhost:5055"
+            mock_settings.overseerr_api_key = "test"
+            mock_get_settings.return_value = mock_settings
+
+            service = OverseerrService()
+            get_request = AsyncMock(return_value={"media": {"tmdbId": 1234}})
+            get_media_details = AsyncMock(return_value={"mediaInfo": {"id": 777}})
+
+            with (
+                patch.object(service, "get_request", get_request),
+                patch.object(
+                    service,
+                    "get_media_details",
+                    get_media_details,
+                ),
+            ):
+                media_id = await service.resolve_tv_media_id(overseerr_request_id=55, tmdb_id=1234)
+
+            assert media_id == 777
+            get_request.assert_awaited_once_with(55)
+            get_media_details.assert_awaited_once_with("tv", 1234)
+
+    def test_extract_overseerr_media_id_handles_supported_shapes(self):
+        """Helper should read media ids from request and media-details payloads."""
+        assert _extract_overseerr_media_id({"media": {"id": 123}}) == 123
+        assert _extract_overseerr_media_id({"mediaInfo": {"id": 456}}) == 456
+        assert _extract_overseerr_media_id({"media": {"tmdbId": 1}}) is None
+
+    @pytest.mark.asyncio
     async def test_get_request_status_success(self):
         """Test getting request status successfully."""
         with patch("app.siftarr.services.overseerr_service.get_settings") as mock_get_settings:
@@ -447,3 +621,260 @@ class TestOverseerrService:
                 result = await service.get_request_status(999)
 
             assert result is None
+
+    def test_clear_status_cache_empties_app_side_cache(self):
+        """Clear helper should empty the in-memory Overseerr status cache."""
+        overseerr_service._STATUS_CACHE.clear()
+        overseerr_service._STATUS_CACHE.update(
+            {
+                1: (1.0, {"status": "approved"}),
+                2: (2.0, {"status": "pending"}),
+            }
+        )
+
+        cleared = overseerr_service.clear_status_cache()
+
+        assert cleared == 2
+        assert overseerr_service._STATUS_CACHE == {}
+
+    @pytest.mark.asyncio
+    async def test_get_media_details_uses_ttl_cache(self):
+        """Media details should reuse a cached response within the TTL window."""
+        overseerr_service._MEDIA_DETAILS_CACHE.clear()
+        with patch("app.siftarr.services.overseerr_service.get_settings") as mock_get_settings:
+            mock_settings = MagicMock()
+            mock_settings.overseerr_url = "http://localhost:5055"
+            mock_settings.overseerr_api_key = "test"
+            mock_get_settings.return_value = mock_settings
+
+            service = OverseerrService()
+            mock_client = AsyncMock()
+            mock_response = MagicMock()
+            mock_response.status_code = 200
+            mock_response.json.return_value = {"id": 123, "title": "Test Show"}
+            mock_client.get = AsyncMock(return_value=mock_response)
+
+            with patch(
+                "app.siftarr.services.overseerr_service.get_shared_client",
+                return_value=mock_client,
+            ):
+                first = await service.get_media_details("tv", 123)
+                second = await service.get_media_details("tv", 123)
+
+            assert first == second == {"id": 123, "title": "Test Show"}
+            mock_client.get.assert_awaited_once()
+
+    def test_clear_media_details_cache_empties_cache(self):
+        """Media details cache clear helper should empty the app-side cache."""
+        overseerr_service._MEDIA_DETAILS_CACHE.clear()
+        overseerr_service._MEDIA_DETAILS_CACHE.update(
+            {("tv", 1): (1.0, {"id": 1}), ("movie", 2): (2.0, {"id": 2})}
+        )
+
+        cleared = overseerr_service.clear_media_details_cache()
+
+        assert cleared == 2
+        assert overseerr_service._MEDIA_DETAILS_CACHE == {}
+
+
+class TestExtractPosterPath:
+    """Tests for extract_poster_path helper."""
+
+    def test_bare_tmdb_path(self):
+        """Bare TMDB path like /abc123.jpg should pass through unchanged."""
+        assert (
+            extract_poster_path("/kSf9svfD2WiLhrs9AP2Uih2Wq3T.jpg")
+            == "/kSf9svfD2WiLhrs9AP2Uih2Wq3T.jpg"
+        )
+
+    def test_overseerr_proxied_path(self):
+        """Overseerr proxied form /images/original/... should strip prefix."""
+        assert (
+            extract_poster_path("/images/original/kSf9svfD2WiLhrs9AP2Uih2Wq3T.jpg")
+            == "/kSf9svfD2WiLhrs9AP2Uih2Wq3T.jpg"
+        )
+
+    def test_overseerr_proxied_path_w500(self):
+        """Overseerr proxied form with w500 size should also strip prefix."""
+        assert (
+            extract_poster_path("/images/w500/kSf9svfD2WiLhrs9AP2Uih2Wq3T.jpg")
+            == "/kSf9svfD2WiLhrs9AP2Uih2Wq3T.jpg"
+        )
+
+    def test_overseerr_proxied_path_truncated(self):
+        """Truncated proxied path with no actual filename returns slash (edge case of split logic)."""
+        # /images/original/ splits to ['', 'images', 'original', ''] -> f"/{''}" -> "/"
+        assert extract_poster_path("/images/original/") == "/"
+
+    def test_overseerr_proxied_path_too_short(self):
+        """Proxied path with only two segments should return None."""
+        assert extract_poster_path("/images/") is None
+
+    def test_full_tmdb_url(self):
+        """Full TMDB URL should extract the bare poster path."""
+        assert extract_poster_path("https://image.tmdb.org/t/p/original/abc.jpg") == "/abc.jpg"
+
+    def test_full_tmdb_url_with_w500(self):
+        """Full TMDB URL with w500 size should still extract the bare path."""
+        assert extract_poster_path("https://image.tmdb.org/t/p/w500/abc.jpg") == "/abc.jpg"
+
+    def test_full_tmdb_url_no_t_p_prefix(self):
+        """Full TMDB URL without /t/p/ structure should return None."""
+        assert extract_poster_path("https://image.tmdb.org/something/abc.jpg") is None
+
+    def test_full_overseerr_url(self):
+        """Full URL pointing to Overseerr instance should extract the TMDB portion."""
+        assert extract_poster_path("http://overseerr:5055/images/original/abc.jpg") == "/abc.jpg"
+
+    def test_full_overseerr_https_url(self):
+        """HTTPS Overseerr URL should also extract the TMDB portion."""
+        assert (
+            extract_poster_path("https://overseerr.example.com/images/w500/abc.jpg") == "/abc.jpg"
+        )
+
+    def test_none_input(self):
+        """None input should return None."""
+        assert extract_poster_path(None) is None
+
+    def test_empty_string_input(self):
+        """Empty string input should return None."""
+        assert extract_poster_path("") is None
+
+    def test_whitespace_string_input(self):
+        """Whitespace-only string should return None."""
+        assert extract_poster_path("   ") is None
+
+    def test_path_starting_with_images_not_proxied(self):
+        """A path starting with /images but not /images/ (no trailing slash) should not match proxied form."""
+        # This starts with "/" and not "/images", so it passes through as a bare TMDB path
+        # Wait - /imagesXXX starts with "/" and does not start with "/images" only if...
+        # "/imagesfoo" starts with "/" and not with "/images" — but actually it does start with "/images" prefix.
+        # Let me re-read the logic: `poster.startswith("/") and not poster.startswith("/images")`
+        # "/imagesfoo" starts with "/images" so it's NOT caught by the bare path rule.
+        # It also doesn't start with "/images/" so it's not caught by the proxied rule.
+        # Falls through to return None.
+        assert extract_poster_path("/imagesfoo/bar.jpg") is None
+
+
+class TestBuildPosterUrl:
+    """Tests for build_poster_url helper."""
+
+    def test_none_input(self):
+        """None poster path should return None."""
+        assert build_poster_url(None) is None
+
+    def test_empty_string_input(self):
+        """Empty string should return None."""
+        assert build_poster_url("") is None
+
+    def test_bare_tmdb_path(self):
+        """Bare TMDB path should produce a properly encoded proxied URL."""
+        result = build_poster_url("/abc123.jpg")
+        assert result == "/api/poster?path=%2Fabc123.jpg"
+
+    def test_overseerr_proxied_path(self):
+        """Overseerr proxied path should strip prefix and produce proxied URL."""
+        result = build_poster_url("/images/original/abc.jpg")
+        assert result == "/api/poster?path=%2Fabc.jpg"
+
+    def test_full_tmdb_url(self):
+        """Full TMDB URL should extract path and produce proxied URL."""
+        result = build_poster_url("https://image.tmdb.org/t/p/original/abc.jpg")
+        assert result == "/api/poster?path=%2Fabc.jpg"
+
+    def test_path_with_special_characters(self):
+        """Path with special characters should be URL-encoded."""
+        result = build_poster_url("/path with spaces.jpg")
+        assert result is not None
+        assert "path=" in result
+        # The path should be URL-encoded (spaces become %20)
+        assert "%2Fpath%20with%20spaces.jpg" in result
+
+
+class TestBuildOverseerrMediaUrl:
+    """Tests for build_overseerr_media_url helper."""
+
+    def test_none_overseerr_url(self):
+        """None Overseerr URL should return None."""
+        assert build_overseerr_media_url(None, "movie", 123) is None
+
+    def test_none_tmdb_id(self):
+        """None TMDB ID should return None."""
+        assert build_overseerr_media_url("http://overseerr:5055", "movie", None) is None
+
+    def test_empty_overseerr_url(self):
+        """Empty string Overseerr URL should return None."""
+        assert build_overseerr_media_url("", "movie", 123) is None
+
+    def test_valid_movie_url(self):
+        """Valid movie inputs should build correct URL."""
+        assert (
+            build_overseerr_media_url("http://overseerr:5055", "movie", 123)
+            == "http://overseerr:5055/movie/123"
+        )
+
+    def test_valid_tv_url(self):
+        """Valid TV inputs should build correct URL."""
+        assert (
+            build_overseerr_media_url("http://overseerr:5055", "tv", 456)
+            == "http://overseerr:5055/tv/456"
+        )
+
+    def test_strips_trailing_slash(self):
+        """Trailing slash in Overseerr URL should be stripped."""
+        assert (
+            build_overseerr_media_url("http://overseerr:5055/", "movie", 123)
+            == "http://overseerr:5055/movie/123"
+        )
+
+
+class TestChooseDisplayStatus:
+    """Tests for choose_display_status helper."""
+
+    def test_media_processing_wins(self):
+        """Media status 'processing' should take priority over any request status."""
+        assert choose_display_status("approved", "processing") == "processing"
+
+    def test_media_partially_available_wins(self):
+        """Media status 'partially_available' should take priority."""
+        assert choose_display_status("approved", "partially_available") == "partially_available"
+
+    def test_media_available_wins(self):
+        """Media status 'available' should take priority."""
+        assert choose_display_status("pending", "available") == "available"
+
+    def test_media_deleted_wins(self):
+        """Media status 'deleted' should take priority."""
+        assert choose_display_status("approved", "deleted") == "deleted"
+
+    def test_request_approved_when_media_not_priority(self):
+        """Request status should be used when media status is not in priority set."""
+        assert choose_display_status("approved", "pending") == "approved"
+
+    def test_request_pending_when_media_not_priority(self):
+        """Request status 'pending' should be used when media is not in priority set."""
+        assert choose_display_status("pending", "pending") == "pending"
+
+    def test_request_status_ignored_when_unknown(self):
+        """When request status is 'unknown', fall through to media status."""
+        assert choose_display_status("unknown", "pending") == "pending"
+
+    def test_request_status_ignored_when_no_overseerr_id(self):
+        """When request status is 'no_overseerr_id', fall through to media status."""
+        assert choose_display_status("no_overseerr_id", "pending") == "pending"
+
+    def test_media_unknown_returns_request_unknown(self):
+        """When both are unknown, return request status."""
+        assert choose_display_status("unknown", "unknown") == "unknown"
+
+    def test_no_overseerr_id_with_unknown_media(self):
+        """When request has no overseerr id and media is unknown, return request status."""
+        assert choose_display_status("no_overseerr_id", "unknown") == "no_overseerr_id"
+
+    def test_media_not_unknown_when_request_unknown(self):
+        """When request is unknown but media is not, return media status."""
+        assert choose_display_status("unknown", "pending") == "pending"
+
+    def test_completed_request_with_pending_media(self):
+        """Completed request status should be used when media is only pending."""
+        assert choose_display_status("completed", "pending") == "completed"
