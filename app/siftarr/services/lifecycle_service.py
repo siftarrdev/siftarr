@@ -24,13 +24,18 @@ class LifecycleService:
     """
 
     VALID_TRANSITIONS: dict[RequestStatus, list[RequestStatus]] = {
-        RequestStatus.RECEIVED: [RequestStatus.SEARCHING, RequestStatus.FAILED],
+        RequestStatus.RECEIVED: [
+            RequestStatus.SEARCHING,
+            RequestStatus.FAILED,
+            RequestStatus.DENIED,
+        ],
         RequestStatus.SEARCHING: [
             RequestStatus.PENDING,
             RequestStatus.STAGED,
             RequestStatus.DOWNLOADING,
             RequestStatus.COMPLETED,
             RequestStatus.FAILED,
+            RequestStatus.DENIED,
         ],
         RequestStatus.PENDING: [
             RequestStatus.SEARCHING,
@@ -38,20 +43,24 @@ class LifecycleService:
             RequestStatus.DOWNLOADING,
             RequestStatus.COMPLETED,
             RequestStatus.FAILED,
+            RequestStatus.DENIED,
         ],
         RequestStatus.STAGED: [
             RequestStatus.DOWNLOADING,
             RequestStatus.PENDING,
             RequestStatus.FAILED,
+            RequestStatus.DENIED,
         ],
         RequestStatus.DOWNLOADING: [
             RequestStatus.STAGED,
             RequestStatus.PENDING,
             RequestStatus.COMPLETED,
             RequestStatus.FAILED,
+            RequestStatus.DENIED,
         ],
         RequestStatus.COMPLETED: [],  # Terminal state
         RequestStatus.FAILED: [],  # Terminal state
+        RequestStatus.DENIED: [],  # Terminal state
     }
 
     def __init__(self, db: AsyncSession):
@@ -212,6 +221,14 @@ class LifecycleService:
     async def mark_as_pending(self, request_id: int) -> Request | None:
         """Convenience method to mark a request as pending."""
         return await self.transition(request_id, RequestStatus.PENDING)
+
+    async def mark_as_denied(
+        self,
+        request_id: int,
+        reason: str | None = None,
+    ) -> Request | None:
+        """Convenience method to mark a request as denied."""
+        return await self.transition(request_id, RequestStatus.DENIED, reason)
 
     async def mark_as_replacing(
         self,

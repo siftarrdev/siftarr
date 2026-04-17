@@ -255,3 +255,34 @@ class TestLifecycleService:
             await service.mark_as_pending(1)
 
             mock_transition.assert_called_once_with(1, RequestStatus.PENDING)
+
+    def test_can_transition_to_denied_from_non_terminal(self, service):
+        """Test that DENIED is reachable from all non-terminal states."""
+        non_terminal = [
+            RequestStatus.RECEIVED,
+            RequestStatus.SEARCHING,
+            RequestStatus.PENDING,
+            RequestStatus.STAGED,
+            RequestStatus.DOWNLOADING,
+        ]
+        for status in non_terminal:
+            assert service.can_transition(status, RequestStatus.DENIED), (
+                f"Should allow transition from {status} to DENIED"
+            )
+
+    def test_denied_is_terminal(self, service):
+        """Test that DENIED is a terminal state with no outgoing transitions."""
+        for status in RequestStatus:
+            assert not service.can_transition(RequestStatus.DENIED, status), (
+                f"DENIED should not transition to {status}"
+            )
+
+    @pytest.mark.asyncio
+    async def test_mark_as_denied(self, mock_db, service):
+        """Test marking request as denied."""
+        mock_request = MagicMock(spec=Request)
+
+        with patch.object(service, "transition", return_value=mock_request) as mock_transition:
+            await service.mark_as_denied(1, reason="Not wanted")
+
+            mock_transition.assert_called_once_with(1, RequestStatus.DENIED, "Not wanted")

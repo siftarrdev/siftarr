@@ -37,6 +37,7 @@ class RequestStatus(enum.StrEnum):
     FAILED = "failed"
     AVAILABLE = "available"
     PARTIALLY_AVAILABLE = "partially_available"
+    DENIED = "denied"
 
 
 class Request(Base):

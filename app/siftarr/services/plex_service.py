@@ -86,6 +86,74 @@ class PlexService:
             logger.exception("PlexService: search_show(%r) failed", title)
             return []
 
+    async def get_movie_by_tmdb(self, tmdb_id: int) -> dict[str, Any] | None:
+        """Find a movie in Plex library by TMDB ID using Plex's guid system.
+
+        Args:
+            tmdb_id: The TMDB ID to search for.
+
+        Returns:
+            Movie metadata dict if found, None otherwise.
+        """
+        if not self.base_url or not self.token:
+            return None
+
+        endpoint = f"{self.base_url}/library/search"
+        client = await self._get_client()
+        guid = f"com.plexapp.agents.themoviedb://{tmdb_id}"
+        params = {"guid": guid}
+
+        try:
+            response = await client.get(
+                endpoint,
+                headers=self._get_headers(),
+                params=params,
+                timeout=30.0,
+            )
+            if response.status_code == 200:
+                data = response.json()
+                container = data.get("MediaContainer", {})
+                results = container.get("Metadata", [])
+                for item in results:
+                    if item.get("type") == "movie" and item.get("ratingKey"):
+                        logger.info(
+                            "PlexService: get_movie_by_tmdb(%s) found rating_key=%s",
+                            tmdb_id,
+                            item.get("ratingKey"),
+                        )
+                        return {
+                            "rating_key": item.get("ratingKey"),
+                            "title": item.get("title"),
+                            "year": item.get("year"),
+                            "guid": item.get("guid"),
+                            "Media": item.get("Media"),
+                        }
+                logger.info("PlexService: get_movie_by_tmdb(%s) found no movie match", tmdb_id)
+            else:
+                logger.debug(
+                    "PlexService: get_movie_by_tmdb(%s) returned status %d (not in Plex)",
+                    tmdb_id,
+                    response.status_code,
+                )
+            return None
+        except (httpx.RequestError, ValueError):
+            logger.exception("PlexService: get_movie_by_tmdb(%s) failed", tmdb_id)
+            return None
+
+    async def check_movie_available(self, tmdb_id: int) -> bool:
+        """Check if a movie is available on Plex by TMDB ID.
+
+        Args:
+            tmdb_id: The TMDB ID to check.
+
+        Returns:
+            True if the movie exists in Plex and has Media entries.
+        """
+        movie = await self.get_movie_by_tmdb(tmdb_id)
+        if movie is None:
+            return False
+        return self._is_available(movie)
+
     async def get_show_by_tmdb(self, tmdb_id: int) -> dict[str, Any] | None:
         """Find a show in Plex library by TMDB ID using Plex's guid system.
 
@@ -364,6 +432,31 @@ class PlexService:
                 sections = container.get("Directory", [])
                 return [
                     str(s.get("key")) for s in sections if s.get("type") == "show" and s.get("key")
+                ]
+            return []
+        except (httpx.RequestError, ValueError):
+            return []
+
+    async def _get_movie_library_sections(self) -> list[str]:
+        """Get the library section keys for movie content."""
+        if not self.base_url or not self.token:
+            return []
+
+        endpoint = f"{self.base_url}/library/sections"
+        client = await self._get_client()
+
+        try:
+            response = await client.get(
+                endpoint,
+                headers=self._get_headers(),
+                timeout=30.0,
+            )
+            if response.status_code == 200:
+                data = response.json()
+                container = data.get("MediaContainer", {})
+                sections = container.get("Directory", [])
+                return [
+                    str(s.get("key")) for s in sections if s.get("type") == "movie" and s.get("key")
                 ]
             return []
         except (httpx.RequestError, ValueError):
