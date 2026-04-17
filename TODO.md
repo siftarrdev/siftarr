@@ -5,7 +5,6 @@
 - Make settings sections collapsible for easier navigation
 
 ## Project quality improvements
-- Refactor the codebase for better separation of concerns and more consistent coding style
 - Improve error handling so the app can gracefully handle unexpected errors and provide useful feedback
 - Tighten router input validation so bad payloads fail loudly
 - Split large router modules into thinner handlers plus service methods

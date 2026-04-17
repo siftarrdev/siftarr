@@ -1984,7 +1984,9 @@ class TestDashboardRouter:
 
     def test_dashboard_template_includes_search_multi_season_ui(self):
         """Dashboard template should expose the Search Multi Season TV UI."""
-        template_path = "/home/lucas/9999-personal/siftarr/app/siftarr/templates/dashboard.html"
+        from pathlib import Path
+
+        template_path = Path(__file__).parent.parent / "app/siftarr/templates/dashboard.html"
         with open(template_path, encoding="utf-8") as handle:
             template = handle.read()
 
@@ -1997,7 +1999,9 @@ class TestDashboardRouter:
 
     def test_dashboard_template_uses_collapsible_episode_results(self):
         """Episode search results should live in their own collapsible sections."""
-        template_path = "/home/lucas/9999-personal/siftarr/app/siftarr/templates/dashboard.html"
+        from pathlib import Path
+
+        template_path = Path(__file__).parent.parent / "app/siftarr/templates/dashboard.html"
         with open(template_path, encoding="utf-8") as handle:
             template = handle.read()
 
@@ -2007,7 +2011,9 @@ class TestDashboardRouter:
 
     def test_dashboard_template_includes_release_status_column_and_upload_age(self):
         """Torrent cards should render a right-side status area with rejection reason and age."""
-        template_path = "/home/lucas/9999-personal/siftarr/app/siftarr/templates/dashboard.html"
+        from pathlib import Path
+
+        template_path = Path(__file__).parent.parent / "app/siftarr/templates/dashboard.html"
         with open(template_path, encoding="utf-8") as handle:
             template = handle.read()
 
@@ -2027,7 +2033,9 @@ class TestDashboardRouter:
 
     def test_dashboard_template_supports_annotation_highlighting(self):
         """Torrent annotation highlighting helpers should exist in the template."""
-        template_path = "/home/lucas/9999-personal/siftarr/app/siftarr/templates/dashboard.html"
+        from pathlib import Path
+
+        template_path = Path(__file__).parent.parent / "app/siftarr/templates/dashboard.html"
         with open(template_path, encoding="utf-8") as handle:
             template = handle.read()
 
