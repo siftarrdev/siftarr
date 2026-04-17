@@ -84,12 +84,27 @@ class TestDashboardRouter:
 
         lifecycle_service = AsyncMock()
         lifecycle_service.get_active_requests.return_value = [active_request]
+        lifecycle_service.get_requests_by_status.return_value = []
+        lifecycle_service.get_requests_stats.return_value = {
+            "by_status": {},
+        }
         monkeypatch.setattr(dashboard, "LifecycleService", lambda db: lifecycle_service)
 
         monkeypatch.setattr(
             dashboard,
             "PendingQueueService",
             lambda db: AsyncMock(get_all_pending=AsyncMock(return_value=[])),
+        )
+
+        monkeypatch.setattr(
+            dashboard,
+            "get_effective_settings",
+            AsyncMock(
+                return_value=MagicMock(
+                    overseerr_url="http://overseerr.test",
+                    staging_mode_enabled=False,
+                )
+            ),
         )
 
         mock_db.execute.return_value = MagicMock(

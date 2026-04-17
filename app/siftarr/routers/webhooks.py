@@ -85,6 +85,27 @@ async def receive_overseerr_webhook(
     else:
         external_id = base_external_id
 
+    # Deduplication: if both mediarequested and mediaapproved fire for the same
+    # Overseerr request, skip creating a duplicate.
+    if payload.request and payload.request.id:
+        existing = await db.execute(
+            select(Request).where(
+                Request.overseerr_request_id == payload.request.id,
+            )
+        )
+        if existing.scalar_one_or_none() is not None:
+            return {
+                "status": "duplicate",
+                "message": f"Request for overseerr_request_id={payload.request.id} already exists",
+            }
+    else:
+        existing = await db.execute(select(Request).where(Request.external_id == external_id))
+        if existing.scalar_one_or_none() is not None:
+            return {
+                "status": "duplicate",
+                "message": f"Request for external_id={external_id} already exists",
+            }
+
     # Fetch title and year from Overseerr media details
     title = ""
     year = None

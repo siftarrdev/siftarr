@@ -115,8 +115,7 @@ details[open] summary .accordion-chevron { transform: rotate(90deg); }
                         </div>
                         <div class="flex flex-wrap gap-2">
                             <button type="submit" name="action" value="search" class="btn-primary btn-sm">Search Selected</button>
-                            <button type="submit" name="action" value="approve" class="btn-success btn-sm">Approve Selected</button>
-                            <button type="submit" name="action" value="reject" class="btn-danger btn-sm">Reject Selected</button>
+                            <button type="submit" name="action" value="deny" class="btn-danger btn-sm">Deny Selected</button>
                         </div>
                     </div>
                     <div class="mt-4 flex flex-col gap-2 lg:flex-row lg:items-center">
@@ -165,10 +164,7 @@ details[open] summary .accordion-chevron { transform: rotate(90deg); }
                             <td class="px-5 py-3.5 whitespace-nowrap text-sm" onclick="event.stopPropagation()">
                                 <div class="flex items-center gap-3">
                                     <button type="button" onclick="openRequestDetails({{ req.id }})" class="text-brand-400 hover:text-brand-300 font-medium">Details</button>
-                                    {% if req.overseerr_request_id and overseerr_request_statuses.get(req.id, 'unknown') in ['pending', 'requested'] %}
-                                    <form action="/requests/{{ req.id }}/approve" method="post" class="inline"><input type="hidden" name="redirect_to" value="/?tab=active"><button type="submit" class="text-emerald-400 hover:text-emerald-300 font-medium">Approve</button></form>
                                     <button type="button" onclick="openDenyModal({{ req.id }}, '/?tab=active')" class="text-red-400 hover:text-red-300 font-medium">Deny</button>
-                                    {% endif %}
                                 </div>
                              </td>
                           </tr>
@@ -195,8 +191,7 @@ details[open] summary .accordion-chevron { transform: rotate(90deg); }
                         </div>
                         <div class="flex flex-wrap gap-2">
                             <button type="submit" name="action" value="search" class="btn-primary btn-sm">Search Selected</button>
-                            <button type="submit" name="action" value="approve" class="btn-success btn-sm">Approve Selected</button>
-                            <button type="submit" name="action" value="reject" class="btn-danger btn-sm">Reject Selected</button>
+                            <button type="submit" name="action" value="deny" class="btn-danger btn-sm">Deny Selected</button>
                         </div>
                     </div>
                     <div class="mt-4 flex flex-col gap-2 lg:flex-row lg:items-center">
@@ -247,9 +242,6 @@ details[open] summary .accordion-chevron { transform: rotate(90deg); }
                                     <div class="flex items-center gap-3">
                                         <button type="button" onclick="openRequestDetails({{ req.id }})" class="text-brand-400 hover:text-brand-300 font-medium">Details</button>
                                         <form action="/requests/{{ req.id }}/search" method="post" class="inline"><input type="hidden" name="redirect_to" value="/?tab=pending"><button type="submit" class="text-brand-400 hover:text-brand-300 font-medium">Search</button></form>
-                                        {% if req.overseerr_request_id %}
-                                        <form action="/requests/{{ req.id }}/approve" method="post" class="inline"><input type="hidden" name="redirect_to" value="/?tab=pending"><button type="submit" class="text-emerald-400 hover:text-emerald-300 font-medium">Approve</button></form>
-                                        {% endif %}
                                         <button type="button" onclick="openDenyModal({{ req.id }}, '/?tab=pending')" class="text-red-400 hover:text-red-300 font-medium">Deny</button>
                                     </div>
                                 </td>
@@ -445,7 +437,7 @@ details[open] summary .accordion-chevron { transform: rotate(90deg); }
                 </table>
             </div>
         </div>
-        {% else %}<p class="text-gray-500">No rejected requests.</p>{% endif %}
+        {% else %}<p class="text-gray-500">No denied requests.</p>{% endif %}
     </div>
 </div>
 
@@ -991,27 +983,21 @@ function filterReleaseCards() {
 
 function filterTable() {
     const filterEl = document.getElementById('filter-input');
-    const statusEl = document.getElementById('overseerr-status-filter');
-    if (!filterEl || !statusEl) return;
+    if (!filterEl) return;
     const filter = filterEl.value.toLowerCase();
-    const selectedStatus = statusEl.value;
     document.querySelectorAll('#active-requests-body tr').forEach(row => {
         const textContent = `${row.dataset.title} ${row.dataset.type} ${row.dataset.statusLow} ${row.dataset.requestedby}`;
-        const ovStatus = row.dataset.ovstatus || '';
-        row.style.display = textContent.includes(filter) && (!selectedStatus || ovStatus === selectedStatus) ? '' : 'none';
+        row.style.display = textContent.includes(filter) ? '' : 'none';
     });
 }
 
 function filterPendingTable() {
     const filterEl = document.getElementById('pending-filter-input');
-    const statusEl = document.getElementById('pending-overseerr-filter');
-    if (!filterEl || !statusEl) return;
+    if (!filterEl) return;
     const filter = filterEl.value.toLowerCase();
-    const selectedStatus = statusEl.value;
     document.querySelectorAll('#pending-requests-body tr').forEach(row => {
         const textContent = `${row.dataset.title} ${row.dataset.type} ${row.dataset.requestedby} ${row.dataset.lasterror}`;
-        const ovStatus = row.dataset.ovstatus || '';
-        row.style.display = textContent.includes(filter) && (!selectedStatus || ovStatus === selectedStatus) ? '' : 'none';
+        row.style.display = textContent.includes(filter) ? '' : 'none';
     });
 }
 
@@ -1257,9 +1243,7 @@ function navigateDetails(direction) {
 }
 
 const filterInput = document.getElementById('filter-input');
-const statusFilter = document.getElementById('overseerr-status-filter');
 const pendingFilterInput = document.getElementById('pending-filter-input');
-const pendingStatusFilter = document.getElementById('pending-overseerr-filter');
 const stagedFilterInput = document.getElementById('staged-filter-input');
 const stagedStatusFilter = document.getElementById('staged-status-filter');
 const finishedFilterInput = document.getElementById('finished-filter-input');
@@ -1267,9 +1251,7 @@ const rejectedFilterInput = document.getElementById('rejected-filter-input');
 const activeSelectAll = document.getElementById('active-select-all');
 const pendingSelectAll = document.getElementById('pending-select-all');
 if (filterInput) filterInput.addEventListener('input', filterTable);
-if (statusFilter) statusFilter.addEventListener('change', filterTable);
 if (pendingFilterInput) pendingFilterInput.addEventListener('input', filterPendingTable);
-if (pendingStatusFilter) pendingStatusFilter.addEventListener('change', filterPendingTable);
 if (stagedFilterInput) stagedFilterInput.addEventListener('input', filterStagedTable);
 if (stagedStatusFilter) stagedStatusFilter.addEventListener('change', filterStagedTable);
 if (finishedFilterInput) finishedFilterInput.addEventListener('input', filterFinishedTable);
