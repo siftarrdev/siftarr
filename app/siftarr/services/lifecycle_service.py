@@ -45,6 +45,9 @@ class LifecycleService:
             RequestStatus.UNRELEASED,
             RequestStatus.FAILED,
         ],
+        RequestStatus.PARTIALLY_AVAILABLE: [
+            RequestStatus.UNRELEASED,
+        ],
         RequestStatus.UNRELEASED: [
             RequestStatus.PENDING,
             RequestStatus.SEARCHING,
@@ -134,6 +137,7 @@ class LifecycleService:
                         RequestStatus.RECEIVED,
                         RequestStatus.SEARCHING,
                         RequestStatus.PENDING,
+                        RequestStatus.PARTIALLY_AVAILABLE,
                         RequestStatus.STAGED,
                         RequestStatus.DOWNLOADING,
                     ]

@@ -12,6 +12,8 @@
 - Add structured decision logs/metrics for search latency, rule failures, pending retries, and qBit handoff
 - Increase unit test coverage to 85% (currently at 47%; focus on router integration tests and complex async service tests)
 
+- rely on plex for media availability instead of qbittorrent or overseerr's internal state. this will allow the app to be more resilient to errors in those systems and provide a better user experience when media is already available but the app's state is out of sync. We should only need overseerr to fetch the requests from users and to fetch the release info and movie posters. 
+
 
 ## Bugs
 - exclusion pattern matches shouldn't report as an error in the dashboard

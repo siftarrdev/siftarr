@@ -21,6 +21,7 @@ from app.siftarr.services.pending_queue_service import PendingQueueService
 from app.siftarr.services.release_selection_service import clear_release_search_cache
 from app.siftarr.services.rule_service import RuleService
 from app.siftarr.services.runtime_settings import get_effective_settings
+from app.siftarr.services.unreleased_service import evaluate_imported_request
 
 router = APIRouter(prefix="/settings", tags=["settings"])
 templates = Jinja2Templates(directory="app/siftarr/templates")
@@ -369,6 +370,7 @@ async def sync_overseerr(
                     actionable_requests.append(ov_req)
 
                 # Process each request
+                imported_requests: list[RequestModel] = []
                 new_tv_requests: list[RequestModel] = []
                 for ov_req in actionable_requests:
                     try:
@@ -438,6 +440,7 @@ async def sync_overseerr(
                         )
                         db.add(new_request)
                         await db.flush()
+                        imported_requests.append(new_request)
                         if media_type == MediaType.TV:
                             new_tv_requests.append(new_request)
                         existing_external_ids.add(external_id)  # Prevent duplicates in same sync
@@ -462,6 +465,9 @@ async def sync_overseerr(
                             logger.exception(
                                 "Episode sync failed for request_id=%s during import", req.id
                             )
+
+                    for req in imported_requests:
+                        await evaluate_imported_request(db, overseerr_service, req, logger=logger)
 
                     message = f"Synced {synced_count} new request(s) from Overseerr"
                     message_type = "success"

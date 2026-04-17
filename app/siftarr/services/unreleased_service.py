@@ -32,6 +32,7 @@ _logger = logging.getLogger(__name__)
 _REDIRECTABLE_STATUSES = {
     RequestStatus.RECEIVED,
     RequestStatus.PENDING,
+    RequestStatus.PARTIALLY_AVAILABLE,
     RequestStatus.SEARCHING,
 }
 
@@ -105,3 +106,25 @@ class UnreleasedEvaluator:
         """Convenience: run `evaluate` then `apply_verdict`."""
         verdict = await self.evaluate(request)
         return await self.apply_verdict(request, verdict)
+
+
+async def evaluate_imported_request(
+    db: AsyncSession,
+    overseerr: OverseerrService,
+    request: Request,
+    *,
+    logger: logging.Logger | None = None,
+) -> RequestStatus | None:
+    """Fail-open unreleased gate for a freshly imported request."""
+    active_logger = logger or _logger
+
+    try:
+        await db.refresh(request)
+        new_status = await UnreleasedEvaluator(db, overseerr).evaluate_and_apply(request)
+        await db.refresh(request)
+        return new_status
+    except Exception:
+        active_logger.exception(
+            "Unreleased evaluation failed for imported request_id=%s", request.id
+        )
+        return None

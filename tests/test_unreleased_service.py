@@ -206,3 +206,62 @@ async def test_apply_verdict_noop_for_terminal_statuses(session, overseerr, term
     assert result is None
     await session.refresh(req)
     assert req.status == terminal_status
+
+
+@pytest.mark.asyncio
+async def test_evaluate_and_apply_partially_available_tv_future_only_becomes_unreleased(
+    session, overseerr
+):
+    """Future-only remaining TV requests should redirect PARTIALLY_AVAILABLE to UNRELEASED."""
+    today = date.today()
+    overseerr.get_media_details.return_value = {
+        "status": "Returning Series",
+        "firstAirDate": (today - timedelta(days=100)).isoformat(),
+    }
+    req = await _make_request(
+        session,
+        media_type=MediaType.TV,
+        status=RequestStatus.PARTIALLY_AVAILABLE,
+        external_id="tv-partial-future-only",
+    )
+
+    season = Season(
+        request_id=req.id,
+        season_number=1,
+        status=RequestStatus.PARTIALLY_AVAILABLE,
+    )
+    session.add(season)
+    await session.commit()
+    await session.refresh(season)
+
+    session.add_all(
+        [
+            Episode(
+                season_id=season.id,
+                episode_number=1,
+                air_date=today - timedelta(days=14),
+                status=RequestStatus.COMPLETED,
+            ),
+            Episode(
+                season_id=season.id,
+                episode_number=2,
+                air_date=today - timedelta(days=7),
+                status=RequestStatus.AVAILABLE,
+            ),
+            Episode(
+                season_id=season.id,
+                episode_number=3,
+                air_date=today + timedelta(days=7),
+                status=RequestStatus.RECEIVED,
+            ),
+        ]
+    )
+    await session.commit()
+
+    evaluator = UnreleasedEvaluator(session, overseerr)
+
+    new_status = await evaluator.evaluate_and_apply(req)
+
+    assert new_status == RequestStatus.UNRELEASED
+    await session.refresh(req)
+    assert req.status == RequestStatus.UNRELEASED

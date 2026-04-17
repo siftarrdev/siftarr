@@ -119,6 +119,213 @@ class TestDashboardRouter:
         assert active_request in context["pending_requests"]
 
     @pytest.mark.asyncio
+    async def test_pending_requests_include_searchable_partially_available_tv_requests(
+        self, mock_db, monkeypatch
+    ):
+        """Partial TV requests with aired work remaining should stay visible in Pending Search."""
+        partial_request = MagicMock()
+        partial_request.id = 1
+        partial_request.status = RequestStatus.PARTIALLY_AVAILABLE
+        partial_request.overseerr_request_id = 10
+        partial_request.media_type = MediaType.TV
+        partial_request.title = "The Rookie"
+        partial_request.created_at = MagicMock()
+
+        lifecycle_service = AsyncMock()
+        lifecycle_service.get_active_requests.return_value = [partial_request]
+        lifecycle_service.get_requests_by_status.return_value = []
+        lifecycle_service.get_unreleased_requests.return_value = []
+        lifecycle_service.get_requests_stats.return_value = {
+            "by_status": {RequestStatus.COMPLETED.value: 0}
+        }
+        monkeypatch.setattr(dashboard, "LifecycleService", lambda db: lifecycle_service)
+
+        class FakeOverseerrService:
+            def __init__(self, settings):
+                pass
+
+            async def get_request_status_cached(self, request_id):
+                return {"status": "approved", "media": {"status": "partially_available"}}
+
+            def normalize_request_status(self, value):
+                return value
+
+            def normalize_media_status(self, value):
+                return value
+
+            async def close(self):
+                return None
+
+        monkeypatch.setattr(dashboard, "OverseerrService", FakeOverseerrService)
+        monkeypatch.setattr(
+            dashboard, "get_effective_settings", AsyncMock(return_value=MagicMock())
+        )
+        monkeypatch.setattr(
+            dashboard,
+            "PendingQueueService",
+            lambda db: AsyncMock(get_all_pending=AsyncMock(return_value=[])),
+        )
+
+        empty_scalars_result = MagicMock()
+        empty_scalars_result.scalars.return_value.all.return_value = []
+        mock_db.execute.return_value = empty_scalars_result
+
+        response = await dashboard.dashboard(MagicMock(), db=mock_db)
+
+        context = response.context
+        assert partial_request in context["active_requests"]
+        assert partial_request in context["pending_requests"]
+        assert context["unreleased_requests"] == []
+
+    @pytest.mark.asyncio
+    async def test_dashboard_excludes_unreleased_requests_from_pending_search(
+        self, mock_db, monkeypatch
+    ):
+        """Persisted UNRELEASED requests should stay out of Pending Search and count as unreleased."""
+        unreleased_request = MagicMock()
+        unreleased_request.id = 1
+        unreleased_request.status = RequestStatus.UNRELEASED
+        unreleased_request.overseerr_request_id = 101
+        unreleased_request.media_type = MediaType.MOVIE
+        unreleased_request.tmdb_id = 9001
+        unreleased_request.tvdb_id = None
+        unreleased_request.title = "Future Movie"
+        unreleased_request.created_at = MagicMock()
+
+        pending_request = MagicMock()
+        pending_request.id = 2
+        pending_request.status = RequestStatus.PENDING
+        pending_request.overseerr_request_id = 102
+        pending_request.media_type = MediaType.MOVIE
+        pending_request.tmdb_id = 9002
+        pending_request.tvdb_id = None
+        pending_request.title = "Released Movie"
+        pending_request.created_at = MagicMock()
+
+        lifecycle_service = AsyncMock()
+        lifecycle_service.get_active_requests.return_value = [unreleased_request, pending_request]
+        lifecycle_service.get_requests_by_status.return_value = []
+        lifecycle_service.get_unreleased_requests.return_value = [unreleased_request]
+        lifecycle_service.get_requests_stats.return_value = {
+            "by_status": {RequestStatus.COMPLETED.value: 0}
+        }
+        monkeypatch.setattr(dashboard, "LifecycleService", lambda db: lifecycle_service)
+
+        class FakeOverseerrService:
+            def __init__(self, settings):
+                pass
+
+            async def get_request_status_cached(self, request_id):
+                return {"status": "approved", "media": {"status": "processing"}}
+
+            async def get_media_details(self, media_type, media_id):
+                return {
+                    "releaseDate": (datetime.now(UTC) + timedelta(days=30)).date().isoformat(),
+                    "releases": {"results": []},
+                }
+
+            def normalize_request_status(self, value):
+                return value
+
+            def normalize_media_status(self, value):
+                return value
+
+            async def close(self):
+                return None
+
+        monkeypatch.setattr(dashboard, "OverseerrService", FakeOverseerrService)
+        monkeypatch.setattr(
+            dashboard, "get_effective_settings", AsyncMock(return_value=MagicMock())
+        )
+        monkeypatch.setattr(
+            dashboard,
+            "PendingQueueService",
+            lambda db: AsyncMock(get_all_pending=AsyncMock(return_value=[])),
+        )
+
+        empty_scalars_result = MagicMock()
+        empty_scalars_result.scalars.return_value.all.return_value = []
+        mock_db.execute.side_effect = [empty_scalars_result, empty_scalars_result]
+
+        response = await dashboard.dashboard(MagicMock(), db=mock_db)
+
+        context = response.context
+        assert pending_request in context["pending_requests"]
+        assert unreleased_request not in context["pending_requests"]
+        assert context["unreleased_requests"] == [unreleased_request]
+        assert context["stats"]["pending"] == 1
+        assert context["stats"]["unreleased"] == 1
+
+    @pytest.mark.asyncio
+    async def test_dashboard_routes_future_only_tv_requests_to_unreleased_tab(
+        self, mock_db, monkeypatch
+    ):
+        """Future-only TV requests should render under Unreleased instead of disappearing from the dashboard."""
+        unreleased_request = MagicMock()
+        unreleased_request.id = 2
+        unreleased_request.status = RequestStatus.UNRELEASED
+        unreleased_request.overseerr_request_id = 102
+        unreleased_request.media_type = MediaType.TV
+        unreleased_request.tmdb_id = 9002
+        unreleased_request.tvdb_id = None
+        unreleased_request.title = "The Rookie"
+        unreleased_request.created_at = MagicMock()
+
+        future_air_date = (datetime.now(UTC) + timedelta(days=7)).date().isoformat()
+
+        lifecycle_service = AsyncMock()
+        lifecycle_service.get_active_requests.return_value = []
+        lifecycle_service.get_requests_by_status.return_value = []
+        lifecycle_service.get_unreleased_requests.return_value = [unreleased_request]
+        lifecycle_service.get_requests_stats.return_value = {
+            "by_status": {RequestStatus.COMPLETED.value: 0}
+        }
+        monkeypatch.setattr(dashboard, "LifecycleService", lambda db: lifecycle_service)
+
+        class FakeOverseerrService:
+            def __init__(self, settings):
+                pass
+
+            async def get_request_status_cached(self, request_id):
+                return {"status": "approved", "media": {"status": "partially_available"}}
+
+            async def get_media_details(self, media_type, media_id):
+                return {"nextEpisodeToAir": {"airDate": future_air_date}}
+
+            def normalize_request_status(self, value):
+                return value
+
+            def normalize_media_status(self, value):
+                return value
+
+            async def close(self):
+                return None
+
+        monkeypatch.setattr(dashboard, "OverseerrService", FakeOverseerrService)
+        monkeypatch.setattr(
+            dashboard, "get_effective_settings", AsyncMock(return_value=MagicMock())
+        )
+        monkeypatch.setattr(
+            dashboard,
+            "PendingQueueService",
+            lambda db: AsyncMock(get_all_pending=AsyncMock(return_value=[])),
+        )
+
+        empty_scalars_result = MagicMock()
+        empty_scalars_result.scalars.return_value.all.return_value = []
+        mock_db.execute.side_effect = [empty_scalars_result, empty_scalars_result]
+
+        response = await dashboard.dashboard(MagicMock(), db=mock_db)
+
+        context = response.context
+        assert context["pending_requests"] == []
+        assert unreleased_request not in context["pending_requests"]
+        assert context["unreleased_requests"] == [unreleased_request]
+        assert context["unreleased_earliest"] == {unreleased_request.id: future_air_date}
+        assert context["stats"]["pending"] == 0
+        assert context["stats"]["unreleased"] == 1
+
+    @pytest.mark.asyncio
     async def test_approve_request_success(self):
         """Approve helper should surface successful approvals."""
         mock_overseerr_service = AsyncMock()

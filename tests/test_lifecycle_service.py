@@ -299,6 +299,19 @@ class TestLifecycleService:
         assert "unreleased" not in compiled.lower()
 
     @pytest.mark.asyncio
+    async def test_get_active_requests_includes_partially_available(self, mock_db, service):
+        """PARTIALLY_AVAILABLE requests should stay in the active dashboard source set."""
+        mock_result = MagicMock()
+        mock_result.scalars.return_value.all.return_value = []
+        mock_db.execute.return_value = mock_result
+
+        await service.get_active_requests()
+
+        called_stmt = mock_db.execute.call_args.args[0]
+        compiled = str(called_stmt.compile(compile_kwargs={"literal_binds": True}))
+        assert "partially_available" in compiled.lower()
+
+    @pytest.mark.asyncio
     async def test_get_unreleased_requests_returns_only_unreleased(self, mock_db, service):
         """get_unreleased_requests should return only UNRELEASED requests."""
         mock_requests = [

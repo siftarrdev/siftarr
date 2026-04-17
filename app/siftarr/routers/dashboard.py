@@ -86,12 +86,11 @@ async def dashboard(
     # Active tab shows all active requests.
     filtered_requests = active_requests
 
-    # Pending search shows only local pending requests that Overseerr has approved
-    # or that are partially available and still need search action.
+    # Pending search shows local requests that still need search action.
     pending_requests = [
         req
         for req in active_requests
-        if req.status == RequestStatus.SEARCHING
+        if req.status in {RequestStatus.SEARCHING, RequestStatus.PARTIALLY_AVAILABLE}
         or (
             req.status == RequestStatus.PENDING
             and req.overseerr_request_id
