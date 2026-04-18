@@ -52,7 +52,9 @@ class TestStagedRouter:
         monkeypatch.setattr(staged, "log_staging_decision", log_decision)
         monkeypatch.setattr(staged.os.path, "exists", MagicMock(return_value=False))
 
-        response = await staged.approve_staged_torrent(1, db=mock_db)
+        response = await staged.approve_staged_torrent(
+            1, http_request=MagicMock(headers={}), db=mock_db
+        )
 
         assert response.status_code == 303
         assert torrent.status == "approved"
@@ -103,7 +105,9 @@ class TestStagedRouter:
         monkeypatch.setattr(staged, "log_staging_decision", log_decision)
         monkeypatch.setattr(staged.os.path, "exists", MagicMock(return_value=False))
 
-        response = await staged.approve_staged_torrent(3, db=mock_db)
+        response = await staged.approve_staged_torrent(
+            3, http_request=MagicMock(headers={}), db=mock_db
+        )
 
         assert response.status_code == 303
         log_decision.assert_called_once_with(

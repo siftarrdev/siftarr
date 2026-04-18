@@ -4,7 +4,8 @@ import os
 from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, Form, HTTPException
-from fastapi.responses import RedirectResponse
+from fastapi import Request as FastAPIRequest
+from fastapi.responses import JSONResponse, RedirectResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -22,11 +23,12 @@ from app.siftarr.services.staging_decision_logger import (
 router = APIRouter(prefix="/staged", tags=["staged"])
 
 
-@router.post("/{torrent_id}/approve")
+@router.post("/{torrent_id}/approve", response_model=None)
 async def approve_staged_torrent(
     torrent_id: int,
+    http_request: FastAPIRequest,
     db: AsyncSession = Depends(get_db),
-) -> RedirectResponse:
+) -> RedirectResponse | JSONResponse:
     """Approve a staged torrent - send to qBittorrent."""
     result = await db.execute(select(StagedTorrent).where(StagedTorrent.id == torrent_id))
     torrent = result.scalar_one_or_none()
@@ -104,14 +106,17 @@ async def approve_staged_torrent(
 
     await db.commit()
 
+    if "application/json" in http_request.headers.get("accept", ""):
+        return JSONResponse({"status": "ok", "message": "Torrent approved successfully"})
     return RedirectResponse(url="/", status_code=303)
 
 
-@router.post("/{torrent_id}/discard")
+@router.post("/{torrent_id}/discard", response_model=None)
 async def discard_staged_torrent(
     torrent_id: int,
+    http_request: FastAPIRequest,
     db: AsyncSession = Depends(get_db),
-) -> RedirectResponse:
+) -> RedirectResponse | JSONResponse:
     """Discard a staged torrent - delete files."""
     from app.siftarr.models.request import RequestStatus
 
@@ -150,6 +155,8 @@ async def discard_staged_torrent(
 
     await db.commit()
 
+    if "application/json" in http_request.headers.get("accept", ""):
+        return JSONResponse({"status": "ok", "message": "Torrent discarded successfully"})
     return RedirectResponse(url="/", status_code=303)
 
 

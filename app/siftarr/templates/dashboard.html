@@ -94,12 +94,12 @@ details[open] summary .accordion-chevron { transform: rotate(90deg); }
     {# ── Tabs ── #}
     <div class="border-b border-gray-700/60">
         <nav class="-mb-px flex gap-6 overflow-x-auto">
+            <button onclick="showTab('unreleased')" id="tab-unreleased"
+                    class="tab-button border-b-2 border-transparent pb-3 text-sm font-medium text-gray-500 hover:text-gray-300 whitespace-nowrap">Unreleased</button>
             <button onclick="showTab('active')" id="tab-active"
                     class="tab-button border-b-2 border-brand-500 pb-3 text-sm font-medium text-brand-400 whitespace-nowrap">Active Requests</button>
             <button onclick="showTab('pending')" id="tab-pending"
                     class="tab-button border-b-2 border-transparent pb-3 text-sm font-medium text-gray-500 hover:text-gray-300 whitespace-nowrap">Pending Search</button>
-            <button onclick="showTab('unreleased')" id="tab-unreleased"
-                    class="tab-button border-b-2 border-transparent pb-3 text-sm font-medium text-gray-500 hover:text-gray-300 whitespace-nowrap">Unreleased</button>
             <button onclick="showTab('staged')" id="tab-staged"
                     class="tab-button border-b-2 border-transparent pb-3 text-sm font-medium text-gray-500 hover:text-gray-300 whitespace-nowrap">Staged / Downloading</button>
             <button onclick="showTab('finished')" id="tab-finished"
@@ -128,6 +128,14 @@ details[open] summary .accordion-chevron { transform: rotate(90deg); }
                     </div>
                     <div class="mt-4 flex flex-col gap-2 lg:flex-row lg:items-center">
                         <input type="text" id="filter-input" placeholder="Filter active requests..." class="form-input lg:flex-1">
+                        <div class="flex items-center gap-1.5">
+                            <button type="button" onclick="toggleMediaFilter('active', 'tv')" id="media-filter-active-tv"
+                                    class="media-toggle-btn px-2.5 py-1 text-xs font-medium rounded-lg border border-gray-700/60 text-gray-500 hover:text-gray-300 transition-colors">TV</button>
+                            <button type="button" onclick="toggleMediaFilter('active', 'movie')" id="media-filter-active-movie"
+                                    class="media-toggle-btn px-2.5 py-1 text-xs font-medium rounded-lg border border-gray-700/60 text-gray-500 hover:text-gray-300 transition-colors">Movies</button>
+                            <button type="button" onclick="toggleShowUnreleased()" id="show-unreleased-toggle"
+                                    class="px-2.5 py-1 text-xs font-medium rounded-lg border border-gray-700/60 text-gray-500 hover:text-gray-300 transition-colors">Show Unreleased</button>
+                        </div>
                     </div>
                 </div>
                 <div class="overflow-x-auto">
@@ -204,6 +212,12 @@ details[open] summary .accordion-chevron { transform: rotate(90deg); }
                     </div>
                     <div class="mt-4 flex flex-col gap-2 lg:flex-row lg:items-center">
                         <input type="text" id="pending-filter-input" placeholder="Filter pending requests..." class="form-input lg:flex-1">
+                        <div class="flex items-center gap-1.5">
+                            <button type="button" onclick="toggleMediaFilter('pending', 'tv')" id="media-filter-pending-tv"
+                                    class="media-toggle-btn px-2.5 py-1 text-xs font-medium rounded-lg border border-gray-700/60 text-gray-500 hover:text-gray-300 transition-colors">TV</button>
+                            <button type="button" onclick="toggleMediaFilter('pending', 'movie')" id="media-filter-pending-movie"
+                                    class="media-toggle-btn px-2.5 py-1 text-xs font-medium rounded-lg border border-gray-700/60 text-gray-500 hover:text-gray-300 transition-colors">Movies</button>
+                        </div>
                     </div>
                 </div>
                 <div class="overflow-x-auto">
@@ -270,8 +284,14 @@ details[open] summary .accordion-chevron { transform: rotate(90deg); }
             <div class="card-header">
                 <div class="section-title">Unreleased Requests</div>
                 <div class="section-subtitle">Requests whose content has not released yet. Siftarr will re-evaluate automatically when they become available.</div>
-                <div class="mt-4">
+                <div class="mt-4 flex flex-col gap-2 lg:flex-row lg:items-center">
                     <input type="text" id="unreleased-filter-input" placeholder="Filter unreleased requests..." class="form-input lg:w-96">
+                    <div class="flex items-center gap-1.5">
+                        <button type="button" onclick="toggleMediaFilter('unreleased', 'tv')" id="media-filter-unreleased-tv"
+                                class="media-toggle-btn px-2.5 py-1 text-xs font-medium rounded-lg border border-gray-700/60 text-gray-500 hover:text-gray-300 transition-colors">TV</button>
+                        <button type="button" onclick="toggleMediaFilter('unreleased', 'movie')" id="media-filter-unreleased-movie"
+                                class="media-toggle-btn px-2.5 py-1 text-xs font-medium rounded-lg border border-gray-700/60 text-gray-500 hover:text-gray-300 transition-colors">Movies</button>
+                    </div>
                 </div>
             </div>
             <div class="overflow-x-auto">
@@ -402,8 +422,14 @@ details[open] summary .accordion-chevron { transform: rotate(90deg); }
             <div class="card-header">
                 <div class="section-title">Finished Requests</div>
                 <div class="section-subtitle">Requests that have been completed and downloaded.</div>
-                <div class="mt-4">
+                <div class="mt-4 flex flex-col gap-2 lg:flex-row lg:items-center">
                     <input type="text" id="finished-filter-input" placeholder="Filter finished requests..." class="form-input lg:w-96">
+                    <div class="flex items-center gap-1.5">
+                        <button type="button" onclick="toggleMediaFilter('finished', 'tv')" id="media-filter-finished-tv"
+                                class="media-toggle-btn px-2.5 py-1 text-xs font-medium rounded-lg border border-gray-700/60 text-gray-500 hover:text-gray-300 transition-colors">TV</button>
+                        <button type="button" onclick="toggleMediaFilter('finished', 'movie')" id="media-filter-finished-movie"
+                                class="media-toggle-btn px-2.5 py-1 text-xs font-medium rounded-lg border border-gray-700/60 text-gray-500 hover:text-gray-300 transition-colors">Movies</button>
+                    </div>
                 </div>
             </div>
             <div class="overflow-x-auto">
@@ -456,8 +482,14 @@ details[open] summary .accordion-chevron { transform: rotate(90deg); }
             <div class="card-header">
                 <div class="section-title">Denied Requests</div>
                 <div class="section-subtitle">Requests that have been denied, along with the reason for denial. Showing last 30 days.</div>
-                <div class="mt-4">
+                <div class="mt-4 flex flex-col gap-2 lg:flex-row lg:items-center">
                     <input type="text" id="rejected-filter-input" placeholder="Filter denied requests..." class="form-input lg:w-96">
+                    <div class="flex items-center gap-1.5">
+                        <button type="button" onclick="toggleMediaFilter('rejected', 'tv')" id="media-filter-rejected-tv"
+                                class="media-toggle-btn px-2.5 py-1 text-xs font-medium rounded-lg border border-gray-700/60 text-gray-500 hover:text-gray-300 transition-colors">TV</button>
+                        <button type="button" onclick="toggleMediaFilter('rejected', 'movie')" id="media-filter-rejected-movie"
+                                class="media-toggle-btn px-2.5 py-1 text-xs font-medium rounded-lg border border-gray-700/60 text-gray-500 hover:text-gray-300 transition-colors">Movies</button>
+                    </div>
                 </div>
             </div>
             <div class="overflow-x-auto">
@@ -779,24 +811,22 @@ function renderReleaseCard(release, requestId) {
     const formAction = storedReleaseId
         ? `/requests/${requestId}/releases/${storedReleaseId}/use`
         : `/requests/${requestId}/manual-release/use`;
-    const manualFieldHtml = storedReleaseId ? '' : `
-                <input type="hidden" name="title" value="${escapeHtml(release.title)}">
-                <input type="hidden" name="size" value="${escapeHtml(release.size_bytes ?? 0)}">
-                <input type="hidden" name="seeders" value="${escapeHtml(release.seeders ?? 0)}">
-                <input type="hidden" name="leechers" value="${escapeHtml(release.leechers ?? 0)}">
-                <input type="hidden" name="indexer" value="${escapeHtml(release.indexer || '')}">
-                <input type="hidden" name="download_url" value="${escapeHtml(release.download_url || '')}">
-                <input type="hidden" name="magnet_url" value="${escapeHtml(release.magnet_url || '')}">
-                <input type="hidden" name="info_hash" value="${escapeHtml(release.info_hash || '')}">
-                <input type="hidden" name="publish_date" value="${escapeHtml(release.publish_date || '')}">
-                <input type="hidden" name="resolution" value="${escapeHtml(release.resolution || '')}">
-                <input type="hidden" name="codec" value="${escapeHtml(release.codec || '')}">
-                <input type="hidden" name="release_group" value="${escapeHtml(release.release_group || '')}">`;
     const disableAction = !(release.download_url || release.magnet_url);
-    const actionHtml = `<form action="${formAction}" method="post" class="shrink-0" onsubmit="event.stopPropagation()">
-                <input type="hidden" name="redirect_to" value="/?tab=${currentTab}">${manualFieldHtml}
-                <button type="submit" class="btn-primary btn-sm" ${disableAction ? 'disabled title="No download source available"' : ''}>${useLabel}</button>
-           </form>`;
+    const manualDataJson = storedReleaseId ? '{}' : escapeHtml(JSON.stringify({
+        title: release.title || '',
+        size: release.size_bytes ?? 0,
+        seeders: release.seeders ?? 0,
+        leechers: release.leechers ?? 0,
+        indexer: release.indexer || '',
+        download_url: release.download_url || '',
+        magnet_url: release.magnet_url || '',
+        info_hash: release.info_hash || '',
+        publish_date: release.publish_date || '',
+        resolution: release.resolution || '',
+        codec: release.codec || '',
+        release_group: release.release_group || '',
+    }));
+    const actionHtml = `<button type="button" class="btn-primary btn-sm" ${disableAction ? 'disabled title="No download source available"' : ''} data-stage-url="${escapeHtml(formAction)}" data-stage-fields="${manualDataJson}" onclick="stageRelease(this)">${useLabel}</button>`;
     const publishAge = formatRelativePublishAge(release.publish_date);
     const coverageHtml = (Array.isArray(release.covered_seasons) || release.is_complete_series)
         ? renderCoverageBadge(release)
@@ -1112,6 +1142,37 @@ function showToast(message) {
     }, 4000);
 }
 
+async function stageRelease(btn) {
+    const url = btn.dataset.stageUrl;
+    const fields = JSON.parse(btn.dataset.stageFields || '{}');
+    const originalText = btn.textContent;
+    btn.disabled = true;
+    btn.textContent = 'Staging…';
+    try {
+        const formData = new FormData();
+        for (const [key, value] of Object.entries(fields)) {
+            formData.append(key, String(value));
+        }
+        const resp = await fetch(url, {
+            method: 'POST',
+            headers: { 'Accept': 'application/json' },
+            body: formData,
+        });
+        if (!resp.ok) {
+            const errData = await resp.json().catch(() => null);
+            throw new Error(errData?.detail || `HTTP ${resp.status}`);
+        }
+        btn.textContent = 'Staged ✓';
+        btn.classList.remove('btn-primary');
+        btn.classList.add('btn-disabled');
+        showToast('Torrent staged successfully');
+    } catch (err) {
+        btn.disabled = false;
+        btn.textContent = originalText;
+        showToast('Error: ' + err.message);
+    }
+}
+
 async function searchRequestFromDetails() {
     if (!currentRequestId) return;
     const btn = document.getElementById('request-details-search-btn');
@@ -1167,13 +1228,74 @@ function filterReleaseCards() {
         .join('');
 }
 
+const mediaFilterState = {};
+let showUnreleasedActive = false;
+
+function toggleShowUnreleased() {
+    showUnreleasedActive = !showUnreleasedActive;
+    const btn = document.getElementById('show-unreleased-toggle');
+    if (btn) {
+        if (showUnreleasedActive) {
+            btn.classList.remove('border-gray-700/60', 'text-gray-500');
+            btn.classList.add('border-brand-500', 'text-brand-400', 'bg-brand-500/10');
+        } else {
+            btn.classList.remove('border-brand-500', 'text-brand-400', 'bg-brand-500/10');
+            btn.classList.add('border-gray-700/60', 'text-gray-500');
+        }
+    }
+    filterTable();
+}
+
+function toggleMediaFilter(tabName, mediaType) {
+    if (!mediaFilterState[tabName]) mediaFilterState[tabName] = null;
+
+    if (mediaFilterState[tabName] === mediaType) {
+        mediaFilterState[tabName] = null;
+    } else {
+        mediaFilterState[tabName] = mediaType;
+    }
+
+    const tvBtn = document.getElementById('media-filter-' + tabName + '-tv');
+    const movieBtn = document.getElementById('media-filter-' + tabName + '-movie');
+
+    [tvBtn, movieBtn].forEach(btn => {
+        if (!btn) return;
+        btn.classList.remove('border-brand-500', 'text-brand-400', 'bg-brand-500/10');
+        btn.classList.add('border-gray-700/60', 'text-gray-500');
+    });
+
+    const activeBtn = mediaFilterState[tabName] === 'tv' ? tvBtn : mediaFilterState[tabName] === 'movie' ? movieBtn : null;
+    if (activeBtn) {
+        activeBtn.classList.remove('border-gray-700/60', 'text-gray-500');
+        activeBtn.classList.add('border-brand-500', 'text-brand-400', 'bg-brand-500/10');
+    }
+
+    applyAllFilters(tabName);
+}
+
+function applyAllFilters(tabName) {
+    const filterMap = {
+        active: filterTable,
+        pending: filterPendingTable,
+        unreleased: filterUnreleasedTable,
+        finished: filterFinishedTable,
+        rejected: filterRejectedTable,
+    };
+    if (filterMap[tabName]) filterMap[tabName]();
+}
+
 function filterTable() {
     const filterEl = document.getElementById('filter-input');
     if (!filterEl) return;
     const filter = filterEl.value.toLowerCase();
+    const mediaType = mediaFilterState['active'] || null;
     document.querySelectorAll('#active-requests-body tr').forEach(row => {
         const textContent = `${row.dataset.title} ${row.dataset.type} ${row.dataset.statusLow} ${row.dataset.requestedby}`;
-        row.style.display = textContent.includes(filter) ? '' : 'none';
+        const textMatch = !filter || textContent.includes(filter);
+        const mediaMatch = !mediaType || row.dataset.type === mediaType;
+        const status = row.dataset.status || '';
+        const unreleasedMatch = showUnreleasedActive || (status !== 'unreleased' && status !== 'partially_available');
+        row.style.display = (textMatch && mediaMatch && unreleasedMatch) ? '' : 'none';
     });
 }
 
@@ -1181,9 +1303,12 @@ function filterPendingTable() {
     const filterEl = document.getElementById('pending-filter-input');
     if (!filterEl) return;
     const filter = filterEl.value.toLowerCase();
+    const mediaType = mediaFilterState['pending'] || null;
     document.querySelectorAll('#pending-requests-body tr').forEach(row => {
         const textContent = `${row.dataset.title} ${row.dataset.type} ${row.dataset.requestedby} ${row.dataset.lasterror}`;
-        row.style.display = textContent.includes(filter) ? '' : 'none';
+        const textMatch = !filter || textContent.includes(filter);
+        const mediaMatch = !mediaType || row.dataset.type === mediaType;
+        row.style.display = (textMatch && mediaMatch) ? '' : 'none';
     });
 }
 
@@ -1204,9 +1329,12 @@ function filterFinishedTable() {
     const filterEl = document.getElementById('finished-filter-input');
     if (!filterEl) return;
     const filter = filterEl.value.toLowerCase();
+    const mediaType = mediaFilterState['finished'] || null;
     document.querySelectorAll('#finished-requests-body tr').forEach(row => {
         const textContent = `${row.dataset.title} ${row.dataset.type} ${row.dataset.requestedby}`;
-        row.style.display = textContent.includes(filter) ? '' : 'none';
+        const textMatch = !filter || textContent.includes(filter);
+        const mediaMatch = !mediaType || row.dataset.type === mediaType;
+        row.style.display = (textMatch && mediaMatch) ? '' : 'none';
     });
 }
 
@@ -1214,9 +1342,12 @@ function filterRejectedTable() {
     const filterEl = document.getElementById('rejected-filter-input');
     if (!filterEl) return;
     const filter = filterEl.value.toLowerCase();
+    const mediaType = mediaFilterState['rejected'] || null;
     document.querySelectorAll('#rejected-requests-body tr').forEach(row => {
         const textContent = `${row.dataset.title} ${row.dataset.type} ${row.dataset.requestedby} ${row.dataset.reason}`;
-        row.style.display = textContent.includes(filter) ? '' : 'none';
+        const textMatch = !filter || textContent.includes(filter);
+        const mediaMatch = !mediaType || row.dataset.type === mediaType;
+        row.style.display = (textMatch && mediaMatch) ? '' : 'none';
     });
 }
 
@@ -1224,9 +1355,12 @@ function filterUnreleasedTable() {
     const filterEl = document.getElementById('unreleased-filter-input');
     if (!filterEl) return;
     const filter = filterEl.value.toLowerCase();
+    const mediaType = mediaFilterState['unreleased'] || null;
     document.querySelectorAll('#unreleased-requests-body tr').forEach(row => {
         const textContent = `${row.dataset.title} ${row.dataset.type} ${row.dataset.requestedby} ${row.dataset.expected}`.toLowerCase();
-        row.style.display = textContent.includes(filter) ? '' : 'none';
+        const textMatch = !filter || textContent.includes(filter);
+        const mediaMatch = !mediaType || row.dataset.type === mediaType;
+        row.style.display = (textMatch && mediaMatch) ? '' : 'none';
     });
 }
 
@@ -1643,6 +1777,7 @@ const initialTab = new URLSearchParams(window.location.search).get('tab');
 if (initialTab && document.getElementById('content-' + initialTab) && document.getElementById('tab-' + initialTab)) {
     showTab(initialTab);
 }
+filterTable();
 
 // Keyboard navigation for details modal
 document.addEventListener('keydown', (e) => {

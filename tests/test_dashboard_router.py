@@ -134,7 +134,7 @@ class TestDashboardRouter:
         lifecycle_service = AsyncMock()
         lifecycle_service.get_active_requests.return_value = [unreleased_request]
         lifecycle_service.get_requests_by_status.return_value = []
-        lifecycle_service.get_unreleased_requests.return_value = [unreleased_request]
+        lifecycle_service.get_unreleased_and_partial_requests.return_value = [unreleased_request]
         lifecycle_service.get_requests_stats.return_value = {
             "by_status": {RequestStatus.UNRELEASED.value: 1},
         }
@@ -1798,6 +1798,7 @@ class TestDashboardRouter:
         response = await dashboard_actions.use_request_release(
             request_id=21,
             release_id=99,
+            http_request=MagicMock(headers={}),
             redirect_to=None,
             db=mock_db,
         )
@@ -1840,6 +1841,7 @@ class TestDashboardRouter:
 
         response = await dashboard_actions.use_manual_release(
             request_id=21,
+            http_request=MagicMock(headers={}),
             title="Foundation.S01E01.1080p.WEB-DL",
             size=2,
             seeders=10,
@@ -1880,6 +1882,7 @@ class TestDashboardRouter:
         with pytest.raises(HTTPException) as exc_info:
             await dashboard_actions.use_manual_release(
                 request_id=21,
+                http_request=MagicMock(headers={}),
                 title="Foundation.S01E01.1080p.WEB-DL",
                 size=2,
                 seeders=10,

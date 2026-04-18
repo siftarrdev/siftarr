@@ -92,7 +92,7 @@ async def dashboard(
         RequestStatus.COMPLETED, limit=500
     )
 
-    unreleased_requests = await lifecycle_service.get_unreleased_requests(limit=500)
+    unreleased_requests = await lifecycle_service.get_unreleased_and_partial_requests(limit=500)
     overseerr_service = OverseerrService(settings=effective_settings)
 
     async def _earliest_future_release(req_obj: RequestModel) -> tuple[int, str | None]:
