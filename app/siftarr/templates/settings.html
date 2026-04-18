@@ -3,6 +3,12 @@
 {% block title %}Settings - Siftarr{% endblock %}
 
 {% block content %}
+<style>
+details summary::-webkit-details-marker { display: none; }
+details summary { list-style: none; }
+details[open] summary .accordion-chevron { transform: rotate(90deg); }
+.accordion-chevron { transition: transform 0.15s ease; }
+</style>
 <div class="space-y-8">
     <h1 class="page-title">Settings</h1>
 
@@ -13,16 +19,19 @@
     {% endif %}
 
     {# ── Connection Settings ── #}
-    <div class="card">
-        <div class="card-header flex items-center justify-between gap-4">
-            <div>
-                <h2 class="section-title">Connection Settings</h2>
-                <p class="section-subtitle">Configure service URLs and credentials</p>
+    <details open class="card">
+        <summary class="card-header flex items-center justify-between gap-4 cursor-pointer select-none">
+            <div class="flex items-center gap-3">
+                <svg class="accordion-chevron w-4 h-4 text-gray-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
+                <div>
+                    <h2 class="section-title">Connection Settings</h2>
+                    <p class="section-subtitle">Configure service URLs and credentials</p>
+                </div>
             </div>
-            <button type="button" onclick="testAllConnections()" class="btn bg-purple-600 text-white hover:bg-purple-500 focus:ring-purple-500 btn-sm">
+            <button type="button" onclick="event.preventDefault(); testAllConnections()" class="btn bg-purple-600 text-white hover:bg-purple-500 focus:ring-purple-500 btn-sm">
                 Test All
             </button>
-        </div>
+        </summary>
         <div class="card-body">
             <form action="/settings/connections" method="post" class="space-y-6">
                 {# Overseerr #}
@@ -116,6 +125,35 @@
                     </div>
                 </div>
 
+                {# Plex #}
+                <div class="rounded-xl border border-gray-700/60 bg-surface-850 p-5 space-y-4">
+                    <div class="flex items-center justify-between gap-4">
+                        <div>
+                            <h3 class="text-sm font-semibold text-white">Plex</h3>
+                            <p class="text-xs text-gray-500 mt-0.5">Media server for availability checking</p>
+                        </div>
+                        <div class="flex items-center gap-3 shrink-0">
+                            <button type="button" onclick="testConnection('plex')" id="btn-test-plex" class="btn-primary btn-sm">Test</button>
+                            <span id="status-plex" class="text-xs font-medium"></span>
+                        </div>
+                    </div>
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div>
+                            <label for="plex_url" class="form-label">URL</label>
+                            <input type="url" id="plex_url" name="plex_url" value="{{ env.plex_url }}" placeholder="http://plex:32400" class="form-input">
+                        </div>
+                        <div>
+                            <label for="plex_token" class="form-label">Token</label>
+                            <div class="relative">
+                                <input type="password" id="plex_token" name="plex_token" value="{{ env.plex_token }}" placeholder="Your Plex token" class="form-input pr-10">
+                                <button type="button" onclick="togglePassword('plex_token')" class="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 hover:text-white transition-colors">
+                                    <svg id="eye-plex_token" class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"></path></svg>
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
                 <div class="grid grid-cols-1 md:grid-cols-[220px_auto] gap-4 items-end">
                     <div>
                         <label for="tz" class="form-label">Timezone</label>
@@ -127,9 +165,18 @@
                 </div>
             </form>
         </div>
-    </div>
+    </details>
 
     {# ── Staging Mode & DB Stats ── #}
+    <details open class="card">
+        <summary class="card-header flex items-center gap-3 cursor-pointer select-none">
+            <svg class="accordion-chevron w-4 h-4 text-gray-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
+            <div>
+                <h2 class="section-title">Staging Mode & DB Stats</h2>
+                <p class="section-subtitle">Toggle staging mode and view database statistics</p>
+            </div>
+        </summary>
+        <div class="card-body">
     <div class="grid grid-cols-1 lg:grid-cols-[1.2fr_1fr] gap-6">
         <div class="card">
             <div class="card-header">
@@ -173,42 +220,95 @@
             </div>
         </div>
     </div>
+        </div>
+    </details>
 
     {# ── Manual Actions ── #}
-    <div class="card">
-        <div class="card-header">
+    <details open class="card">
+        <summary class="card-header flex items-center gap-3 cursor-pointer select-none">
+            <svg class="accordion-chevron w-4 h-4 text-gray-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
             <h2 class="section-title">Manual Actions</h2>
+        </summary>
+        <div class="card-body divide-y divide-gray-700/40">
+            <form action="/settings/retry-pending" method="post" class="flex items-center justify-between gap-4 py-3 first:pt-0 last:pb-0">
+                <div class="min-w-0">
+                    <div class="text-sm font-semibold text-white">Retry Pending</div>
+                    <div class="text-xs text-gray-500">{{ pending_count }} items ready for retry</div>
+                </div>
+                <button type="submit" class="btn-primary btn-sm shrink-0">Retry Now</button>
+            </form>
+
+            <div class="flex items-center justify-between gap-4 py-3 first:pt-0 last:pb-0">
+                <div class="min-w-0">
+                    <div class="text-sm font-semibold text-white">Sync Overseerr</div>
+                    <div class="text-xs text-gray-500">Fetch new approved or pending requests</div>
+                </div>
+                <button type="button" onclick="startOverseerrSync()" class="btn-primary btn-sm shrink-0">Sync</button>
+            </div>
+
+            <div class="flex items-center justify-between gap-4 py-3 first:pt-0 last:pb-0">
+                <div class="min-w-0">
+                    <div class="text-sm font-semibold text-white">Re-scan Plex Availability</div>
+                    <div class="text-xs text-gray-500">Re-check existing requests against Plex and update availability/completion state</div>
+                </div>
+                <button type="button" onclick="startPlexRescan()" class="btn-primary btn-sm shrink-0">Re-scan Plex</button>
+            </div>
+
+            <form action="/settings/reseed-rules" method="post" class="flex items-center justify-between gap-4 py-3 first:pt-0 last:pb-0">
+                <div class="min-w-0">
+                    <div class="text-sm font-semibold text-white">Reseed Default Rules</div>
+                    <div class="text-xs text-gray-500">Restore the checked-in 12-rule default snapshot without deleting custom rules</div>
+                </div>
+                <button type="submit" class="btn-warning btn-sm shrink-0">Reseed</button>
+            </form>
+
+            <form action="/settings/clear-cache" method="post" class="flex items-center justify-between gap-4 py-3 first:pt-0 last:pb-0">
+                <div class="min-w-0">
+                    <div class="text-sm font-semibold text-white">Clear App Search Cache</div>
+                    <div class="text-xs text-gray-500">Clears stored releases and Siftarr's app-side Overseerr status cache. Requests stay intact.</div>
+                </div>
+                <button type="submit" class="btn-danger btn-sm shrink-0">Clear Cache</button>
+            </form>
         </div>
-        <div class="card-body grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-4 gap-4">
-            <form action="/settings/retry-pending" method="post" class="rounded-xl bg-surface-850 border border-gray-700/40 p-5 flex flex-col gap-2">
-                <div class="text-sm font-semibold text-white">Retry Pending</div>
-                <div class="text-xs text-gray-500">{{ pending_count }} items ready for retry</div>
-                <button type="submit" class="btn-primary btn-sm w-fit mt-1">Retry Now</button>
-            </form>
+    </details>
+</div>
 
-            <form action="/settings/sync-overseerr" method="post" class="rounded-xl bg-surface-850 border border-gray-700/40 p-5 flex flex-col gap-2 xl:col-span-1">
-                <div class="text-sm font-semibold text-white">Sync Overseerr</div>
-                <div class="text-xs text-gray-500">Fetch new approved or pending requests</div>
-                <button type="submit" class="btn-primary btn-sm w-fit mt-1">Sync</button>
-            </form>
+<!-- Overseerr Sync Modal -->
+<div id="overseerr-sync-modal" class="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm hidden">
+    <div class="bg-surface-800 border border-gray-700/60 rounded-2xl shadow-2xl w-full max-w-md mx-4 p-6">
+        <h3 class="text-lg font-semibold text-white mb-4">Syncing Overseerr</h3>
+        <div class="mb-3">
+            <div class="w-full h-2 rounded-full bg-surface-700 overflow-hidden">
+                <div id="sync-progress-bar" class="h-2 rounded-full bg-brand-500 transition-all duration-300" style="width: 0%"></div>
+            </div>
+        </div>
+        <p id="sync-status-text" class="text-sm text-gray-400 mb-4">Connecting...</p>
+        <div id="sync-active-wrap" class="hidden mb-4">
+            <div class="text-xs uppercase tracking-wide text-gray-500 mb-2">Active</div>
+            <ul id="sync-active-list" class="space-y-1 text-sm text-gray-300 max-h-48 overflow-y-auto"></ul>
+        </div>
+        <div class="flex justify-end">
+            <button id="sync-close-btn" type="button" onclick="closeOverseerrSync()" disabled class="btn-primary btn-sm opacity-50 cursor-not-allowed">Close</button>
+        </div>
+    </div>
+</div>
 
-            <form action="/settings/rescan-plex" method="post" class="rounded-xl bg-surface-850 border border-gray-700/40 p-5 flex flex-col gap-2 xl:col-span-1">
-                <div class="text-sm font-semibold text-white">Re-scan Plex Availability</div>
-                <div class="text-xs text-gray-500">Re-check existing requests against Plex and update availability/completion state</div>
-                <button type="submit" class="btn-primary btn-sm w-fit mt-1">Re-scan Plex</button>
-            </form>
-
-            <form action="/settings/reseed-rules" method="post" class="rounded-xl bg-surface-850 border border-gray-700/40 p-5 flex flex-col gap-2">
-                <div class="text-sm font-semibold text-white">Reseed Default Rules</div>
-                <div class="text-xs text-gray-500">Restore the checked-in 12-rule default snapshot without deleting custom rules</div>
-                <button type="submit" class="btn-warning btn-sm w-fit mt-1">Reseed</button>
-            </form>
-
-            <form action="/settings/clear-cache" method="post" class="rounded-xl bg-surface-850 border border-gray-700/40 p-5 flex flex-col gap-2">
-                <div class="text-sm font-semibold text-white">Clear App Search Cache</div>
-                <div class="text-xs text-gray-500">Clears stored releases from the releases table and Siftarr's app-side Overseerr status cache. Requests stay intact, but external/manual Prowlarr caching cannot be guaranteed if it lives outside Siftarr.</div>
-                <button type="submit" class="btn-danger btn-sm w-fit mt-1">Clear Cache</button>
-            </form>
+<!-- Plex Rescan Modal -->
+<div id="plex-sync-modal" class="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm hidden">
+    <div class="bg-surface-800 border border-gray-700/60 rounded-2xl shadow-2xl w-full max-w-md mx-4 p-6">
+        <h3 class="text-lg font-semibold text-white mb-4">Re-scanning Plex</h3>
+        <div class="mb-3">
+            <div class="w-full h-2 rounded-full bg-surface-700 overflow-hidden">
+                <div id="plex-sync-progress-bar" class="h-2 rounded-full bg-brand-500 transition-all duration-300" style="width: 0%"></div>
+            </div>
+        </div>
+        <p id="plex-sync-status-text" class="text-sm text-gray-400 mb-4">Connecting...</p>
+        <div id="plex-sync-active-wrap" class="hidden mb-4">
+            <div class="text-xs uppercase tracking-wide text-gray-500 mb-2">Active</div>
+            <ul id="plex-sync-active-list" class="space-y-1 text-sm text-gray-300 max-h-48 overflow-y-auto"></ul>
+        </div>
+        <div class="flex justify-end">
+            <button id="plex-sync-close-btn" type="button" onclick="closePlexRescan()" disabled class="btn-primary btn-sm opacity-50 cursor-not-allowed">Close</button>
         </div>
     </div>
 </div>
@@ -262,9 +362,231 @@ async function testConnection(service) {
 }
 
 async function testAllConnections() {
-    const services = ['overseerr', 'prowlarr', 'qbittorrent'];
+    const services = ['overseerr', 'prowlarr', 'qbittorrent', 'plex'];
     for (const service of services) {
         await testConnection(service);
+    }
+}
+
+let syncEventSource = null;
+
+function renderActiveItems(listElement, wrapperElement, items) {
+    if (!listElement || !wrapperElement) {
+        return;
+    }
+
+    listElement.innerHTML = '';
+    const values = Array.isArray(items) ? items.slice(0, 16) : [];
+    if (!values.length) {
+        wrapperElement.classList.add('hidden');
+        return;
+    }
+
+    for (const item of values) {
+        const li = document.createElement('li');
+        li.className = 'rounded-lg bg-surface-850 px-3 py-1.5 text-xs text-gray-300 truncate';
+        li.textContent = item;
+        listElement.appendChild(li);
+    }
+
+    wrapperElement.classList.remove('hidden');
+}
+
+function startOverseerrSync() {
+    const modal = document.getElementById('overseerr-sync-modal');
+    const bar = document.getElementById('sync-progress-bar');
+    const status = document.getElementById('sync-status-text');
+    const closeBtn = document.getElementById('sync-close-btn');
+    const activeWrap = document.getElementById('sync-active-wrap');
+    const activeList = document.getElementById('sync-active-list');
+
+    // Reset state
+    bar.style.width = '0%';
+    bar.classList.remove('bg-red-500');
+    bar.classList.add('bg-brand-500');
+    status.textContent = 'Connecting...';
+    status.classList.remove('text-red-400');
+    status.classList.add('text-gray-400');
+    renderActiveItems(activeList, activeWrap, []);
+    closeBtn.disabled = true;
+    closeBtn.classList.add('opacity-50', 'cursor-not-allowed');
+    modal.classList.remove('hidden');
+
+    syncEventSource = new EventSource('/settings/api/sync-overseerr/stream');
+
+    syncEventSource.onmessage = function(event) {
+        const data = JSON.parse(event.data);
+
+        switch (data.phase) {
+            case 'connecting':
+                status.textContent = 'Connecting to Overseerr...';
+                bar.style.width = '5%';
+                break;
+            case 'fetching':
+                status.textContent = data.message;
+                bar.style.width = '15%';
+                renderActiveItems(activeList, activeWrap, data.active || []);
+                break;
+            case 'processing':
+                const pct = Math.max(20, Math.round((data.current / data.total) * 100));
+                bar.style.width = pct + '%';
+                status.textContent = `Processing ${data.current}/${data.total}: ${data.title}`;
+                renderActiveItems(activeList, activeWrap, data.active || (data.title ? [data.title] : []));
+                break;
+            case 'complete':
+                bar.style.width = '100%';
+                status.textContent = data.message;
+                status.classList.remove('text-gray-400');
+                status.classList.add('text-emerald-400');
+                renderActiveItems(activeList, activeWrap, data.active || []);
+                enableCloseBtn();
+                syncEventSource.close();
+                syncEventSource = null;
+                break;
+            case 'error':
+                bar.style.width = '100%';
+                bar.classList.remove('bg-brand-500');
+                bar.classList.add('bg-red-500');
+                status.textContent = data.message;
+                status.classList.remove('text-gray-400');
+                status.classList.add('text-red-400');
+                renderActiveItems(activeList, activeWrap, data.active || []);
+                enableCloseBtn();
+                syncEventSource.close();
+                syncEventSource = null;
+                break;
+        }
+    };
+
+    syncEventSource.onerror = function() {
+        bar.style.width = '100%';
+        bar.classList.remove('bg-brand-500');
+        bar.classList.add('bg-red-500');
+        status.textContent = 'Connection error. The sync may have completed — check logs.';
+        status.classList.remove('text-gray-400');
+        status.classList.add('text-red-400');
+        enableCloseBtn();
+        if (syncEventSource) {
+            syncEventSource.close();
+            syncEventSource = null;
+        }
+    };
+}
+
+function enableCloseBtn() {
+    const closeBtn = document.getElementById('sync-close-btn');
+    closeBtn.disabled = false;
+    closeBtn.classList.remove('opacity-50', 'cursor-not-allowed');
+}
+
+function closeOverseerrSync() {
+    const modal = document.getElementById('overseerr-sync-modal');
+    modal.classList.add('hidden');
+    if (syncEventSource) {
+        syncEventSource.close();
+        syncEventSource = null;
+    }
+}
+
+let plexEventSource = null;
+
+function startPlexRescan() {
+    const modal = document.getElementById('plex-sync-modal');
+    const bar = document.getElementById('plex-sync-progress-bar');
+    const status = document.getElementById('plex-sync-status-text');
+    const closeBtn = document.getElementById('plex-sync-close-btn');
+    const activeWrap = document.getElementById('plex-sync-active-wrap');
+    const activeList = document.getElementById('plex-sync-active-list');
+
+    bar.style.width = '0%';
+    bar.classList.remove('bg-red-500');
+    bar.classList.add('bg-brand-500');
+    status.textContent = 'Connecting...';
+    status.classList.remove('text-red-400', 'text-emerald-400');
+    status.classList.add('text-gray-400');
+    renderActiveItems(activeList, activeWrap, []);
+    closeBtn.disabled = true;
+    closeBtn.classList.add('opacity-50', 'cursor-not-allowed');
+    modal.classList.remove('hidden');
+
+    plexEventSource = new EventSource('/settings/api/rescan-plex/stream');
+
+    plexEventSource.onmessage = function(event) {
+        const data = JSON.parse(event.data);
+
+        switch (data.phase) {
+            case 'connecting':
+                status.textContent = 'Connecting to Plex...';
+                bar.style.width = '5%';
+                break;
+            case 'fetching':
+                status.textContent = data.message;
+                bar.style.width = '10%';
+                renderActiveItems(activeList, activeWrap, data.active || []);
+                break;
+            case 'processing':
+                const pct = Math.max(15, Math.round((data.current / data.total) * 85));
+                bar.style.width = pct + '%';
+                status.textContent = `Re-syncing ${data.current}/${data.total}: ${data.title}`;
+                renderActiveItems(activeList, activeWrap, data.active || (data.title ? [data.title] : []));
+                break;
+            case 'polling':
+                status.textContent = data.message;
+                bar.style.width = '90%';
+                renderActiveItems(activeList, activeWrap, data.active || []);
+                break;
+            case 'complete':
+                bar.style.width = '100%';
+                status.textContent = data.message;
+                status.classList.remove('text-gray-400');
+                status.classList.add('text-emerald-400');
+                renderActiveItems(activeList, activeWrap, data.active || []);
+                enablePlexCloseBtn();
+                plexEventSource.close();
+                plexEventSource = null;
+                break;
+            case 'error':
+                bar.style.width = '100%';
+                bar.classList.remove('bg-brand-500');
+                bar.classList.add('bg-red-500');
+                status.textContent = data.message;
+                status.classList.remove('text-gray-400');
+                status.classList.add('text-red-400');
+                renderActiveItems(activeList, activeWrap, data.active || []);
+                enablePlexCloseBtn();
+                plexEventSource.close();
+                plexEventSource = null;
+                break;
+        }
+    };
+
+    plexEventSource.onerror = function() {
+        bar.style.width = '100%';
+        bar.classList.remove('bg-brand-500');
+        bar.classList.add('bg-red-500');
+        status.textContent = 'Connection error. The re-scan may have completed — check logs.';
+        status.classList.remove('text-gray-400');
+        status.classList.add('text-red-400');
+        enablePlexCloseBtn();
+        if (plexEventSource) {
+            plexEventSource.close();
+            plexEventSource = null;
+        }
+    };
+}
+
+function enablePlexCloseBtn() {
+    const closeBtn = document.getElementById('plex-sync-close-btn');
+    closeBtn.disabled = false;
+    closeBtn.classList.remove('opacity-50', 'cursor-not-allowed');
+}
+
+function closePlexRescan() {
+    const modal = document.getElementById('plex-sync-modal');
+    modal.classList.add('hidden');
+    if (plexEventSource) {
+        plexEventSource.close();
+        plexEventSource = null;
     }
 }
 </script>

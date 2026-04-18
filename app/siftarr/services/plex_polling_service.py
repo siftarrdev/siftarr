@@ -1,7 +1,10 @@
 """Service for polling Plex to check if requested media has become available."""
 
+import asyncio
+import contextlib
 import json
 import logging
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 
 from sqlalchemy import select
@@ -16,6 +19,7 @@ from app.siftarr.services.lifecycle_service import LifecycleService
 from app.siftarr.services.plex_service import PlexService
 
 logger = logging.getLogger(__name__)
+ProgressCallback = Callable[[dict[str, object]], Awaitable[None] | None]
 
 # All non-terminal statuses
 NON_TERMINAL_STATUSES = [
@@ -49,18 +53,22 @@ class PlexPollingService:
         self.plex = plex
         self.lifecycle = LifecycleService(db)
 
-    async def poll(self) -> int:
-        """Check all active requests against Plex availability.
-
-        Returns:
-            Number of requests transitioned to COMPLETED.
-        """
+    async def get_active_requests(self) -> list[Request]:
+        """Return all non-terminal requests tracked for Plex polling."""
         result = await self.db.execute(
             select(Request)
             .where(Request.status.in_(NON_TERMINAL_STATUSES))
             .options(selectinload(Request.seasons).selectinload(Season.episodes))
         )
-        requests = list(result.scalars().all())
+        return list(result.scalars().all())
+
+    async def poll(self, on_progress: ProgressCallback | None = None) -> int:
+        """Check all active requests against Plex availability.
+
+        Returns:
+            Number of requests transitioned to COMPLETED.
+        """
+        requests = await self.get_active_requests()
 
         if not requests:
             logger.debug("PlexPollingService: no active requests to poll")
@@ -68,6 +76,18 @@ class PlexPollingService:
 
         logger.info("PlexPollingService: polling %d active request(s)", len(requests))
         requests_by_id = {req.id: req for req in requests}
+
+        async def emit(payload: dict[str, object]) -> None:
+            if on_progress is None:
+                return
+            result = on_progress(payload)
+            if asyncio.iscoroutine(result):
+                await result
+
+        active_titles: list[str] = []
+        active_lock = asyncio.Lock()
+        started = 0
+        finished = 0
 
         async def probe(req: Request) -> PollDecision | None:
             try:
@@ -84,7 +104,45 @@ class PlexPollingService:
                 )
                 return None
 
-        probe_results = await gather_limited(requests, self._get_concurrency_limit(), probe)
+        async def run(req: Request) -> PollDecision | None:
+            nonlocal started, finished
+
+            title = req.title or f"Request #{req.id}"
+            async with active_lock:
+                active_titles.append(title)
+                active_snapshot = active_titles[:16]
+                started += 1
+
+            await emit(
+                {
+                    "phase": "polling",
+                    "current": started,
+                    "total": len(requests),
+                    "title": title,
+                    "active": active_snapshot,
+                }
+            )
+
+            try:
+                return await probe(req)
+            finally:
+                async with active_lock:
+                    with contextlib.suppress(ValueError):
+                        active_titles.remove(title)
+                    finished += 1
+                    active_snapshot = active_titles[:16]
+
+                await emit(
+                    {
+                        "phase": "polling",
+                        "current": finished,
+                        "total": len(requests),
+                        "title": title,
+                        "active": active_snapshot,
+                    }
+                )
+
+        probe_results = await gather_limited(requests, self._get_concurrency_limit(), run)
 
         completed = 0
         for decision in probe_results:

@@ -542,8 +542,20 @@ details[open] summary .accordion-chevron { transform: rotate(90deg); }
                         <p id="request-details-overview" class="mt-1 text-sm text-gray-300 leading-relaxed whitespace-pre-wrap"></p>
                     </div>
                     <a id="request-details-overseerr-link" href="#" target="_blank" rel="noopener noreferrer" class="hidden shrink-0 btn-ghost btn-sm">Open in Overseerr</a>
-                    <button id="request-details-search-btn" onclick="searchRequestFromDetails()" class="hidden shrink-0 btn-ghost btn-sm">Search</button>
-                    <button id="request-details-tv-search-btn" onclick="showToast('General TV search is not fully implemented yet. Use season or episode-specific search buttons below.')" class="hidden shrink-0 btn-ghost btn-sm">Search</button>
+                    <button id="request-details-search-btn" onclick="searchRequestFromDetails()" class="hidden shrink-0 btn-ghost btn-sm"><svg class="inline w-3.5 h-3.5 mr-1 -mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>Refresh Search</button>
+                    <div id="request-details-tv-search-btn" class="hidden shrink-0 relative">
+                        <button onclick="toggleTvSearchDropdown(event)" class="btn-ghost btn-sm flex items-center gap-1">
+                            Search
+                            <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
+                        </button>
+                        <div id="tv-search-dropdown" class="hidden absolute right-0 top-full mt-1 z-[60] bg-surface-800 border border-gray-700/60 rounded-xl shadow-2xl py-2 min-w-[220px]">
+                            <div class="px-4 py-1.5 text-xs font-medium uppercase tracking-wider text-gray-500">Search Scope</div>
+                            <div id="tv-search-dropdown-seasons"></div>
+                            <div class="border-t border-gray-700/40 my-1"></div>
+                            <button onclick="searchAllEpisodes(); closeTvSearchDropdown();" class="w-full text-left px-4 py-2 text-sm text-gray-300 hover:bg-surface-850 cursor-pointer transition-colors">Search All Episodes</button>
+                            <button onclick="searchAllSeasonPacks(currentRequestId); closeTvSearchDropdown();" class="w-full text-left px-4 py-2 text-sm text-gray-300 hover:bg-surface-850 cursor-pointer transition-colors">Search Multi-Season Packs</button>
+                        </div>
+                    </div>
                     <button id="request-details-refresh-plex" onclick="refreshPlexAndReload()" class="hidden shrink-0 btn-ghost btn-sm">Refresh Plex</button>
                 </div>
                 <div>
@@ -552,6 +564,10 @@ details[open] summary .accordion-chevron { transform: rotate(90deg); }
                             <div class="form-label">Search Results</div>
                             <p class="mt-1 text-xs text-gray-500">Ranked from highest rule score to lowest, including rejected candidates so you can tune your filters.</p>
                         </div>
+                    </div>
+                    <div id="release-cache-indicator" class="hidden text-xs text-gray-500 mt-1 flex items-center gap-1.5">
+                        <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+                        <span id="release-cache-indicator-text">Showing cached results</span>
                     </div>
                     <input type="text" id="release-filter-input" placeholder="Filter results by title..." class="form-input mt-2 mb-2 w-full lg:w-64">
                     <div id="request-details-releases" class="mt-1 space-y-1"></div>
@@ -1020,6 +1036,54 @@ async function searchEpisode(requestId, seasonNumber, episodeNumber) {
     }
 }
 
+function toggleTvSearchDropdown(event) {
+    event.stopPropagation();
+    const dropdown = document.getElementById('tv-search-dropdown');
+    if (!dropdown) return;
+    dropdown.classList.toggle('hidden');
+}
+
+function closeTvSearchDropdown() {
+    const dropdown = document.getElementById('tv-search-dropdown');
+    if (dropdown) dropdown.classList.add('hidden');
+}
+
+function populateTvSearchDropdown() {
+    const container = document.getElementById('tv-search-dropdown-seasons');
+    if (!container) return;
+    container.innerHTML = currentTvSeasons.map(function(season) {
+        return '<button onclick="searchSeasonPacks(currentRequestId, ' + season.season_number + '); closeTvSearchDropdown();" ' +
+            'class="w-full text-left px-4 py-2 text-sm text-gray-300 hover:bg-surface-850 cursor-pointer transition-colors">' +
+            'Search Season ' + season.season_number + ' Packs</button>';
+    }).join('');
+}
+
+async function searchAllEpisodes() {
+    if (!currentRequestId || !currentTvSeasons.length) return;
+    closeTvSearchDropdown();
+
+    const allEpisodes = [];
+    for (const season of currentTvSeasons) {
+        for (const ep of (season.episodes || [])) {
+            if (ep.status === 'completed' || ep.status === 'available') continue;
+            allEpisodes.push({ season: season.season_number, episode: ep.episode_number });
+        }
+    }
+
+    if (allEpisodes.length === 0) {
+        showToast('No pending episodes to search.');
+        return;
+    }
+
+    for (let i = 0; i < allEpisodes.length; i++) {
+        const ep = allEpisodes[i];
+        showToast('Searching S' + String(ep.season).padStart(2, '0') + 'E' + String(ep.episode).padStart(2, '0') + '... (' + (i + 1) + '/' + allEpisodes.length + ')');
+        await searchEpisode(currentRequestId, ep.season, ep.episode);
+    }
+
+    showToast('Finished searching all episodes (' + allEpisodes.length + ' total).');
+}
+
 function postToAction(action, redirectTo) {
     const form = document.createElement('form');
     form.method = 'POST';
@@ -1051,7 +1115,7 @@ function showToast(message) {
 async function searchRequestFromDetails() {
     if (!currentRequestId) return;
     const btn = document.getElementById('request-details-search-btn');
-    const originalText = btn ? btn.textContent : '';
+    const originalText = btn ? btn.innerHTML : '';
     if (btn) {
         btn.disabled = true;
         btn.textContent = 'Searching...';
@@ -1068,6 +1132,14 @@ async function searchRequestFromDetails() {
         if (releasesContainer) {
             releasesContainer.innerHTML = currentReleases.map(release => renderReleaseCard(release, currentRequestId)).join('') || '<div class="text-gray-500 text-sm">No search results found for this request.</div>';
         }
+        const cacheInd = document.getElementById('release-cache-indicator');
+        const cacheIndText = document.getElementById('release-cache-indicator-text');
+        if (cacheInd && cacheIndText && currentReleases.length > 0) {
+            cacheIndText.textContent = 'Fresh results';
+            cacheInd.classList.remove('hidden');
+        } else if (cacheInd) {
+            cacheInd.classList.add('hidden');
+        }
     } catch (err) {
         if (releasesContainer) {
             releasesContainer.innerHTML = '<div class="text-red-400 text-sm">Search failed: ' + escapeHtml(err.message) + '</div>';
@@ -1075,13 +1147,14 @@ async function searchRequestFromDetails() {
     } finally {
         if (btn) {
             btn.disabled = false;
-            btn.textContent = originalText || 'Search';
+            btn.innerHTML = originalText || 'Refresh Search';
         }
     }
 }
 
 let currentReleases = [];
 let currentRequestId = null;
+let currentTvSeasons = [];
 
 function filterReleaseCards() {
     const filterEl = document.getElementById('release-filter-input');
@@ -1250,11 +1323,15 @@ async function openRequestDetails(requestId, explicitIndex = null) {
     }
     if (tvSearchBtn) {
         tvSearchBtn.classList.add('hidden');
+        closeTvSearchDropdown();
     }
+    currentTvSeasons = [];
     setPoster(null, 'Loading poster');
     document.getElementById('release-results-header').classList.remove('hidden');
     document.getElementById('release-filter-input').classList.remove('hidden');
     releases.innerHTML = '<div class="text-gray-500 text-sm">Loading search results...</div>';
+    const cacheIndicatorInit = document.getElementById('release-cache-indicator');
+    if (cacheIndicatorInit) cacheIndicatorInit.classList.add('hidden');
     if (filterInput) filterInput.value = '';
     modal.classList.remove('hidden');
 
@@ -1289,14 +1366,29 @@ async function openRequestDetails(requestId, explicitIndex = null) {
         currentReleases = data.releases || [];
         currentRequestId = data.request.id;
 
+        const cacheIndicator = document.getElementById('release-cache-indicator');
+        const cacheIndicatorText = document.getElementById('release-cache-indicator-text');
+
         if (data.request.media_type === 'tv' && data.tv_info) {
+            currentTvSeasons = data.tv_info.seasons || [];
+            populateTvSearchDropdown();
             document.getElementById('release-results-header').classList.add('hidden');
             document.getElementById('release-filter-input').classList.add('hidden');
+            if (cacheIndicator) cacheIndicator.classList.add('hidden');
             releases.innerHTML = renderSeasonAccordion(data);
         } else {
             document.getElementById('release-results-header').classList.remove('hidden');
             document.getElementById('release-filter-input').classList.remove('hidden');
-            releases.innerHTML = currentReleases.map(release => renderReleaseCard(release, currentRequestId)).join('') || '<div class="text-gray-500 text-sm">No search results have been stored for this request yet. Run a search, then reopen details.</div>';
+            if (currentReleases.length > 0) {
+                releases.innerHTML = currentReleases.map(release => renderReleaseCard(release, currentRequestId)).join('');
+                if (cacheIndicator && cacheIndicatorText) {
+                    cacheIndicatorText.textContent = 'Showing cached results';
+                    cacheIndicator.classList.remove('hidden');
+                }
+            } else {
+                releases.innerHTML = '<div class="text-gray-500 text-sm">No cached results. Click \'Refresh Search\' to find releases.</div>';
+                if (cacheIndicator) cacheIndicator.classList.add('hidden');
+            }
         }
     } catch (err) {
         title.textContent = 'Error loading details';
@@ -1556,14 +1648,28 @@ if (initialTab && document.getElementById('content-' + initialTab) && document.g
 document.addEventListener('keydown', (e) => {
     const modal = document.getElementById('request-details-modal');
     if (modal.classList.contains('hidden')) return;
-    if (e.key === 'ArrowLeft') {
+    if (e.key === 'Escape') {
+        const dropdown = document.getElementById('tv-search-dropdown');
+        if (dropdown && !dropdown.classList.contains('hidden')) {
+            closeTvSearchDropdown();
+            return;
+        }
+        closeRequestDetails();
+    } else if (e.key === 'ArrowLeft') {
         e.preventDefault();
         navigateDetails(-1);
     } else if (e.key === 'ArrowRight') {
         e.preventDefault();
         navigateDetails(1);
-    } else if (e.key === 'Escape') {
-        closeRequestDetails();
+    }
+});
+
+// Close TV search dropdown on outside click
+document.addEventListener('click', (e) => {
+    const dropdown = document.getElementById('tv-search-dropdown');
+    const wrapper = document.getElementById('request-details-tv-search-btn');
+    if (dropdown && !dropdown.classList.contains('hidden') && wrapper && !wrapper.contains(e.target)) {
+        closeTvSearchDropdown();
     }
 });
 </script>

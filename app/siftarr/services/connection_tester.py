@@ -205,3 +205,60 @@ class ConnectionTester:
                 message="Connection failed",
                 details=str(e),
             )
+
+    @staticmethod
+    async def test_plex(settings: Settings) -> ConnectionTestResult:
+        """Test connection to Plex.
+
+        Args:
+            settings: Application settings containing Plex configuration.
+
+        Returns:
+            ConnectionTestResult with success status and message.
+        """
+        if not settings.plex_url:
+            return ConnectionTestResult(
+                success=False,
+                message="Plex URL is not configured",
+            )
+
+        if not settings.plex_token:
+            return ConnectionTestResult(
+                success=False,
+                message="Plex token is not configured",
+            )
+
+        endpoint = f"{str(settings.plex_url).rstrip('/')}/status"
+        headers = {"X-Plex-Token": settings.plex_token, "Accept": "application/json"}
+
+        try:
+            client = await get_shared_client()
+            response = await client.get(endpoint, headers=headers, timeout=10.0)
+            if response.status_code == 200:
+                return ConnectionTestResult(
+                    success=True,
+                    message="Successfully connected to Plex",
+                )
+            elif response.status_code == 401:
+                return ConnectionTestResult(
+                    success=False,
+                    message="Authentication failed",
+                    details="Invalid Plex token",
+                )
+            else:
+                return ConnectionTestResult(
+                    success=False,
+                    message=f"HTTP Error: {response.status_code}",
+                )
+        except httpx.TimeoutException:
+            return ConnectionTestResult(
+                success=False,
+                message="Connection timeout",
+                details="Plex did not respond in time",
+            )
+        except httpx.RequestError as e:
+            return ConnectionTestResult(
+                success=False,
+                message="Connection failed",
+                details=str(e),
+            )
