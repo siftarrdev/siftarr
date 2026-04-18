@@ -198,7 +198,13 @@ class SchedulerService:
         if self.scheduler is not None:
             return
 
-        self.scheduler = AsyncIOScheduler()
+        self.scheduler = AsyncIOScheduler(
+            job_defaults={
+                "misfire_grace_time": 60
+                * 60,  # Allow jobs to fire up to 1 hour late (e.g. after slow startup)
+                "coalesce": True,  # If multiple firings were missed, only run once
+            }
+        )
 
         self.scheduler.add_job(
             self._retry_pending_jobs,
