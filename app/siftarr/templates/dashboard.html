@@ -344,12 +344,16 @@ details[open] summary .accordion-chevron { transform: rotate(90deg); }
         <div class="card overflow-hidden">
             <div class="card-header flex flex-col gap-3 md:flex-row md:items-center">
                 <input type="text" id="staged-filter-input" placeholder="Filter staged or downloading torrents..." class="form-input md:flex-1">
-                <select id="staged-status-filter" class="form-select md:w-56">
-                    <option value="">All Torrent States</option>
-                    <option value="staged">Staged</option>
-                    <option value="approved">Sent to qBittorrent</option>
-                    <option value="replaced">Replaced</option>
-                </select>
+                <div class="flex flex-wrap items-center gap-2">
+                    <select id="staged-status-filter" class="form-select md:w-56">
+                        <option value="">All Torrent States</option>
+                        <option value="staged">Staged</option>
+                        <option value="approved">Sent to qBittorrent</option>
+                        <option value="replaced">Replaced</option>
+                    </select>
+                    <button type="button" onclick="bulkStagedAction('approve')" class="btn-primary btn-sm">Approve Selected</button>
+                    <button type="button" onclick="bulkStagedAction('discard')" class="btn-danger btn-sm">Discard Selected</button>
+                </div>
             </div>
             <div class="overflow-x-auto">
                 <table class="min-w-full divide-y divide-gray-700/60 data-resizable" id="staged-torrents-table">
@@ -365,6 +369,7 @@ details[open] summary .accordion-chevron { transform: rotate(90deg); }
                     <thead>
                         <tr class="bg-surface-850">
                             <th class="px-5 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 cursor-pointer hover:text-gray-300" data-table="staged" data-sort="title" data-col-key="title" style="position: relative;"><span class="sort-title">Title <span class="sort-indicator"></span></span><div class="resize-handle"></div></th>
+                            <th class="px-5 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500" data-col-key="select" style="position: relative;"><span class="sort-title">Select</span><div class="resize-handle"></div></th>
                             <th class="px-5 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 cursor-pointer hover:text-gray-300" data-table="staged" data-sort="state" data-col-key="state" style="position: relative;"><span class="sort-title">Torrent State <span class="sort-indicator"></span></span><div class="resize-handle"></div></th>
                             <th class="px-5 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 cursor-pointer hover:text-gray-300" data-table="staged" data-sort="requeststate" data-col-key="requeststate" style="position: relative;"><span class="sort-title">Request State <span class="sort-indicator"></span></span><div class="resize-handle"></div></th>
                             <th class="px-5 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 cursor-pointer hover:text-gray-300" data-table="staged" data-sort="size" data-col-key="size" style="position: relative;"><span class="sort-title">Size <span class="sort-indicator"></span></span><div class="resize-handle"></div></th>
@@ -376,8 +381,11 @@ details[open] summary .accordion-chevron { transform: rotate(90deg); }
                     <tbody class="divide-y divide-gray-700/40" id="staged-torrents-body">
                         {% for torrent in staged_torrents %}
                         {% set request_state = staged_request_statuses.get(torrent.request_id, 'unknown') %}
-                        <tr class="hover:bg-surface-850/80 cursor-pointer transition-colors" onclick="{% if torrent.request_id %}openRequestDetails({{ torrent.request_id }}){% endif %}" data-request-id="{{ torrent.request_id }}" data-title="{{ torrent.title|lower }}" data-state="{{ torrent.status|lower }}" data-requeststate="{{ request_state|lower }}" data-size="{{ torrent.size }}" data-indexer="{{ torrent.indexer|lower }}" data-score="{{ torrent.score }}">
+                        <tr class="hover:bg-surface-850/80 cursor-pointer transition-colors" onclick="{% if torrent.request_id %}openRequestDetails({{ torrent.request_id }}){% endif %}" data-torrent-id="{{ torrent.id }}" data-request-id="{{ torrent.request_id }}" data-title="{{ torrent.title|lower }}" data-state="{{ torrent.status|lower }}" data-requeststate="{{ request_state|lower }}" data-size="{{ torrent.size }}" data-indexer="{{ torrent.indexer|lower }}" data-score="{{ torrent.score }}">
                             <td class="px-5 py-3.5 text-sm font-medium text-white">{{ torrent.title }}</td>
+                            <td class="px-5 py-3.5 whitespace-nowrap text-sm" onclick="event.stopPropagation()">
+                                <input type="checkbox" class="staged-torrent-checkbox rounded border-gray-600 bg-surface-900 text-brand-500 focus:ring-brand-500" value="{{ torrent.id }}">
+                            </td>
                             <td class="px-5 py-3.5 whitespace-nowrap text-sm">
                                 {% if torrent.status == 'replaced' %}
                                 {% set replacement_title = replaced_by_titles.get(torrent.replaced_by_id, 'Unknown') %}
@@ -396,9 +404,9 @@ details[open] summary .accordion-chevron { transform: rotate(90deg); }
                                     <button type="button" onclick="openRequestDetails({{ torrent.request_id }})" class="text-brand-400 hover:text-brand-300 font-medium">Details</button>
                                     {% endif %}
                                     {% if torrent.status == 'staged' %}
-                                    <form action="/staged/{{ torrent.id }}/approve" method="post" class="inline"><button type="submit" class="text-emerald-400 hover:text-emerald-300 font-medium">Approve</button></form>
+                                    <button type="button" onclick="postStagedAction('/staged/{{ torrent.id }}/approve', '/?tab=staged')" class="text-emerald-400 hover:text-emerald-300 font-medium">Approve</button>
                                     <button type="button" onclick="openReplaceModal({{ torrent.id }}, {{ torrent.request_id }}, '{{ torrent.title|replace("'", "\\'") }}')" class="text-amber-400 hover:text-amber-300 font-medium">Replace</button>
-                                    <form action="/staged/{{ torrent.id }}/discard" method="post" class="inline"><button type="submit" class="text-red-400 hover:text-red-300 font-medium">Discard</button></form>
+                                    <button type="button" onclick="postStagedAction('/staged/{{ torrent.id }}/discard', '/?tab=staged')" class="text-red-400 hover:text-red-300 font-medium">Discard</button>
                                     {% elif torrent.status == 'replaced' %}
                                     <span class="text-gray-500 text-xs" title="Replaced{% if torrent.replacement_reason %}: {{ torrent.replacement_reason }}{% endif %}">Replaced</span>
                                     {% else %}
@@ -1196,11 +1204,18 @@ async function refreshStagedTabData() {
 
         stagedBody.innerHTML = newBody.innerHTML;
         filterStagedTable();
+        bindStagedSelectionHandlers();
     } catch (err) {
         console.error('Failed to refresh staged tab:', err);
     } finally {
         stagedTabRefreshInFlight = false;
     }
+}
+
+function bindStagedSelectionHandlers() {
+    document.querySelectorAll('.staged-torrent-checkbox').forEach((checkbox) => {
+        checkbox.addEventListener('click', (event) => event.stopPropagation());
+    });
 }
 
 async function searchRequestFromDetails() {
@@ -1353,6 +1368,64 @@ function filterStagedTable() {
         const torrentState = row.dataset.state || '';
         row.style.display = textContent.includes(filter) && (!selectedStatus || torrentState === selectedStatus) ? '' : 'none';
     });
+}
+
+async function postStagedAction(actionUrl, redirectTo = '/?tab=staged') {
+    try {
+        const formData = new FormData();
+        formData.append('redirect_to', redirectTo);
+        const response = await fetch(actionUrl, {
+            method: 'POST',
+            headers: { 'Accept': 'application/json' },
+            body: formData,
+        });
+        if (!response.ok) {
+            const errorData = await response.json().catch(() => null);
+            throw new Error(errorData?.detail || errorData?.message || `Server error: ${response.status}`);
+        }
+        await refreshStagedTabData();
+        showToast('Staged torrent updated');
+    } catch (err) {
+        showToast('Error: ' + err.message);
+    }
+}
+
+function getSelectedStagedTorrentIds() {
+    return Array.from(document.querySelectorAll('.staged-torrent-checkbox:checked')).map(
+        (checkbox) => checkbox.value,
+    );
+}
+
+async function bulkStagedAction(action) {
+    const selectedIds = getSelectedStagedTorrentIds();
+    if (selectedIds.length === 0) {
+        showToast('Select one or more staged torrents first.');
+        return;
+    }
+
+    try {
+        const formData = new FormData();
+        formData.append('action', action);
+        selectedIds.forEach((id) => formData.append('torrent_ids', id));
+        formData.append('redirect_to', '/?tab=staged');
+
+        const response = await fetch('/staged/bulk', {
+            method: 'POST',
+            headers: { 'Accept': 'application/json' },
+            body: formData,
+        });
+        if (!response.ok) {
+            const errorData = await response.json().catch(() => null);
+            throw new Error(errorData?.detail || errorData?.message || `Server error: ${response.status}`);
+        }
+        document.querySelectorAll('.staged-torrent-checkbox').forEach((checkbox) => {
+            checkbox.checked = false;
+        });
+        await refreshStagedTabData();
+        showToast(action === 'approve' ? 'Selected torrents approved' : 'Selected torrents discarded');
+    } catch (err) {
+        showToast('Error: ' + err.message);
+    }
 }
 
 function filterFinishedTable() {
@@ -1668,6 +1741,7 @@ function bindSelectAll(toggle, checkboxSelector) {
 
 bindSelectAll(activeSelectAll, '.active-request-checkbox');
 bindSelectAll(pendingSelectAll, '.pending-request-checkbox');
+bindStagedSelectionHandlers();
 
 document.querySelectorAll('.sort-title').forEach(el => {
     el.addEventListener('click', (e) => {
