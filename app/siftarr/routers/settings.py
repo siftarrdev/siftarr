@@ -209,6 +209,8 @@ async def _build_effective_settings(db: AsyncSession) -> dict:
         "qbittorrent_url": str(effective.qbittorrent_url or ""),
         "qbittorrent_username": effective.qbittorrent_username,
         "qbittorrent_password": effective.qbittorrent_password,
+        "plex_url": str(effective.plex_url or ""),
+        "plex_token": effective.plex_token or "",
         "tz": effective.tz,
     }
 
@@ -225,6 +227,8 @@ async def _build_effective_settings_obj(db: AsyncSession) -> Settings:
         qbittorrent_url=eff["qbittorrent_url"] or None,
         qbittorrent_username=eff["qbittorrent_username"],
         qbittorrent_password=eff["qbittorrent_password"],
+        plex_url=eff["plex_url"] or None,
+        plex_token=eff["plex_token"] or None,
         tz=eff["tz"],
     )
 
@@ -340,6 +344,8 @@ async def save_connections(
     qbittorrent_url: str | None = Form(None),
     qbittorrent_username: str | None = Form(None),
     qbittorrent_password: str | None = Form(None),
+    plex_url: str | None = Form(None),
+    plex_token: str | None = Form(None),
     tz: str | None = Form(None),
 ) -> RedirectResponse:
     """Save connection settings to database."""
@@ -354,6 +360,8 @@ async def save_connections(
     await _set_db_setting(
         db, "qbittorrent_password", qbittorrent_password or "", "qBittorrent password"
     )
+    await _set_db_setting(db, "plex_url", plex_url or "", "Plex URL")
+    await _set_db_setting(db, "plex_token", plex_token or "", "Plex token")
     if tz:
         await _set_db_setting(db, "tz", tz, "Timezone")
 
@@ -427,6 +435,19 @@ async def test_qbittorrent_connection(db: AsyncSession = Depends(get_db)) -> Con
     )
 
 
+@router.post("/api/test/plex", response_model=ConnectionTestResponse)
+async def test_plex_connection(db: AsyncSession = Depends(get_db)) -> ConnectionTestResponse:
+    """Test connection to Plex."""
+    eff_settings = await _build_effective_settings_obj(db)
+    result: ConnectionTestResult = await ConnectionTester.test_plex(eff_settings)
+    return ConnectionTestResponse(
+        service="plex",
+        success=result.success,
+        message=result.message,
+        details=result.details,
+    )
+
+
 @router.post("/api/test/all", response_model=list[ConnectionTestResponse])
 async def test_all_connections(db: AsyncSession = Depends(get_db)) -> list[ConnectionTestResponse]:
     """Test connections to all services."""
@@ -437,6 +458,7 @@ async def test_all_connections(db: AsyncSession = Depends(get_db)) -> list[Conne
         ("overseerr", ConnectionTester.test_overseerr),
         ("prowlarr", ConnectionTester.test_prowlarr),
         ("qbittorrent", ConnectionTester.test_qbittorrent),
+        ("plex", ConnectionTester.test_plex),
     ]:
         result: ConnectionTestResult = await tester(eff_settings)
         results.append(

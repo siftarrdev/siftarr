@@ -17,7 +17,18 @@ class TestSettingsRouter:
     def _base_context() -> dict:
         return {
             "request": MagicMock(),
-            "env": {},
+            "env": {
+                "overseerr_url": "",
+                "overseerr_api_key": "",
+                "prowlarr_url": "",
+                "prowlarr_api_key": "",
+                "qbittorrent_url": "",
+                "qbittorrent_username": "",
+                "qbittorrent_password": "",
+                "plex_url": "",
+                "plex_token": "",
+                "tz": "UTC",
+            },
             "staging_enabled": True,
             "pending_count": 0,
             "stats": {"total_requests": 0, "completed": 0, "pending": 0, "failed": 0},
@@ -37,7 +48,18 @@ class TestSettingsRouter:
             AsyncMock(
                 return_value={
                     "request": MagicMock(),
-                    "env": {},
+                    "env": {
+                        "overseerr_url": "",
+                        "overseerr_api_key": "",
+                        "prowlarr_url": "",
+                        "prowlarr_api_key": "",
+                        "qbittorrent_url": "",
+                        "qbittorrent_username": "",
+                        "qbittorrent_password": "",
+                        "plex_url": "",
+                        "plex_token": "",
+                        "tz": "UTC",
+                    },
                     "staging_enabled": True,
                     "pending_count": 0,
                     "stats": {"total_requests": 0, "completed": 0, "pending": 0, "failed": 0},
@@ -49,9 +71,8 @@ class TestSettingsRouter:
         body = cast(bytes, response.body).decode()
 
         assert "Clear App Search Cache" in body
-        assert "releases table" in body
+        assert "stored releases" in body
         assert "Overseerr status cache" in body
-        assert "external/manual Prowlarr caching cannot be guaranteed" in body
 
     @pytest.mark.asyncio
     async def test_clear_cache_route_reports_success(self, monkeypatch):
@@ -115,7 +136,18 @@ class TestSettingsRouter:
             AsyncMock(
                 return_value={
                     "request": MagicMock(),
-                    "env": {},
+                    "env": {
+                        "overseerr_url": "",
+                        "overseerr_api_key": "",
+                        "prowlarr_url": "",
+                        "prowlarr_api_key": "",
+                        "qbittorrent_url": "",
+                        "qbittorrent_username": "",
+                        "qbittorrent_password": "",
+                        "plex_url": "",
+                        "plex_token": "",
+                        "tz": "UTC",
+                    },
                     "staging_enabled": True,
                     "pending_count": 0,
                     "stats": {"total_requests": 0, "completed": 0, "pending": 0, "failed": 0},
@@ -142,7 +174,18 @@ class TestSettingsRouter:
             AsyncMock(
                 return_value={
                     "request": MagicMock(),
-                    "env": {},
+                    "env": {
+                        "overseerr_url": "",
+                        "overseerr_api_key": "",
+                        "prowlarr_url": "",
+                        "prowlarr_api_key": "",
+                        "qbittorrent_url": "",
+                        "qbittorrent_username": "",
+                        "qbittorrent_password": "",
+                        "plex_url": "",
+                        "plex_token": "",
+                        "tz": "UTC",
+                    },
                     "staging_enabled": True,
                     "pending_count": 0,
                     "stats": {"total_requests": 0, "completed": 0, "pending": 0, "failed": 0},

@@ -200,35 +200,45 @@ details[open] summary .accordion-chevron { transform: rotate(90deg); }
             <svg class="accordion-chevron w-4 h-4 text-gray-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
             <h2 class="section-title">Manual Actions</h2>
         </summary>
-        <div class="card-body grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-4 gap-4">
-            <form action="/settings/retry-pending" method="post" class="rounded-xl bg-surface-850 border border-gray-700/40 p-5 flex flex-col gap-2">
-                <div class="text-sm font-semibold text-white">Retry Pending</div>
-                <div class="text-xs text-gray-500">{{ pending_count }} items ready for retry</div>
-                <button type="submit" class="btn-primary btn-sm w-fit mt-1">Retry Now</button>
+        <div class="card-body divide-y divide-gray-700/40">
+            <form action="/settings/retry-pending" method="post" class="flex items-center justify-between gap-4 py-3 first:pt-0 last:pb-0">
+                <div class="min-w-0">
+                    <div class="text-sm font-semibold text-white">Retry Pending</div>
+                    <div class="text-xs text-gray-500">{{ pending_count }} items ready for retry</div>
+                </div>
+                <button type="submit" class="btn-primary btn-sm shrink-0">Retry Now</button>
             </form>
 
-            <form action="/settings/sync-overseerr" method="post" class="rounded-xl bg-surface-850 border border-gray-700/40 p-5 flex flex-col gap-2 xl:col-span-1">
-                <div class="text-sm font-semibold text-white">Sync Overseerr</div>
-                <div class="text-xs text-gray-500">Fetch new approved or pending requests</div>
-                <button type="submit" class="btn-primary btn-sm w-fit mt-1">Sync</button>
+            <form action="/settings/sync-overseerr" method="post" class="flex items-center justify-between gap-4 py-3 first:pt-0 last:pb-0">
+                <div class="min-w-0">
+                    <div class="text-sm font-semibold text-white">Sync Overseerr</div>
+                    <div class="text-xs text-gray-500">Fetch new approved or pending requests</div>
+                </div>
+                <button type="submit" class="btn-primary btn-sm shrink-0">Sync</button>
             </form>
 
-            <form action="/settings/rescan-plex" method="post" class="rounded-xl bg-surface-850 border border-gray-700/40 p-5 flex flex-col gap-2 xl:col-span-1">
-                <div class="text-sm font-semibold text-white">Re-scan Plex Availability</div>
-                <div class="text-xs text-gray-500">Re-check existing requests against Plex and update availability/completion state</div>
-                <button type="submit" class="btn-primary btn-sm w-fit mt-1">Re-scan Plex</button>
+            <form action="/settings/rescan-plex" method="post" class="flex items-center justify-between gap-4 py-3 first:pt-0 last:pb-0">
+                <div class="min-w-0">
+                    <div class="text-sm font-semibold text-white">Re-scan Plex Availability</div>
+                    <div class="text-xs text-gray-500">Re-check existing requests against Plex and update availability/completion state</div>
+                </div>
+                <button type="submit" class="btn-primary btn-sm shrink-0">Re-scan Plex</button>
             </form>
 
-            <form action="/settings/reseed-rules" method="post" class="rounded-xl bg-surface-850 border border-gray-700/40 p-5 flex flex-col gap-2">
-                <div class="text-sm font-semibold text-white">Reseed Default Rules</div>
-                <div class="text-xs text-gray-500">Restore the checked-in 12-rule default snapshot without deleting custom rules</div>
-                <button type="submit" class="btn-warning btn-sm w-fit mt-1">Reseed</button>
+            <form action="/settings/reseed-rules" method="post" class="flex items-center justify-between gap-4 py-3 first:pt-0 last:pb-0">
+                <div class="min-w-0">
+                    <div class="text-sm font-semibold text-white">Reseed Default Rules</div>
+                    <div class="text-xs text-gray-500">Restore the checked-in 12-rule default snapshot without deleting custom rules</div>
+                </div>
+                <button type="submit" class="btn-warning btn-sm shrink-0">Reseed</button>
             </form>
 
-            <form action="/settings/clear-cache" method="post" class="rounded-xl bg-surface-850 border border-gray-700/40 p-5 flex flex-col gap-2">
-                <div class="text-sm font-semibold text-white">Clear App Search Cache</div>
-                <div class="text-xs text-gray-500">Clears stored releases from the releases table and Siftarr's app-side Overseerr status cache. Requests stay intact, but external/manual Prowlarr caching cannot be guaranteed if it lives outside Siftarr.</div>
-                <button type="submit" class="btn-danger btn-sm w-fit mt-1">Clear Cache</button>
+            <form action="/settings/clear-cache" method="post" class="flex items-center justify-between gap-4 py-3 first:pt-0 last:pb-0">
+                <div class="min-w-0">
+                    <div class="text-sm font-semibold text-white">Clear App Search Cache</div>
+                    <div class="text-xs text-gray-500">Clears stored releases and Siftarr's app-side Overseerr status cache. Requests stay intact.</div>
+                </div>
+                <button type="submit" class="btn-danger btn-sm shrink-0">Clear Cache</button>
             </form>
         </div>
     </details>
@@ -283,7 +293,7 @@ async function testConnection(service) {
 }
 
 async function testAllConnections() {
-    const services = ['overseerr', 'prowlarr', 'qbittorrent'];
+    const services = ['overseerr', 'prowlarr', 'qbittorrent', 'plex'];
     for (const service of services) {
         await testConnection(service);
     }
