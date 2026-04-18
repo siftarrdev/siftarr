@@ -23,6 +23,8 @@ async def test_get_effective_settings_uses_db_staging_flag(monkeypatch):
         staging_mode_enabled=True,
         retry_interval_hours=24,
         max_retry_duration_days=7,
+        overseerr_sync_concurrency=16,
+        plex_sync_concurrency=16,
         puid=1000,
         pgid=1000,
     )
@@ -58,6 +60,8 @@ async def test_get_effective_settings_includes_plex_overrides(monkeypatch):
         staging_mode_enabled=True,
         retry_interval_hours=24,
         max_retry_duration_days=7,
+        overseerr_sync_concurrency=16,
+        plex_sync_concurrency=16,
         puid=1000,
         pgid=1000,
     )
@@ -75,3 +79,39 @@ async def test_get_effective_settings_includes_plex_overrides(monkeypatch):
 
     assert settings.plex_url == "http://db-plex:32400"
     assert settings.plex_token == "db-token"
+
+
+@pytest.mark.asyncio
+async def test_get_effective_settings_preserves_env_concurrency_caps(monkeypatch):
+    """Env concurrency caps should survive DB-backed runtime settings resolution."""
+    env_settings = MagicMock(
+        overseerr_url=None,
+        overseerr_api_key=None,
+        prowlarr_url=None,
+        prowlarr_api_key=None,
+        plex_url=None,
+        plex_token=None,
+        qbittorrent_url=None,
+        qbittorrent_username="admin",
+        qbittorrent_password="adminadmin",
+        tz="UTC",
+        database_url="sqlite+aiosqlite:////tmp/test.db",
+        staging_mode_enabled=True,
+        retry_interval_hours=24,
+        max_retry_duration_days=7,
+        overseerr_sync_concurrency=5,
+        plex_sync_concurrency=9,
+        puid=1000,
+        pgid=1000,
+    )
+    monkeypatch.setattr(runtime_settings, "get_settings", lambda: env_settings)
+
+    db = AsyncMock()
+    db_result = MagicMock()
+    db_result.scalars.return_value.all.return_value = []
+    db.execute.return_value = db_result
+
+    settings = await runtime_settings.get_effective_settings(db)
+
+    assert settings.overseerr_sync_concurrency == 5
+    assert settings.plex_sync_concurrency == 9

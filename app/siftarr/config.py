@@ -46,6 +46,8 @@ class Settings(BaseSettings):
     episode_sync_stale_hours: int = 24
     max_episode_discovery: int = 30
     plex_poll_interval_minutes: int = 15
+    overseerr_sync_concurrency: int = 16
+    plex_sync_concurrency: int = 16
 
     database_url: str = Field(
         default_factory=lambda: (
