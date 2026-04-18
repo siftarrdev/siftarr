@@ -2,13 +2,16 @@
 
 import json
 import logging
+from dataclasses import dataclass, field
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.siftarr.config import get_settings
 from app.siftarr.models.request import MediaType, Request, RequestStatus
 from app.siftarr.models.season import Season
+from app.siftarr.services.async_utils import gather_limited
 from app.siftarr.services.lifecycle_service import LifecycleService
 from app.siftarr.services.plex_service import PlexService
 
@@ -19,10 +22,23 @@ NON_TERMINAL_STATUSES = [
     RequestStatus.RECEIVED,
     RequestStatus.SEARCHING,
     RequestStatus.PENDING,
+    RequestStatus.PARTIALLY_AVAILABLE,
     RequestStatus.UNRELEASED,
     RequestStatus.STAGED,
     RequestStatus.DOWNLOADING,
 ]
+
+type EpisodeKey = tuple[int, int]
+
+
+@dataclass(frozen=True)
+class PollDecision:
+    """Immutable polling result produced by the read-only probe stage."""
+
+    request_id: int
+    reason: str
+    requested_episode_count: int = 0
+    completed_episodes: frozenset[EpisodeKey] = field(default_factory=frozenset)
 
 
 class PlexPollingService:
@@ -51,78 +67,106 @@ class PlexPollingService:
             return 0
 
         logger.info("PlexPollingService: polling %d active request(s)", len(requests))
-        completed = 0
+        requests_by_id = {req.id: req for req in requests}
 
-        for req in requests:
+        async def probe(req: Request) -> PollDecision | None:
             try:
                 if req.media_type == MediaType.MOVIE:
-                    if await self._check_movie(req):
-                        completed += 1
-                elif req.media_type == MediaType.TV and await self._check_tv(req):
-                    completed += 1
+                    return await self._check_movie(req)
+                if req.media_type == MediaType.TV:
+                    return await self._check_tv(req)
+                return None
             except Exception:
                 logger.exception(
                     "PlexPollingService: error checking request_id=%s title=%s",
                     req.id,
                     req.title,
                 )
+                return None
+
+        probe_results = await gather_limited(requests, self._get_concurrency_limit(), probe)
+
+        completed = 0
+        for decision in probe_results:
+            if decision is None:
+                continue
+
+            req = requests_by_id.get(decision.request_id)
+            if req is None:
+                continue
+
+            await self._apply_decision(req, decision)
+            completed += 1
 
         logger.info("PlexPollingService: completed %d request(s) this cycle", completed)
         return completed
 
-    async def _check_movie(self, req: Request) -> bool:
-        """Check if a movie request is available on Plex."""
-        if not req.tmdb_id:
-            return False
+    def _get_concurrency_limit(self) -> int:
+        settings = getattr(self.plex, "settings", None)
+        configured = getattr(settings, "plex_sync_concurrency", None)
+        if isinstance(configured, int) and configured > 0:
+            return configured
+        return max(1, get_settings().plex_sync_concurrency)
 
-        available = await self.plex.check_movie_available(req.tmdb_id)
-        if available:
+    async def _apply_decision(self, req: Request, decision: PollDecision) -> None:
+        if decision.completed_episodes:
+            logger.info(
+                "PlexPollingService: TV '%s' all %d requested episode(s) available on Plex, "
+                "completing request_id=%s",
+                req.title,
+                decision.requested_episode_count,
+                req.id,
+            )
+            await self._update_episode_statuses(req, decision.completed_episodes)
+        else:
             logger.info(
                 "PlexPollingService: movie '%s' (tmdb_id=%s) found on Plex, completing request_id=%s",
                 req.title,
                 req.tmdb_id,
                 req.id,
             )
-            await self.lifecycle.transition(req.id, RequestStatus.COMPLETED, reason="Found on Plex")
-            return True
-        return False
 
-    async def _check_tv(self, req: Request) -> bool:
+        await self.lifecycle.transition(req.id, RequestStatus.COMPLETED, reason=decision.reason)
+
+    async def _check_movie(self, req: Request) -> PollDecision | None:
+        """Check if a movie request is available on Plex."""
+        if not req.tmdb_id:
+            return None
+
+        available = await self.plex.check_movie_available(req.tmdb_id)
+        if available:
+            return PollDecision(request_id=req.id, reason="Found on Plex")
+        return None
+
+    async def _check_tv(self, req: Request) -> PollDecision | None:
         """Check if a TV request is fully available on Plex."""
         show = await self._find_show(req)
         if not show:
-            return False
+            return None
 
         rating_key = show["rating_key"]
         availability = await self.plex.get_episode_availability(rating_key)
 
         if not availability:
-            return False
+            return None
 
         # Determine which episodes were requested
         requested_episodes = self._get_requested_episodes(req)
         if not requested_episodes:
-            return False
+            return None
 
         # Check if all requested episodes are available
         all_available = all(availability.get((s, e), False) for s, e in requested_episodes)
 
         if all_available:
-            logger.info(
-                "PlexPollingService: TV '%s' all %d requested episode(s) available on Plex, "
-                "completing request_id=%s",
-                req.title,
-                len(requested_episodes),
-                req.id,
+            return PollDecision(
+                request_id=req.id,
+                reason="All episodes found on Plex",
+                requested_episode_count=len(requested_episodes),
+                completed_episodes=frozenset(requested_episodes),
             )
-            # Update individual episode statuses
-            await self._update_episode_statuses(req, availability)
-            await self.lifecycle.transition(
-                req.id, RequestStatus.COMPLETED, reason="All episodes found on Plex"
-            )
-            return True
 
-        return False
+        return None
 
     async def _find_show(self, req: Request) -> dict | None:
         """Find a show in Plex by TMDB or TVDB ID."""
@@ -161,13 +205,13 @@ class PlexPollingService:
         return episodes
 
     async def _update_episode_statuses(
-        self, req: Request, availability: dict[tuple[int, int], bool]
+        self, req: Request, completed_episodes: frozenset[EpisodeKey]
     ) -> None:
         """Update episode statuses based on Plex availability."""
         for season in req.seasons:
             for ep in season.episodes:
                 key = (season.season_number, ep.episode_number)
-                if availability.get(key, False) and ep.status != RequestStatus.COMPLETED:
+                if key in completed_episodes and ep.status != RequestStatus.COMPLETED:
                     ep.status = RequestStatus.COMPLETED
             # If all episodes in season are completed, mark season completed too
             if season.episodes and all(
