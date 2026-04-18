@@ -52,7 +52,7 @@ details[open] summary .accordion-chevron { transform: rotate(90deg); }
     </div>
 
     {# ── Stat cards ── #}
-    <div class="grid grid-cols-2 md:grid-cols-5 gap-3">
+    <div class="grid grid-cols-2 md:grid-cols-6 gap-3">
         <button onclick="showTab('active')" class="card group text-left hover:border-gray-600 transition-colors">
             <div class="px-4 py-3.5">
                 <div class="text-xs font-medium uppercase tracking-wider text-gray-500 group-hover:text-gray-400">Active</div>
@@ -77,6 +77,12 @@ details[open] summary .accordion-chevron { transform: rotate(90deg); }
                 <div class="mt-1 text-2xl font-bold text-emerald-400 tabular-nums">{{ stats.completed }}</div>
             </div>
         </button>
+        <button onclick="showTab('unreleased')" class="card group text-left hover:border-gray-600 transition-colors">
+            <div class="px-4 py-3.5">
+                <div class="text-xs font-medium uppercase tracking-wider text-gray-500 group-hover:text-gray-400">Unreleased</div>
+                <div class="mt-1 text-2xl font-bold text-gray-400 tabular-nums">{{ stats.unreleased }}</div>
+            </div>
+        </button>
         <button onclick="showTab('rejected')" class="card group text-left hover:border-gray-600 transition-colors">
             <div class="px-4 py-3.5">
                 <div class="text-xs font-medium uppercase tracking-wider text-gray-500 group-hover:text-gray-400">Denied</div>
@@ -92,6 +98,8 @@ details[open] summary .accordion-chevron { transform: rotate(90deg); }
                     class="tab-button border-b-2 border-brand-500 pb-3 text-sm font-medium text-brand-400 whitespace-nowrap">Active Requests</button>
             <button onclick="showTab('pending')" id="tab-pending"
                     class="tab-button border-b-2 border-transparent pb-3 text-sm font-medium text-gray-500 hover:text-gray-300 whitespace-nowrap">Pending Search</button>
+            <button onclick="showTab('unreleased')" id="tab-unreleased"
+                    class="tab-button border-b-2 border-transparent pb-3 text-sm font-medium text-gray-500 hover:text-gray-300 whitespace-nowrap">Unreleased</button>
             <button onclick="showTab('staged')" id="tab-staged"
                     class="tab-button border-b-2 border-transparent pb-3 text-sm font-medium text-gray-500 hover:text-gray-300 whitespace-nowrap">Staged / Downloading</button>
             <button onclick="showTab('finished')" id="tab-finished"
@@ -241,7 +249,7 @@ details[open] summary .accordion-chevron { transform: rotate(90deg); }
                                 <td class="px-4 py-3.5 whitespace-nowrap text-sm" onclick="event.stopPropagation()">
                                     <div class="flex items-center gap-3">
                                         <button type="button" onclick="openRequestDetails({{ req.id }})" class="text-brand-400 hover:text-brand-300 font-medium">Details</button>
-                                        <form action="/requests/{{ req.id }}/search" method="post" class="inline"><input type="hidden" name="redirect_to" value="/?tab=pending"><button type="submit" class="text-brand-400 hover:text-brand-300 font-medium">Search</button></form>
+                                        <button type="button" onclick="postToAction('/requests/{{ req.id }}/search', '/?tab=pending')" class="text-brand-400 hover:text-brand-300 font-medium">Search</button>
                                         <button type="button" onclick="openDenyModal({{ req.id }}, '/?tab=pending')" class="text-red-400 hover:text-red-300 font-medium">Deny</button>
                                     </div>
                                 </td>
@@ -253,6 +261,61 @@ details[open] summary .accordion-chevron { transform: rotate(90deg); }
             </form>
         </div>
         {% else %}<p class="text-gray-500">No pending items.</p>{% endif %}
+    </div>
+
+    {# ═══════════════ UNRELEASED TAB ═══════════════ #}
+    <div id="content-unreleased" class="tab-content hidden">
+        {% if unreleased_requests %}
+        <div class="card overflow-hidden">
+            <div class="card-header">
+                <div class="section-title">Unreleased Requests</div>
+                <div class="section-subtitle">Requests whose content has not released yet. Siftarr will re-evaluate automatically when they become available.</div>
+                <div class="mt-4">
+                    <input type="text" id="unreleased-filter-input" placeholder="Filter unreleased requests..." class="form-input lg:w-96">
+                </div>
+            </div>
+            <div class="overflow-x-auto">
+                <table class="min-w-full divide-y divide-gray-700/60 data-resizable" id="unreleased-requests-table">
+                    <colgroup>
+                        <col data-col-key="title" style="width: 200px;">
+                        <col data-col-key="year" style="width: 70px;">
+                        <col data-col-key="type" style="width: 80px;">
+                        <col data-col-key="requested" style="width: 140px;">
+                        <col data-col-key="requestedby" style="width: 120px;">
+                        <col data-col-key="expected" style="width: 140px;">
+                        <col data-col-key="actions" style="width: 100px;">
+                    </colgroup>
+                    <thead>
+                        <tr class="bg-surface-850">
+                            <th class="px-5 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 cursor-pointer hover:text-gray-300" data-table="unreleased" data-sort="title" data-col-key="title" style="position: relative;"><span class="sort-title">Title <span class="sort-indicator"></span></span><div class="resize-handle"></div></th>
+                            <th class="px-5 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 cursor-pointer hover:text-gray-300" data-table="unreleased" data-sort="year" data-col-key="year" style="position: relative;"><span class="sort-title">Year <span class="sort-indicator"></span></span><div class="resize-handle"></div></th>
+                            <th class="px-5 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 cursor-pointer hover:text-gray-300" data-table="unreleased" data-sort="type" data-col-key="type" style="position: relative;"><span class="sort-title">Type <span class="sort-indicator"></span></span><div class="resize-handle"></div></th>
+                            <th class="px-5 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 cursor-pointer hover:text-gray-300" data-table="unreleased" data-sort="requested" data-col-key="requested" style="position: relative;"><span class="sort-title">Requested <span class="sort-indicator"></span></span><div class="resize-handle"></div></th>
+                            <th class="px-5 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 cursor-pointer hover:text-gray-300" data-table="unreleased" data-sort="requestedby" data-col-key="requestedby" style="position: relative;"><span class="sort-title">Requested By <span class="sort-indicator"></span></span><div class="resize-handle"></div></th>
+                            <th class="px-5 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 cursor-pointer hover:text-gray-300" data-table="unreleased" data-sort="expected" data-col-key="expected" style="position: relative;"><span class="sort-title">Expected <span class="sort-indicator"></span></span><div class="resize-handle"></div></th>
+                            <th class="px-5 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500" data-col-key="actions" style="position: relative;"><span class="sort-title">Actions</span><div class="resize-handle"></div></th>
+                        </tr>
+                    </thead>
+                    <tbody class="divide-y divide-gray-700/40" id="unreleased-requests-body">
+                        {% for req in unreleased_requests %}
+                        {% set expected_date = unreleased_earliest.get(req.id) %}
+                        <tr class="hover:bg-surface-850/80 cursor-pointer transition-colors" onclick="openRequestDetails({{ req.id }})" data-request-id="{{ req.id }}" data-title="{{ req.title|lower }}" data-type="{{ req.media_type.value|lower }}" data-requestedby="{{ req.requester_username|default('Unknown')|lower }}" data-requested="{{ req.created_at.strftime('%Y-%m-%d %H:%M') }}" data-expected="{{ expected_date or '' }}" data-year="{{ req.year or 0 }}">
+                            <td class="px-5 py-3.5 whitespace-nowrap text-sm font-medium text-white">{{ req.title }}</td>
+                            <td class="px-5 py-3.5 whitespace-nowrap text-sm text-gray-500 tabular-nums" data-sort-value="{{ req.year or 0 }}">{{ req.year or '-' }}</td>
+                            <td class="px-5 py-3.5 whitespace-nowrap text-sm capitalize text-gray-400">{{ req.media_type.value }}</td>
+                            <td class="px-5 py-3.5 whitespace-nowrap text-sm text-gray-500 tabular-nums">{{ req.created_at.strftime('%Y-%m-%d %H:%M') }}</td>
+                            <td class="px-5 py-3.5 whitespace-nowrap text-sm text-gray-400">{{ req.requester_username or 'Unknown' }}</td>
+                            <td class="px-5 py-3.5 whitespace-nowrap text-sm text-purple-300 tabular-nums">{{ expected_date or '-' }}</td>
+                            <td class="px-5 py-3.5 whitespace-nowrap text-sm" onclick="event.stopPropagation()">
+                                <button type="button" onclick="openRequestDetails({{ req.id }})" class="text-brand-400 hover:text-brand-300 font-medium">Details</button>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+        {% else %}<p class="text-gray-500">No unreleased requests.</p>{% endif %}
     </div>
 
     {# ═══════════════ STAGED / DOWNLOADING TAB ═══════════════ #}
@@ -479,6 +542,8 @@ details[open] summary .accordion-chevron { transform: rotate(90deg); }
                         <p id="request-details-overview" class="mt-1 text-sm text-gray-300 leading-relaxed whitespace-pre-wrap"></p>
                     </div>
                     <a id="request-details-overseerr-link" href="#" target="_blank" rel="noopener noreferrer" class="hidden shrink-0 btn-ghost btn-sm">Open in Overseerr</a>
+                    <button id="request-details-search-btn" onclick="searchRequestFromDetails()" class="hidden shrink-0 btn-ghost btn-sm">Search</button>
+                    <button id="request-details-tv-search-btn" onclick="showToast('General TV search is not fully implemented yet. Use season or episode-specific search buttons below.')" class="hidden shrink-0 btn-ghost btn-sm">Search</button>
                     <button id="request-details-refresh-plex" onclick="refreshPlexAndReload()" class="hidden shrink-0 btn-ghost btn-sm">Refresh Plex</button>
                 </div>
                 <div>
@@ -495,6 +560,9 @@ details[open] summary .accordion-chevron { transform: rotate(90deg); }
         </div>
     </div>
 </div>
+
+{# ═══════════════ TOAST CONTAINER ═══════════════ #}
+<div id="toast-container" class="fixed bottom-6 left-1/2 -translate-x-1/2 z-[70] flex flex-col items-center gap-2 pointer-events-none"></div>
 
 {# ═══════════════ DENY MODAL ═══════════════ #}
 <div id="deny-modal" class="fixed inset-0 z-[60] hidden">
@@ -543,6 +611,7 @@ window.siftarrStagingModeEnabled = {{ 'true' if staging_mode_enabled else 'false
 const tableSortState = {
     active: { column: null, direction: 'asc' },
     pending: { column: null, direction: 'asc' },
+    unreleased: { column: null, direction: 'asc' },
     staged: { column: null, direction: 'asc' },
     finished: { column: null, direction: 'asc' },
     rejected: { column: null, direction: 'asc' },
@@ -951,6 +1020,66 @@ async function searchEpisode(requestId, seasonNumber, episodeNumber) {
     }
 }
 
+function postToAction(action, redirectTo) {
+    const form = document.createElement('form');
+    form.method = 'POST';
+    form.action = action;
+    const input = document.createElement('input');
+    input.type = 'hidden';
+    input.name = 'redirect_to';
+    input.value = redirectTo;
+    form.appendChild(input);
+    document.body.appendChild(form);
+    form.submit();
+}
+
+function showToast(message) {
+    const container = document.getElementById('toast-container');
+    if (!container) return;
+    const toast = document.createElement('div');
+    toast.className = 'bg-surface-800 text-white border border-gray-700/60 rounded-xl px-5 py-3 text-sm shadow-2xl pointer-events-auto transition-opacity duration-300 opacity-0';
+    toast.textContent = message;
+    container.appendChild(toast);
+    requestAnimationFrame(() => { toast.classList.remove('opacity-0'); toast.classList.add('opacity-100'); });
+    setTimeout(() => {
+        toast.classList.remove('opacity-100');
+        toast.classList.add('opacity-0');
+        setTimeout(() => toast.remove(), 300);
+    }, 4000);
+}
+
+async function searchRequestFromDetails() {
+    if (!currentRequestId) return;
+    const btn = document.getElementById('request-details-search-btn');
+    const originalText = btn ? btn.textContent : '';
+    if (btn) {
+        btn.disabled = true;
+        btn.textContent = 'Searching...';
+    }
+    const releasesContainer = document.getElementById('request-details-releases');
+    try {
+        const response = await fetch('/requests/' + currentRequestId + '/search', { method: 'POST' });
+        if (!response.ok) {
+            const errorData = await response.json().catch(() => null);
+            throw new Error(errorData?.error || 'Server error: ' + response.status);
+        }
+        const data = await response.json();
+        currentReleases = data.releases || [];
+        if (releasesContainer) {
+            releasesContainer.innerHTML = currentReleases.map(release => renderReleaseCard(release, currentRequestId)).join('') || '<div class="text-gray-500 text-sm">No search results found for this request.</div>';
+        }
+    } catch (err) {
+        if (releasesContainer) {
+            releasesContainer.innerHTML = '<div class="text-red-400 text-sm">Search failed: ' + escapeHtml(err.message) + '</div>';
+        }
+    } finally {
+        if (btn) {
+            btn.disabled = false;
+            btn.textContent = originalText || 'Search';
+        }
+    }
+}
+
 let currentReleases = [];
 let currentRequestId = null;
 
@@ -1018,10 +1147,21 @@ function filterRejectedTable() {
     });
 }
 
+function filterUnreleasedTable() {
+    const filterEl = document.getElementById('unreleased-filter-input');
+    if (!filterEl) return;
+    const filter = filterEl.value.toLowerCase();
+    document.querySelectorAll('#unreleased-requests-body tr').forEach(row => {
+        const textContent = `${row.dataset.title} ${row.dataset.type} ${row.dataset.requestedby} ${row.dataset.expected}`.toLowerCase();
+        row.style.display = textContent.includes(filter) ? '' : 'none';
+    });
+}
+
 function sortTable(tableName, sortKey) {
     const tableIdMap = {
         active: 'active-requests-table',
         pending: 'pending-requests-table',
+        unreleased: 'unreleased-requests-table',
         staged: 'staged-torrents-table',
         finished: 'finished-requests-table',
         rejected: 'rejected-requests-table',
@@ -1029,6 +1169,7 @@ function sortTable(tableName, sortKey) {
     const bodyIdMap = {
         active: 'active-requests-body',
         pending: 'pending-requests-body',
+        unreleased: 'unreleased-requests-body',
         staged: 'staged-torrents-body',
         finished: 'finished-requests-body',
         rejected: 'rejected-requests-body',
@@ -1078,6 +1219,8 @@ async function openRequestDetails(requestId, explicitIndex = null) {
     const releases = document.getElementById('request-details-releases');
     const overseerrLink = document.getElementById('request-details-overseerr-link');
     const refreshPlexBtn = document.getElementById('request-details-refresh-plex');
+    const searchBtn = document.getElementById('request-details-search-btn');
+    const tvSearchBtn = document.getElementById('request-details-tv-search-btn');
     const filterInput = document.getElementById('release-filter-input');
 
     // Build navigation context from currently visible rows
@@ -1101,6 +1244,12 @@ async function openRequestDetails(requestId, explicitIndex = null) {
     }
     if (refreshPlexBtn) {
         refreshPlexBtn.classList.add('hidden');
+    }
+    if (searchBtn) {
+        searchBtn.classList.add('hidden');
+    }
+    if (tvSearchBtn) {
+        tvSearchBtn.classList.add('hidden');
     }
     setPoster(null, 'Loading poster');
     document.getElementById('release-results-header').classList.remove('hidden');
@@ -1127,6 +1276,14 @@ async function openRequestDetails(requestId, explicitIndex = null) {
 
         if (data.request.media_type === 'tv' && refreshPlexBtn) {
             refreshPlexBtn.classList.remove('hidden');
+        }
+
+        if (data.request.media_type === 'movie' && searchBtn) {
+            searchBtn.classList.remove('hidden');
+        }
+
+        if (data.request.media_type === 'tv' && tvSearchBtn) {
+            tvSearchBtn.classList.remove('hidden');
         }
 
         currentReleases = data.releases || [];
@@ -1232,6 +1389,7 @@ const stagedFilterInput = document.getElementById('staged-filter-input');
 const stagedStatusFilter = document.getElementById('staged-status-filter');
 const finishedFilterInput = document.getElementById('finished-filter-input');
 const rejectedFilterInput = document.getElementById('rejected-filter-input');
+const unreleasedFilterInput = document.getElementById('unreleased-filter-input');
 const activeSelectAll = document.getElementById('active-select-all');
 const pendingSelectAll = document.getElementById('pending-select-all');
 if (filterInput) filterInput.addEventListener('input', filterTable);
@@ -1240,6 +1398,7 @@ if (stagedFilterInput) stagedFilterInput.addEventListener('input', filterStagedT
 if (stagedStatusFilter) stagedStatusFilter.addEventListener('change', filterStagedTable);
 if (finishedFilterInput) finishedFilterInput.addEventListener('input', filterFinishedTable);
 if (rejectedFilterInput) rejectedFilterInput.addEventListener('input', filterRejectedTable);
+if (unreleasedFilterInput) unreleasedFilterInput.addEventListener('input', filterUnreleasedTable);
 const releaseFilterInput = document.getElementById('release-filter-input');
 if (releaseFilterInput) releaseFilterInput.addEventListener('input', filterReleaseCards);
 function bindSelectAll(toggle, checkboxSelector) {

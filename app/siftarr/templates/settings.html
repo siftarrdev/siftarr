@@ -186,10 +186,16 @@
                 <button type="submit" class="btn-primary btn-sm w-fit mt-1">Retry Now</button>
             </form>
 
-            <form action="/settings/sync-overseerr" method="post" class="rounded-xl bg-surface-850 border border-gray-700/40 p-5 flex flex-col gap-2">
+            <form action="/settings/sync-overseerr" method="post" class="rounded-xl bg-surface-850 border border-gray-700/40 p-5 flex flex-col gap-2 xl:col-span-1">
                 <div class="text-sm font-semibold text-white">Sync Overseerr</div>
                 <div class="text-xs text-gray-500">Fetch new approved or pending requests</div>
                 <button type="submit" class="btn-primary btn-sm w-fit mt-1">Sync</button>
+            </form>
+
+            <form action="/settings/rescan-plex" method="post" class="rounded-xl bg-surface-850 border border-gray-700/40 p-5 flex flex-col gap-2 xl:col-span-1">
+                <div class="text-sm font-semibold text-white">Re-scan Plex Availability</div>
+                <div class="text-xs text-gray-500">Re-check existing requests against Plex and update availability/completion state</div>
+                <button type="submit" class="btn-primary btn-sm w-fit mt-1">Re-scan Plex</button>
             </form>
 
             <form action="/settings/reseed-rules" method="post" class="rounded-xl bg-surface-850 border border-gray-700/40 p-5 flex flex-col gap-2">
