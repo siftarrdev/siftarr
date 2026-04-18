@@ -693,6 +693,9 @@ function showTab(tabName) {
     setActiveTab(tabName);
     if (tabName === 'staged') {
         refreshStagedTabData();
+        _startStagedStatusPoll();
+    } else {
+        _stopStagedStatusPoll();
     }
 }
 
@@ -1186,6 +1189,72 @@ async function stageRelease(btn) {
 }
 
 let stagedTabRefreshInFlight = false;
+let _stagedStatusPollInterval = null;
+
+function _startStagedStatusPoll() {
+    _stopStagedStatusPoll();
+    _stagedStatusPollInterval = setInterval(_patchStagedDownloadStatus, 30000);
+}
+
+function _stopStagedStatusPoll() {
+    if (_stagedStatusPollInterval !== null) {
+        clearInterval(_stagedStatusPollInterval);
+        _stagedStatusPollInterval = null;
+    }
+}
+
+async function _patchStagedDownloadStatus() {
+    try {
+        const response = await fetch('/staged/download-status');
+        if (!response.ok) return;
+        const data = await response.json();
+        for (const torrent of (data.torrents || [])) {
+            const row = document.querySelector(`tr[data-torrent-id="${torrent.id}"]`);
+            if (!row) continue;
+
+            // Update request state cell (4th td, index 3)
+            const cells = row.querySelectorAll('td');
+            if (cells.length < 4) continue;
+
+            // Torrent state cell: index 2
+            const stateTd = cells[2];
+            if (stateTd) {
+                let stateLabel = 'sent to qBittorrent';
+                let badgeClass = 'badge-blue';
+                if (torrent.qbit_progress !== null && torrent.qbit_progress !== undefined) {
+                    const pct = Math.round(torrent.qbit_progress * 100);
+                    stateLabel = `downloading ${pct}%`;
+                    if (torrent.qbit_progress >= 1.0) {
+                        stateLabel = 'done';
+                        badgeClass = 'badge-green';
+                    }
+                }
+                if (torrent.qbit_state) {
+                    stateLabel += ` (${torrent.qbit_state})`;
+                }
+                const span = stateTd.querySelector('.badge');
+                if (span) {
+                    span.className = `badge ${badgeClass}`;
+                    span.textContent = stateLabel;
+                }
+            }
+
+            // Request state cell: index 3
+            const reqStateTd = cells[3];
+            if (reqStateTd && torrent.request_status) {
+                const span = reqStateTd.querySelector('.badge');
+                if (span) {
+                    const rs = torrent.request_status;
+                    const cls = rs === 'downloading' ? 'badge-blue' : rs === 'staged' ? 'badge-yellow' : 'badge-gray';
+                    span.className = `badge ${cls}`;
+                    span.textContent = rs;
+                }
+            }
+        }
+    } catch (_err) {
+        // silently ignore poll errors
+    }
+}
 
 async function refreshStagedTabData() {
     if (stagedTabRefreshInFlight) return;

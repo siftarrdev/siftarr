@@ -1,6 +1,7 @@
 """Staged torrent management router."""
 
 import os
+import re
 from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, Form, HTTPException
@@ -19,6 +20,8 @@ from app.siftarr.services.staging_decision_logger import (
     log_replacement_decision,
     log_staging_decision,
 )
+
+_BTIH_RE = re.compile(r"urn:btih:([0-9a-fA-F]{40}|[2-7A-Za-z]{32})", re.IGNORECASE)
 
 router = APIRouter(prefix="/staged", tags=["staged"])
 
@@ -318,3 +321,65 @@ async def replace_staged_torrent(
     await db.commit()
 
     return RedirectResponse(url="/", status_code=303)
+
+
+@router.get("/download-status")
+async def get_download_status(
+    db: AsyncSession = Depends(get_db),
+) -> JSONResponse:
+    """Return qBittorrent progress for all approved torrents."""
+    result = await db.execute(select(StagedTorrent).where(StagedTorrent.status == "approved"))
+    torrents = list(result.scalars().all())
+
+    if not torrents:
+        return JSONResponse({"torrents": []})
+
+    # Collect request IDs for status lookup
+    request_ids = {t.request_id for t in torrents if t.request_id is not None}
+    request_statuses: dict[int, str] = {}
+    if request_ids:
+        req_result = await db.execute(
+            select(Request.id, Request.status).where(Request.id.in_(request_ids))
+        )
+        for req_id, req_status in req_result.all():
+            request_statuses[req_id] = (
+                req_status.value if hasattr(req_status, "value") else str(req_status)
+            )
+
+    runtime_settings = await get_effective_settings(db)
+    qbittorrent = QbittorrentService(settings=runtime_settings)
+
+    torrent_data = []
+    for torrent in torrents:
+        qbit_progress: float | None = None
+        qbit_state: str | None = None
+
+        # Try to get progress via hash first, then fall back to name
+        torrent_hash: str | None = None
+        if torrent.magnet_url:
+            m = _BTIH_RE.search(torrent.magnet_url)
+            if m:
+                torrent_hash = m.group(1).lower()
+
+        if torrent_hash:
+            info = await qbittorrent.get_torrent_info(torrent_hash)
+            if info:
+                qbit_progress = info["progress"]
+                qbit_state = info["state"]
+        else:
+            qbit_progress = await qbittorrent.get_torrent_progress_by_name(torrent.title)
+
+        request_status = request_statuses.get(torrent.request_id or -1, "unknown")
+
+        torrent_data.append(
+            {
+                "id": torrent.id,
+                "title": torrent.title,
+                "request_id": torrent.request_id,
+                "request_status": request_status,
+                "qbit_progress": qbit_progress,
+                "qbit_state": qbit_state,
+            }
+        )
+
+    return JSONResponse({"torrents": torrent_data})

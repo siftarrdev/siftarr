@@ -1,11 +1,16 @@
 """Release payload serialization, sorting, and finalization for dashboard responses."""
 
+from __future__ import annotations
+
 from datetime import UTC, datetime
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from app.siftarr.services.prowlarr_service import ProwlarrRelease
 from app.siftarr.services.release_parser import ParsedReleaseCoverage
 from app.siftarr.services.rule_engine import ReleaseEvaluation
+
+if TYPE_CHECKING:
+    from app.siftarr.services.rule_engine import RuleEngine
 from app.siftarr.services.type_utils import (
     coerce_int_list,
     normalize_float,
@@ -28,7 +33,10 @@ def release_failed_size_limit(release: dict[str, object]) -> bool:
     return isinstance(rejection_reason, str) and rejection_reason.startswith("Size ")
 
 
-def apply_release_size_per_season_metadata(release: dict[str, object]) -> dict[str, object]:
+def apply_release_size_per_season_metadata(
+    release: dict[str, object],
+    rule_engine: RuleEngine | None = None,
+) -> dict[str, object]:
     """Attach derived per-season size metadata when season coverage is known."""
     size_bytes = normalize_int(release.get("size_bytes"))
     covered_seasons = coerce_int_list(release.get("covered_seasons"))
@@ -51,9 +59,14 @@ def apply_release_size_per_season_metadata(release: dict[str, object]) -> dict[s
     size_per_season_bytes = int(round(size_bytes / covered_season_count))
     release["size_per_season"] = format_release_size(size_per_season_bytes)
     release["size_per_season_bytes"] = size_per_season_bytes
-    release["size_per_season_passed"] = (
-        None if size_limit_passed is None else not release_failed_size_limit(release)
-    )
+    if rule_engine is not None:
+        release["size_per_season_passed"] = rule_engine.evaluate_per_season_size(
+            size_per_season_bytes
+        )
+    else:
+        release["size_per_season_passed"] = (
+            None if size_limit_passed is None else not release_failed_size_limit(release)
+        )
     return release
 
 

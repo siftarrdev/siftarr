@@ -1,5 +1,6 @@
 """Background task scheduler using APScheduler."""
 
+import asyncio
 import logging
 from contextlib import suppress
 
@@ -43,6 +44,7 @@ class SchedulerService:
         self.db_session_factory = db_session_factory
         self.scheduler: AsyncIOScheduler | None = None
         self._logger = logger or logging.getLogger(__name__)
+        self._download_completion_lock = asyncio.Lock()
 
     async def _process_pending_item(self, pending_item: PendingQueue) -> None:
         """Process a single pending item."""
@@ -177,6 +179,33 @@ class SchedulerService:
         except Exception:
             logger.exception("Error during unreleased recheck")
 
+    async def _check_download_completion(self) -> None:
+        """Poll qBittorrent for completed downloads and transition requests to COMPLETED."""
+        logger = self._logger
+        if self._download_completion_lock.locked():
+            logger.debug("DownloadCompletionService: previous run still in progress, skipping")
+            return
+        async with self._download_completion_lock:
+            try:
+                async with self.db_session_factory() as db:
+                    from app.siftarr.services.download_completion_service import (
+                        DownloadCompletionService,
+                    )
+
+                    runtime_settings = await get_effective_settings(db)
+                    plex = PlexService(settings=runtime_settings)
+                    qbittorrent = QbittorrentService(settings=runtime_settings)
+                    plex_polling = PlexPollingService(db, plex)
+                    service = DownloadCompletionService(db, qbittorrent, plex_polling)
+                    completed = await service.check_downloading_requests()
+                    if completed:
+                        logger.info(
+                            "DownloadCompletionService: completed %d request(s) this cycle",
+                            completed,
+                        )
+            except Exception:
+                logger.exception("Error during download completion check")
+
     async def _poll_overseerr(self) -> None:
         """
         Poll Overseerr for new approved requests.
@@ -238,6 +267,14 @@ class SchedulerService:
             trigger=IntervalTrigger(hours=6),
             id="recheck_unreleased",
             name="Recheck unreleased media status",
+            replace_existing=True,
+        )
+
+        self.scheduler.add_job(
+            self._check_download_completion,
+            trigger=IntervalTrigger(seconds=60),
+            id="check_download_completion",
+            name="Check qBittorrent download completion",
             replace_existing=True,
         )
 

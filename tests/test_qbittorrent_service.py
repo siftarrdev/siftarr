@@ -281,6 +281,86 @@ class TestQbittorrentServiceUnit:
                 assert result is False
 
     @pytest.mark.asyncio
+    async def test_get_all_active_torrents_returns_list(self):
+        """Test get_all_active_torrents returns list of dicts."""
+        with patch("app.siftarr.config.get_settings") as mock_get_settings:
+            mock_settings = MagicMock()
+            mock_get_settings.return_value = mock_settings
+
+            service = QbittorrentService()
+            mock_t = MagicMock()
+            mock_t.hash = "aaa"
+            mock_t.name = "Test Movie"
+            mock_t.progress = 0.5
+            mock_t.state = "downloading"
+            mock_t.category = "radarr"
+            service._client = MagicMock()
+
+            with patch("asyncio.to_thread", AsyncMock(return_value=[mock_t])):
+                result = await service.get_all_active_torrents()
+
+            assert len(result) == 1
+            assert result[0]["hash"] == "aaa"
+            assert result[0]["progress"] == 0.5
+
+    @pytest.mark.asyncio
+    async def test_get_all_active_torrents_error_returns_empty(self):
+        """Test get_all_active_torrents returns [] on exception."""
+        with patch("app.siftarr.config.get_settings") as mock_get_settings:
+            mock_get_settings.return_value = MagicMock()
+            service = QbittorrentService()
+            service._client = MagicMock()
+
+            with patch("asyncio.to_thread", side_effect=Exception("err")):
+                result = await service.get_all_active_torrents()
+
+            assert result == []
+
+    @pytest.mark.asyncio
+    async def test_get_torrent_progress_by_name_found(self):
+        """Test get_torrent_progress_by_name finds matching torrent."""
+        with patch("app.siftarr.config.get_settings") as mock_get_settings:
+            mock_get_settings.return_value = MagicMock()
+            service = QbittorrentService()
+            service._client = MagicMock()
+
+            active = [
+                {
+                    "hash": "x",
+                    "name": "The Dark Knight 2008",
+                    "progress": 0.75,
+                    "state": "downloading",
+                    "category": "radarr",
+                }
+            ]
+
+            with patch.object(service, "get_all_active_torrents", AsyncMock(return_value=active)):
+                result = await service.get_torrent_progress_by_name("dark knight")
+            assert result == 0.75
+
+    @pytest.mark.asyncio
+    async def test_get_torrent_progress_by_name_not_found(self):
+        """Test get_torrent_progress_by_name returns None when not found."""
+        with patch("app.siftarr.config.get_settings") as mock_get_settings:
+            mock_get_settings.return_value = MagicMock()
+            service = QbittorrentService()
+            service._client = MagicMock()
+
+            active = [
+                {
+                    "hash": "x",
+                    "name": "Some Other Movie",
+                    "progress": 1.0,
+                    "state": "seeding",
+                    "category": "radarr",
+                }
+            ]
+
+            with patch.object(service, "get_all_active_torrents", AsyncMock(return_value=active)):
+                result = await service.get_torrent_progress_by_name("dark knight")
+            assert result is None
+
+    @pytest.mark.asyncio
     async def test_delete_torrent_with_files(self):
         """Test deleting torrent with files."""
         with patch("app.siftarr.config.get_settings") as mock_get_settings:

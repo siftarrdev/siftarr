@@ -1122,6 +1122,7 @@ class TestDashboardRouter:
 
         fake_engine = MagicMock()
         fake_engine.evaluate.return_value = MagicMock(rejection_reason=None, matches=[])
+        fake_engine.evaluate_per_season_size.return_value = True
 
         monkeypatch.setattr(dashboard_api, "OverseerrService", FakeOverseerrService)
         monkeypatch.setattr(dashboard_api, "PlexService", lambda settings: FakePlexService())
@@ -1288,6 +1289,7 @@ class TestDashboardRouter:
 
         fake_engine = MagicMock()
         fake_engine.evaluate.return_value = MagicMock(rejection_reason=None, matches=[])
+        fake_engine.evaluate_per_season_size.return_value = True
 
         monkeypatch.setattr(dashboard_api, "OverseerrService", FakeOverseerrService)
         monkeypatch.setattr(dashboard_api, "PlexService", lambda settings: FakePlexService())

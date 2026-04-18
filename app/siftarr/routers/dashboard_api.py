@@ -224,7 +224,7 @@ async def request_details(
                     release.get("is_complete_series") or len(covered_seasons) >= known_total_seasons
                 )
             )
-            apply_release_size_per_season_metadata(release)
+            apply_release_size_per_season_metadata(release, rule_engine=engine)
 
         releases_by_season: dict[int, list[dict[str, object]]] = {}
         releases_by_episode: dict[tuple[int, int], list[dict[str, object]]] = {}

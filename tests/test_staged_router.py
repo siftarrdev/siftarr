@@ -195,3 +195,65 @@ class TestStagedRouter:
         assert response.status_code == 200
         assert torrent_one.status == "discarded"
         assert torrent_two.status == "discarded"
+
+
+class TestDownloadStatusEndpoint:
+    """Tests for GET /staged/download-status."""
+
+    @pytest.fixture
+    def mock_db(self):
+        return AsyncMock()
+
+    @pytest.mark.asyncio
+    async def test_returns_empty_when_no_approved_torrents(self, mock_db, monkeypatch):
+        """Returns empty list when no approved torrents."""
+        from app.siftarr.routers.staged import get_download_status
+
+        empty_result = MagicMock()
+        empty_result.scalars.return_value.all.return_value = []
+        mock_db.execute.return_value = empty_result
+
+        response = await get_download_status(db=mock_db)
+        assert response.status_code == 200
+        import json
+
+        body = json.loads(bytes(response.body))  # type: ignore[arg-type]
+        assert body == {"torrents": []}
+
+    @pytest.mark.asyncio
+    async def test_returns_torrent_status(self, mock_db, monkeypatch):
+        """Returns torrent list with qbit progress."""
+        import json
+
+        from app.siftarr.models.request import RequestStatus
+        from app.siftarr.routers import staged as staged_module
+        from app.siftarr.routers.staged import get_download_status
+
+        torrent = MagicMock()
+        torrent.id = 5
+        torrent.title = "Test Movie"
+        torrent.request_id = 99
+        torrent.magnet_url = "magnet:?xt=urn:btih:da39a3ee5e6b4b0d3255bfef95601890afd80709"
+        torrent.status = "approved"
+
+        torrent_result = MagicMock()
+        torrent_result.scalars.return_value.all.return_value = [torrent]
+
+        request_status_result = MagicMock()
+        request_status_result.all.return_value = [(99, RequestStatus.DOWNLOADING)]
+
+        mock_db.execute.side_effect = [torrent_result, request_status_result]
+
+        qbit = AsyncMock()
+        qbit.get_torrent_info = AsyncMock(return_value={"progress": 0.6, "state": "downloading"})
+        monkeypatch.setattr(
+            staged_module, "get_effective_settings", AsyncMock(return_value=MagicMock())
+        )
+        monkeypatch.setattr(staged_module, "QbittorrentService", MagicMock(return_value=qbit))
+
+        response = await get_download_status(db=mock_db)
+        assert response.status_code == 200
+        body = json.loads(bytes(response.body))  # type: ignore[arg-type]
+        assert len(body["torrents"]) == 1
+        assert body["torrents"][0]["id"] == 5
+        assert body["torrents"][0]["qbit_progress"] == 0.6
