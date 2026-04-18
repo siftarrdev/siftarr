@@ -125,6 +125,35 @@ details[open] summary .accordion-chevron { transform: rotate(90deg); }
                     </div>
                 </div>
 
+                {# Plex #}
+                <div class="rounded-xl border border-gray-700/60 bg-surface-850 p-5 space-y-4">
+                    <div class="flex items-center justify-between gap-4">
+                        <div>
+                            <h3 class="text-sm font-semibold text-white">Plex</h3>
+                            <p class="text-xs text-gray-500 mt-0.5">Media server for availability checking</p>
+                        </div>
+                        <div class="flex items-center gap-3 shrink-0">
+                            <button type="button" onclick="testConnection('plex')" id="btn-test-plex" class="btn-primary btn-sm">Test</button>
+                            <span id="status-plex" class="text-xs font-medium"></span>
+                        </div>
+                    </div>
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div>
+                            <label for="plex_url" class="form-label">URL</label>
+                            <input type="url" id="plex_url" name="plex_url" value="{{ env.plex_url }}" placeholder="http://plex:32400" class="form-input">
+                        </div>
+                        <div>
+                            <label for="plex_token" class="form-label">Token</label>
+                            <div class="relative">
+                                <input type="password" id="plex_token" name="plex_token" value="{{ env.plex_token }}" placeholder="Your Plex token" class="form-input pr-10">
+                                <button type="button" onclick="togglePassword('plex_token')" class="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 hover:text-white transition-colors">
+                                    <svg id="eye-plex_token" class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"></path></svg>
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
                 <div class="grid grid-cols-1 md:grid-cols-[220px_auto] gap-4 items-end">
                     <div>
                         <label for="tz" class="form-label">Timezone</label>
@@ -217,13 +246,13 @@ details[open] summary .accordion-chevron { transform: rotate(90deg); }
                 <button type="button" onclick="startOverseerrSync()" class="btn-primary btn-sm shrink-0">Sync</button>
             </div>
 
-            <form action="/settings/rescan-plex" method="post" class="flex items-center justify-between gap-4 py-3 first:pt-0 last:pb-0">
+            <div class="flex items-center justify-between gap-4 py-3 first:pt-0 last:pb-0">
                 <div class="min-w-0">
                     <div class="text-sm font-semibold text-white">Re-scan Plex Availability</div>
                     <div class="text-xs text-gray-500">Re-check existing requests against Plex and update availability/completion state</div>
                 </div>
-                <button type="submit" class="btn-primary btn-sm shrink-0">Re-scan Plex</button>
-            </form>
+                <button type="button" onclick="startPlexRescan()" class="btn-primary btn-sm shrink-0">Re-scan Plex</button>
+            </div>
 
             <form action="/settings/reseed-rules" method="post" class="flex items-center justify-between gap-4 py-3 first:pt-0 last:pb-0">
                 <div class="min-w-0">
@@ -256,6 +285,22 @@ details[open] summary .accordion-chevron { transform: rotate(90deg); }
         <p id="sync-status-text" class="text-sm text-gray-400 mb-4">Connecting...</p>
         <div class="flex justify-end">
             <button id="sync-close-btn" type="button" onclick="closeOverseerrSync()" disabled class="btn-primary btn-sm opacity-50 cursor-not-allowed">Close</button>
+        </div>
+    </div>
+</div>
+
+<!-- Plex Rescan Modal -->
+<div id="plex-sync-modal" class="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm hidden">
+    <div class="bg-surface-800 border border-gray-700/60 rounded-2xl shadow-2xl w-full max-w-md mx-4 p-6">
+        <h3 class="text-lg font-semibold text-white mb-4">Re-scanning Plex</h3>
+        <div class="mb-3">
+            <div class="w-full h-2 rounded-full bg-surface-700 overflow-hidden">
+                <div id="plex-sync-progress-bar" class="h-2 rounded-full bg-brand-500 transition-all duration-300" style="width: 0%"></div>
+            </div>
+        </div>
+        <p id="plex-sync-status-text" class="text-sm text-gray-400 mb-4">Connecting...</p>
+        <div class="flex justify-end">
+            <button id="plex-sync-close-btn" type="button" onclick="closePlexRescan()" disabled class="btn-primary btn-sm opacity-50 cursor-not-allowed">Close</button>
         </div>
     </div>
 </div>
@@ -403,6 +448,100 @@ function closeOverseerrSync() {
     if (syncEventSource) {
         syncEventSource.close();
         syncEventSource = null;
+    }
+}
+
+let plexEventSource = null;
+
+function startPlexRescan() {
+    const modal = document.getElementById('plex-sync-modal');
+    const bar = document.getElementById('plex-sync-progress-bar');
+    const status = document.getElementById('plex-sync-status-text');
+    const closeBtn = document.getElementById('plex-sync-close-btn');
+
+    bar.style.width = '0%';
+    bar.classList.remove('bg-red-500');
+    bar.classList.add('bg-brand-500');
+    status.textContent = 'Connecting...';
+    status.classList.remove('text-red-400', 'text-emerald-400');
+    status.classList.add('text-gray-400');
+    closeBtn.disabled = true;
+    closeBtn.classList.add('opacity-50', 'cursor-not-allowed');
+    modal.classList.remove('hidden');
+
+    plexEventSource = new EventSource('/settings/api/rescan-plex/stream');
+
+    plexEventSource.onmessage = function(event) {
+        const data = JSON.parse(event.data);
+
+        switch (data.phase) {
+            case 'connecting':
+                status.textContent = 'Connecting to Plex...';
+                bar.style.width = '5%';
+                break;
+            case 'fetching':
+                status.textContent = data.message;
+                bar.style.width = '10%';
+                break;
+            case 'processing':
+                const pct = Math.max(15, Math.round((data.current / data.total) * 85));
+                bar.style.width = pct + '%';
+                status.textContent = `Re-syncing ${data.current}/${data.total}: ${data.title}`;
+                break;
+            case 'polling':
+                status.textContent = data.message;
+                bar.style.width = '90%';
+                break;
+            case 'complete':
+                bar.style.width = '100%';
+                status.textContent = data.message;
+                status.classList.remove('text-gray-400');
+                status.classList.add('text-emerald-400');
+                enablePlexCloseBtn();
+                plexEventSource.close();
+                plexEventSource = null;
+                break;
+            case 'error':
+                bar.style.width = '100%';
+                bar.classList.remove('bg-brand-500');
+                bar.classList.add('bg-red-500');
+                status.textContent = data.message;
+                status.classList.remove('text-gray-400');
+                status.classList.add('text-red-400');
+                enablePlexCloseBtn();
+                plexEventSource.close();
+                plexEventSource = null;
+                break;
+        }
+    };
+
+    plexEventSource.onerror = function() {
+        bar.style.width = '100%';
+        bar.classList.remove('bg-brand-500');
+        bar.classList.add('bg-red-500');
+        status.textContent = 'Connection error. The re-scan may have completed — check logs.';
+        status.classList.remove('text-gray-400');
+        status.classList.add('text-red-400');
+        enablePlexCloseBtn();
+        if (plexEventSource) {
+            plexEventSource.close();
+            plexEventSource = null;
+        }
+    };
+}
+
+function enablePlexCloseBtn() {
+    const closeBtn = document.getElementById('plex-sync-close-btn');
+    closeBtn.disabled = false;
+    closeBtn.classList.remove('opacity-50', 'cursor-not-allowed');
+}
+
+function closePlexRescan() {
+    const modal = document.getElementById('plex-sync-modal');
+    modal.classList.add('hidden');
+    if (plexEventSource) {
+        plexEventSource.close();
+        plexEventSource = null;
     }
 }
 </script>

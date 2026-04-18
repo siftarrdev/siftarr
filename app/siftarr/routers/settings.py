@@ -744,6 +744,99 @@ async def _sync_overseerr_generator():
         yield _sse({"phase": "error", "message": f"Sync error: {e}"})
 
 
+async def _rescan_plex_generator():
+    """Async generator that yields SSE events for Plex re-scan progress."""
+
+    def _sse(data: dict) -> str:
+        return f"data: {json.dumps(data)}\n\n"
+
+    try:
+        yield _sse({"phase": "connecting"})
+
+        async with async_session_maker() as db:
+            runtime_settings = await get_effective_settings(db)
+            plex = PlexService(settings=runtime_settings)
+            try:
+                yield _sse({"phase": "fetching", "message": "Fetching TV requests..."})
+
+                result = await db.execute(
+                    select(RequestModel).where(RequestModel.media_type == MediaType.TV)
+                )
+                tv_requests = list(result.scalars().all())
+                total = len(tv_requests)
+
+                if total == 0:
+                    yield _sse(
+                        {
+                            "phase": "complete",
+                            "resynced": 0,
+                            "failed": 0,
+                            "completed": 0,
+                            "message": "No TV requests to re-scan.",
+                        }
+                    )
+                    return
+
+                resynced = 0
+                failed = 0
+
+                for i, tv_request in enumerate(tv_requests):
+                    yield _sse(
+                        {
+                            "phase": "processing",
+                            "current": i + 1,
+                            "total": total,
+                            "title": tv_request.title or f"Request #{tv_request.id}",
+                        }
+                    )
+                    success = await _rescan_plex_tv_request(tv_request.id, plex, runtime_settings)
+                    if success:
+                        resynced += 1
+                    else:
+                        failed += 1
+
+                yield _sse({"phase": "polling", "message": "Running Plex availability poll..."})
+
+                polling_service = PlexPollingService(db, plex)
+                completed = await polling_service.poll()
+
+                message = (
+                    f"Plex re-scan completed. "
+                    f"Re-synced {resynced} TV request(s), "
+                    f"{failed} failed, "
+                    f"{completed} transitioned to completed."
+                )
+                yield _sse(
+                    {
+                        "phase": "complete",
+                        "resynced": resynced,
+                        "failed": failed,
+                        "completed": completed,
+                        "message": message,
+                    }
+                )
+            finally:
+                await plex.close()
+
+    except Exception as e:
+        logger.exception("Plex SSE re-scan failed")
+        yield _sse({"phase": "error", "message": f"Plex re-scan error: {e}"})
+
+
+@router.get("/api/rescan-plex/stream")
+async def rescan_plex_stream() -> StreamingResponse:
+    """Stream Plex re-scan progress via SSE."""
+    return StreamingResponse(
+        _rescan_plex_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
 @router.get("/api/sync-overseerr/stream")
 async def sync_overseerr_stream() -> StreamingResponse:
     """Stream Overseerr sync progress via SSE."""
