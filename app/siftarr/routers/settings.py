@@ -19,7 +19,6 @@ from app.siftarr.database import async_session_maker, get_db
 from app.siftarr.models.request import MediaType, RequestStatus
 from app.siftarr.models.request import Request as RequestModel
 from app.siftarr.models.settings import Settings as DBSettings
-from app.siftarr.services.async_utils import gather_limited
 from app.siftarr.services.connection_tester import ConnectionTester, ConnectionTestResult
 from app.siftarr.services.overseerr_service import OverseerrService
 from app.siftarr.services.pending_queue_service import PendingQueueService
@@ -49,6 +48,141 @@ class _PreparedOverseerrImport:
     requester_email: str | None
     overseerr_request_id: int | None
     media_details: dict | None
+
+
+def _build_sse_progress(
+    phase: str,
+    *,
+    current: int | None = None,
+    total: int | None = None,
+    title: str | None = None,
+    active: list[str] | None = None,
+    **extra: Any,
+) -> dict[str, Any]:
+    payload: dict[str, Any] = {"phase": phase}
+    if current is not None:
+        payload["current"] = current
+    if total is not None:
+        payload["total"] = total
+    if title is not None:
+        payload["title"] = title
+    if active is not None:
+        payload["active"] = active[:16]
+    payload.update(extra)
+    return payload
+
+
+async def _run_bounded_with_progress(
+    items: list[Any],
+    limit: int,
+    worker,
+    *,
+    on_event,
+    phase: str,
+) -> list[Any]:
+    semaphore = asyncio.Semaphore(max(1, limit))
+    active_titles: list[str] = []
+    active_lock = asyncio.Lock()
+    started = 0
+    finished = 0
+
+    async def emit(payload: dict[str, Any]) -> None:
+        result = on_event(payload)
+        if asyncio.iscoroutine(result):
+            await result
+
+    async def run(item: Any) -> Any:
+        nonlocal started, finished
+        title = getattr(item, "title", None) or f"Request #{getattr(item, 'id', '?')}"
+
+        async with semaphore:
+            async with active_lock:
+                started += 1
+                active_titles.append(title)
+                active_snapshot = active_titles[:16]
+
+            await emit(
+                _build_sse_progress(
+                    phase,
+                    current=started,
+                    total=len(items),
+                    title=title,
+                    active=active_snapshot,
+                )
+            )
+
+            try:
+                return await worker(item)
+            finally:
+                async with active_lock:
+                    with contextlib.suppress(ValueError):
+                        active_titles.remove(title)
+                    finished += 1
+                    active_snapshot = active_titles[:16]
+
+                await emit(
+                    _build_sse_progress(
+                        phase,
+                        current=finished,
+                        total=len(items),
+                        title=title,
+                        active=active_snapshot,
+                    )
+                )
+
+    return await asyncio.gather(*(run(item) for item in items))
+
+
+async def _rescan_plex_requests(
+    db: AsyncSession,
+    runtime_settings: Settings,
+    plex: PlexService,
+    *,
+    on_event=None,
+) -> tuple[int, int, int]:
+    polling_service = PlexPollingService(db, plex)
+    active_requests = await polling_service.get_active_requests()
+    active_requests = [req for req in active_requests if req.status != RequestStatus.COMPLETED]
+    tv_requests = [req for req in active_requests if req.media_type == MediaType.TV]
+
+    configured_concurrency = getattr(runtime_settings, "plex_sync_concurrency", 1)
+    sync_concurrency = (
+        configured_concurrency
+        if isinstance(configured_concurrency, int) and configured_concurrency > 0
+        else 1
+    )
+
+    if on_event is not None:
+        await on_event(
+            _build_sse_progress(
+                "fetching",
+                title="Fetching active Plex requests...",
+                active=[req.title or f"Request #{req.id}" for req in active_requests[:16]],
+            )
+        )
+
+    async def resync_worker(request: RequestModel) -> bool:
+        return await _rescan_plex_tv_request(request.id, plex, runtime_settings)
+
+    if tv_requests:
+        resync_results = await _run_bounded_with_progress(
+            tv_requests,
+            sync_concurrency,
+            resync_worker,
+            on_event=on_event or (lambda _payload: None),
+            phase="processing",
+        )
+    else:
+        resync_results = []
+
+    tv_resynced = sum(1 for result in resync_results if result)
+    tv_failed = len(resync_results) - tv_resynced
+
+    if on_event is not None:
+        await on_event(_build_sse_progress("polling", title="Running Plex availability poll..."))
+
+    completed = await polling_service.poll(on_progress=on_event)
+    return tv_resynced, tv_failed, completed
 
 
 def _extract_title_and_year_from_media_details(
@@ -296,29 +430,11 @@ async def rescan_plex(
         runtime_settings = await get_effective_settings(db)
         plex = PlexService(settings=runtime_settings)
         try:
-            result = await db.execute(
-                select(RequestModel).where(RequestModel.media_type == MediaType.TV)
+            tv_resynced, tv_failed, completed = await _rescan_plex_requests(
+                db,
+                runtime_settings,
+                plex,
             )
-            tv_requests = [
-                req for req in result.scalars().all() if req.status != RequestStatus.COMPLETED
-            ]
-
-            configured_concurrency = getattr(runtime_settings, "plex_sync_concurrency", 1)
-            sync_concurrency = (
-                configured_concurrency
-                if isinstance(configured_concurrency, int) and configured_concurrency > 0
-                else 1
-            )
-            resync_results = await gather_limited(
-                (tv_request.id for tv_request in tv_requests),
-                sync_concurrency,
-                lambda request_id: _rescan_plex_tv_request(request_id, plex, runtime_settings),
-            )
-            tv_resynced = sum(1 for result in resync_results if result)
-            tv_failed = len(resync_results) - tv_resynced
-
-            polling_service = PlexPollingService(db, plex)
-            completed = await polling_service.poll()
         finally:
             await plex.close()
 
@@ -550,17 +666,25 @@ async def _sync_overseerr_generator():
             runtime_settings = await get_effective_settings(db)
             overseerr_service = OverseerrService(settings=runtime_settings)
             try:
-                yield _sse({"phase": "fetching", "message": "Fetching requests from Overseerr..."})
+                yield _sse(
+                    _build_sse_progress(
+                        "fetching",
+                        title="Fetching requests from Overseerr...",
+                        active=[],
+                        message="Fetching requests from Overseerr...",
+                    )
+                )
                 overseerr_requests = await overseerr_service.get_all_requests(status=None)
 
                 if not overseerr_requests:
                     yield _sse(
-                        {
-                            "phase": "complete",
-                            "synced": 0,
-                            "skipped": 0,
-                            "message": "No requests found in Overseerr",
-                        }
+                        _build_sse_progress(
+                            "complete",
+                            active=[],
+                            synced=0,
+                            skipped=0,
+                            message="No requests found in Overseerr",
+                        )
                     )
                     return
 
@@ -586,10 +710,21 @@ async def _sync_overseerr_generator():
 
                 total = len(actionable_requests)
                 yield _sse(
-                    {
-                        "phase": "fetching",
-                        "message": f"Found {total} actionable request(s). Fetching details...",
-                    }
+                    _build_sse_progress(
+                        "fetching",
+                        title=f"Found {total} actionable request(s). Fetching details...",
+                        active=[
+                            (ov_req.get("media") or {}).get("title")
+                            or (ov_req.get("media") or {}).get("name")
+                            or str(
+                                (ov_req.get("media") or {}).get("tmdbId")
+                                or (ov_req.get("media") or {}).get("tvdbId")
+                                or ov_req.get("id")
+                            )
+                            for ov_req in actionable_requests[:16]
+                        ],
+                        message=f"Found {total} actionable request(s). Fetching details...",
+                    )
                 )
 
                 sync_concurrency = max(1, runtime_settings.overseerr_sync_concurrency)
@@ -624,36 +759,39 @@ async def _sync_overseerr_generator():
                             )
                             skipped_count += 1
                             yield _sse(
-                                {
-                                    "phase": "processing",
-                                    "current": i + 1,
-                                    "total": total,
-                                    "title": "(prefetch error)",
-                                }
+                                _build_sse_progress(
+                                    "processing",
+                                    current=i + 1,
+                                    total=total,
+                                    title="(prefetch error)",
+                                    active=["(prefetch error)"],
+                                )
                             )
                             continue
 
                         if prepared_request is None:
                             skipped_count += 1
                             yield _sse(
-                                {
-                                    "phase": "processing",
-                                    "current": i + 1,
-                                    "total": total,
-                                    "title": "(skipped)",
-                                }
+                                _build_sse_progress(
+                                    "processing",
+                                    current=i + 1,
+                                    total=total,
+                                    title="(skipped)",
+                                    active=["(skipped)"],
+                                )
                             )
                             continue
 
                         prepared = prepared_request
 
                         yield _sse(
-                            {
-                                "phase": "processing",
-                                "current": i + 1,
-                                "total": total,
-                                "title": prepared.title or prepared.external_id,
-                            }
+                            _build_sse_progress(
+                                "processing",
+                                current=i + 1,
+                                total=total,
+                                title=prepared.title or prepared.external_id,
+                                active=[prepared.title or prepared.external_id],
+                            )
                         )
 
                         if (
@@ -731,19 +869,20 @@ async def _sync_overseerr_generator():
                     message = f"No new actionable requests to sync ({skipped_count} already existed or were already available)"
 
                 yield _sse(
-                    {
-                        "phase": "complete",
-                        "synced": synced_count,
-                        "skipped": skipped_count,
-                        "message": message,
-                    }
+                    _build_sse_progress(
+                        "complete",
+                        active=[],
+                        synced=synced_count,
+                        skipped=skipped_count,
+                        message=message,
+                    )
                 )
             finally:
                 await overseerr_service.close()
 
     except Exception as e:
         logger.exception("Overseerr SSE sync failed")
-        yield _sse({"phase": "error", "message": f"Sync error: {e}"})
+        yield _sse(_build_sse_progress("error", active=[], message=f"Sync error: {e}"))
 
 
 async def _rescan_plex_generator():
@@ -759,50 +898,55 @@ async def _rescan_plex_generator():
             runtime_settings = await get_effective_settings(db)
             plex = PlexService(settings=runtime_settings)
             try:
-                yield _sse({"phase": "fetching", "message": "Fetching TV requests..."})
-
-                result = await db.execute(
-                    select(RequestModel).where(RequestModel.media_type == MediaType.TV)
-                )
-                tv_requests = [
-                    req for req in result.scalars().all() if req.status != RequestStatus.COMPLETED
-                ]
-                total = len(tv_requests)
-
-                if total == 0:
-                    yield _sse(
-                        {
-                            "phase": "complete",
-                            "resynced": 0,
-                            "failed": 0,
-                            "completed": 0,
-                            "message": "No TV requests to re-scan.",
-                        }
-                    )
-                    return
-
-                resynced = 0
-                failed = 0
-
-                for i, tv_request in enumerate(tv_requests):
-                    yield _sse(
-                        {
-                            "phase": "processing",
-                            "current": i + 1,
-                            "total": total,
-                            "title": tv_request.title or f"Request #{tv_request.id}",
-                        }
-                    )
-                    success = await _rescan_plex_tv_request(tv_request.id, plex, runtime_settings)
-                    if success:
-                        resynced += 1
-                    else:
-                        failed += 1
-
-                yield _sse({"phase": "polling", "message": "Running Plex availability poll..."})
-
                 polling_service = PlexPollingService(db, plex)
-                completed = await polling_service.poll()
+                active_requests = await polling_service.get_active_requests()
+                yield _sse(
+                    _build_sse_progress(
+                        "fetching",
+                        message="Fetching active Plex requests...",
+                        active=[req.title or f"Request #{req.id}" for req in active_requests[:16]],
+                    )
+                )
+
+                queue: asyncio.Queue[dict[str, Any] | None] = asyncio.Queue()
+
+                async def emit(payload: dict[str, Any]) -> None:
+                    await queue.put(payload)
+
+                task = asyncio.create_task(
+                    _rescan_plex_requests(
+                        db,
+                        runtime_settings,
+                        plex,
+                        on_event=emit,
+                    )
+                )
+
+                get_task = asyncio.create_task(queue.get())
+
+                while True:
+                    done, _pending = await asyncio.wait(
+                        {task, get_task}, return_when=asyncio.FIRST_COMPLETED
+                    )
+                    if get_task in done:
+                        payload = get_task.result()
+                        if payload is not None:
+                            yield _sse(payload)
+                        get_task = asyncio.create_task(queue.get())
+                        continue
+
+                    if task in done:
+                        if not get_task.done():
+                            get_task.cancel()
+                            with contextlib.suppress(asyncio.CancelledError):
+                                await get_task
+                        while not queue.empty():
+                            payload = queue.get_nowait()
+                            if payload is not None:
+                                yield _sse(payload)
+                        break
+
+                resynced, failed, completed = await task
 
                 message = (
                     f"Plex re-scan completed. "
@@ -811,13 +955,14 @@ async def _rescan_plex_generator():
                     f"{completed} transitioned to completed."
                 )
                 yield _sse(
-                    {
-                        "phase": "complete",
-                        "resynced": resynced,
-                        "failed": failed,
-                        "completed": completed,
-                        "message": message,
-                    }
+                    _build_sse_progress(
+                        "complete",
+                        resynced=resynced,
+                        failed=failed,
+                        completed=completed,
+                        active=[],
+                        message=message,
+                    )
                 )
             finally:
                 await plex.close()

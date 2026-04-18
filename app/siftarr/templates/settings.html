@@ -283,6 +283,10 @@ details[open] summary .accordion-chevron { transform: rotate(90deg); }
             </div>
         </div>
         <p id="sync-status-text" class="text-sm text-gray-400 mb-4">Connecting...</p>
+        <div id="sync-active-wrap" class="hidden mb-4">
+            <div class="text-xs uppercase tracking-wide text-gray-500 mb-2">Active</div>
+            <ul id="sync-active-list" class="space-y-1 text-sm text-gray-300 max-h-48 overflow-y-auto"></ul>
+        </div>
         <div class="flex justify-end">
             <button id="sync-close-btn" type="button" onclick="closeOverseerrSync()" disabled class="btn-primary btn-sm opacity-50 cursor-not-allowed">Close</button>
         </div>
@@ -299,6 +303,10 @@ details[open] summary .accordion-chevron { transform: rotate(90deg); }
             </div>
         </div>
         <p id="plex-sync-status-text" class="text-sm text-gray-400 mb-4">Connecting...</p>
+        <div id="plex-sync-active-wrap" class="hidden mb-4">
+            <div class="text-xs uppercase tracking-wide text-gray-500 mb-2">Active</div>
+            <ul id="plex-sync-active-list" class="space-y-1 text-sm text-gray-300 max-h-48 overflow-y-auto"></ul>
+        </div>
         <div class="flex justify-end">
             <button id="plex-sync-close-btn" type="button" onclick="closePlexRescan()" disabled class="btn-primary btn-sm opacity-50 cursor-not-allowed">Close</button>
         </div>
@@ -362,11 +370,35 @@ async function testAllConnections() {
 
 let syncEventSource = null;
 
+function renderActiveItems(listElement, wrapperElement, items) {
+    if (!listElement || !wrapperElement) {
+        return;
+    }
+
+    listElement.innerHTML = '';
+    const values = Array.isArray(items) ? items.slice(0, 16) : [];
+    if (!values.length) {
+        wrapperElement.classList.add('hidden');
+        return;
+    }
+
+    for (const item of values) {
+        const li = document.createElement('li');
+        li.className = 'rounded-lg bg-surface-850 px-3 py-1.5 text-xs text-gray-300 truncate';
+        li.textContent = item;
+        listElement.appendChild(li);
+    }
+
+    wrapperElement.classList.remove('hidden');
+}
+
 function startOverseerrSync() {
     const modal = document.getElementById('overseerr-sync-modal');
     const bar = document.getElementById('sync-progress-bar');
     const status = document.getElementById('sync-status-text');
     const closeBtn = document.getElementById('sync-close-btn');
+    const activeWrap = document.getElementById('sync-active-wrap');
+    const activeList = document.getElementById('sync-active-list');
 
     // Reset state
     bar.style.width = '0%';
@@ -375,6 +407,7 @@ function startOverseerrSync() {
     status.textContent = 'Connecting...';
     status.classList.remove('text-red-400');
     status.classList.add('text-gray-400');
+    renderActiveItems(activeList, activeWrap, []);
     closeBtn.disabled = true;
     closeBtn.classList.add('opacity-50', 'cursor-not-allowed');
     modal.classList.remove('hidden');
@@ -392,17 +425,20 @@ function startOverseerrSync() {
             case 'fetching':
                 status.textContent = data.message;
                 bar.style.width = '15%';
+                renderActiveItems(activeList, activeWrap, data.active || []);
                 break;
             case 'processing':
                 const pct = Math.max(20, Math.round((data.current / data.total) * 100));
                 bar.style.width = pct + '%';
                 status.textContent = `Processing ${data.current}/${data.total}: ${data.title}`;
+                renderActiveItems(activeList, activeWrap, data.active || (data.title ? [data.title] : []));
                 break;
             case 'complete':
                 bar.style.width = '100%';
                 status.textContent = data.message;
                 status.classList.remove('text-gray-400');
                 status.classList.add('text-emerald-400');
+                renderActiveItems(activeList, activeWrap, data.active || []);
                 enableCloseBtn();
                 syncEventSource.close();
                 syncEventSource = null;
@@ -414,6 +450,7 @@ function startOverseerrSync() {
                 status.textContent = data.message;
                 status.classList.remove('text-gray-400');
                 status.classList.add('text-red-400');
+                renderActiveItems(activeList, activeWrap, data.active || []);
                 enableCloseBtn();
                 syncEventSource.close();
                 syncEventSource = null;
@@ -458,6 +495,8 @@ function startPlexRescan() {
     const bar = document.getElementById('plex-sync-progress-bar');
     const status = document.getElementById('plex-sync-status-text');
     const closeBtn = document.getElementById('plex-sync-close-btn');
+    const activeWrap = document.getElementById('plex-sync-active-wrap');
+    const activeList = document.getElementById('plex-sync-active-list');
 
     bar.style.width = '0%';
     bar.classList.remove('bg-red-500');
@@ -465,6 +504,7 @@ function startPlexRescan() {
     status.textContent = 'Connecting...';
     status.classList.remove('text-red-400', 'text-emerald-400');
     status.classList.add('text-gray-400');
+    renderActiveItems(activeList, activeWrap, []);
     closeBtn.disabled = true;
     closeBtn.classList.add('opacity-50', 'cursor-not-allowed');
     modal.classList.remove('hidden');
@@ -482,21 +522,25 @@ function startPlexRescan() {
             case 'fetching':
                 status.textContent = data.message;
                 bar.style.width = '10%';
+                renderActiveItems(activeList, activeWrap, data.active || []);
                 break;
             case 'processing':
                 const pct = Math.max(15, Math.round((data.current / data.total) * 85));
                 bar.style.width = pct + '%';
                 status.textContent = `Re-syncing ${data.current}/${data.total}: ${data.title}`;
+                renderActiveItems(activeList, activeWrap, data.active || (data.title ? [data.title] : []));
                 break;
             case 'polling':
                 status.textContent = data.message;
                 bar.style.width = '90%';
+                renderActiveItems(activeList, activeWrap, data.active || []);
                 break;
             case 'complete':
                 bar.style.width = '100%';
                 status.textContent = data.message;
                 status.classList.remove('text-gray-400');
                 status.classList.add('text-emerald-400');
+                renderActiveItems(activeList, activeWrap, data.active || []);
                 enablePlexCloseBtn();
                 plexEventSource.close();
                 plexEventSource = null;
@@ -508,6 +552,7 @@ function startPlexRescan() {
                 status.textContent = data.message;
                 status.classList.remove('text-gray-400');
                 status.classList.add('text-red-400');
+                renderActiveItems(activeList, activeWrap, data.active || []);
                 enablePlexCloseBtn();
                 plexEventSource.close();
                 plexEventSource = null;

@@ -220,6 +220,8 @@ class TestSettingsRouter:
 
         tv_request = MagicMock()
         tv_request.id = 12
+        tv_request.media_type = MediaType.TV
+        tv_request.status = "pending"
         scalars = MagicMock()
         scalars.all.return_value = [tv_request]
         execute_result = MagicMock()
@@ -253,6 +255,7 @@ class TestSettingsRouter:
         monkeypatch.setattr(episode_sync_module, "EpisodeSyncService", FakeEpisodeSyncService)
 
         polling = AsyncMock()
+        polling.get_active_requests = AsyncMock(return_value=[tv_request])
         polling.poll.return_value = 3
         monkeypatch.setattr(settings, "PlexPollingService", lambda db, plex: polling)
 
@@ -266,6 +269,53 @@ class TestSettingsRouter:
         assert created_episode_sync["db"] is worker_db
         assert created_episode_sync["plex"] is plex_service
         plex_service.close.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_rescan_plex_sse_reports_movies_and_tv_in_active_items(self, monkeypatch):
+        """Plex SSE progress should include both movie and TV requests in active items."""
+        mock_db = AsyncMock()
+        runtime_settings = MagicMock(plex_sync_concurrency=2)
+        plex_service = AsyncMock()
+
+        movie_request = MagicMock(
+            id=1, title="Movie One", media_type=MediaType.MOVIE, status="pending"
+        )
+        tv_request = MagicMock(id=2, title="Show One", media_type=MediaType.TV, status="pending")
+
+        polling = AsyncMock()
+        polling.get_active_requests = AsyncMock(return_value=[movie_request, tv_request])
+        polling.poll = AsyncMock(return_value=7)
+        monkeypatch.setattr(settings, "PlexPollingService", lambda db, plex: polling)
+        monkeypatch.setattr(
+            settings, "get_effective_settings", AsyncMock(return_value=runtime_settings)
+        )
+        monkeypatch.setattr(settings, "PlexService", lambda settings: plex_service)
+
+        monkeypatch.setattr(settings, "async_session_maker", lambda: AsyncMock())
+
+        tv_rescan = AsyncMock(return_value=True)
+        monkeypatch.setattr(settings, "_rescan_plex_tv_request", tv_rescan)
+
+        events: list[dict[str, Any]] = []
+
+        async def collect(payload):
+            events.append(payload)
+
+        resynced, failed, completed = await settings._rescan_plex_requests(
+            mock_db,
+            runtime_settings,
+            plex_service,
+            on_event=collect,
+        )
+
+        assert (resynced, failed, completed) == (1, 0, 7)
+        assert any(
+            event.get("phase") == "fetching" and event.get("active") == ["Movie One", "Show One"]
+            for event in events
+        )
+        assert any(event.get("phase") == "processing" and event.get("active") for event in events)
+        assert tv_rescan.await_count == 1
+        tv_rescan.assert_awaited_once_with(2, plex_service, runtime_settings)
 
     @pytest.mark.asyncio
     async def test_rescan_plex_uses_bounded_parallel_workers_and_reports_counts(self, monkeypatch):
@@ -292,6 +342,8 @@ class TestSettingsRouter:
         for request_id in (11, 12, 13, 14):
             tv_request = MagicMock()
             tv_request.id = request_id
+            tv_request.media_type = MediaType.TV
+            tv_request.status = "pending"
             tv_requests.append(tv_request)
 
         scalars = MagicMock()
@@ -370,7 +422,10 @@ class TestSettingsRouter:
                 assert db is mock_db
                 assert plex is plex_service
 
-            async def poll(self):
+            async def get_active_requests(self):
+                return tv_requests
+
+            async def poll(self, on_progress=None):
                 nonlocal poll_called
                 poll_called = True
                 assert finished == len(tv_requests)
