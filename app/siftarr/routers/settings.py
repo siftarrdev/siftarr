@@ -299,7 +299,9 @@ async def rescan_plex(
             result = await db.execute(
                 select(RequestModel).where(RequestModel.media_type == MediaType.TV)
             )
-            tv_requests = list(result.scalars().all())
+            tv_requests = [
+                req for req in result.scalars().all() if req.status != RequestStatus.COMPLETED
+            ]
 
             configured_concurrency = getattr(runtime_settings, "plex_sync_concurrency", 1)
             sync_concurrency = (
@@ -762,7 +764,9 @@ async def _rescan_plex_generator():
                 result = await db.execute(
                     select(RequestModel).where(RequestModel.media_type == MediaType.TV)
                 )
-                tv_requests = list(result.scalars().all())
+                tv_requests = [
+                    req for req in result.scalars().all() if req.status != RequestStatus.COMPLETED
+                ]
                 total = len(tv_requests)
 
                 if total == 0:
