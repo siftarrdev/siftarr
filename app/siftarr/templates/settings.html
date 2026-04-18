@@ -3,6 +3,12 @@
 {% block title %}Settings - Siftarr{% endblock %}
 
 {% block content %}
+<style>
+details summary::-webkit-details-marker { display: none; }
+details summary { list-style: none; }
+details[open] summary .accordion-chevron { transform: rotate(90deg); }
+.accordion-chevron { transition: transform 0.15s ease; }
+</style>
 <div class="space-y-8">
     <h1 class="page-title">Settings</h1>
 
@@ -13,16 +19,19 @@
     {% endif %}
 
     {# ── Connection Settings ── #}
-    <div class="card">
-        <div class="card-header flex items-center justify-between gap-4">
-            <div>
-                <h2 class="section-title">Connection Settings</h2>
-                <p class="section-subtitle">Configure service URLs and credentials</p>
+    <details open class="card">
+        <summary class="card-header flex items-center justify-between gap-4 cursor-pointer select-none">
+            <div class="flex items-center gap-3">
+                <svg class="accordion-chevron w-4 h-4 text-gray-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
+                <div>
+                    <h2 class="section-title">Connection Settings</h2>
+                    <p class="section-subtitle">Configure service URLs and credentials</p>
+                </div>
             </div>
-            <button type="button" onclick="testAllConnections()" class="btn bg-purple-600 text-white hover:bg-purple-500 focus:ring-purple-500 btn-sm">
+            <button type="button" onclick="event.preventDefault(); testAllConnections()" class="btn bg-purple-600 text-white hover:bg-purple-500 focus:ring-purple-500 btn-sm">
                 Test All
             </button>
-        </div>
+        </summary>
         <div class="card-body">
             <form action="/settings/connections" method="post" class="space-y-6">
                 {# Overseerr #}
@@ -127,9 +136,18 @@
                 </div>
             </form>
         </div>
-    </div>
+    </details>
 
     {# ── Staging Mode & DB Stats ── #}
+    <details open class="card">
+        <summary class="card-header flex items-center gap-3 cursor-pointer select-none">
+            <svg class="accordion-chevron w-4 h-4 text-gray-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
+            <div>
+                <h2 class="section-title">Staging Mode & DB Stats</h2>
+                <p class="section-subtitle">Toggle staging mode and view database statistics</p>
+            </div>
+        </summary>
+        <div class="card-body">
     <div class="grid grid-cols-1 lg:grid-cols-[1.2fr_1fr] gap-6">
         <div class="card">
             <div class="card-header">
@@ -173,12 +191,15 @@
             </div>
         </div>
     </div>
+        </div>
+    </details>
 
     {# ── Manual Actions ── #}
-    <div class="card">
-        <div class="card-header">
+    <details open class="card">
+        <summary class="card-header flex items-center gap-3 cursor-pointer select-none">
+            <svg class="accordion-chevron w-4 h-4 text-gray-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
             <h2 class="section-title">Manual Actions</h2>
-        </div>
+        </summary>
         <div class="card-body grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-4 gap-4">
             <form action="/settings/retry-pending" method="post" class="rounded-xl bg-surface-850 border border-gray-700/40 p-5 flex flex-col gap-2">
                 <div class="text-sm font-semibold text-white">Retry Pending</div>
@@ -210,7 +231,7 @@
                 <button type="submit" class="btn-danger btn-sm w-fit mt-1">Clear Cache</button>
             </form>
         </div>
-    </div>
+    </details>
 </div>
 
 <script>
