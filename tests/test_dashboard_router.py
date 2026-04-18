@@ -117,6 +117,70 @@ class TestDashboardRouter:
         assert active_request in context["pending_requests"]
 
     @pytest.mark.asyncio
+    async def test_dashboard_restores_unreleased_tab_and_requests(self, mock_db, monkeypatch):
+        """Dashboard should expose unreleased requests and stats for the tab."""
+        unreleased_request = MagicMock()
+        unreleased_request.id = 42
+        unreleased_request.status = RequestStatus.UNRELEASED
+        unreleased_request.overseerr_request_id = 10
+        unreleased_request.title = "The Rookie"
+        unreleased_request.media_type = MediaType.TV
+        unreleased_request.created_at = datetime(2026, 4, 1, 12, 0, tzinfo=UTC)
+        unreleased_request.requester_username = "lucas"
+        unreleased_request.year = 2025
+        unreleased_request.tmdb_id = 123
+        unreleased_request.tvdb_id = 456
+
+        lifecycle_service = AsyncMock()
+        lifecycle_service.get_active_requests.return_value = [unreleased_request]
+        lifecycle_service.get_requests_by_status.return_value = []
+        lifecycle_service.get_unreleased_requests.return_value = [unreleased_request]
+        lifecycle_service.get_requests_stats.return_value = {
+            "by_status": {RequestStatus.UNRELEASED.value: 1},
+        }
+        monkeypatch.setattr(dashboard, "LifecycleService", lambda db: lifecycle_service)
+
+        monkeypatch.setattr(
+            dashboard,
+            "PendingQueueService",
+            lambda db: AsyncMock(get_all_pending=AsyncMock(return_value=[])),
+        )
+        monkeypatch.setattr(
+            dashboard,
+            "get_effective_settings",
+            AsyncMock(
+                return_value=MagicMock(
+                    overseerr_url="http://overseerr.test",
+                    staging_mode_enabled=False,
+                )
+            ),
+        )
+
+        fake_overseerr = AsyncMock()
+        fake_overseerr.get_media_details.return_value = {
+            "nextEpisodeToAir": {"airDate": "2026-05-01"}
+        }
+        monkeypatch.setattr(dashboard, "OverseerrService", lambda settings: fake_overseerr)
+
+        execute_results = [
+            MagicMock(scalars=MagicMock(return_value=MagicMock(all=MagicMock(return_value=[])))),
+            MagicMock(scalars=MagicMock(return_value=MagicMock(all=MagicMock(return_value=[])))),
+        ]
+        mock_db.execute.side_effect = execute_results
+
+        response = await dashboard.dashboard(MagicMock(), db=mock_db)
+
+        context = response.context
+        assert context["unreleased_requests"] == [unreleased_request]
+        assert context["unreleased_earliest"][42] == "2026-05-01"
+        assert context["stats"]["unreleased"] == 1
+        rendered = response.body.decode()
+        assert "tab-unreleased" in rendered
+        assert "content-unreleased" in rendered
+        assert "The Rookie" in rendered
+        assert "No unreleased requests." not in rendered
+
+    @pytest.mark.asyncio
     async def test_deny_request_success(self):
         """Deny helper should surface successful declines."""
         mock_overseerr_service = AsyncMock()
