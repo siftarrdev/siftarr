@@ -1,5 +1,6 @@
 """Tests for EpisodeSyncService."""
 
+import asyncio
 from datetime import UTC, date, datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -241,6 +242,113 @@ class TestEpisodeSyncService:
         mock_db.commit.assert_awaited_once()
 
     @pytest.mark.asyncio
+    async def test_sync_fetches_missing_season_payloads_with_bounded_concurrency(
+        self, mock_db, mock_overseerr
+    ):
+        request = _make_request(id=1, tmdb_id=71527, tvdb_id=None)
+        request.status = RequestStatus.PENDING
+
+        mock_db.execute.side_effect = [
+            MagicMock(scalar_one_or_none=MagicMock(return_value=request)),
+            MagicMock(scalar_one_or_none=MagicMock(return_value=None)),
+            MagicMock(scalar_one_or_none=MagicMock(return_value=None)),
+            MagicMock(scalar_one_or_none=MagicMock(return_value=None)),
+            MagicMock(scalar_one_or_none=MagicMock(return_value=None)),
+            MagicMock(scalar_one_or_none=MagicMock(return_value=None)),
+        ]
+
+        next_season_id = 100
+
+        async def flush_side_effect():
+            nonlocal next_season_id
+            for call in mock_db.add.call_args_list:
+                row = call.args[0]
+                if isinstance(row, Season) and row.id is None:
+                    row.id = next_season_id
+                    next_season_id += 1
+
+        mock_db.flush = AsyncMock(side_effect=flush_side_effect)
+        mock_db.commit = AsyncMock()
+
+        media_details = {
+            "seasons": [
+                {"seasonNumber": 0, "name": "Specials"},
+                {"seasonNumber": 1, "name": "Season 1"},
+                {"seasonNumber": 2, "name": "Season 2"},
+                {"seasonNumber": 3, "name": "Season 3"},
+            ]
+        }
+        mock_overseerr.get_media_details.return_value = media_details
+
+        release_details = asyncio.Event()
+        first_batch_started = asyncio.Event()
+        started_calls: list[int] = []
+        in_flight = 0
+        max_in_flight = 0
+
+        async def get_season_details_side_effect(tv_id, season_number):
+            nonlocal in_flight, max_in_flight
+            assert tv_id == 71527
+            started_calls.append(season_number)
+            in_flight += 1
+            max_in_flight = max(max_in_flight, in_flight)
+            if in_flight == 2:
+                first_batch_started.set()
+
+            await release_details.wait()
+            in_flight -= 1
+
+            if season_number == 2:
+                raise RuntimeError("season detail failure")
+
+            return {
+                "seasonNumber": season_number,
+                "episodes": [
+                    {
+                        "episodeNumber": season_number,
+                        "title": f"Episode {season_number}",
+                        "airDate": "2024-01-01",
+                    }
+                ],
+            }
+
+        mock_overseerr.get_season_details.side_effect = get_season_details_side_effect
+
+        service = EpisodeSyncService(mock_db, overseerr=mock_overseerr)
+
+        with patch("app.siftarr.services.episode_sync_service.get_settings") as mock_get_settings:
+            mock_get_settings.return_value = MagicMock(
+                episode_sync_stale_hours=24,
+                overseerr_sync_concurrency=2,
+            )
+
+            sync_task = asyncio.create_task(service.sync_episodes(1))
+            await first_batch_started.wait()
+
+            assert started_calls == [1, 2]
+            assert max_in_flight == 2
+
+            release_details.set()
+            seasons = await sync_task
+
+        assert [season.season_number for season in seasons] == [1, 2, 3]
+        assert started_calls == [1, 2, 3]
+        assert max_in_flight == 2
+        mock_db.commit.assert_awaited_once()
+
+        added_rows = [call.args[0] for call in mock_db.add.call_args_list]
+        added_seasons = [row for row in added_rows if isinstance(row, Season)]
+        added_episodes = [row for row in added_rows if isinstance(row, Episode)]
+
+        assert [season.season_number for season in added_seasons] == [1, 2, 3]
+        assert [(episode.episode_number, episode.title) for episode in added_episodes] == [
+            (1, "Episode 1"),
+            (3, "Episode 3"),
+        ]
+        assert all(episode.status == RequestStatus.PENDING for episode in added_episodes)
+        assert request.status == RequestStatus.PENDING
+
+    @pytest.mark.asyncio
     async def test_refresh_if_stale_triggers_sync_when_no_seasons(self, service, mock_db):
         mock_db.execute.return_value = MagicMock(
             scalars=MagicMock(return_value=MagicMock(all=MagicMock(return_value=[])))
@@ -410,6 +518,54 @@ class TestEpisodeSyncService:
             RequestStatus.UNRELEASED,
         ]
 
+    @pytest.mark.asyncio
+    async def test_sync_from_overseerr_ignores_available_status_for_episode_state(
+        self, service, mock_db, mock_overseerr
+    ):
+        """TV episode state should not be seeded from Overseerr availability."""
+        request = _make_request(id=1, tmdb_id=71527, overseerr_request_id=55)
+
+        req_result = MagicMock()
+        req_result.scalar_one_or_none.return_value = request
+        season_result = MagicMock()
+        season_result.scalar_one_or_none.return_value = None
+        ep1_result = MagicMock()
+        ep1_result.scalar_one_or_none.return_value = None
+        ep2_result = MagicMock()
+        ep2_result.scalar_one_or_none.return_value = None
+        mock_db.execute.side_effect = [req_result, season_result, ep1_result, ep2_result]
+        mock_db.flush = AsyncMock()
+        mock_db.commit = AsyncMock()
+
+        future_day = (datetime.now(UTC) + timedelta(days=7)).date().isoformat()
+        mock_overseerr.get_media_details.return_value = {
+            "mediaInfo": {"seasons": [{"seasonNumber": 8, "status": 5}]},
+            "seasons": [
+                {
+                    "seasonNumber": 8,
+                    "episodes": [
+                        {"episodeNumber": 1, "title": "Episode 1", "airDate": "2024-01-01"},
+                        {"episodeNumber": 2, "title": "Episode 2", "airDate": future_day},
+                    ],
+                }
+            ],
+        }
+
+        added_rows = []
+
+        def capture_add(instance):
+            added_rows.append(instance)
+
+        mock_db.add = MagicMock(side_effect=capture_add)
+
+        await service.sync_episodes(1)
+
+        added_episodes = [row for row in added_rows if isinstance(row, Episode)]
+        assert [episode.status for episode in added_episodes] == [
+            RequestStatus.PENDING,
+            RequestStatus.UNRELEASED,
+        ]
+
     def test_derive_episode_status_prioritizes_available_then_unreleased(self):
         """Episode status should prefer Plex availability, then future-airing unreleased state."""
         tomorrow = datetime.now(UTC).date() + timedelta(days=1)
@@ -453,7 +609,7 @@ class TestEpisodeSyncService:
 
     @pytest.mark.asyncio
     async def test_apply_fallback_statuses_preserves_unreleased_and_partial_availability(
-        self, service
+        self, mock_db
     ):
         """Fallback logic should not flatten future episodes or partial seasons to pending."""
         season = _make_season(season_number=8)
@@ -463,9 +619,14 @@ class TestEpisodeSyncService:
         future_episode = _make_episode(season_id=season.id, episode_number=16)
         future_episode.air_date = datetime.now(UTC).date() + timedelta(days=7)
         future_episode.status = RequestStatus.PARTIALLY_AVAILABLE
-        season.episodes = [available_episode, future_episode]
 
-        await service._apply_fallback_statuses([season])
+        # Mock _load_season_episodes to return the test episodes directly
+        # (avoids needing a full DB query setup for unit tests)
+        service = EpisodeSyncService(mock_db)
+        with patch.object(service, "_load_season_episodes", new_callable=AsyncMock) as mock_load:
+            mock_load.return_value = [available_episode, future_episode]
+
+            await service._apply_fallback_statuses([season])
 
         assert available_episode.status == RequestStatus.AVAILABLE
         assert future_episode.status == RequestStatus.UNRELEASED
@@ -487,7 +648,6 @@ class TestEpisodeSyncService:
         pending_episode.air_date = date(2024, 1, 8)
         future_episode = _make_episode(season_id=season.id, episode_number=3)
         future_episode.air_date = datetime.now(UTC).date() + timedelta(days=7)
-        season.episodes = [available_episode, pending_episode, future_episode]
 
         plex = AsyncMock()
         plex.get_episode_availability.return_value = {(8, 1): True, (8, 2): False, (8, 3): False}
@@ -496,12 +656,56 @@ class TestEpisodeSyncService:
         mock_db.flush = AsyncMock()
         mock_db.commit = AsyncMock()
 
-        seasons = await service._apply_plex_availability(request, [season])
+        # Mock _load_season_episodes to return the test episodes directly
+        # (avoids needing a full DB query setup for unit tests)
+        with patch.object(service, "_load_season_episodes", new_callable=AsyncMock) as mock_load:
+            mock_load.return_value = [available_episode, pending_episode, future_episode]
+
+            seasons = await service._apply_plex_availability(request, [season])
 
         assert seasons == [season]
         assert season.status == RequestStatus.PARTIALLY_AVAILABLE
         assert request.status == RequestStatus.PARTIALLY_AVAILABLE
         mock_db.commit.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_refresh_if_stale_reapplies_plex_when_available_and_pending_mix_exists(
+        self, mock_db, mock_overseerr
+    ):
+        """Fresh seasons with available+pending episodes should still re-enrich from Plex."""
+        request = _make_request(id=1, overseerr_request_id=55)
+        request.plex_rating_key = "plex-123"
+        season = _make_season(synced_at=datetime.now(UTC))
+        season.status = RequestStatus.PARTIALLY_AVAILABLE
+        available_episode = _make_episode(season_id=season.id, episode_number=1)
+        available_episode.status = RequestStatus.AVAILABLE
+        pending_episode = _make_episode(season_id=season.id, episode_number=2)
+        pending_episode.status = RequestStatus.PENDING
+        season.episodes = [available_episode, pending_episode]
+
+        request_result = MagicMock()
+        request_result.scalar_one_or_none.return_value = request
+        seasons_result = MagicMock()
+        seasons_result.scalars.return_value.all.return_value = [season]
+        mock_db.execute.side_effect = [request_result, seasons_result]
+
+        plex = AsyncMock()
+        service = EpisodeSyncService(mock_db, overseerr=mock_overseerr, plex=plex)
+
+        with (
+            patch.object(service, "sync_episodes", new_callable=AsyncMock) as mock_sync,
+            patch.object(
+                service,
+                "_apply_plex_to_existing_seasons",
+                new_callable=AsyncMock,
+            ) as mock_apply,
+        ):
+            mock_apply.return_value = [season]
+            seasons = await service.refresh_if_stale(1)
+
+        mock_sync.assert_not_awaited()
+        mock_apply.assert_awaited_once_with(request, [season])
+        assert seasons == [season]
 
     @pytest.mark.asyncio
     async def test_apply_fallback_request_status_updates_request_aggregate(self, service):

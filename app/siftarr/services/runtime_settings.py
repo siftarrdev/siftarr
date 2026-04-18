@@ -68,6 +68,8 @@ async def get_effective_settings(db: AsyncSession | None = None) -> Settings:
         ),
         retry_interval_hours=env_settings.retry_interval_hours,
         max_retry_duration_days=env_settings.max_retry_duration_days,
+        overseerr_sync_concurrency=env_settings.overseerr_sync_concurrency,
+        plex_sync_concurrency=env_settings.plex_sync_concurrency,
         puid=env_settings.puid,
         pgid=env_settings.pgid,
     )

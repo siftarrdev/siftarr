@@ -4,7 +4,7 @@ import asyncio
 import logging
 from typing import Any
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Depends
 from fastapi.responses import JSONResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -12,12 +12,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.siftarr.database import get_db
 from app.siftarr.models.request import MediaType, RequestStatus
 from app.siftarr.models.rule import Rule
+from app.siftarr.routers.dashboard_actions import _process_request_search
 from app.siftarr.services.overseerr_service import (
     OverseerrService,
     build_overseerr_media_url,
     build_poster_url,
-    clear_media_details_cache,
-    clear_status_cache,
 )
 from app.siftarr.services.plex_service import PlexService
 from app.siftarr.services.prowlarr_service import ProwlarrService
@@ -261,6 +260,86 @@ async def request_details(
     return JSONResponse(details, background=background_tasks)
 
 
+@router.post("/{request_id}/search")
+async def search_request_releases(
+    request_id: int,
+    db: AsyncSession = Depends(get_db),
+) -> JSONResponse:
+    """Trigger a search for a movie request and return updated releases as JSON."""
+    from app.siftarr.models.release import Release
+
+    request = await load_request_or_404(db, request_id)
+
+    if request.media_type != MediaType.MOVIE:
+        return JSONResponse(
+            {"error": "Search endpoint is only available for movie requests"},
+            status_code=400,
+        )
+
+    await _process_request_search(request, db)
+
+    release_result = await db.execute(
+        select(Release)
+        .where(Release.request_id == request_id)
+        .order_by(
+            Release.score.desc(),
+            Release.size.asc(),
+            Release.seeders.desc(),
+            Release.created_at.desc(),
+        )
+    )
+    releases = list(release_result.scalars().all())
+    rules = await db.execute(select(Rule))
+    rule_list = list(rules.scalars().all())
+    engine = RuleEngine.from_db_rules(rules=rule_list, media_type=request.media_type.value)
+
+    matched = []
+    for release in releases:
+        evaluation = engine.evaluate(build_prowlarr_release(release))
+        coverage = None
+        if request.media_type == MediaType.TV:
+            coverage = parse_stored_release_coverage(
+                release.season_coverage,
+                release.season_number,
+                release.episode_number,
+            )
+
+        payload = serialize_evaluated_release(release, evaluation, coverage=coverage)
+        payload.update(
+            {
+                "score": release.score,
+                "passed": release.passed_rules,
+                "downloaded": release.is_downloaded,
+                "rejection_reason": evaluation.rejection_reason,
+                "season_number": release.season_number,
+                "episode_number": release.episode_number,
+                "matches": [
+                    {
+                        "rule_name": m.rule_name,
+                        "matched": m.matched,
+                        "score_delta": m.score_delta,
+                    }
+                    for m in evaluation.matches
+                ],
+            }
+        )
+        matched.append(payload)
+
+    matched = finalize_releases(matched)
+
+    return JSONResponse(
+        {
+            "releases": matched,
+            "request": {
+                "id": request.id,
+                "title": request.title,
+                "status": request.status.value,
+                "media_type": request.media_type.value,
+            },
+        }
+    )
+
+
 @router.get("/{request_id}/seasons")
 async def get_request_seasons(
     request_id: int,
@@ -500,44 +579,4 @@ async def refresh_plex(
         logger.exception("Plex refresh failed for request_id=%s", request_id)
         return JSONResponse({"status": "error", "message": "Plex sync failed"}, status_code=500)
     finally:
-        await plex_service.close()
-
-
-@router.post("/{request_id}/mark-available")
-async def mark_series_available(
-    request_id: int,
-    db: AsyncSession = Depends(get_db),
-) -> JSONResponse:
-    """Mark a TV series available in Overseerr and refresh local episode state."""
-    request = await load_request_or_404(db, request_id)
-    validate_tv_request(request)
-
-    effective_settings = await get_effective_settings(db)
-    overseerr_service = OverseerrService(settings=effective_settings)
-    plex_service = PlexService(settings=effective_settings)
-    try:
-        media_id = await overseerr_service.resolve_tv_media_id(
-            overseerr_request_id=request.overseerr_request_id,
-            tmdb_id=request.tmdb_id,
-        )
-        if media_id is None:
-            raise HTTPException(status_code=400, detail="No Overseerr media ID available")
-
-        success = await overseerr_service.mark_series_available(media_id)
-        if not success:
-            return JSONResponse(
-                {"status": "error", "message": "Failed to mark series available in Overseerr"},
-                status_code=502,
-            )
-
-        clear_status_cache()
-        clear_media_details_cache()
-
-        from app.siftarr.services.episode_sync_service import EpisodeSyncService
-
-        episode_sync = EpisodeSyncService(db, plex=plex_service)
-        await episode_sync.sync_episodes(request_id, force_plex_refresh=True)
-        return JSONResponse({"status": "success", "message": "Series marked available"})
-    finally:
-        await overseerr_service.close()
         await plex_service.close()

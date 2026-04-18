@@ -8,16 +8,19 @@ from apscheduler.triggers.interval import IntervalTrigger
 from sqlalchemy import select
 
 from app.siftarr.models.pending_queue import PendingQueue
-from app.siftarr.models.request import MediaType, Request
+from app.siftarr.models.request import MediaType, Request, RequestStatus
 from app.siftarr.services.lifecycle_service import LifecycleService
 from app.siftarr.services.media_helpers import extract_media_title_and_year
 from app.siftarr.services.movie_decision_service import MovieDecisionService
 from app.siftarr.services.overseerr_service import OverseerrService
 from app.siftarr.services.pending_queue_service import PendingQueueService
+from app.siftarr.services.plex_polling_service import PlexPollingService
+from app.siftarr.services.plex_service import PlexService
 from app.siftarr.services.prowlarr_service import ProwlarrService
 from app.siftarr.services.qbittorrent_service import QbittorrentService
 from app.siftarr.services.runtime_settings import get_effective_settings
 from app.siftarr.services.tv_decision_service import TVDecisionService
+from app.siftarr.services.unreleased_service import UnreleasedEvaluator
 
 
 class SchedulerService:
@@ -135,6 +138,45 @@ class SchedulerService:
                 except Exception as e:
                     logger.error("Error processing pending item %s: %s", item.request_id, e)
 
+    async def _poll_plex_availability(self) -> None:
+        """Poll Plex to check if any active requests have become available."""
+        logger = self._logger
+        try:
+            async with self.db_session_factory() as db:
+                runtime_settings = await get_effective_settings(db)
+                plex = PlexService(settings=runtime_settings)
+                polling_service = PlexPollingService(db, plex)
+                completed = await polling_service.poll()
+                if completed:
+                    logger.info("Plex polling completed %d request(s)", completed)
+        except Exception:
+            logger.exception("Error during Plex availability polling")
+
+    async def _recheck_unreleased(self) -> None:
+        """Re-evaluate requests currently in the UNRELEASED state."""
+        logger = self._logger
+        try:
+            async with self.db_session_factory() as db:
+                lifecycle = LifecycleService(db)
+                unreleased_requests = await lifecycle.get_unreleased_requests(limit=500)
+                if not unreleased_requests:
+                    return
+
+                runtime_settings = await get_effective_settings(db)
+                overseerr = OverseerrService(settings=runtime_settings)
+                try:
+                    evaluator = UnreleasedEvaluator(db, overseerr)
+                    queue_service = PendingQueueService(db)
+                    for request in unreleased_requests:
+                        new_status = await evaluator.evaluate_and_apply(request)
+                        if new_status == RequestStatus.PENDING:
+                            await queue_service.add_to_queue(request.id)
+                    logger.info("Rechecked %d unreleased request(s)", len(unreleased_requests))
+                finally:
+                    await overseerr.close()
+        except Exception:
+            logger.exception("Error during unreleased recheck")
+
     async def _poll_overseerr(self) -> None:
         """
         Poll Overseerr for new approved requests.
@@ -171,6 +213,25 @@ class SchedulerService:
             trigger=IntervalTrigger(hours=1),
             id="poll_overseerr",
             name="Poll Overseerr for new requests",
+            replace_existing=True,
+        )
+
+        from app.siftarr.config import get_settings
+
+        settings = get_settings()
+        self.scheduler.add_job(
+            self._poll_plex_availability,
+            trigger=IntervalTrigger(minutes=settings.plex_poll_interval_minutes),
+            id="poll_plex_availability",
+            name="Poll Plex for media availability",
+            replace_existing=True,
+        )
+
+        self.scheduler.add_job(
+            self._recheck_unreleased,
+            trigger=IntervalTrigger(hours=6),
+            id="recheck_unreleased",
+            name="Recheck unreleased media status",
             replace_existing=True,
         )
 

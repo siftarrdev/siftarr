@@ -1,7 +1,7 @@
 """Dashboard router for main UI."""
 
-import asyncio
 import logging
+from datetime import UTC, date, datetime, timedelta
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -12,16 +12,14 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.siftarr.database import get_db
+from app.siftarr.models.episode import Episode
+from app.siftarr.models.request import MediaType, RequestStatus
 from app.siftarr.models.request import Request as RequestModel
-from app.siftarr.models.request import RequestStatus
+from app.siftarr.models.season import Season
 from app.siftarr.models.staged_torrent import StagedTorrent
-from app.siftarr.services.background_tasks import OVERSEERR_SEMAPHORE
 from app.siftarr.services.http_client import get_shared_client
 from app.siftarr.services.lifecycle_service import LifecycleService
-from app.siftarr.services.overseerr_service import (
-    OverseerrService,
-    choose_display_status,
-)
+from app.siftarr.services.overseerr_service import OverseerrService
 from app.siftarr.services.pending_queue_service import PendingQueueService
 from app.siftarr.services.runtime_settings import get_effective_settings
 
@@ -40,63 +38,18 @@ async def dashboard(
     lifecycle_service = LifecycleService(db)
     queue_service = PendingQueueService(db)
     effective_settings = await get_effective_settings(db)
-    overseerr_service = OverseerrService(settings=effective_settings)
 
     # Get active requests
     active_requests = await lifecycle_service.get_active_requests(limit=500)
 
-    # Fetch Overseerr statuses concurrently for all requests with overseerr_request_id
-    overseerr_statuses: dict[int, str] = {}
-    overseerr_request_statuses: dict[int, str] = {}
-    overseerr_media_statuses: dict[int, str] = {}
-
-    async def _fetch_status(req_obj: RequestModel) -> tuple[int, str, str, str]:
-        if not req_obj.overseerr_request_id:
-            return req_obj.id, "no_overseerr_id", "no_overseerr_id", "unknown"
-        try:
-            async with OVERSEERR_SEMAPHORE:
-                ov_status = await overseerr_service.get_request_status_cached(
-                    req_obj.overseerr_request_id
-                )
-            if ov_status and isinstance(ov_status, dict):
-                media = ov_status.get("media") or {}
-                request_status = overseerr_service.normalize_request_status(ov_status.get("status"))
-                media_status = overseerr_service.normalize_media_status(media.get("status"))
-                return (
-                    req_obj.id,
-                    choose_display_status(request_status, media_status),
-                    request_status,
-                    media_status,
-                )
-            return req_obj.id, "unknown", "unknown", "unknown"
-        except Exception:
-            return req_obj.id, "unknown", "unknown", "unknown"
-
-    status_results = await asyncio.gather(*[_fetch_status(req) for req in active_requests])
-    for req_id, status, request_status, media_status in status_results:
-        overseerr_statuses[req_id] = status
-        overseerr_request_statuses[req_id] = request_status
-        overseerr_media_statuses[req_id] = media_status
-
-    await overseerr_service.close()
-
     # Active tab shows all active requests.
     filtered_requests = active_requests
 
-    # Pending search shows only local pending requests that Overseerr has approved
-    # or that are partially available and still need search action.
+    # Pending search shows all PENDING and SEARCHING requests.
     pending_requests = [
         req
         for req in active_requests
-        if req.status == RequestStatus.SEARCHING
-        or (
-            req.status == RequestStatus.PENDING
-            and req.overseerr_request_id
-            and (
-                overseerr_request_statuses.get(req.id) == "approved"
-                or overseerr_media_statuses.get(req.id) == "partially_available"
-            )
-        )
+        if req.status in (RequestStatus.PENDING, RequestStatus.SEARCHING)
     ]
 
     # Get pending items and pending requests
@@ -139,13 +92,96 @@ async def dashboard(
         RequestStatus.COMPLETED, limit=500
     )
 
-    rejected_result = await db.execute(
+    unreleased_requests = await lifecycle_service.get_unreleased_requests(limit=500)
+    overseerr_service = OverseerrService(settings=effective_settings)
+
+    async def _earliest_future_release(req_obj: RequestModel) -> tuple[int, str | None]:
+        try:
+            today = date.today()
+            if req_obj.media_type == MediaType.MOVIE:
+                if not req_obj.tmdb_id:
+                    return req_obj.id, None
+                details = await overseerr_service.get_media_details("movie", req_obj.tmdb_id)
+                if not details:
+                    return req_obj.id, None
+                candidates: list[date] = []
+                release_date_str = details.get("releaseDate")
+                if release_date_str:
+                    try:
+                        parsed = date.fromisoformat(str(release_date_str)[:10])
+                        if parsed > today:
+                            candidates.append(parsed)
+                    except ValueError:
+                        pass
+                releases_block = details.get("releases") or {}
+                for result in releases_block.get("results") or []:
+                    for rd in result.get("release_dates") or []:
+                        if rd.get("type") not in {3, 4, 5}:
+                            continue
+                        raw = rd.get("release_date")
+                        if not raw:
+                            continue
+                        try:
+                            parsed = date.fromisoformat(str(raw)[:10])
+                        except ValueError:
+                            continue
+                        if parsed > today:
+                            candidates.append(parsed)
+                if not candidates:
+                    return req_obj.id, None
+                return req_obj.id, min(candidates).isoformat()
+
+            external_id = req_obj.tmdb_id or req_obj.tvdb_id
+            if external_id:
+                details = await overseerr_service.get_media_details("tv", external_id)
+                if details:
+                    next_ep = details.get("nextEpisodeToAir") or {}
+                    air_date_str = next_ep.get("airDate")
+                    if air_date_str:
+                        try:
+                            parsed = date.fromisoformat(str(air_date_str)[:10])
+                            return req_obj.id, parsed.isoformat()
+                        except ValueError:
+                            pass
+
+            result = await db.execute(
+                select(Episode.air_date)
+                .join(Season, Season.id == Episode.season_id)
+                .where(Season.request_id == req_obj.id)
+                .where(Episode.air_date.is_not(None))
+                .where(Episode.air_date > today)
+                .order_by(Episode.air_date.asc())
+                .limit(1)
+            )
+            row = result.first()
+            if row and row[0]:
+                return req_obj.id, row[0].isoformat()
+            return req_obj.id, None
+        except Exception:
+            logger.debug(
+                "Failed to compute earliest future release for request %s",
+                req_obj.id,
+                exc_info=True,
+            )
+            return req_obj.id, None
+
+    unreleased_earliest: dict[int, str | None] = {}
+    if unreleased_requests:
+        earliest_results = [await _earliest_future_release(req) for req in unreleased_requests]
+        for req_id, iso_date in earliest_results:
+            unreleased_earliest[req_id] = iso_date
+
+    denied_cutoff = datetime.now(UTC) - timedelta(days=30)
+    denied_result = await db.execute(
         select(RequestModel)
-        .where(RequestModel.status == RequestStatus.FAILED)
+        .where(
+            RequestModel.status == RequestStatus.DENIED,
+            RequestModel.updated_at >= denied_cutoff,
+        )
         .order_by(RequestModel.updated_at.desc())
         .limit(500)
     )
-    rejected_requests = list(rejected_result.scalars().all())
+    denied_requests = list(denied_result.scalars().all())
 
     # Get stats
     stats = await lifecycle_service.get_requests_stats()
@@ -156,9 +192,6 @@ async def dashboard(
         {
             "request": request,
             "active_requests": filtered_requests,
-            "overseerr_statuses": overseerr_statuses,
-            "overseerr_request_statuses": overseerr_request_statuses,
-            "overseerr_media_statuses": overseerr_media_statuses,
             "overseerr_url": str(effective_settings.overseerr_url or "").rstrip("/"),
             "staging_mode_enabled": effective_settings.staging_mode_enabled,
             "pending_requests": pending_requests,
@@ -166,14 +199,17 @@ async def dashboard(
             "staged_torrents": staged_torrents,
             "staged_request_statuses": staged_request_statuses,
             "replaced_by_titles": replaced_by_titles,
+            "unreleased_requests": unreleased_requests,
+            "unreleased_earliest": unreleased_earliest,
             "completed_requests": completed_requests,
-            "rejected_requests": rejected_requests,
+            "denied_requests": denied_requests,
             "stats": {
                 "active": len(active_requests),
                 "pending": len(pending_requests),
                 "staged": len(staged_torrents),
                 "completed": stats["by_status"].get(RequestStatus.COMPLETED.value, 0),
-                "rejected": len(rejected_requests),
+                "unreleased": len(unreleased_requests),
+                "denied": len(denied_requests),
             },
         },
     )

@@ -103,32 +103,12 @@ async def _process_request_search(
     return result
 
 
-async def _approve_and_search_request(
-    request: RequestModel,
-    db: AsyncSession,
-) -> bool:
-    """Approve a request in Overseerr when needed, then trigger search."""
-    effective_settings = await get_effective_settings(db)
-    overseerr_service = OverseerrService(settings=effective_settings)
-
-    try:
-        if request.overseerr_request_id:
-            success = await overseerr_service.approve_request(request.overseerr_request_id)
-            if not success:
-                return False
-
-        await _process_request_search(request, db)
-        return True
-    finally:
-        await overseerr_service.close()
-
-
 async def _deny_request_record(
     request: RequestModel,
     db: AsyncSession,
     reason: str | None = None,
 ) -> None:
-    """Decline a request in Overseerr and mark it failed locally."""
+    """Decline a request in Overseerr and mark it denied locally."""
     effective_settings = await get_effective_settings(db)
     overseerr_service = OverseerrService(settings=effective_settings)
     lifecycle_service = LifecycleService(db)
@@ -139,22 +119,9 @@ async def _deny_request_record(
             await overseerr_service.decline_request(request.overseerr_request_id, reason=reason)
 
         await queue_service.remove_from_queue(request.id)
-        await lifecycle_service.mark_as_failed(request.id, reason=reason)
+        await lifecycle_service.mark_as_denied(request.id, reason=reason)
     finally:
         await overseerr_service.close()
-
-
-@router.post("/{request_id}/approve")
-async def approve_request(
-    request_id: int,
-    redirect_to: str | None = Form(default=None),
-    db: AsyncSession = Depends(get_db),
-) -> RedirectResponse:
-    """Approve a request in Overseerr and trigger search."""
-    request = await load_request_or_404(db, request_id)
-
-    await _approve_and_search_request(request, db)
-    return RedirectResponse(url=redirect_to or "/", status_code=303)
 
 
 @router.post("/{request_id}/search")
@@ -192,10 +159,8 @@ async def bulk_request_action(
     for request in requests:
         if action == "search":
             await _process_request_search(request, db)
-        elif action == "approve":
-            await _approve_and_search_request(request, db)
-        elif action == "reject":
-            await _deny_request_record(request, db, reason="Bulk rejected")
+        elif action == "deny":
+            await _deny_request_record(request, db, reason="Bulk denied")
 
     return RedirectResponse(url=redirect_url, status_code=303)
 
@@ -283,7 +248,7 @@ async def deny_request(
     reason: str | None = Form(default=None),
     db: AsyncSession = Depends(get_db),
 ) -> RedirectResponse:
-    """Decline a request in Overseerr and mark as failed."""
+    """Decline a request in Overseerr and mark as denied."""
     request = await load_request_or_404(db, request_id)
 
     await _deny_request_record(request, db, reason=reason)

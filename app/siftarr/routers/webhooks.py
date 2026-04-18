@@ -18,6 +18,7 @@ from app.siftarr.services.prowlarr_service import ProwlarrService
 from app.siftarr.services.qbittorrent_service import QbittorrentService
 from app.siftarr.services.runtime_settings import get_effective_settings
 from app.siftarr.services.tv_decision_service import TVDecisionService
+from app.siftarr.services.unreleased_service import UnreleasedEvaluator
 
 logger = logging.getLogger(__name__)
 
@@ -84,6 +85,27 @@ async def receive_overseerr_webhook(
         external_id = f"{base_external_id}-{payload.request.id}"
     else:
         external_id = base_external_id
+
+    # Deduplication: if both mediarequested and mediaapproved fire for the same
+    # Overseerr request, skip creating a duplicate.
+    if payload.request and payload.request.id:
+        existing = await db.execute(
+            select(Request).where(
+                Request.overseerr_request_id == payload.request.id,
+            )
+        )
+        if existing.scalar_one_or_none() is not None:
+            return {
+                "status": "duplicate",
+                "message": f"Request for overseerr_request_id={payload.request.id} already exists",
+            }
+    else:
+        existing = await db.execute(select(Request).where(Request.external_id == external_id))
+        if existing.scalar_one_or_none() is not None:
+            return {
+                "status": "duplicate",
+                "message": f"Request for external_id={external_id} already exists",
+            }
 
     # Fetch title and year from Overseerr media details
     title = ""
@@ -161,6 +183,22 @@ async def process_request_background(request_id: int) -> None:
                     logger.exception("Episode sync failed for request_id=%s", request_id)
                 finally:
                     await plex_service.close()
+
+            settings = await get_effective_settings(db)
+            overseerr = OverseerrService(settings=settings)
+            try:
+                evaluator = UnreleasedEvaluator(db, overseerr)
+                try:
+                    new_status = await evaluator.evaluate_and_apply(request)
+                except Exception:
+                    logger.exception("Unreleased evaluation failed for request_id=%s", request_id)
+                    new_status = None
+                if new_status == RequestStatus.UNRELEASED:
+                    logger.info("Request %s classified as unreleased; skipping search", request_id)
+                    return
+                await db.refresh(request)
+            finally:
+                await overseerr.close()
 
             settings = await get_effective_settings(db)
             prowlarr = ProwlarrService(settings=settings)

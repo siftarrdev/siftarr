@@ -1,6 +1,10 @@
 """Settings page router for viewing and editing application settings."""
 
+import asyncio
+import contextlib
 import logging
+from dataclasses import dataclass
+from typing import Any
 
 from fastapi import APIRouter, Depends, Form, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
@@ -10,21 +14,151 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.siftarr.config import Settings
-from app.siftarr.database import get_db
+from app.siftarr.database import async_session_maker, get_db
 from app.siftarr.models.request import MediaType, RequestStatus
 from app.siftarr.models.request import Request as RequestModel
 from app.siftarr.models.settings import Settings as DBSettings
+from app.siftarr.services.async_utils import gather_limited
 from app.siftarr.services.connection_tester import ConnectionTester, ConnectionTestResult
-from app.siftarr.services.media_helpers import extract_media_title_and_year
-from app.siftarr.services.overseerr_service import OverseerrService, clear_status_cache
+from app.siftarr.services.overseerr_service import OverseerrService
 from app.siftarr.services.pending_queue_service import PendingQueueService
+from app.siftarr.services.plex_polling_service import PlexPollingService
+from app.siftarr.services.plex_service import PlexService
 from app.siftarr.services.release_selection_service import clear_release_search_cache
 from app.siftarr.services.rule_service import RuleService
 from app.siftarr.services.runtime_settings import get_effective_settings
+from app.siftarr.services.unreleased_service import evaluate_imported_request
 
 router = APIRouter(prefix="/settings", tags=["settings"])
 templates = Jinja2Templates(directory="app/siftarr/templates")
 logger = logging.getLogger(__name__)
+
+
+@dataclass(slots=True)
+class _PreparedOverseerrImport:
+    external_id: str
+    media_type: MediaType
+    tmdb_id: int | None
+    tvdb_id: int | None
+    title: str
+    year: int | None
+    requested_seasons: Any
+    requested_episodes: Any
+    requester_username: str | None
+    requester_email: str | None
+    overseerr_request_id: int | None
+    media_details: dict | None
+
+
+def _extract_title_and_year_from_media_details(
+    media_details: dict | None,
+) -> tuple[str, int | None]:
+    """Extract title and year from already-fetched Overseerr media details."""
+    if not media_details:
+        return "", None
+
+    title = media_details.get("title") or media_details.get("name") or ""
+    date_str = media_details.get("releaseDate") or media_details.get("firstAirDate") or ""
+    year = None
+    if date_str and len(date_str) >= 4:
+        with contextlib.suppress(ValueError, TypeError):
+            year = int(date_str[:4])
+    return title, year
+
+
+async def _prepare_overseerr_import(
+    ov_req: dict[str, Any],
+    overseerr_service: OverseerrService,
+    semaphore: asyncio.Semaphore,
+    media_details_tasks: dict[tuple[str, int], asyncio.Task[dict | None]],
+    media_details_lock: asyncio.Lock,
+) -> _PreparedOverseerrImport | None:
+    """Collect per-request network-backed metadata before serial DB writes."""
+    media = ov_req.get("media") or {}
+    tmdb_id = media.get("tmdbId")
+    tvdb_id = media.get("tvdbId")
+    overseerr_request_id = ov_req.get("id")
+
+    if tmdb_id is None and tvdb_id is None:
+        return None
+
+    external_id = str(tmdb_id) if tmdb_id is not None else str(tvdb_id)
+    media_type_str = media.get("mediaType", "")
+    media_type = MediaType.MOVIE if media_type_str == "movie" else MediaType.TV
+    requested_seasons = media.get("requestedSeasons")
+    requested_episodes = media.get("requestedEpisodes")
+
+    requested_by = ov_req.get("requestedBy") or {}
+    username = (
+        requested_by.get("username")
+        or requested_by.get("plexUsername")
+        or requested_by.get("displayName")
+    )
+    email = requested_by.get("email")
+
+    media_details = None
+    media_external_id = tmdb_id if tmdb_id is not None else tvdb_id
+    if media_external_id is not None:
+        media_type_for_api = "movie" if media_type == MediaType.MOVIE else "tv"
+        media_details_key = (media_type_for_api, media_external_id)
+
+        async with media_details_lock:
+            media_details_task = media_details_tasks.get(media_details_key)
+            if media_details_task is None:
+
+                async def fetch_media_details() -> dict | None:
+                    async with semaphore:
+                        return await overseerr_service.get_media_details(
+                            media_type_for_api, media_external_id
+                        )
+
+                media_details_task = asyncio.create_task(fetch_media_details())
+                media_details_tasks[media_details_key] = media_details_task
+
+        media_details = await media_details_task
+
+    title, year = _extract_title_and_year_from_media_details(media_details)
+    return _PreparedOverseerrImport(
+        external_id=external_id,
+        media_type=media_type,
+        tmdb_id=tmdb_id,
+        tvdb_id=tvdb_id,
+        title=title,
+        year=year,
+        requested_seasons=requested_seasons,
+        requested_episodes=requested_episodes,
+        requester_username=username,
+        requester_email=email,
+        overseerr_request_id=overseerr_request_id,
+        media_details=media_details,
+    )
+
+
+async def _rescan_plex_tv_request(
+    request_id: int,
+    plex: PlexService,
+    runtime_settings: Settings,
+) -> bool:
+    """Resync one TV request on an isolated DB session."""
+    from app.siftarr.services.episode_sync_service import EpisodeSyncService
+    from app.siftarr.services.overseerr_service import OverseerrService
+
+    async with async_session_maker() as worker_db:
+        overseerr = OverseerrService(settings=runtime_settings)
+        episode_sync = EpisodeSyncService(worker_db, overseerr=overseerr, plex=plex)
+        try:
+            await episode_sync.sync_episodes(request_id, force_plex_refresh=True)
+        except Exception:
+            await worker_db.rollback()
+            logger.exception(
+                "Plex TV resync failed for request_id=%s during settings rescan",
+                request_id,
+            )
+            return False
+        finally:
+            await overseerr.close()
+
+    return True
 
 
 # Pydantic models for connection settings
@@ -143,6 +277,56 @@ async def get_settings_page(
         "settings.html",
         context,
     )
+
+
+@router.post("/rescan-plex")
+async def rescan_plex(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+) -> HTMLResponse:
+    """Re-scan Plex for availability across existing requests."""
+    context = await _build_settings_page_context(request, db)
+
+    try:
+        runtime_settings = await get_effective_settings(db)
+        plex = PlexService(settings=runtime_settings)
+        try:
+            result = await db.execute(
+                select(RequestModel).where(RequestModel.media_type == MediaType.TV)
+            )
+            tv_requests = list(result.scalars().all())
+
+            configured_concurrency = getattr(runtime_settings, "plex_sync_concurrency", 1)
+            sync_concurrency = (
+                configured_concurrency
+                if isinstance(configured_concurrency, int) and configured_concurrency > 0
+                else 1
+            )
+            resync_results = await gather_limited(
+                (tv_request.id for tv_request in tv_requests),
+                sync_concurrency,
+                lambda request_id: _rescan_plex_tv_request(request_id, plex, runtime_settings),
+            )
+            tv_resynced = sum(1 for result in resync_results if result)
+            tv_failed = len(resync_results) - tv_resynced
+
+            polling_service = PlexPollingService(db, plex)
+            completed = await polling_service.poll()
+        finally:
+            await plex.close()
+
+        context["message"] = (
+            "Plex availability re-scan completed. "
+            f"Re-synced {tv_resynced} TV request(s), had {tv_failed} failed TV request(s), "
+            f"and transitioned {completed} request(s) to completed."
+        )
+        context["message_type"] = "success"
+    except Exception as exc:
+        logger.exception("Plex availability re-scan failed")
+        context["message"] = f"Plex availability re-scan failed: {exc}"
+        context["message_type"] = "error"
+
+    return templates.TemplateResponse(request, "settings.html", context)
 
 
 @router.post("/connections")
@@ -368,84 +552,91 @@ async def sync_overseerr(
 
                     actionable_requests.append(ov_req)
 
+                sync_concurrency = max(1, runtime_settings.overseerr_sync_concurrency)
+                sync_semaphore = asyncio.Semaphore(sync_concurrency)
+                media_details_tasks: dict[tuple[str, int], asyncio.Task[dict | None]] = {}
+                media_details_lock = asyncio.Lock()
+
+                prepared_requests = await asyncio.gather(
+                    *(
+                        _prepare_overseerr_import(
+                            ov_req,
+                            overseerr_service,
+                            sync_semaphore,
+                            media_details_tasks,
+                            media_details_lock,
+                        )
+                        for ov_req in actionable_requests
+                    ),
+                    return_exceptions=True,
+                )
+
                 # Process each request
                 new_tv_requests: list[RequestModel] = []
-                for ov_req in actionable_requests:
+                for prepared_request in prepared_requests:
                     try:
-                        # Overseerr API returns media info nested under "media" key
-                        media = ov_req.get("media") or {}
-                        tmdb_id = media.get("tmdbId")
-                        tvdb_id = media.get("tvdbId")
-                        overseerr_request_id = ov_req.get("id")
-
-                        if tmdb_id is None and tvdb_id is None:
+                        if isinstance(prepared_request, BaseException):
+                            logger.exception(
+                                "Overseerr request prefetch failed during sync",
+                                exc_info=prepared_request,
+                            )
                             skipped_count += 1
                             continue
 
-                        external_id = str(tmdb_id) if tmdb_id is not None else str(tvdb_id)
+                        if prepared_request is None:
+                            skipped_count += 1
+                            continue
+
+                        prepared = prepared_request
 
                         # Skip if already exists
                         if (
-                            external_id in existing_external_ids
-                            or overseerr_request_id in existing_request_ids
+                            prepared.external_id in existing_external_ids
+                            or prepared.overseerr_request_id in existing_request_ids
                         ):
                             skipped_count += 1
                             continue
 
-                        # Determine media type
-                        media_type_str = media.get("mediaType", "")
-                        media_type = MediaType.MOVIE if media_type_str == "movie" else MediaType.TV
-
-                        # Get requested seasons/episodes
-                        requested_seasons = media.get("requestedSeasons")
-                        requested_episodes = media.get("requestedEpisodes")
-
-                        # Get requester info - use plexUsername or displayName as fallback for username
-                        requested_by = ov_req.get("requestedBy") or {}
-                        username = (
-                            requested_by.get("username")
-                            or requested_by.get("plexUsername")
-                            or requested_by.get("displayName")
-                        )
-                        email = requested_by.get("email")
-
-                        # Fetch title and year from Overseerr media details
-                        title = ""
-                        year = None
-                        media_external_id = tmdb_id if tmdb_id else tvdb_id
-                        if media_external_id:
-                            media_type_for_api = "movie" if media_type == MediaType.MOVIE else "tv"
-                            title, year = await extract_media_title_and_year(
-                                overseerr_service, media_type_for_api, media_external_id
-                            )
-
                         # Create new request
                         new_request = RequestModel(
-                            external_id=external_id,
-                            media_type=media_type,
-                            tmdb_id=tmdb_id,
-                            tvdb_id=tvdb_id,
-                            title=title,
-                            year=year,
-                            requested_seasons=str(requested_seasons) if requested_seasons else None,
-                            requested_episodes=str(requested_episodes)
-                            if requested_episodes
+                            external_id=prepared.external_id,
+                            media_type=prepared.media_type,
+                            tmdb_id=prepared.tmdb_id,
+                            tvdb_id=prepared.tvdb_id,
+                            title=prepared.title,
+                            year=prepared.year,
+                            requested_seasons=str(prepared.requested_seasons)
+                            if prepared.requested_seasons
                             else None,
-                            requester_username=username,
-                            requester_email=email,
+                            requested_episodes=str(prepared.requested_episodes)
+                            if prepared.requested_episodes
+                            else None,
+                            requester_username=prepared.requester_username,
+                            requester_email=prepared.requester_email,
                             status=RequestStatus.PENDING,
-                            overseerr_request_id=overseerr_request_id,
+                            overseerr_request_id=prepared.overseerr_request_id,
                         )
                         db.add(new_request)
                         await db.flush()
-                        if media_type == MediaType.TV:
+                        await evaluate_imported_request(
+                            db,
+                            overseerr_service,
+                            new_request,
+                            logger=logger,
+                            prefetched_media_details=prepared.media_details,
+                            local_episodes=(),
+                        )
+                        if prepared.media_type == MediaType.TV:
                             new_tv_requests.append(new_request)
-                        existing_external_ids.add(external_id)  # Prevent duplicates in same sync
-                        if overseerr_request_id is not None:
-                            existing_request_ids.add(overseerr_request_id)
+                        existing_external_ids.add(
+                            prepared.external_id
+                        )  # Prevent duplicates in same sync
+                        if prepared.overseerr_request_id is not None:
+                            existing_request_ids.add(prepared.overseerr_request_id)
                         synced_count += 1
                     except Exception:
                         # Log individual request processing errors but continue
+                        logger.exception("Overseerr request import failed during sync")
                         skipped_count += 1
                         continue
 
@@ -454,14 +645,22 @@ async def sync_overseerr(
                 if synced_count > 0:
                     from app.siftarr.services.episode_sync_service import EpisodeSyncService
 
-                    episode_sync = EpisodeSyncService(db, overseerr=overseerr_service)
-                    for req in new_tv_requests:
-                        try:
-                            await episode_sync.sync_episodes(req.id)
-                        except Exception:
-                            logger.exception(
-                                "Episode sync failed for request_id=%s during import", req.id
-                            )
+                    plex_service = PlexService(settings=runtime_settings)
+                    try:
+                        episode_sync = EpisodeSyncService(
+                            db,
+                            overseerr=overseerr_service,
+                            plex=plex_service,
+                        )
+                        for req in new_tv_requests:
+                            try:
+                                await episode_sync.sync_episodes(req.id)
+                            except Exception:
+                                logger.exception(
+                                    "Episode sync failed for request_id=%s during import", req.id
+                                )
+                    finally:
+                        await plex_service.close()
 
                     message = f"Synced {synced_count} new request(s) from Overseerr"
                     message_type = "success"
@@ -494,12 +693,10 @@ async def clear_cache(
 
     try:
         release_result = await clear_release_search_cache(db)
-        cleared_status_entries = clear_status_cache()
         context["message"] = (
             "Cleared app search cache: "
-            f"removed {release_result['deleted_releases']} stored release result(s), "
-            f"detached {release_result['detached_episode_refs']} episode link(s), and "
-            f"cleared {cleared_status_entries} Overseerr status cache entr{'y' if cleared_status_entries == 1 else 'ies'}."
+            f"removed {release_result['deleted_releases']} stored release result(s) and "
+            f"detached {release_result['detached_episode_refs']} episode link(s)."
         )
         context["message_type"] = "success"
     except Exception as exc:

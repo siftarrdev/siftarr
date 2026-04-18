@@ -6,9 +6,25 @@ from typing import Any
 import httpx
 
 from app.siftarr.config import Settings, get_settings
+from app.siftarr.services.async_utils import gather_limited
 from app.siftarr.services.http_client import get_shared_client
 
 logger = logging.getLogger(__name__)
+
+# Modern Plex agents (tv.plex.agents.series, tv.plex.agents.movie) store
+# external IDs in "tmdb://ID" / "tvdb://ID" format inside each item's
+# Guid array.  The legacy /library/search?guid= endpoint only accepts the
+# old "com.plexapp.agents.themoviedb://ID" / "com.plexapp.agents.thetvdb://ID"
+# format *and* modern Plex versions may return 400 for guid searches entirely.
+#
+# We try both GUID formats via /library/search?guid=, and if both fail we
+# fall back to scanning all items in the relevant library section and
+# matching by the Guid array.
+_MODERN_GUID_PREFIXES: dict[str, list[str]] = {
+    # key: search-prefix  value: list of prefixes to try, newest first
+    "tmdb": ["tmdb://", "com.plexapp.agents.themoviedb://"],
+    "tvdb": ["tvdb://", "com.plexapp.agents.thetvdb://"],
+}
 
 
 class PlexService:
@@ -37,6 +53,98 @@ class PlexService:
         """Check if a metadata entry has Media (is available on Plex)."""
         return "Media" in metadata and bool(metadata.get("Media"))
 
+    # ------------------------------------------------------------------
+    #  Internal helpers for parsing Plex JSON responses
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _extract_metadata_items(container: dict[str, Any]) -> list[dict[str, Any]]:
+        """Extract metadata items from a Plex MediaContainer response.
+
+        Plex returns metadata in two formats depending on endpoint:
+
+        * Direct listings (``/library/sections/…/all``, ``/metadata/…/children``)
+          use ``MediaContainer.Metadata[]``.
+
+        * Search results (``/library/search?query=…``) nest each item inside
+          ``MediaContainer.SearchResult[].Metadata``.
+
+        This helper normalises both into a flat list of metadata dicts.
+        """
+        direct = container.get("Metadata")
+        if isinstance(direct, list):
+            return direct
+
+        items: list[dict[str, Any]] = []
+        for sr in container.get("SearchResult", []):
+            md = sr.get("Metadata")
+            if isinstance(md, dict):
+                items.append(md)
+        return items
+
+    def _match_guid(self, item: dict[str, Any], guid_prefix: str, guid_id: int) -> bool:
+        """Return True if *item* has a Guid entry matching *prefix* + *guid_id*."""
+        target = f"{guid_prefix}{guid_id}"
+        for g in item.get("Guid", []):
+            gid = g.get("id", "") if isinstance(g, dict) else str(g)
+            if gid == target:
+                return True
+        return False
+
+    async def _find_by_guid_in_sections(
+        self,
+        guid_prefix: str,
+        guid_id: int,
+        media_type: str,
+    ) -> dict[str, Any] | None:
+        """Scan library sections to find an item by its external Guid.
+
+        Used as a fallback when /library/search?guid= fails (e.g. on modern
+        Plex agents that don't support guid-based search).
+        """
+        if media_type == "movie":
+            sections = await self._get_movie_library_sections()
+        else:
+            sections = await self._get_tv_library_sections()
+
+        for section_key in sections:
+            client = await self._get_client()
+            endpoint = f"{self.base_url}/library/sections/{section_key}/all"
+            try:
+                response = await client.get(
+                    endpoint,
+                    headers=self._get_headers(),
+                    params={"includeGuids": "1"},
+                    timeout=30.0,
+                )
+                if response.status_code != 200:
+                    continue
+                data = response.json()
+                container = data.get("MediaContainer", {})
+                for item in self._extract_metadata_items(container):
+                    if item.get("type") != media_type or not item.get("ratingKey"):
+                        continue
+                    if self._match_guid(item, guid_prefix, guid_id):
+                        return self._item_to_show_dict(item)
+            except (httpx.RequestError, ValueError):
+                continue
+        return None
+
+    @staticmethod
+    def _item_to_show_dict(item: dict[str, Any]) -> dict[str, Any]:
+        """Convert a Plex metadata item to our simplified show/movie dict."""
+        return {
+            "rating_key": item.get("ratingKey"),
+            "title": item.get("title"),
+            "year": item.get("year"),
+            "guid": item.get("guid"),
+            "Media": item.get("Media"),
+        }
+
+    # ------------------------------------------------------------------
+    #  Public search / lookup methods
+    # ------------------------------------------------------------------
+
     async def search_show(self, title: str) -> list[dict[str, Any]]:
         """Search Plex library by title, return matching items with rating keys.
 
@@ -63,7 +171,7 @@ class PlexService:
             if response.status_code == 200:
                 data = response.json()
                 container = data.get("MediaContainer", {})
-                results = container.get("Metadata", [])
+                results = self._extract_metadata_items(container)
                 matches = [
                     {
                         "rating_key": item.get("ratingKey"),
@@ -86,8 +194,103 @@ class PlexService:
             logger.exception("PlexService: search_show(%r) failed", title)
             return []
 
+    async def _search_guid(
+        self,
+        guid: str,
+        media_type: str,
+    ) -> dict[str, Any] | None:
+        """Search Plex by guid string and return first matching item.
+
+        Handles both ``Metadata[]`` and ``SearchResult[].Metadata`` response formats.
+        """
+        endpoint = f"{self.base_url}/library/search"
+        client = await self._get_client()
+        params = {"guid": guid}
+
+        try:
+            response = await client.get(
+                endpoint,
+                headers=self._get_headers(),
+                params=params,
+                timeout=30.0,
+            )
+            if response.status_code == 200:
+                data = response.json()
+                container = data.get("MediaContainer", {})
+                results = self._extract_metadata_items(container)
+                for item in results:
+                    if item.get("type") == media_type and item.get("ratingKey"):
+                        return self._item_to_show_dict(item)
+                return None
+            # guid search returning non-200 (e.g. 400) means the format
+            # isn't supported by this Plex server – caller should try next.
+            return None
+        except (httpx.RequestError, ValueError):
+            return None
+
+    async def get_movie_by_tmdb(self, tmdb_id: int) -> dict[str, Any] | None:
+        """Find a movie in Plex library by TMDB ID.
+
+        Tries multiple guid formats (modern ``tmdb://``, legacy
+        ``com.plexapp.agents.themoviedb://``) and falls back to a
+        library section scan.
+
+        Args:
+            tmdb_id: The TMDB ID to search for.
+
+        Returns:
+            Movie metadata dict if found, None otherwise.
+        """
+        if not self.base_url or not self.token:
+            return None
+
+        # Try guid-based search with each known format
+        for prefix in _MODERN_GUID_PREFIXES["tmdb"]:
+            guid = f"{prefix}{tmdb_id}"
+            result = await self._search_guid(guid, "movie")
+            if result is not None:
+                logger.info(
+                    "PlexService: get_movie_by_tmdb(%s) found via guid %s: %s",
+                    tmdb_id,
+                    guid,
+                    result.get("rating_key"),
+                )
+                # Merge Media info for availability check
+                return result
+
+        # Fallback: scan movie library sections
+        result = await self._find_by_guid_in_sections("tmdb://", tmdb_id, "movie")
+        if result is not None:
+            logger.info(
+                "PlexService: get_movie_by_tmdb(%s) found via section scan: %s",
+                tmdb_id,
+                result.get("rating_key"),
+            )
+            return result
+
+        logger.debug("PlexService: get_movie_by_tmdb(%s) found no match", tmdb_id)
+        return None
+
+    async def check_movie_available(self, tmdb_id: int) -> bool:
+        """Check if a movie is available on Plex by TMDB ID.
+
+        Args:
+            tmdb_id: The TMDB ID to check.
+
+        Returns:
+            True if the movie exists in Plex and has Media entries.
+        """
+        movie = await self.get_movie_by_tmdb(tmdb_id)
+        if movie is None:
+            return False
+        return self._is_available(movie)
+
     async def get_show_by_tmdb(self, tmdb_id: int) -> dict[str, Any] | None:
-        """Find a show in Plex library by TMDB ID using Plex's guid system.
+        """Find a show in Plex library by TMDB ID.
+
+        Tries multiple guid formats (modern ``tmdb://``, legacy
+        ``com.plexapp.agents.themoviedb://``) and falls back to a
+        library section scan.
 
         Args:
             tmdb_id: The TMDB ID to search for.
@@ -98,50 +301,38 @@ class PlexService:
         if not self.base_url or not self.token:
             return None
 
-        endpoint = f"{self.base_url}/library/search"
-        client = await self._get_client()
-        guid = f"com.plexapp.agents.themoviedb://{tmdb_id}"
-        params = {"guid": guid}
-
-        try:
-            response = await client.get(
-                endpoint,
-                headers=self._get_headers(),
-                params=params,
-                timeout=30.0,
-            )
-            if response.status_code == 200:
-                data = response.json()
-                container = data.get("MediaContainer", {})
-                results = container.get("Metadata", [])
-                for item in results:
-                    if item.get("type") == "show" and item.get("ratingKey"):
-                        logger.info(
-                            "PlexService: get_show_by_tmdb(%s) found rating_key=%s",
-                            tmdb_id,
-                            item.get("ratingKey"),
-                        )
-                        return {
-                            "rating_key": item.get("ratingKey"),
-                            "title": item.get("title"),
-                            "year": item.get("year"),
-                            "guid": item.get("guid"),
-                        }
-                logger.info("PlexService: get_show_by_tmdb(%s) found no show match", tmdb_id)
-            else:
-                # 400 = not found (expected when show doesn't exist in Plex yet)
-                logger.debug(
-                    "PlexService: get_show_by_tmdb(%s) returned status %d (not in Plex)",
+        # Try guid-based search with each known format
+        for prefix in _MODERN_GUID_PREFIXES["tmdb"]:
+            guid = f"{prefix}{tmdb_id}"
+            result = await self._search_guid(guid, "show")
+            if result is not None:
+                logger.info(
+                    "PlexService: get_show_by_tmdb(%s) found via guid %s: %s",
                     tmdb_id,
-                    response.status_code,
+                    guid,
+                    result.get("rating_key"),
                 )
-            return None
-        except (httpx.RequestError, ValueError):
-            logger.exception("PlexService: get_show_by_tmdb(%s) failed", tmdb_id)
-            return None
+                return result
+
+        # Fallback: scan TV library sections
+        result = await self._find_by_guid_in_sections("tmdb://", tmdb_id, "show")
+        if result is not None:
+            logger.info(
+                "PlexService: get_show_by_tmdb(%s) found via section scan: %s",
+                tmdb_id,
+                result.get("rating_key"),
+            )
+            return result
+
+        logger.debug("PlexService: get_show_by_tmdb(%s) found no match", tmdb_id)
+        return None
 
     async def get_show_by_tvdb(self, tvdb_id: int) -> dict[str, Any] | None:
-        """Find a show in Plex library by TVDB ID using Plex's guid system.
+        """Find a show in Plex library by TVDB ID.
+
+        Tries multiple guid formats (modern ``tvdb://``, legacy
+        ``com.plexapp.agents.thetvdb://``) and falls back to a
+        library section scan.
 
         Args:
             tvdb_id: The TVDB ID to search for.
@@ -152,47 +343,31 @@ class PlexService:
         if not self.base_url or not self.token:
             return None
 
-        endpoint = f"{self.base_url}/library/search"
-        client = await self._get_client()
-        guid = f"com.plexapp.agents.thetvdb://{tvdb_id}"
-        params = {"guid": guid}
-
-        try:
-            response = await client.get(
-                endpoint,
-                headers=self._get_headers(),
-                params=params,
-                timeout=30.0,
-            )
-            if response.status_code == 200:
-                data = response.json()
-                container = data.get("MediaContainer", {})
-                results = container.get("Metadata", [])
-                for item in results:
-                    if item.get("type") == "show" and item.get("ratingKey"):
-                        logger.info(
-                            "PlexService: get_show_by_tvdb(%s) found rating_key=%s",
-                            tvdb_id,
-                            item.get("ratingKey"),
-                        )
-                        return {
-                            "rating_key": item.get("ratingKey"),
-                            "title": item.get("title"),
-                            "year": item.get("year"),
-                            "guid": item.get("guid"),
-                        }
-                logger.info("PlexService: get_show_by_tvdb(%s) found no show match", tvdb_id)
-            else:
-                # 400 = not found (expected when show doesn't exist in Plex yet)
-                logger.debug(
-                    "PlexService: get_show_by_tvdb(%s) returned status %d (not in Plex)",
+        # Try guid-based search with each known format
+        for prefix in _MODERN_GUID_PREFIXES["tvdb"]:
+            guid = f"{prefix}{tvdb_id}"
+            result = await self._search_guid(guid, "show")
+            if result is not None:
+                logger.info(
+                    "PlexService: get_show_by_tvdb(%s) found via guid %s: %s",
                     tvdb_id,
-                    response.status_code,
+                    guid,
+                    result.get("rating_key"),
                 )
-            return None
-        except (httpx.RequestError, ValueError):
-            logger.exception("PlexService: get_show_by_tvdb(%s) failed", tvdb_id)
-            return None
+                return result
+
+        # Fallback: scan TV library sections
+        result = await self._find_by_guid_in_sections("tvdb://", tvdb_id, "show")
+        if result is not None:
+            logger.info(
+                "PlexService: get_show_by_tvdb(%s) found via section scan: %s",
+                tvdb_id,
+                result.get("rating_key"),
+            )
+            return result
+
+        logger.debug("PlexService: get_show_by_tvdb(%s) found no match", tvdb_id)
+        return None
 
     async def get_show_children(self, rating_key: str) -> list[dict[str, Any]]:
         """Get all seasons for a show.
@@ -276,14 +451,14 @@ class PlexService:
         Returns:
             Dict mapping (season_number, episode_number) -> available (True/False).
         """
-        availability: dict[tuple[int, int], bool] = {}
-
         seasons = await self.get_show_children(rating_key)
         logger.info(
             "PlexService: get_episode_availability(rating_key=%s) found %d season(s)",
             rating_key,
             len(seasons),
         )
+
+        season_infos: list[tuple[int, str]] = []
         for season in seasons:
             if season.get("type") != "season":
                 continue
@@ -294,7 +469,16 @@ class PlexService:
             if not season_rating_key:
                 continue
 
-            episodes = await self.get_season_children(season_rating_key)
+            season_infos.append((season_number, season_rating_key))
+
+        season_episodes = await gather_limited(
+            (season_rating_key for _, season_rating_key in season_infos),
+            self.settings.plex_sync_concurrency,
+            self.get_season_children,
+        )
+
+        availability: dict[tuple[int, int], bool] = {}
+        for (season_number, _), episodes in zip(season_infos, season_episodes, strict=True):
             available_in_season = 0
             for episode in episodes:
                 if episode.get("type") != "episode":
@@ -364,6 +548,31 @@ class PlexService:
                 sections = container.get("Directory", [])
                 return [
                     str(s.get("key")) for s in sections if s.get("type") == "show" and s.get("key")
+                ]
+            return []
+        except (httpx.RequestError, ValueError):
+            return []
+
+    async def _get_movie_library_sections(self) -> list[str]:
+        """Get the library section keys for movie content."""
+        if not self.base_url or not self.token:
+            return []
+
+        endpoint = f"{self.base_url}/library/sections"
+        client = await self._get_client()
+
+        try:
+            response = await client.get(
+                endpoint,
+                headers=self._get_headers(),
+                timeout=30.0,
+            )
+            if response.status_code == 200:
+                data = response.json()
+                container = data.get("MediaContainer", {})
+                sections = container.get("Directory", [])
+                return [
+                    str(s.get("key")) for s in sections if s.get("type") == "movie" and s.get("key")
                 ]
             return []
         except (httpx.RequestError, ValueError):

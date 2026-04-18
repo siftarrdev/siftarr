@@ -84,29 +84,27 @@ class TestDashboardRouter:
 
         lifecycle_service = AsyncMock()
         lifecycle_service.get_active_requests.return_value = [active_request]
+        lifecycle_service.get_requests_by_status.return_value = []
+        lifecycle_service.get_requests_stats.return_value = {
+            "by_status": {},
+        }
         monkeypatch.setattr(dashboard, "LifecycleService", lambda db: lifecycle_service)
 
-        class FakeOverseerrService:
-            def __init__(self, settings):
-                pass
-
-            async def get_request_status(self, request_id):
-                return {"status": "approved", "media": {"status": "processing"}}
-
-            def normalize_request_status(self, value):
-                return value
-
-            def normalize_media_status(self, value):
-                return value
-
-            async def close(self):
-                return None
-
-        monkeypatch.setattr(dashboard, "OverseerrService", FakeOverseerrService)
         monkeypatch.setattr(
             dashboard,
             "PendingQueueService",
             lambda db: AsyncMock(get_all_pending=AsyncMock(return_value=[])),
+        )
+
+        monkeypatch.setattr(
+            dashboard,
+            "get_effective_settings",
+            AsyncMock(
+                return_value=MagicMock(
+                    overseerr_url="http://overseerr.test",
+                    staging_mode_enabled=False,
+                )
+            ),
         )
 
         mock_db.execute.return_value = MagicMock(
@@ -119,29 +117,68 @@ class TestDashboardRouter:
         assert active_request in context["pending_requests"]
 
     @pytest.mark.asyncio
-    async def test_approve_request_success(self):
-        """Approve helper should surface successful approvals."""
-        mock_overseerr_service = AsyncMock()
-        mock_overseerr_service.approve_request.return_value = True
+    async def test_dashboard_restores_unreleased_tab_and_requests(self, mock_db, monkeypatch):
+        """Dashboard should expose unreleased requests and stats for the tab."""
+        unreleased_request = MagicMock()
+        unreleased_request.id = 42
+        unreleased_request.status = RequestStatus.UNRELEASED
+        unreleased_request.overseerr_request_id = 10
+        unreleased_request.title = "The Rookie"
+        unreleased_request.media_type = MediaType.TV
+        unreleased_request.created_at = datetime(2026, 4, 1, 12, 0, tzinfo=UTC)
+        unreleased_request.requester_username = "lucas"
+        unreleased_request.year = 2025
+        unreleased_request.tmdb_id = 123
+        unreleased_request.tvdb_id = 456
 
-        result = await mock_overseerr_service.approve_request(123)
+        lifecycle_service = AsyncMock()
+        lifecycle_service.get_active_requests.return_value = [unreleased_request]
+        lifecycle_service.get_requests_by_status.return_value = []
+        lifecycle_service.get_unreleased_requests.return_value = [unreleased_request]
+        lifecycle_service.get_requests_stats.return_value = {
+            "by_status": {RequestStatus.UNRELEASED.value: 1},
+        }
+        monkeypatch.setattr(dashboard, "LifecycleService", lambda db: lifecycle_service)
 
-        assert result is True
-        mock_overseerr_service.approve_request.assert_called_once_with(123)
+        monkeypatch.setattr(
+            dashboard,
+            "PendingQueueService",
+            lambda db: AsyncMock(get_all_pending=AsyncMock(return_value=[])),
+        )
+        monkeypatch.setattr(
+            dashboard,
+            "get_effective_settings",
+            AsyncMock(
+                return_value=MagicMock(
+                    overseerr_url="http://overseerr.test",
+                    staging_mode_enabled=False,
+                )
+            ),
+        )
 
-    @pytest.mark.asyncio
-    async def test_approve_request_not_found(self):
-        """Approve helper should map a missing request to 404."""
-        mock_overseerr_service = AsyncMock()
-        mock_overseerr_service.approve_request.return_value = False
+        fake_overseerr = AsyncMock()
+        fake_overseerr.get_media_details.return_value = {
+            "nextEpisodeToAir": {"airDate": "2026-05-01"}
+        }
+        monkeypatch.setattr(dashboard, "OverseerrService", lambda settings: fake_overseerr)
 
-        from starlette.exceptions import HTTPException
+        execute_results = [
+            MagicMock(scalars=MagicMock(return_value=MagicMock(all=MagicMock(return_value=[])))),
+            MagicMock(scalars=MagicMock(return_value=MagicMock(all=MagicMock(return_value=[])))),
+        ]
+        mock_db.execute.side_effect = execute_results
 
-        with pytest.raises(HTTPException) as exc_info:
-            if not await mock_overseerr_service.approve_request(999):
-                raise HTTPException(status_code=404, detail="Request not found")
+        response = await dashboard.dashboard(MagicMock(), db=mock_db)
 
-        assert exc_info.value.status_code == 404
+        context = response.context
+        assert context["unreleased_requests"] == [unreleased_request]
+        assert context["unreleased_earliest"][42] == "2026-05-01"
+        assert context["stats"]["unreleased"] == 1
+        rendered = response.body.decode()
+        assert "tab-unreleased" in rendered
+        assert "content-unreleased" in rendered
+        assert "The Rookie" in rendered
+        assert "No unreleased requests." not in rendered
 
     @pytest.mark.asyncio
     async def test_deny_request_success(self):
@@ -1740,126 +1777,6 @@ class TestDashboardRouter:
         }
 
     @pytest.mark.asyncio
-    async def test_mark_series_available_refreshes_local_state(self, mock_db, monkeypatch):
-        """Series mark-available action should call Overseerr and refresh local TV state."""
-        request_record = MagicMock()
-        request_record.id = 21
-        request_record.media_type = MediaType.TV
-        request_record.tmdb_id = 1234
-        request_record.overseerr_request_id = 88
-
-        request_result = MagicMock()
-        request_result.scalar_one_or_none.return_value = request_record
-        mock_db.execute.return_value = request_result
-
-        monkeypatch.setattr(
-            dashboard_api, "get_effective_settings", AsyncMock(return_value=MagicMock())
-        )
-
-        overseerr_service = AsyncMock()
-        overseerr_service.resolve_tv_media_id.return_value = 4321
-        overseerr_service.mark_series_available.return_value = True
-        monkeypatch.setattr(dashboard_api, "OverseerrService", lambda settings: overseerr_service)
-
-        plex_service = AsyncMock()
-        monkeypatch.setattr(dashboard_api, "PlexService", lambda settings: plex_service)
-
-        sync_episodes = AsyncMock()
-
-        class FakeEpisodeSyncService:
-            def __init__(self, db, plex):
-                self.db = db
-                self.plex = plex
-
-            async def sync_episodes(self, request_id, force_plex_refresh=False):
-                return await sync_episodes(request_id, force_plex_refresh=force_plex_refresh)
-
-        monkeypatch.setattr(dashboard_api, "clear_status_cache", MagicMock(return_value=1))
-        monkeypatch.setattr(dashboard_api, "clear_media_details_cache", MagicMock(return_value=1))
-
-        with pytest.MonkeyPatch.context() as inner_monkeypatch:
-            inner_monkeypatch.setattr(
-                "app.siftarr.services.episode_sync_service.EpisodeSyncService",
-                FakeEpisodeSyncService,
-            )
-            response = await dashboard_api.mark_series_available(
-                request_id=21,
-                db=mock_db,
-            )
-
-        body = json.loads(cast(bytes, response.body))
-        assert body["status"] == "success"
-        overseerr_service.resolve_tv_media_id.assert_awaited_once_with(
-            overseerr_request_id=88,
-            tmdb_id=1234,
-        )
-        overseerr_service.mark_series_available.assert_awaited_once_with(4321)
-        sync_episodes.assert_awaited_once_with(21, force_plex_refresh=True)
-
-    @pytest.mark.asyncio
-    async def test_mark_series_available_returns_error_on_overseerr_failure(
-        self, mock_db, monkeypatch
-    ):
-        """Series mark-available action should surface Overseerr failures."""
-        request_record = MagicMock()
-        request_record.id = 21
-        request_record.media_type = MediaType.TV
-        request_record.tmdb_id = 1234
-        request_record.overseerr_request_id = 88
-
-        request_result = MagicMock()
-        request_result.scalar_one_or_none.return_value = request_record
-        mock_db.execute.return_value = request_result
-
-        monkeypatch.setattr(
-            dashboard_api, "get_effective_settings", AsyncMock(return_value=MagicMock())
-        )
-
-        overseerr_service = AsyncMock()
-        overseerr_service.resolve_tv_media_id.return_value = 4321
-        overseerr_service.mark_series_available.return_value = False
-        monkeypatch.setattr(dashboard_api, "OverseerrService", lambda settings: overseerr_service)
-        monkeypatch.setattr(dashboard_api, "PlexService", lambda settings: AsyncMock())
-
-        response = await dashboard_api.mark_series_available(
-            request_id=21,
-            db=mock_db,
-        )
-
-        assert response.status_code == 502
-
-    @pytest.mark.asyncio
-    async def test_mark_series_available_requires_overseerr_media_id(self, mock_db, monkeypatch):
-        """Series mark-available action should fail clearly if no Overseerr media id can be resolved."""
-        request_record = MagicMock()
-        request_record.id = 21
-        request_record.media_type = MediaType.TV
-        request_record.tmdb_id = 1234
-        request_record.overseerr_request_id = 88
-
-        request_result = MagicMock()
-        request_result.scalar_one_or_none.return_value = request_record
-        mock_db.execute.return_value = request_result
-
-        monkeypatch.setattr(
-            dashboard_api, "get_effective_settings", AsyncMock(return_value=MagicMock())
-        )
-
-        overseerr_service = AsyncMock()
-        overseerr_service.resolve_tv_media_id.return_value = None
-        monkeypatch.setattr(dashboard_api, "OverseerrService", lambda settings: overseerr_service)
-        monkeypatch.setattr(dashboard_api, "PlexService", lambda settings: AsyncMock())
-
-        with pytest.raises(HTTPException) as exc_info:
-            await dashboard_api.mark_series_available(
-                request_id=21,
-                db=mock_db,
-            )
-
-        assert exc_info.value.status_code == 400
-        assert exc_info.value.detail == "No Overseerr media ID available"
-
-    @pytest.mark.asyncio
     async def test_use_request_release_redirects_pending_requests_to_pending_tab(
         self, mock_db, monkeypatch
     ):
@@ -2028,8 +1945,6 @@ class TestDashboardRouter:
         assert "/manual-release/use" in template
         assert "background refresh updates Plex/Overseerr data" in template
         assert "Plex episode availability is being resolved for partial seasons" in template
-        assert "Mark Series Available in Overseerr" in template
-        assert "function markSeriesAvailable(requestId)" in template
 
     def test_dashboard_template_supports_annotation_highlighting(self):
         """Torrent annotation highlighting helpers should exist in the template."""
