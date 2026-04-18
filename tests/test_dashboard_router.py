@@ -276,6 +276,58 @@ class TestDashboardRouter:
         assert unreleased_request in context["unreleased_requests"]
 
     @pytest.mark.asyncio
+    async def test_dashboard_renders_staged_torrents_for_refresh(self, mock_db, monkeypatch):
+        """Dashboard should include staged torrents in the staged tab HTML."""
+        lifecycle_service = AsyncMock()
+        lifecycle_service.get_active_requests.return_value = []
+        lifecycle_service.get_requests_by_status.return_value = []
+        lifecycle_service.get_unreleased_and_partial_requests.return_value = []
+        lifecycle_service.get_requests_stats.return_value = {"by_status": {}}
+        monkeypatch.setattr(dashboard, "LifecycleService", lambda db: lifecycle_service)
+
+        monkeypatch.setattr(
+            dashboard,
+            "PendingQueueService",
+            lambda db: AsyncMock(get_all_pending=AsyncMock(return_value=[])),
+        )
+        monkeypatch.setattr(
+            dashboard,
+            "get_effective_settings",
+            AsyncMock(
+                return_value=MagicMock(
+                    overseerr_url="http://overseerr.test",
+                    staging_mode_enabled=False,
+                )
+            ),
+        )
+
+        staged_torrent = MagicMock()
+        staged_torrent.id = 1
+        staged_torrent.request_id = None
+        staged_torrent.title = "Test Torrent"
+        staged_torrent.status = "staged"
+        staged_torrent.size = 123
+        staged_torrent.indexer = "Indexer"
+        staged_torrent.score = 42
+        staged_torrent.created_at = datetime(2026, 4, 1, 12, 0, tzinfo=UTC)
+        staged_torrent.replaced_by_id = None
+        staged_torrent.replacement_reason = None
+
+        staged_result = MagicMock(
+            scalars=MagicMock(return_value=MagicMock(all=MagicMock(return_value=[staged_torrent])))
+        )
+        empty_result = MagicMock(
+            scalars=MagicMock(return_value=MagicMock(all=MagicMock(return_value=[])))
+        )
+        mock_db.execute.side_effect = [staged_result, empty_result, empty_result, empty_result]
+
+        response = await dashboard.dashboard(MagicMock(), db=mock_db)
+
+        body = response.body.decode()
+        assert "staged-torrents-body" in body
+        assert "Test Torrent" in body
+
+    @pytest.mark.asyncio
     async def test_deny_request_success(self):
         """Deny helper should surface successful declines."""
         mock_overseerr_service = AsyncMock()

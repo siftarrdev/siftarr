@@ -683,6 +683,9 @@ function showTab(tabName) {
     tab.classList.remove('border-transparent', 'text-gray-500');
     tab.classList.add('border-brand-500', 'text-brand-400');
     setActiveTab(tabName);
+    if (tabName === 'staged') {
+        refreshStagedTabData();
+    }
 }
 
 function setPoster(posterUrl, titleText) {
@@ -1166,10 +1169,37 @@ async function stageRelease(btn) {
         btn.classList.remove('btn-primary');
         btn.classList.add('btn-disabled');
         showToast('Torrent staged successfully');
+        refreshStagedTabData();
     } catch (err) {
         btn.disabled = false;
         btn.textContent = originalText;
         showToast('Error: ' + err.message);
+    }
+}
+
+let stagedTabRefreshInFlight = false;
+
+async function refreshStagedTabData() {
+    if (stagedTabRefreshInFlight) return;
+    const stagedBody = document.getElementById('staged-torrents-body');
+    if (!stagedBody) return;
+
+    stagedTabRefreshInFlight = true;
+    try {
+        const response = await fetch(window.location.pathname, { headers: { 'Accept': 'text/html' } });
+        if (!response.ok) return;
+        const html = await response.text();
+        const parser = new DOMParser();
+        const doc = parser.parseFromString(html, 'text/html');
+        const newBody = doc.getElementById('staged-torrents-body');
+        if (!newBody) return;
+
+        stagedBody.innerHTML = newBody.innerHTML;
+        filterStagedTable();
+    } catch (err) {
+        console.error('Failed to refresh staged tab:', err);
+    } finally {
+        stagedTabRefreshInFlight = false;
     }
 }
 
