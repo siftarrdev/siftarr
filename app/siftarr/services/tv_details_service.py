@@ -22,24 +22,13 @@ def has_unresolved_partial_tv_data(
     """Return True when season rows imply Plex enrichment still needs to run."""
     for season in seasons:
         season_episodes = episodes_by_season.get(season.id, [])
-        season_status = getattr(season.status, "value", season.status)
-        if season_status not in {
-            RequestStatus.PARTIALLY_AVAILABLE.value,
-            RequestStatus.PENDING.value,
-            RequestStatus.UNRELEASED.value,
-        }:
-            continue
         if not season_episodes:
             return True
 
         episode_statuses = {
             getattr(episode.status, "value", episode.status) for episode in season_episodes
         }
-        if RequestStatus.AVAILABLE.value not in episode_statuses and (
-            RequestStatus.PENDING.value in episode_statuses
-            or RequestStatus.UNRELEASED.value in episode_statuses
-            or season_status == RequestStatus.PARTIALLY_AVAILABLE.value
-        ):
+        if RequestStatus.PENDING.value in episode_statuses:
             return True
     return False
 
