@@ -52,7 +52,9 @@ class TestStagedRouter:
         monkeypatch.setattr(staged, "log_staging_decision", log_decision)
         monkeypatch.setattr(staged.os.path, "exists", MagicMock(return_value=False))
 
-        response = await staged.approve_staged_torrent(1, db=mock_db)
+        response = await staged.approve_staged_torrent(
+            1, http_request=MagicMock(headers={}), db=mock_db
+        )
 
         assert response.status_code == 303
         assert torrent.status == "approved"
@@ -103,7 +105,9 @@ class TestStagedRouter:
         monkeypatch.setattr(staged, "log_staging_decision", log_decision)
         monkeypatch.setattr(staged.os.path, "exists", MagicMock(return_value=False))
 
-        response = await staged.approve_staged_torrent(3, db=mock_db)
+        response = await staged.approve_staged_torrent(
+            3, http_request=MagicMock(headers={}), db=mock_db
+        )
 
         assert response.status_code == 303
         log_decision.assert_called_once_with(
@@ -111,3 +115,83 @@ class TestStagedRouter:
             approved_torrent=torrent,
             rules_selected_torrent=rule_torrent,
         )
+
+    @pytest.mark.asyncio
+    async def test_bulk_staged_action_approves_selected(self, mock_db, monkeypatch):
+        """Bulk approve should process multiple staged torrents."""
+        torrent_one = MagicMock()
+        torrent_one.id = 1
+        torrent_one.request_id = 10
+        torrent_one.magnet_url = "magnet:?xt=urn:btih:abc"
+        torrent_one.status = "staged"
+        torrent_one.selection_source = "rule"
+        torrent_one.torrent_path = "/tmp/one.torrent"
+        torrent_one.json_path = "/tmp/one.json"
+
+        torrent_two = MagicMock()
+        torrent_two.id = 2
+        torrent_two.request_id = 11
+        torrent_two.magnet_url = "magnet:?xt=urn:btih:def"
+        torrent_two.status = "staged"
+        torrent_two.selection_source = "rule"
+        torrent_two.torrent_path = "/tmp/two.torrent"
+        torrent_two.json_path = "/tmp/two.json"
+
+        torrent_result = MagicMock()
+        torrent_result.scalars.return_value.all.return_value = [torrent_one, torrent_two]
+        mock_db.execute.return_value = torrent_result
+
+        qbittorrent = AsyncMock()
+        qbittorrent.add_torrent.side_effect = ["hash1", "hash2"]
+        lifecycle_service = AsyncMock()
+        monkeypatch.setattr(staged, "get_effective_settings", AsyncMock(return_value=MagicMock()))
+        monkeypatch.setattr(staged, "QbittorrentService", MagicMock(return_value=qbittorrent))
+        monkeypatch.setattr(staged, "LifecycleService", MagicMock(return_value=lifecycle_service))
+        monkeypatch.setattr(staged, "log_staging_decision", MagicMock())
+        monkeypatch.setattr(staged.os.path, "exists", MagicMock(return_value=False))
+
+        response = await staged.bulk_staged_action(
+            action="approve",
+            torrent_ids=[1, 2],
+            http_request=MagicMock(headers={"accept": "application/json"}),
+            db=mock_db,
+        )
+
+        assert response.status_code == 200
+        assert torrent_one.status == "approved"
+        assert torrent_two.status == "approved"
+        assert lifecycle_service.mark_as_downloading.await_count == 2
+
+    @pytest.mark.asyncio
+    async def test_bulk_staged_action_discards_selected(self, mock_db, monkeypatch):
+        """Bulk discard should process multiple staged torrents."""
+        torrent_one = MagicMock()
+        torrent_one.id = 3
+        torrent_one.request_id = None
+        torrent_one.status = "staged"
+        torrent_one.torrent_path = "/tmp/three.torrent"
+        torrent_one.json_path = "/tmp/three.json"
+
+        torrent_two = MagicMock()
+        torrent_two.id = 4
+        torrent_two.request_id = None
+        torrent_two.status = "staged"
+        torrent_two.torrent_path = "/tmp/four.torrent"
+        torrent_two.json_path = "/tmp/four.json"
+
+        torrent_result = MagicMock()
+        torrent_result.scalars.return_value.all.return_value = [torrent_one, torrent_two]
+        mock_db.execute.return_value = torrent_result
+
+        monkeypatch.setattr(staged.os.path, "exists", MagicMock(return_value=False))
+
+        response = await staged.bulk_staged_action(
+            action="discard",
+            torrent_ids=[3, 4],
+            http_request=MagicMock(headers={"accept": "application/json"}),
+            db=mock_db,
+        )
+
+        assert response.status_code == 200
+        assert torrent_one.status == "discarded"
+        assert torrent_two.status == "discarded"

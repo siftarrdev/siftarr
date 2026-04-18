@@ -65,6 +65,7 @@ class LifecycleService:
             RequestStatus.DENIED,
         ],
         RequestStatus.DOWNLOADING: [
+            RequestStatus.DOWNLOADING,
             RequestStatus.STAGED,
             RequestStatus.PENDING,
             RequestStatus.COMPLETED,
@@ -250,6 +251,18 @@ class LifecycleService:
         result = await self.db.execute(
             select(Request)
             .where(Request.status == RequestStatus.UNRELEASED)
+            .order_by(Request.updated_at.desc())
+            .limit(limit)
+        )
+        return list(result.scalars().all())
+
+    async def get_unreleased_and_partial_requests(self, limit: int = 500) -> list[Request]:
+        """Get requests in UNRELEASED or PARTIALLY_AVAILABLE status."""
+        result = await self.db.execute(
+            select(Request)
+            .where(
+                Request.status.in_([RequestStatus.UNRELEASED, RequestStatus.PARTIALLY_AVAILABLE])
+            )
             .order_by(Request.updated_at.desc())
             .limit(limit)
         )

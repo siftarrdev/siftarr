@@ -4,7 +4,8 @@ import logging
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, Form, HTTPException
-from fastapi.responses import RedirectResponse
+from fastapi import Request as FastAPIRequest
+from fastapi.responses import JSONResponse, RedirectResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -165,13 +166,14 @@ async def bulk_request_action(
     return RedirectResponse(url=redirect_url, status_code=303)
 
 
-@router.post("/{request_id}/releases/{release_id}/use")
+@router.post("/{request_id}/releases/{release_id}/use", response_model=None)
 async def use_request_release(
     request_id: int,
     release_id: int,
+    http_request: FastAPIRequest,
     redirect_to: str | None = Form(default=None),
     db: AsyncSession = Depends(get_db),
-) -> RedirectResponse:
+) -> RedirectResponse | JSONResponse:
     """Stage or send a selected stored release for a request."""
     request = await load_request_or_404(db, request_id)
 
@@ -185,15 +187,18 @@ async def use_request_release(
         raise HTTPException(status_code=404, detail="Release not found")
 
     await use_releases(db, request, [release], selection_source="manual")
+    if "application/json" in http_request.headers.get("accept", ""):
+        return JSONResponse({"status": "ok", "message": "Torrent staged successfully"})
     return RedirectResponse(
         url=selection_redirect_url(redirect_to, request),
         status_code=303,
     )
 
 
-@router.post("/{request_id}/manual-release/use")
+@router.post("/{request_id}/manual-release/use", response_model=None)
 async def use_manual_release(
     request_id: int,
+    http_request: FastAPIRequest,
     title: str = Form(...),
     size: int = Form(...),
     seeders: int = Form(default=0),
@@ -208,7 +213,7 @@ async def use_manual_release(
     release_group: str | None = Form(default=None),
     redirect_to: str | None = Form(default=None),
     db: AsyncSession = Depends(get_db),
-) -> RedirectResponse:
+) -> RedirectResponse | JSONResponse:
     """Persist and use an ad hoc manual-search release for a request."""
     request = await load_request_or_404(db, request_id)
 
@@ -235,6 +240,8 @@ async def use_manual_release(
     )
 
     await _select_manual_release_for_request(db, request, release)
+    if "application/json" in http_request.headers.get("accept", ""):
+        return JSONResponse({"status": "ok", "message": "Torrent staged successfully"})
     return RedirectResponse(
         url=selection_redirect_url(redirect_to, request),
         status_code=303,

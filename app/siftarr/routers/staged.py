@@ -4,7 +4,8 @@ import os
 from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, Form, HTTPException
-from fastapi.responses import RedirectResponse
+from fastapi import Request as FastAPIRequest
+from fastapi.responses import JSONResponse, RedirectResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -22,28 +23,32 @@ from app.siftarr.services.staging_decision_logger import (
 router = APIRouter(prefix="/staged", tags=["staged"])
 
 
-@router.post("/{torrent_id}/approve")
-async def approve_staged_torrent(
-    torrent_id: int,
-    db: AsyncSession = Depends(get_db),
-) -> RedirectResponse:
-    """Approve a staged torrent - send to qBittorrent."""
-    result = await db.execute(select(StagedTorrent).where(StagedTorrent.id == torrent_id))
-    torrent = result.scalar_one_or_none()
+def _wants_json(http_request: FastAPIRequest) -> bool:
+    return "application/json" in http_request.headers.get("accept", "")
 
-    if not torrent:
-        raise HTTPException(status_code=404, detail="Staged torrent not found")
 
-    # Get request to determine category
+async def _finalize_action_response(
+    http_request: FastAPIRequest,
+    message: str,
+    *,
+    redirect_url: str = "/?tab=staged",
+):
+    if _wants_json(http_request):
+        return JSONResponse({"status": "ok", "message": message})
+    return RedirectResponse(url=redirect_url, status_code=303)
+
+
+async def _approve_torrent(torrent: StagedTorrent, db: AsyncSession) -> bool:
     request = None
     if torrent.request_id:
         result = await db.execute(select(Request).where(Request.id == torrent.request_id))
         request = result.scalar_one_or_none()
 
-    # Determine category
-    category = MediaCategory.TV
-    if request and request.media_type == MediaType.MOVIE:
-        category = MediaCategory.MOVIES
+    category = (
+        MediaCategory.MOVIES
+        if request and request.media_type == MediaType.MOVIE
+        else MediaCategory.TV
+    )
 
     rules_selected_torrent = None
     if request is not None:
@@ -58,88 +63,33 @@ async def approve_staged_torrent(
         )
         rules_selected_torrent = rules_selected_result.scalars().first()
 
-    # Add to qBittorrent
     runtime_settings = await get_effective_settings(db)
     qbittorrent = QbittorrentService(settings=runtime_settings)
-    success = False
 
     if torrent.magnet_url:
         torrent_hash = await qbittorrent.add_torrent(
-            magnet_uri=torrent.magnet_url,
-            category=category,
+            magnet_uri=torrent.magnet_url, category=category
         )
         success = torrent_hash is not None
     else:
         success = (
-            await qbittorrent.add_torrent(
-                torrent_path=torrent.torrent_path,
-                category=category,
-            )
+            await qbittorrent.add_torrent(torrent_path=torrent.torrent_path, category=category)
             is not None
         )
 
-    if success:
-        log_staging_decision(
-            request=request,
-            approved_torrent=torrent,
-            rules_selected_torrent=rules_selected_torrent,
-        )
+    if not success:
+        return False
 
-        # Update torrent status
-        torrent.status = "approved"
+    log_staging_decision(
+        request=request,
+        approved_torrent=torrent,
+        rules_selected_torrent=rules_selected_torrent,
+    )
+    torrent.status = "approved"
+    if request:
+        lifecycle_service = LifecycleService(db)
+        await lifecycle_service.mark_as_downloading(request.id)
 
-        # Update request status if exists
-        if request:
-            lifecycle_service = LifecycleService(db)
-            await lifecycle_service.mark_as_downloading(request.id)
-
-        # Delete staging files
-        try:
-            if os.path.exists(torrent.torrent_path):
-                os.remove(torrent.torrent_path)
-            if os.path.exists(torrent.json_path):
-                os.remove(torrent.json_path)
-        except OSError:
-            pass
-
-    await db.commit()
-
-    return RedirectResponse(url="/", status_code=303)
-
-
-@router.post("/{torrent_id}/discard")
-async def discard_staged_torrent(
-    torrent_id: int,
-    db: AsyncSession = Depends(get_db),
-) -> RedirectResponse:
-    """Discard a staged torrent - delete files."""
-    from app.siftarr.models.request import RequestStatus
-
-    result = await db.execute(select(StagedTorrent).where(StagedTorrent.id == torrent_id))
-    torrent = result.scalar_one_or_none()
-
-    if not torrent:
-        raise HTTPException(status_code=404, detail="Staged torrent not found")
-
-    # Check request status before allowing discard
-    if torrent.request_id:
-        result = await db.execute(select(Request).where(Request.id == torrent.request_id))
-        request = result.scalar_one_or_none()
-        if request:
-            if request.status == RequestStatus.DOWNLOADING:
-                raise HTTPException(
-                    status_code=400,
-                    detail="Cannot discard a torrent that is already downloading. Use Replace instead to select a different torrent.",
-                )
-            # Only transition to pending if currently staged
-            if request.status == RequestStatus.STAGED:
-                lifecycle_service = LifecycleService(db)
-                await lifecycle_service.mark_as_pending(torrent.request_id)
-
-    # Update torrent status
-    torrent.status = "discarded"
-
-    # Delete staging files
     try:
         if os.path.exists(torrent.torrent_path):
             os.remove(torrent.torrent_path)
@@ -148,9 +98,126 @@ async def discard_staged_torrent(
     except OSError:
         pass
 
+    return True
+
+
+async def _discard_torrent(torrent: StagedTorrent, db: AsyncSession) -> bool:
+    from app.siftarr.models.request import RequestStatus
+
+    if torrent.request_id:
+        result = await db.execute(select(Request).where(Request.id == torrent.request_id))
+        request = result.scalar_one_or_none()
+        if request:
+            if request.status == RequestStatus.DOWNLOADING:
+                raise HTTPException(
+                    status_code=400,
+                    detail=(
+                        "Cannot discard a torrent that is already downloading. Use Replace instead to select a different torrent."
+                    ),
+                )
+            if request.status == RequestStatus.STAGED:
+                lifecycle_service = LifecycleService(db)
+                await lifecycle_service.mark_as_pending(torrent.request_id)
+
+    torrent.status = "discarded"
+
+    try:
+        if os.path.exists(torrent.torrent_path):
+            os.remove(torrent.torrent_path)
+        if os.path.exists(torrent.json_path):
+            os.remove(torrent.json_path)
+    except OSError:
+        pass
+
+    return True
+
+
+@router.post("/{torrent_id}/approve", response_model=None)
+async def approve_staged_torrent(
+    torrent_id: int,
+    http_request: FastAPIRequest,
+    db: AsyncSession = Depends(get_db),
+) -> RedirectResponse | JSONResponse:
+    """Approve a staged torrent - send to qBittorrent."""
+    result = await db.execute(select(StagedTorrent).where(StagedTorrent.id == torrent_id))
+    torrent = result.scalar_one_or_none()
+
+    if not torrent:
+        raise HTTPException(status_code=404, detail="Staged torrent not found")
+
+    success = await _approve_torrent(torrent, db)
     await db.commit()
 
-    return RedirectResponse(url="/", status_code=303)
+    if not success:
+        raise HTTPException(status_code=500, detail="Failed to approve staged torrent")
+    return await _finalize_action_response(
+        http_request,
+        "Torrent approved successfully",
+        redirect_url="/?tab=staged",
+    )
+
+
+@router.post("/{torrent_id}/discard", response_model=None)
+async def discard_staged_torrent(
+    torrent_id: int,
+    http_request: FastAPIRequest,
+    db: AsyncSession = Depends(get_db),
+) -> RedirectResponse | JSONResponse:
+    """Discard a staged torrent - delete files."""
+    result = await db.execute(select(StagedTorrent).where(StagedTorrent.id == torrent_id))
+    torrent = result.scalar_one_or_none()
+
+    if not torrent:
+        raise HTTPException(status_code=404, detail="Staged torrent not found")
+
+    await _discard_torrent(torrent, db)
+    await db.commit()
+
+    return await _finalize_action_response(
+        http_request,
+        "Torrent discarded successfully",
+        redirect_url="/?tab=staged",
+    )
+
+
+@router.post("/bulk", response_model=None)
+async def bulk_staged_action(
+    http_request: FastAPIRequest,
+    action: str = Form(...),
+    torrent_ids: list[int] = Form(default=[]),
+    db: AsyncSession = Depends(get_db),
+) -> RedirectResponse | JSONResponse:
+    """Apply an approve/discard action to multiple staged torrents."""
+    if not torrent_ids:
+        return await _finalize_action_response(
+            http_request,
+            "No staged torrents were selected.",
+            redirect_url="/?tab=staged",
+        )
+
+    result = await db.execute(select(StagedTorrent).where(StagedTorrent.id.in_(torrent_ids)))
+    torrents = list(result.scalars().all())
+
+    if action not in {"approve", "discard"}:
+        raise HTTPException(status_code=400, detail="Invalid bulk action")
+
+    processed = 0
+    for torrent in torrents:
+        if action == "approve":
+            success = await _approve_torrent(torrent, db)
+        else:
+            success = await _discard_torrent(torrent, db)
+        if success:
+            processed += 1
+
+    await db.commit()
+    action_label = "Approved" if action == "approve" else "Discarded"
+    message = f"{action_label} {processed} staged torrent(s)."
+    return await _finalize_action_response(
+        http_request,
+        message,
+        redirect_url="/?tab=staged",
+    )
 
 
 @router.post("/{torrent_id}/replace")
