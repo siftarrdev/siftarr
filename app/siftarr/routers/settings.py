@@ -2,12 +2,13 @@
 
 import asyncio
 import contextlib
+import json
 import logging
 from dataclasses import dataclass
 from typing import Any
 
 from fastapi import APIRouter, Depends, Form, Request
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, RedirectResponse, StreamingResponse
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
 from sqlalchemy import func, select
@@ -519,6 +520,240 @@ async def retry_pending(
             "request": request,
             "message": message,
             "message_type": "success",
+        },
+    )
+
+
+async def _sync_overseerr_generator():
+    """Async generator that yields SSE events for Overseerr sync progress."""
+
+    def _sse(data: dict) -> str:
+        return f"data: {json.dumps(data)}\n\n"
+
+    try:
+        yield _sse({"phase": "connecting"})
+
+        async with async_session_maker() as db:
+            eff_settings = await _build_effective_settings(db)
+
+            if not eff_settings.get("overseerr_url") or not eff_settings.get("overseerr_api_key"):
+                yield _sse(
+                    {
+                        "phase": "error",
+                        "message": "Overseerr is not configured. Please set URL and API key.",
+                    }
+                )
+                return
+
+            runtime_settings = await get_effective_settings(db)
+            overseerr_service = OverseerrService(settings=runtime_settings)
+            try:
+                yield _sse({"phase": "fetching", "message": "Fetching requests from Overseerr..."})
+                overseerr_requests = await overseerr_service.get_all_requests(status=None)
+
+                if not overseerr_requests:
+                    yield _sse(
+                        {
+                            "phase": "complete",
+                            "synced": 0,
+                            "skipped": 0,
+                            "message": "No requests found in Overseerr",
+                        }
+                    )
+                    return
+
+                result = await db.execute(
+                    select(RequestModel.external_id, RequestModel.overseerr_request_id)
+                )
+                existing_rows = result.fetchall()
+                existing_external_ids = {row[0] for row in existing_rows}
+                existing_request_ids = {row[1] for row in existing_rows if row[1] is not None}
+
+                actionable_requests = []
+                for ov_req in overseerr_requests:
+                    media = ov_req.get("media") or {}
+                    request_status = overseerr_service.normalize_request_status(
+                        ov_req.get("status")
+                    )
+                    media_status = overseerr_service.normalize_media_status(media.get("status"))
+                    if request_status not in {"pending", "approved"}:
+                        continue
+                    if media_status == "available":
+                        continue
+                    actionable_requests.append(ov_req)
+
+                total = len(actionable_requests)
+                yield _sse(
+                    {
+                        "phase": "fetching",
+                        "message": f"Found {total} actionable request(s). Fetching details...",
+                    }
+                )
+
+                sync_concurrency = max(1, runtime_settings.overseerr_sync_concurrency)
+                sync_semaphore = asyncio.Semaphore(sync_concurrency)
+                media_details_tasks: dict[tuple[str, int], asyncio.Task[dict | None]] = {}
+                media_details_lock = asyncio.Lock()
+
+                prepared_requests = await asyncio.gather(
+                    *(
+                        _prepare_overseerr_import(
+                            ov_req,
+                            overseerr_service,
+                            sync_semaphore,
+                            media_details_tasks,
+                            media_details_lock,
+                        )
+                        for ov_req in actionable_requests
+                    ),
+                    return_exceptions=True,
+                )
+
+                synced_count = 0
+                skipped_count = 0
+                new_tv_requests: list[RequestModel] = []
+
+                for i, prepared_request in enumerate(prepared_requests):
+                    try:
+                        if isinstance(prepared_request, BaseException):
+                            logger.exception(
+                                "Overseerr request prefetch failed during sync",
+                                exc_info=prepared_request,
+                            )
+                            skipped_count += 1
+                            yield _sse(
+                                {
+                                    "phase": "processing",
+                                    "current": i + 1,
+                                    "total": total,
+                                    "title": "(prefetch error)",
+                                }
+                            )
+                            continue
+
+                        if prepared_request is None:
+                            skipped_count += 1
+                            yield _sse(
+                                {
+                                    "phase": "processing",
+                                    "current": i + 1,
+                                    "total": total,
+                                    "title": "(skipped)",
+                                }
+                            )
+                            continue
+
+                        prepared = prepared_request
+
+                        yield _sse(
+                            {
+                                "phase": "processing",
+                                "current": i + 1,
+                                "total": total,
+                                "title": prepared.title or prepared.external_id,
+                            }
+                        )
+
+                        if (
+                            prepared.external_id in existing_external_ids
+                            or prepared.overseerr_request_id in existing_request_ids
+                        ):
+                            skipped_count += 1
+                            continue
+
+                        new_request = RequestModel(
+                            external_id=prepared.external_id,
+                            media_type=prepared.media_type,
+                            tmdb_id=prepared.tmdb_id,
+                            tvdb_id=prepared.tvdb_id,
+                            title=prepared.title,
+                            year=prepared.year,
+                            requested_seasons=str(prepared.requested_seasons)
+                            if prepared.requested_seasons
+                            else None,
+                            requested_episodes=str(prepared.requested_episodes)
+                            if prepared.requested_episodes
+                            else None,
+                            requester_username=prepared.requester_username,
+                            requester_email=prepared.requester_email,
+                            status=RequestStatus.PENDING,
+                            overseerr_request_id=prepared.overseerr_request_id,
+                        )
+                        db.add(new_request)
+                        await db.flush()
+                        await evaluate_imported_request(
+                            db,
+                            overseerr_service,
+                            new_request,
+                            logger=logger,
+                            prefetched_media_details=prepared.media_details,
+                            local_episodes=(),
+                        )
+                        if prepared.media_type == MediaType.TV:
+                            new_tv_requests.append(new_request)
+                        existing_external_ids.add(prepared.external_id)
+                        if prepared.overseerr_request_id is not None:
+                            existing_request_ids.add(prepared.overseerr_request_id)
+                        synced_count += 1
+                    except Exception:
+                        logger.exception("Overseerr request import failed during sync")
+                        skipped_count += 1
+                        continue
+
+                await db.commit()
+
+                if synced_count > 0:
+                    from app.siftarr.services.episode_sync_service import EpisodeSyncService
+
+                    plex_service = PlexService(settings=runtime_settings)
+                    try:
+                        episode_sync = EpisodeSyncService(
+                            db,
+                            overseerr=overseerr_service,
+                            plex=plex_service,
+                        )
+                        for req in new_tv_requests:
+                            try:
+                                await episode_sync.sync_episodes(req.id)
+                            except Exception:
+                                logger.exception(
+                                    "Episode sync failed for request_id=%s during import",
+                                    req.id,
+                                )
+                    finally:
+                        await plex_service.close()
+
+                if synced_count > 0:
+                    message = f"Synced {synced_count} new request(s) from Overseerr"
+                else:
+                    message = f"No new actionable requests to sync ({skipped_count} already existed or were already available)"
+
+                yield _sse(
+                    {
+                        "phase": "complete",
+                        "synced": synced_count,
+                        "skipped": skipped_count,
+                        "message": message,
+                    }
+                )
+            finally:
+                await overseerr_service.close()
+
+    except Exception as e:
+        logger.exception("Overseerr SSE sync failed")
+        yield _sse({"phase": "error", "message": f"Sync error: {e}"})
+
+
+@router.get("/api/sync-overseerr/stream")
+async def sync_overseerr_stream() -> StreamingResponse:
+    """Stream Overseerr sync progress via SSE."""
+    return StreamingResponse(
+        _sync_overseerr_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
         },
     )
 
