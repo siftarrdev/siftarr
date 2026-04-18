@@ -22,6 +22,7 @@ from app.siftarr.services.lifecycle_service import LifecycleService
 from app.siftarr.services.overseerr_service import OverseerrService
 from app.siftarr.services.pending_queue_service import PendingQueueService
 from app.siftarr.services.runtime_settings import get_effective_settings
+from app.siftarr.services.tv_details_service import load_tv_seasons_with_episodes
 
 logger = logging.getLogger(__name__)
 
@@ -45,12 +46,38 @@ async def dashboard(
     # Active tab shows all active requests.
     filtered_requests = active_requests
 
-    # Pending search shows all PENDING and SEARCHING requests.
-    pending_requests = [
-        req
-        for req in active_requests
-        if req.status in (RequestStatus.PENDING, RequestStatus.SEARCHING)
-    ]
+    async def _tv_has_pending_episodes(request_id: int) -> bool:
+        seasons, episodes = await load_tv_seasons_with_episodes(db, request_id)
+        if not seasons or not episodes:
+            return False
+        return any(episode.status == RequestStatus.PENDING for episode in episodes)
+
+    async def _should_show_in_unreleased(req: RequestModel) -> bool:
+        if req.status == RequestStatus.UNRELEASED:
+            return True
+        if req.media_type != MediaType.TV or req.status != RequestStatus.PARTIALLY_AVAILABLE:
+            return False
+
+        seasons, episodes = await load_tv_seasons_with_episodes(db, req.id)
+        if not seasons or not episodes:
+            return False
+
+        statuses = {episode.status for episode in episodes}
+        return RequestStatus.UNRELEASED in statuses and RequestStatus.PENDING not in statuses
+
+    # Pending search shows PENDING and SEARCHING requests, plus TV requests that
+    # have pending episodes alongside partial availability.
+    pending_requests = []
+    for req in active_requests:
+        if req.status in (RequestStatus.PENDING, RequestStatus.SEARCHING):
+            pending_requests.append(req)
+            continue
+        if (
+            req.status == RequestStatus.PARTIALLY_AVAILABLE
+            and req.media_type == MediaType.TV
+            and await _tv_has_pending_episodes(req.id)
+        ):
+            pending_requests.append(req)
 
     # Get pending items and pending requests
     pending_items = await queue_service.get_all_pending()
@@ -92,7 +119,10 @@ async def dashboard(
         RequestStatus.COMPLETED, limit=500
     )
 
-    unreleased_requests = await lifecycle_service.get_unreleased_and_partial_requests(limit=500)
+    unreleased_candidates = await lifecycle_service.get_unreleased_and_partial_requests(limit=500)
+    unreleased_requests = [
+        req for req in unreleased_candidates if await _should_show_in_unreleased(req)
+    ]
     overseerr_service = OverseerrService(settings=effective_settings)
 
     async def _earliest_future_release(req_obj: RequestModel) -> tuple[int, str | None]:

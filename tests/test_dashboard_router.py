@@ -181,6 +181,101 @@ class TestDashboardRouter:
         assert "No unreleased requests." not in rendered
 
     @pytest.mark.asyncio
+    async def test_dashboard_separates_mixed_pending_from_true_unreleased(
+        self, mock_db, monkeypatch
+    ):
+        """TV shows with pending episodes should stay out of Unreleased tab."""
+        mixed_request = MagicMock()
+        mixed_request.id = 7
+        mixed_request.status = RequestStatus.PARTIALLY_AVAILABLE
+        mixed_request.overseerr_request_id = 11
+        mixed_request.title = "High Potential"
+        mixed_request.media_type = MediaType.TV
+        mixed_request.created_at = datetime(2026, 4, 1, 12, 0, tzinfo=UTC)
+        mixed_request.requester_username = "lucas"
+        mixed_request.year = 2025
+        mixed_request.tmdb_id = 123
+        mixed_request.tvdb_id = 456
+
+        unreleased_request = MagicMock()
+        unreleased_request.id = 8
+        unreleased_request.status = RequestStatus.UNRELEASED
+        unreleased_request.overseerr_request_id = 12
+        unreleased_request.title = "The Rookie"
+        unreleased_request.media_type = MediaType.TV
+        unreleased_request.created_at = datetime(2026, 4, 1, 13, 0, tzinfo=UTC)
+        unreleased_request.requester_username = "lucas"
+        unreleased_request.year = 2025
+        unreleased_request.tmdb_id = 124
+        unreleased_request.tvdb_id = 457
+
+        lifecycle_service = AsyncMock()
+        lifecycle_service.get_active_requests.return_value = [mixed_request, unreleased_request]
+        lifecycle_service.get_requests_by_status.return_value = []
+        lifecycle_service.get_unreleased_and_partial_requests.return_value = [
+            mixed_request,
+            unreleased_request,
+        ]
+        lifecycle_service.get_requests_stats.return_value = {
+            "by_status": {
+                RequestStatus.UNRELEASED.value: 1,
+                RequestStatus.PARTIALLY_AVAILABLE.value: 1,
+            },
+        }
+        monkeypatch.setattr(dashboard, "LifecycleService", lambda db: lifecycle_service)
+
+        monkeypatch.setattr(
+            dashboard,
+            "PendingQueueService",
+            lambda db: AsyncMock(get_all_pending=AsyncMock(return_value=[])),
+        )
+        monkeypatch.setattr(
+            dashboard,
+            "get_effective_settings",
+            AsyncMock(
+                return_value=MagicMock(
+                    overseerr_url="http://overseerr.test",
+                    staging_mode_enabled=False,
+                )
+            ),
+        )
+
+        fake_overseerr = AsyncMock()
+        fake_overseerr.get_media_details.return_value = {
+            "nextEpisodeToAir": {"airDate": "2026-05-01"}
+        }
+        monkeypatch.setattr(dashboard, "OverseerrService", lambda settings: fake_overseerr)
+
+        # active requests query, staged query, unreleased query, completed query, denied query
+        execute_results = [
+            MagicMock(scalars=MagicMock(return_value=MagicMock(all=MagicMock(return_value=[])))),
+            MagicMock(scalars=MagicMock(return_value=MagicMock(all=MagicMock(return_value=[])))),
+            MagicMock(scalars=MagicMock(return_value=MagicMock(all=MagicMock(return_value=[])))),
+            MagicMock(scalars=MagicMock(return_value=MagicMock(all=MagicMock(return_value=[])))),
+        ]
+        mock_db.execute.side_effect = execute_results
+
+        seasons = [MagicMock(id=1, season_number=8, synced_at=None)]
+        episodes = [
+            MagicMock(status=RequestStatus.AVAILABLE),
+            MagicMock(status=RequestStatus.AVAILABLE),
+            MagicMock(status=RequestStatus.PENDING),
+            MagicMock(status=RequestStatus.PENDING),
+        ]
+        monkeypatch.setattr(
+            dashboard,
+            "load_tv_seasons_with_episodes",
+            AsyncMock(side_effect=[(seasons, episodes), (seasons, episodes)]),
+        )
+
+        response = await dashboard.dashboard(MagicMock(), db=mock_db)
+
+        context = response.context
+        assert mixed_request in context["pending_requests"]
+        assert mixed_request not in context["unreleased_requests"]
+        assert unreleased_request in context["unreleased_requests"]
+
+    @pytest.mark.asyncio
     async def test_deny_request_success(self):
         """Deny helper should surface successful declines."""
         mock_overseerr_service = AsyncMock()
