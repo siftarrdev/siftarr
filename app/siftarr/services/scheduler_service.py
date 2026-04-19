@@ -3,6 +3,10 @@
 import asyncio
 import logging
 from contextlib import suppress
+from dataclasses import dataclass
+from datetime import datetime, timedelta
+from typing import cast
+from uuid import uuid4
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.interval import IntervalTrigger
@@ -16,12 +20,28 @@ from app.siftarr.services.movie_decision_service import MovieDecisionService
 from app.siftarr.services.overseerr_service import OverseerrService
 from app.siftarr.services.pending_queue_service import PendingQueueService
 from app.siftarr.services.plex_polling_service import PlexPollingService
+from app.siftarr.services.plex_scan_state_service import PlexScanStateService
 from app.siftarr.services.plex_service import PlexService
 from app.siftarr.services.prowlarr_service import ProwlarrService
 from app.siftarr.services.qbittorrent_service import QbittorrentService
 from app.siftarr.services.runtime_settings import get_effective_settings
 from app.siftarr.services.tv_decision_service import TVDecisionService
 from app.siftarr.services.unreleased_service import UnreleasedEvaluator
+
+PLEX_INCREMENTAL_SYNC_JOB_NAME = "plex_recent_scan"
+PLEX_FULL_RECONCILE_JOB_NAME = "plex_full_reconcile"
+
+
+@dataclass(frozen=True)
+class PlexJobRunResult:
+    """Outcome of a manually or automatically triggered Plex scan job."""
+
+    job_name: str
+    status: str
+    completed_requests: int = 0
+    error: str | None = None
+    lock_owner: str | None = None
+    metrics_payload: dict[str, object] | None = None
 
 
 class SchedulerService:
@@ -141,18 +161,218 @@ class SchedulerService:
                     logger.error("Error processing pending item %s: %s", item.request_id, e)
 
     async def _poll_plex_availability(self) -> None:
-        """Poll Plex to check if any active requests have become available."""
+        """Compatibility wrapper that reuses the incremental Plex scan job."""
+        await self._run_incremental_plex_sync_job(trigger_source="legacy_poll")
+
+    async def _run_incremental_plex_sync_job(self, *, trigger_source: str) -> PlexJobRunResult:
+        """Run the fast incremental Plex sync under a persisted job lock."""
+        return await self._run_guarded_plex_scan_job(
+            job_name=PLEX_INCREMENTAL_SYNC_JOB_NAME,
+            trigger_source=trigger_source,
+            job_label="Incremental Plex sync",
+            interval_minutes_attr="plex_recent_scan_interval_minutes",
+            scan_method_name="incremental_recent_scan",
+        )
+
+    async def _run_full_plex_reconcile_job(self, *, trigger_source: str) -> PlexJobRunResult:
+        """Run the slower full Plex reconcile under a persisted job lock."""
+        return await self._run_guarded_plex_scan_job(
+            job_name=PLEX_FULL_RECONCILE_JOB_NAME,
+            trigger_source=trigger_source,
+            job_label="Full Plex reconcile",
+            interval_minutes_attr="plex_full_reconcile_interval_minutes",
+            scan_method_name="full_reconcile_scan",
+        )
+
+    async def _run_guarded_plex_scan_job(
+        self,
+        *,
+        job_name: str,
+        trigger_source: str,
+        job_label: str,
+        interval_minutes_attr: str,
+        scan_method_name: str,
+    ) -> PlexJobRunResult:
+        """Run a Plex scan entry point with persisted overlap protection."""
         logger = self._logger
-        try:
-            async with self.db_session_factory() as db:
-                runtime_settings = await get_effective_settings(db)
-                plex = PlexService(settings=runtime_settings)
+        async with self.db_session_factory() as db:
+            runtime_settings = await get_effective_settings(db)
+            state_service = PlexScanStateService(db)
+            lease_duration = self._get_plex_job_lease_duration(
+                runtime_settings, interval_minutes_attr=interval_minutes_attr
+            )
+
+            await state_service.recover_stale_lock(job_name)
+            lock_owner = self._build_lock_owner(job_name)
+            state = await state_service.acquire_lock(job_name, lock_owner, lease_duration)
+            if state is None:
+                current_state = await state_service.get_state(job_name)
+                current_owner = current_state.lock_owner if current_state else None
+                logger.info(
+                    "%s skipped due to lock contention via %s; job lock already held by %s",
+                    job_label,
+                    trigger_source,
+                    current_owner or "another worker",
+                )
+                return PlexJobRunResult(
+                    job_name=job_name,
+                    status="locked",
+                    lock_owner=current_owner,
+                )
+
+            plex = PlexService(settings=runtime_settings)
+            try:
                 polling_service = PlexPollingService(db, plex)
-                completed = await polling_service.poll()
-                if completed:
-                    logger.info("Plex polling completed %d request(s)", completed)
-        except Exception:
-            logger.exception("Error during Plex availability polling")
+                scan_method = getattr(polling_service, scan_method_name)
+                scan_kwargs: dict[str, object] = {}
+                if scan_method_name == "incremental_recent_scan":
+                    scan_kwargs = {
+                        "acquire_lock": False,
+                        "previous_checkpoint_at": getattr(state, "checkpoint_at", None),
+                    }
+                result = await scan_method(**scan_kwargs)
+            except Exception as exc:
+                error_message = str(exc) or exc.__class__.__name__
+                await state_service.release_lock(
+                    job_name,
+                    lock_owner,
+                    success=False,
+                    last_error=error_message,
+                )
+                logger.exception(
+                    "Error during %s triggered via %s", job_label.lower(), trigger_source
+                )
+                return PlexJobRunResult(
+                    job_name=job_name,
+                    status="failed",
+                    error=error_message,
+                )
+            finally:
+                await plex.close()
+
+            metrics_payload = self._build_plex_job_metrics_payload(result)
+            checkpoint_at = self._extract_checkpoint_at(metrics_payload)
+            clean_run = self._is_clean_plex_job_result(result)
+            if clean_run:
+                await state_service.release_lock(
+                    job_name,
+                    lock_owner,
+                    success=True,
+                    checkpoint_at=checkpoint_at,
+                    metrics_payload=metrics_payload,
+                )
+            else:
+                await state_service.release_lock(
+                    job_name,
+                    lock_owner,
+                    success=False,
+                    checkpoint_at=checkpoint_at,
+                    metrics_payload=metrics_payload,
+                    last_error=self._get_plex_job_last_error(result),
+                )
+            logger.info(
+                "%s completed via %s; transitioned %d request(s); outcome=%s",
+                job_label,
+                trigger_source,
+                result.completed_requests,
+                self._summarize_plex_job_result(result),
+            )
+            return PlexJobRunResult(
+                job_name=job_name,
+                status="completed",
+                completed_requests=result.completed_requests,
+                metrics_payload=metrics_payload,
+            )
+
+    def _get_plex_job_lease_duration(
+        self, runtime_settings, *, interval_minutes_attr: str
+    ) -> timedelta:
+        """Derive a conservative persisted lock lease from the job cadence."""
+        interval_minutes = getattr(runtime_settings, interval_minutes_attr, 0)
+        if not isinstance(interval_minutes, int) or interval_minutes <= 0:
+            interval_minutes = 15
+        return timedelta(minutes=max(interval_minutes, 15))
+
+    def _build_lock_owner(self, job_name: str) -> str:
+        """Return a unique lock owner token for this process and run."""
+        return f"{job_name}:{id(self)}:{uuid4()}"
+
+    def _build_plex_job_metrics_payload(self, result) -> dict[str, object]:
+        """Serialize compact scan metrics for persisted job state."""
+        return {
+            "mode": result.mode,
+            "completed_requests": result.completed_requests,
+            "scan": result.metrics.as_dict(),
+        }
+
+    def _extract_checkpoint_at(self, metrics_payload: dict[str, object]) -> datetime | None:
+        """Return the persisted checkpoint timestamp from serialized metrics."""
+        raw_scan_payload = metrics_payload.get("scan")
+        if not isinstance(raw_scan_payload, dict):
+            return None
+        scan_payload = cast("dict[str, object]", raw_scan_payload)
+        raw_checkpoint_payload = scan_payload.get("checkpoint")
+        if not isinstance(raw_checkpoint_payload, dict):
+            return None
+        checkpoint_payload = cast("dict[str, object]", raw_checkpoint_payload)
+        current_checkpoint_at = checkpoint_payload.get("current_checkpoint_at")
+        if not isinstance(current_checkpoint_at, str) or not current_checkpoint_at:
+            return None
+        try:
+            return datetime.fromisoformat(current_checkpoint_at)
+        except ValueError:
+            return None
+
+    def _is_clean_plex_job_result(self, result) -> bool:
+        """Return whether the inner Plex scan finished cleanly."""
+        clean_run = getattr(result, "clean_run", None)
+        if isinstance(clean_run, bool):
+            return clean_run
+
+        metrics_payload = self._build_plex_job_metrics_payload(result)
+        raw_scan_payload = metrics_payload.get("scan")
+        if not isinstance(raw_scan_payload, dict):
+            return True
+        skipped = cast("dict[str, object]", raw_scan_payload).get("skipped_on_error_items")
+        return not skipped
+
+    def _get_plex_job_last_error(self, result) -> str | None:
+        """Extract the persisted error for partial/inconclusive scheduler runs."""
+        last_error = getattr(result, "last_error", None)
+        return last_error if isinstance(last_error, str) and last_error else None
+
+    def _summarize_plex_job_result(self, result) -> str:
+        """Return a compact operator-facing summary for scheduler logs."""
+        metrics_payload = self._build_plex_job_metrics_payload(result)
+        raw_scan_payload = metrics_payload.get("scan")
+        if not isinstance(raw_scan_payload, dict):
+            return "unknown"
+        scan_payload = cast("dict[str, object]", raw_scan_payload)
+
+        skipped = scan_payload.get("skipped_on_error_items")
+        downgraded = scan_payload.get("downgraded_requests")
+        checkpoint_payload = scan_payload.get("checkpoint")
+        checkpoint_advanced = None
+        if isinstance(checkpoint_payload, dict):
+            checkpoint_advanced = cast("dict[str, object]", checkpoint_payload).get("advanced")
+
+        if result.mode == "incremental_recent_scan":
+            if skipped:
+                return "incremental partial; checkpoint retained"
+            if checkpoint_advanced:
+                return "incremental clean; checkpoint advanced"
+            return "incremental completed"
+
+        if result.mode == "full_reconcile_scan":
+            if skipped and downgraded:
+                return "full partial; guarded negative reconciliation applied selectively"
+            if skipped:
+                return "full partial; guarded negative reconciliation withheld"
+            if downgraded:
+                return "full completed with guarded negative reconciliation"
+            return "full completed cleanly"
+
+        return str(result.mode)
 
     async def _recheck_unreleased(self) -> None:
         """Re-evaluate requests currently in the UNRELEASED state."""
@@ -269,10 +489,20 @@ class SchedulerService:
 
         settings = get_settings()
         self.scheduler.add_job(
-            self._poll_plex_availability,
-            trigger=IntervalTrigger(minutes=settings.plex_poll_interval_minutes),
-            id="poll_plex_availability",
-            name="Poll Plex for media availability",
+            self._run_incremental_plex_sync_job,
+            trigger=IntervalTrigger(minutes=settings.plex_recent_scan_interval_minutes),
+            kwargs={"trigger_source": "scheduler"},
+            id="plex_incremental_sync",
+            name="Run incremental Plex sync",
+            replace_existing=True,
+        )
+
+        self.scheduler.add_job(
+            self._run_full_plex_reconcile_job,
+            trigger=IntervalTrigger(minutes=settings.plex_full_reconcile_interval_minutes),
+            kwargs={"trigger_source": "scheduler"},
+            id="plex_full_reconcile",
+            name="Run full Plex reconcile",
             replace_existing=True,
         )
 
@@ -319,3 +549,11 @@ class SchedulerService:
                     await self._process_pending_item(item)
 
             return len(pending_items)
+
+    async def trigger_incremental_plex_sync_now(self) -> PlexJobRunResult:
+        """Manually trigger the incremental Plex sync job."""
+        return await self._run_incremental_plex_sync_job(trigger_source="manual")
+
+    async def trigger_full_plex_reconcile_now(self) -> PlexJobRunResult:
+        """Manually trigger the full Plex reconcile job."""
+        return await self._run_full_plex_reconcile_job(trigger_source="manual")

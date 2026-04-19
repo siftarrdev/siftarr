@@ -167,6 +167,62 @@ details[open] summary .accordion-chevron { transform: rotate(90deg); }
         </div>
     </details>
 
+    {# ── Plex Scheduler Status ── #}
+    <details open class="card">
+        <summary class="card-header flex items-center gap-3 cursor-pointer select-none">
+            <svg class="accordion-chevron w-4 h-4 text-gray-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
+            <div>
+                <h2 class="section-title">Plex Scheduler Status</h2>
+                <p class="section-subtitle">Persisted status for incremental and full Plex jobs</p>
+            </div>
+        </summary>
+        <div class="card-body grid grid-cols-1 xl:grid-cols-2 gap-4">
+            {% for job in plex_jobs or [] %}
+            <div class="rounded-xl border border-gray-700/60 bg-surface-850 p-5 space-y-3">
+                <div class="flex items-start justify-between gap-4">
+                    <div>
+                        <h3 class="text-sm font-semibold text-white">{{ job.label }}</h3>
+                        <p class="text-xs text-gray-500 mt-0.5">{{ job.description }}</p>
+                    </div>
+                    <span class="text-xs font-semibold px-2.5 py-1 rounded-full {% if job.locked %}bg-amber-900/40 text-amber-300 border border-amber-700/50{% else %}bg-emerald-900/40 text-emerald-300 border border-emerald-700/50{% endif %}">
+                        {{ 'In Progress' if job.locked else 'Idle' }}
+                    </span>
+                </div>
+                <dl class="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+                    <div class="rounded-lg bg-surface-900/70 p-3 sm:col-span-2">
+                        <dt class="text-gray-500">Last Outcome</dt>
+                        <dd class="text-gray-200 mt-1">{{ job.run_summary or 'No completed run recorded' }}</dd>
+                    </div>
+                    <div class="rounded-lg bg-surface-900/70 p-3">
+                        <dt class="text-gray-500">Last Success</dt>
+                        <dd class="text-gray-200 mt-1">{{ job.last_success or 'Never' }}</dd>
+                    </div>
+                    <div class="rounded-lg bg-surface-900/70 p-3">
+                        <dt class="text-gray-500">Last Run</dt>
+                        <dd class="text-gray-200 mt-1">{{ job.last_run or job.last_started or 'Never' }}</dd>
+                    </div>
+                    <div class="rounded-lg bg-surface-900/70 p-3">
+                        <dt class="text-gray-500">Checkpoint</dt>
+                        <dd class="text-gray-200 mt-1">{{ job.checkpoint or 'None' }}</dd>
+                    </div>
+                    <div class="rounded-lg bg-surface-900/70 p-3">
+                        <dt class="text-gray-500">Lock</dt>
+                        <dd class="text-gray-200 mt-1">{{ job.lock_owner or 'Unlocked' }}</dd>
+                    </div>
+                    <div class="rounded-lg bg-surface-900/70 p-3 sm:col-span-2">
+                        <dt class="text-gray-500">Last Error</dt>
+                        <dd class="text-gray-200 mt-1">{{ job.last_error or 'None' }}</dd>
+                    </div>
+                    <div class="rounded-lg bg-surface-900/70 p-3 sm:col-span-2">
+                        <dt class="text-gray-500">Metrics Snapshot</dt>
+                        <dd class="text-gray-200 mt-1">{{ job.metrics_snapshot or 'No metrics recorded yet' }}</dd>
+                    </div>
+                </dl>
+            </div>
+            {% endfor %}
+        </div>
+    </details>
+
     {# ── Staging Mode & DB Stats ── #}
     <details open class="card">
         <summary class="card-header flex items-center gap-3 cursor-pointer select-none">
@@ -249,10 +305,18 @@ details[open] summary .accordion-chevron { transform: rotate(90deg); }
             <div class="flex items-center justify-between gap-4 py-3 first:pt-0 last:pb-0">
                 <div class="min-w-0">
                     <div class="text-sm font-semibold text-white">Re-scan Plex Availability</div>
-                    <div class="text-xs text-gray-500">Re-check existing requests against Plex and update availability/completion state</div>
+                    <div class="text-xs text-gray-500">Run incremental/full Plex jobs, or use the legacy manual reconcile path for a one-off full resync of existing requests</div>
                 </div>
-                <button type="button" onclick="startPlexRescan(false)" class="btn-primary btn-sm shrink-0">Deep Re-scan</button>
-                <button type="button" onclick="startPlexRescan(true)" class="btn btn-secondary btn-sm shrink-0">Shallow Re-scan</button>
+                <div class="flex items-center gap-2 shrink-0">
+                    <form action="/settings/run-incremental-plex-sync" method="post">
+                        <button type="submit" class="btn-primary btn-sm shrink-0">Run Incremental Plex Sync</button>
+                    </form>
+                    <form action="/settings/run-full-plex-reconcile" method="post">
+                        <button type="submit" class="btn-warning btn-sm shrink-0">Run Full Plex Reconcile</button>
+                    </form>
+                    <button type="button" onclick="startPlexRescan(false)" class="btn-primary btn-sm shrink-0">Deep Re-scan</button>
+                    <button type="button" onclick="startPlexRescan(true)" class="btn btn-secondary btn-sm shrink-0">Shallow Re-scan</button>
+                </div>
             </div>
 
             <form action="/settings/reseed-rules" method="post" class="flex items-center justify-between gap-4 py-3 first:pt-0 last:pb-0">

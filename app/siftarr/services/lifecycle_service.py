@@ -51,6 +51,7 @@ class LifecycleService:
         RequestStatus.PARTIALLY_AVAILABLE: [
             RequestStatus.COMPLETED,
             RequestStatus.UNRELEASED,
+            RequestStatus.PENDING,
         ],
         RequestStatus.UNRELEASED: [
             RequestStatus.PENDING,
@@ -74,8 +75,14 @@ class LifecycleService:
             RequestStatus.DENIED,
         ],
         RequestStatus.COMPLETED: [
-            RequestStatus.UNRELEASED
+            RequestStatus.UNRELEASED,
+            RequestStatus.PENDING,
         ],  # Re-classifiable for ongoing TV series
+        RequestStatus.AVAILABLE: [
+            RequestStatus.COMPLETED,
+            RequestStatus.UNRELEASED,
+            RequestStatus.PENDING,
+        ],
         RequestStatus.FAILED: [],  # Terminal state
         RequestStatus.DENIED: [],  # Terminal state
     }

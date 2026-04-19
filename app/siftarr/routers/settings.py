@@ -5,6 +5,7 @@ import contextlib
 import json
 import logging
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Any
 
 from fastapi import APIRouter, Depends, Form, Request
@@ -23,15 +24,208 @@ from app.siftarr.services.connection_tester import ConnectionTester, ConnectionT
 from app.siftarr.services.overseerr_service import OverseerrService
 from app.siftarr.services.pending_queue_service import PendingQueueService
 from app.siftarr.services.plex_polling_service import PlexPollingService
+from app.siftarr.services.plex_scan_state_service import PlexScanStateService
 from app.siftarr.services.plex_service import PlexService
 from app.siftarr.services.release_selection_service import clear_release_search_cache
 from app.siftarr.services.rule_service import RuleService
 from app.siftarr.services.runtime_settings import get_effective_settings
+from app.siftarr.services.scheduler_service import (
+    PLEX_FULL_RECONCILE_JOB_NAME,
+    PLEX_INCREMENTAL_SYNC_JOB_NAME,
+)
 from app.siftarr.services.unreleased_service import evaluate_imported_request
 
 router = APIRouter(prefix="/settings", tags=["settings"])
 templates = Jinja2Templates(directory="app/siftarr/templates")
 logger = logging.getLogger(__name__)
+
+
+def _serialize_datetime(value: datetime | None) -> str | None:
+    """Serialize datetimes for compact status rendering."""
+    return value.isoformat(sep=" ", timespec="seconds") if value is not None else None
+
+
+def _build_compact_metrics_snapshot(metrics_payload: dict[str, Any] | None) -> str | None:
+    """Render a compact operator-facing metrics summary."""
+    if not isinstance(metrics_payload, dict):
+        return None
+
+    scan_payload = metrics_payload.get("scan")
+    if not isinstance(scan_payload, dict):
+        return None
+
+    parts: list[str] = []
+    if "completed_requests" in metrics_payload:
+        parts.append(f"completed={metrics_payload['completed_requests']}")
+    for source_key, label in [
+        ("scanned_items", "scanned"),
+        ("matched_requests", "matched"),
+        ("deduped_items", "deduped"),
+        ("downgraded_requests", "downgraded"),
+        ("skipped_on_error_items", "errors"),
+    ]:
+        value = scan_payload.get(source_key)
+        if value is not None:
+            parts.append(f"{label}={value}")
+
+    return ", ".join(parts) if parts else None
+
+
+def _coerce_int(value: Any) -> int:
+    """Return an integer-like value or 0 when unavailable."""
+    return value if isinstance(value, int) else 0
+
+
+def _get_scan_metrics_payload(metrics_payload: dict[str, Any] | None) -> dict[str, Any] | None:
+    """Extract the nested scan metrics payload if present."""
+    if not isinstance(metrics_payload, dict):
+        return None
+    scan_payload = metrics_payload.get("scan")
+    return scan_payload if isinstance(scan_payload, dict) else None
+
+
+def _build_plex_run_outcome_summary(
+    metrics_payload: dict[str, Any] | None,
+    *,
+    locked: bool = False,
+    lock_owner: str | None = None,
+    last_error: str | None = None,
+) -> str | None:
+    """Summarize the last known operator-facing outcome for a Plex job."""
+    if locked:
+        return f"Skipped due to lock ({lock_owner or 'another worker'})"
+
+    if not isinstance(metrics_payload, dict):
+        return "No completed run recorded"
+
+    scan_payload = _get_scan_metrics_payload(metrics_payload)
+    if scan_payload is None:
+        return "No completed run recorded"
+
+    mode = metrics_payload.get("mode")
+    skipped = _coerce_int(scan_payload.get("skipped_on_error_items"))
+    downgraded = _coerce_int(scan_payload.get("downgraded_requests"))
+    checkpoint_payload = scan_payload.get("checkpoint")
+    checkpoint_advanced = (
+        checkpoint_payload.get("advanced") if isinstance(checkpoint_payload, dict) else None
+    )
+
+    if mode == "incremental_recent_scan":
+        if skipped or last_error:
+            return (
+                "Incremental run partial; checkpoint retained after "
+                f"{max(skipped, 1)} transient/inconclusive item(s)"
+            )
+        if checkpoint_advanced is True:
+            return "Incremental run completed cleanly; checkpoint advanced"
+        return "Incremental run completed"
+
+    if mode == "full_reconcile_scan":
+        if skipped and downgraded:
+            return (
+                "Full run partial with guarded negative reconciliation; downgraded "
+                f"{downgraded} request(s), {skipped} item(s) stayed inconclusive"
+            )
+        if skipped:
+            return (
+                "Full run partial; guarded negative reconciliation withheld for "
+                f"{skipped} inconclusive item(s)"
+            )
+        if downgraded:
+            return (
+                "Full run completed with guarded negative reconciliation; downgraded "
+                f"{downgraded} request(s)"
+            )
+        return "Full run completed cleanly"
+
+    return None
+
+
+def _build_manual_plex_job_message(
+    job_label: str,
+    result: Any,
+) -> tuple[str, str]:
+    """Build a concise manual-trigger status message for Plex jobs."""
+    if result.status == "locked":
+        return f"{job_label} is already in progress.", "error"
+    if result.status != "completed":
+        return f"{job_label} failed: {result.error}", "error"
+
+    message = f"{job_label} completed. Transitioned {result.completed_requests} request(s)."
+    outcome_summary = _build_plex_run_outcome_summary(result.metrics_payload)
+    if outcome_summary == "Incremental run completed cleanly; checkpoint advanced":
+        message = (
+            f"{job_label} completed cleanly. Transitioned {result.completed_requests} request(s)."
+        )
+    elif outcome_summary and outcome_summary.startswith("Incremental run partial"):
+        message = (
+            f"{job_label} completed partially. "
+            f"Transitioned {result.completed_requests} request(s). "
+            f"{outcome_summary.removeprefix('Incremental run partial; ').capitalize()}."
+        )
+    elif outcome_summary and outcome_summary.startswith(
+        "Full run completed with guarded negative reconciliation"
+    ):
+        downgraded = _coerce_int(
+            (_get_scan_metrics_payload(result.metrics_payload) or {}).get("downgraded_requests")
+        )
+        message = (
+            f"{job_label} completed with guarded negative reconciliation. "
+            f"Transitioned {result.completed_requests} request(s) and downgraded "
+            f"{downgraded} request(s)."
+        )
+    elif outcome_summary and outcome_summary.startswith("Full run partial"):
+        message = (
+            f"{job_label} completed partially. "
+            f"Transitioned {result.completed_requests} request(s). "
+            f"{outcome_summary.removeprefix('Full run ').capitalize()}."
+        )
+
+    return message, "success"
+
+
+async def _build_plex_job_statuses(db: AsyncSession) -> list[dict[str, Any]]:
+    """Load persisted scheduler status for Plex scan jobs."""
+    state_service = PlexScanStateService(db)
+    job_rows = [
+        (
+            PLEX_INCREMENTAL_SYNC_JOB_NAME,
+            "Incremental Plex Sync",
+            "Fast recent-added availability scan",
+        ),
+        (
+            PLEX_FULL_RECONCILE_JOB_NAME,
+            "Full Plex Reconcile",
+            "Slower full-library reconciliation run",
+        ),
+    ]
+    statuses: list[dict[str, Any]] = []
+    for job_name, label, description in job_rows:
+        state = await state_service.get_state(job_name)
+        metrics_payload = state.metrics_payload if state is not None else None
+        statuses.append(
+            {
+                "job_name": job_name,
+                "label": label,
+                "description": description,
+                "last_success": _serialize_datetime(state.last_success_at if state else None),
+                "last_run": _serialize_datetime(state.last_finished_at if state else None),
+                "last_started": _serialize_datetime(state.last_started_at if state else None),
+                "checkpoint": _serialize_datetime(state.checkpoint_at if state else None),
+                "locked": bool(state and state.lock_owner),
+                "lock_owner": state.lock_owner if state else None,
+                "last_error": state.last_error if state else None,
+                "run_summary": _build_plex_run_outcome_summary(
+                    metrics_payload,
+                    locked=bool(state and state.lock_owner),
+                    lock_owner=state.lock_owner if state else None,
+                    last_error=state.last_error if state else None,
+                ),
+                "metrics_snapshot": _build_compact_metrics_snapshot(metrics_payload),
+                "metrics_payload": metrics_payload,
+            }
+        )
+    return statuses
 
 
 @dataclass(slots=True)
@@ -141,6 +335,7 @@ async def _rescan_plex_requests(
     on_event=None,
     shallow: bool = False,
 ) -> tuple[int, int, int]:
+    """Run the legacy manual Plex reconcile path (TV refresh + compatibility poll)."""
     polling_service = PlexPollingService(db, plex)
     active_requests = await polling_service.get_active_requests()
     active_requests = [req for req in active_requests if req.status != RequestStatus.COMPLETED]
@@ -407,6 +602,7 @@ async def _build_settings_page_context(request: Request, db: AsyncSession) -> di
         await db.execute(select(RequestModel.status, func.count()).group_by(RequestModel.status))
     ).all()
     stats_by_status = {s.value: c for s, c in status_counts}
+    plex_jobs = await _build_plex_job_statuses(db)
 
     return {
         "request": request,
@@ -418,6 +614,7 @@ async def _build_settings_page_context(request: Request, db: AsyncSession) -> di
             "pending": stats_by_status.get(RequestStatus.PENDING.value, 0),
             "failed": stats_by_status.get(RequestStatus.FAILED.value, 0),
         },
+        "plex_jobs": plex_jobs,
         "env": eff_settings,
     }
 
@@ -444,7 +641,7 @@ async def rescan_plex(
     request: Request,
     db: AsyncSession = Depends(get_db),
 ) -> HTMLResponse:
-    """Re-scan Plex for availability across existing requests."""
+    """Run the legacy manual Plex reconcile path for existing requests."""
     context = await _build_settings_page_context(request, db)
 
     try:
@@ -460,7 +657,7 @@ async def rescan_plex(
             await plex.close()
 
         context["message"] = (
-            "Plex availability re-scan completed. "
+            "Legacy/manual Plex reconcile completed. "
             f"Re-synced {tv_resynced} TV request(s), had {tv_failed} failed TV request(s), "
             f"and transitioned {completed} request(s) to completed."
         )
@@ -646,21 +843,64 @@ async def retry_pending(
     """Manually trigger retry of pending items."""
     from app.siftarr.main import scheduler_service
 
+    context = await _build_settings_page_context(request, db)
     if scheduler_service:
         count = await scheduler_service.trigger_retry_now()
-        message = f"Retrying {count} pending items"
+        context["message"] = f"Retrying {count} pending items"
+        context["message_type"] = "success"
     else:
-        message = "Scheduler not available"
+        context["message"] = "Scheduler not available"
+        context["message_type"] = "error"
 
-    return templates.TemplateResponse(
-        request,
-        "settings.html",
-        {
-            "request": request,
-            "message": message,
-            "message_type": "success",
-        },
+    return templates.TemplateResponse(request, "settings.html", context)
+
+
+@router.post("/run-incremental-plex-sync")
+async def run_incremental_plex_sync(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+) -> HTMLResponse:
+    """Manually trigger the incremental Plex sync scheduler job."""
+    from app.siftarr.main import scheduler_service
+
+    context = await _build_settings_page_context(request, db)
+    if scheduler_service is None:
+        context["message"] = "Scheduler not available"
+        context["message_type"] = "error"
+        return templates.TemplateResponse(request, "settings.html", context)
+
+    result = await scheduler_service.trigger_incremental_plex_sync_now()
+    context["message"], context["message_type"] = _build_manual_plex_job_message(
+        "Incremental Plex sync",
+        result,
     )
+
+    context["plex_jobs"] = await _build_plex_job_statuses(db)
+    return templates.TemplateResponse(request, "settings.html", context)
+
+
+@router.post("/run-full-plex-reconcile")
+async def run_full_plex_reconcile(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+) -> HTMLResponse:
+    """Manually trigger the full Plex reconcile scheduler job."""
+    from app.siftarr.main import scheduler_service
+
+    context = await _build_settings_page_context(request, db)
+    if scheduler_service is None:
+        context["message"] = "Scheduler not available"
+        context["message_type"] = "error"
+        return templates.TemplateResponse(request, "settings.html", context)
+
+    result = await scheduler_service.trigger_full_plex_reconcile_now()
+    context["message"], context["message_type"] = _build_manual_plex_job_message(
+        "Full Plex reconcile",
+        result,
+    )
+
+    context["plex_jobs"] = await _build_plex_job_statuses(db)
+    return templates.TemplateResponse(request, "settings.html", context)
 
 
 async def _import_overseerr_requests(
@@ -931,7 +1171,7 @@ async def _rescan_plex_generator(shallow: bool = False):
                 resynced, failed, completed = await task
 
                 message = (
-                    f"Plex re-scan completed. "
+                    "Legacy/manual Plex reconcile completed. "
                     f"Re-synced {resynced} TV request(s), "
                     f"{failed} failed, "
                     f"{completed} transitioned to completed."
@@ -1197,13 +1437,8 @@ async def reseed_rules(
     """Reseed default rules."""
     rule_service = RuleService(db)
     await rule_service.seed_default_rules()
+    context = await _build_settings_page_context(request, db)
+    context["message"] = "Default rules have been seeded"
+    context["message_type"] = "success"
 
-    return templates.TemplateResponse(
-        request,
-        "settings.html",
-        {
-            "request": request,
-            "message": "Default rules have been seeded",
-            "message_type": "success",
-        },
-    )
+    return templates.TemplateResponse(request, "settings.html", context)

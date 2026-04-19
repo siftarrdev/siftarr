@@ -18,6 +18,9 @@ SETTING_KEYS = {
     "qbittorrent_password",
     "staging_mode_enabled",
     "tz",
+    "plex_recent_scan_interval_minutes",
+    "plex_full_reconcile_interval_minutes",
+    "plex_checkpoint_buffer_minutes",
 }
 
 
@@ -47,6 +50,15 @@ async def get_effective_settings(db: AsyncSession | None = None) -> Settings:
             return fallback
         return str(value).strip().lower() in {"1", "true", "yes", "on"}
 
+    def get_int_value(key: str, fallback: int) -> int:
+        value = db_settings.get(key)
+        if value is None or value == "":
+            return fallback
+        try:
+            return int(str(value).strip())
+        except ValueError:
+            return fallback
+
     return Settings(
         overseerr_url=get_value("overseerr_url", get_optional_env_value("overseerr_url")),
         overseerr_api_key=get_value(
@@ -68,6 +80,19 @@ async def get_effective_settings(db: AsyncSession | None = None) -> Settings:
         ),
         retry_interval_hours=env_settings.retry_interval_hours,
         max_retry_duration_days=env_settings.max_retry_duration_days,
+        episode_sync_stale_hours=env_settings.episode_sync_stale_hours,
+        max_episode_discovery=env_settings.max_episode_discovery,
+        plex_poll_interval_minutes=env_settings.plex_poll_interval_minutes,
+        plex_recent_scan_interval_minutes=get_int_value(
+            "plex_recent_scan_interval_minutes", env_settings.plex_recent_scan_interval_minutes
+        ),
+        plex_full_reconcile_interval_minutes=get_int_value(
+            "plex_full_reconcile_interval_minutes",
+            env_settings.plex_full_reconcile_interval_minutes,
+        ),
+        plex_checkpoint_buffer_minutes=get_int_value(
+            "plex_checkpoint_buffer_minutes", env_settings.plex_checkpoint_buffer_minutes
+        ),
         overseerr_sync_concurrency=env_settings.overseerr_sync_concurrency,
         plex_sync_concurrency=env_settings.plex_sync_concurrency,
         puid=env_settings.puid,

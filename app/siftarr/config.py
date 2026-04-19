@@ -46,6 +46,9 @@ class Settings(BaseSettings):
     episode_sync_stale_hours: int = 24
     max_episode_discovery: int = 30
     plex_poll_interval_minutes: int = 15
+    plex_recent_scan_interval_minutes: int = 5
+    plex_full_reconcile_interval_minutes: int = 360
+    plex_checkpoint_buffer_minutes: int = 10
     overseerr_sync_concurrency: int = 16
     plex_sync_concurrency: int = 16
 
