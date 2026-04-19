@@ -54,6 +54,7 @@ def _make_episode(
     ep = MagicMock()
     ep.episode_number = episode_number
     ep.status = status
+    ep.air_date = None
     return ep
 
 
@@ -147,7 +148,7 @@ class TestPlexPollingService:
 
     @pytest.mark.asyncio
     async def test_poll_tv_all_episodes_available(self, service, mock_db, mock_plex):
-        """TV request where all episodes are on Plex should be completed."""
+        """TV request where all episodes are on Plex should be reconciled via aggregation."""
         ep1 = _make_episode(1)
         ep2 = _make_episode(2)
         season = _make_season(1, [ep1, ep2])
@@ -166,16 +167,31 @@ class TestPlexPollingService:
             (1, 2): True,
         }
 
-        with patch.object(
-            service.lifecycle, "transition", new_callable=AsyncMock
-        ) as mock_transition:
-            mock_transition.return_value = req
+        async def reconcile_to_available(request, seasons, availability):
+            return await _set_request_status(
+                request, RequestStatus.AVAILABLE, seasons, availability
+            )
+
+        with (
+            patch.object(
+                service.episode_sync,
+                "reconcile_existing_seasons_from_plex",
+                new_callable=AsyncMock,
+            ) as mock_reconcile,
+            patch.object(
+                service.lifecycle, "transition", new_callable=AsyncMock
+            ) as mock_transition,
+        ):
+            mock_reconcile.side_effect = reconcile_to_available
             completed = await service.poll()
 
         assert completed == 1
-        mock_transition.assert_called_once_with(
-            req.id, RequestStatus.COMPLETED, reason="All episodes found on Plex"
+        mock_reconcile.assert_awaited_once_with(
+            req,
+            req.seasons,
+            {(1, 1): True, (1, 2): True},
         )
+        mock_transition.assert_not_awaited()
 
     @pytest.mark.asyncio
     async def test_poll_tv_partial_episodes(self, service, mock_db, mock_plex):
@@ -208,7 +224,7 @@ class TestPlexPollingService:
 
     @pytest.mark.asyncio
     async def test_poll_partially_available_request_can_complete(self, service, mock_db, mock_plex):
-        """Previously partial TV requests should still be polled and allowed to complete."""
+        """Previously partial TV requests should still be polled and recomputed."""
         ep1 = _make_episode(1, status=RequestStatus.COMPLETED)
         ep2 = _make_episode(2, status=RequestStatus.PENDING)
         season = _make_season(1, [ep1, ep2])
@@ -228,16 +244,31 @@ class TestPlexPollingService:
             (1, 2): True,
         }
 
-        with patch.object(
-            service.lifecycle, "transition", new_callable=AsyncMock
-        ) as mock_transition:
-            mock_transition.return_value = req
+        async def reconcile_to_available(request, seasons, availability):
+            return await _set_request_status(
+                request, RequestStatus.AVAILABLE, seasons, availability
+            )
+
+        with (
+            patch.object(
+                service.episode_sync,
+                "reconcile_existing_seasons_from_plex",
+                new_callable=AsyncMock,
+            ) as mock_reconcile,
+            patch.object(
+                service.lifecycle, "transition", new_callable=AsyncMock
+            ) as mock_transition,
+        ):
+            mock_reconcile.side_effect = reconcile_to_available
             completed = await service.poll()
 
         assert completed == 1
-        mock_transition.assert_called_once_with(
-            req.id, RequestStatus.COMPLETED, reason="All episodes found on Plex"
+        mock_reconcile.assert_awaited_once_with(
+            req,
+            req.seasons,
+            {(1, 1): True, (1, 2): True},
         )
+        mock_transition.assert_not_awaited()
 
     @pytest.mark.asyncio
     async def test_poll_tv_show_not_in_plex(self, service, mock_db, mock_plex):
@@ -278,14 +309,28 @@ class TestPlexPollingService:
         mock_plex.get_show_by_tvdb.return_value = {"rating_key": "55"}
         mock_plex.get_episode_availability.return_value = {(1, 1): True}
 
-        with patch.object(
-            service.lifecycle, "transition", new_callable=AsyncMock
-        ) as mock_transition:
-            mock_transition.return_value = req
+        async def reconcile_to_available(request, seasons, availability):
+            return await _set_request_status(
+                request, RequestStatus.AVAILABLE, seasons, availability
+            )
+
+        with (
+            patch.object(
+                service.episode_sync,
+                "reconcile_existing_seasons_from_plex",
+                new_callable=AsyncMock,
+            ) as mock_reconcile,
+            patch.object(
+                service.lifecycle, "transition", new_callable=AsyncMock
+            ) as mock_transition,
+        ):
+            mock_reconcile.side_effect = reconcile_to_available
             completed = await service.poll()
 
         assert completed == 1
         mock_plex.get_show_by_tvdb.assert_called_once_with(888)
+        mock_reconcile.assert_awaited_once_with(req, req.seasons, {(1, 1): True})
+        mock_transition.assert_not_awaited()
 
     @pytest.mark.asyncio
     async def test_poll_error_handling(self, service, mock_db, mock_plex):
@@ -436,15 +481,16 @@ class TestPlexPollingService:
                 authoritative=True,
             )
 
-        update_calls = 0
+        reconcile_calls = 0
 
-        async def update_episode_statuses(req, completed_episodes) -> None:
-            nonlocal update_calls
+        async def reconcile_existing_seasons_from_plex(req, seasons, availability) -> None:
+            nonlocal reconcile_calls
             nonlocal active_writes, max_active_writes
             assert probes_finished == 2
-            assert completed_episodes == frozenset({(1, 1), (1, 2)})
-            update_calls += 1
-            if update_calls == 1:
+            assert seasons == req.seasons
+            assert availability == {(1, 1): True, (1, 2): True}
+            reconcile_calls += 1
+            if reconcile_calls == 1:
                 first_write_started.set()
             else:
                 second_write_started.set()
@@ -453,31 +499,23 @@ class TestPlexPollingService:
             await release_writes.wait()
             active_writes -= 1
 
-        async def transition(*args, **kwargs):
-            nonlocal active_writes, max_active_writes
-            assert probes_finished == 2
-            first_transition_started.set()
-            active_writes += 1
-            max_active_writes = max(max_active_writes, active_writes)
-            await release_writes.wait()
-            active_writes -= 1
-            return args[0]
-
         mock_plex.get_episode_availability_result.side_effect = get_episode_availability_result
 
         with (
             patch.object(
-                service, "_update_episode_statuses", side_effect=update_episode_statuses
-            ) as mock_update,
+                service.episode_sync,
+                "reconcile_existing_seasons_from_plex",
+                side_effect=reconcile_existing_seasons_from_plex,
+            ) as mock_reconcile,
             patch.object(
-                service.lifecycle, "transition", side_effect=transition
+                service.lifecycle, "transition", new_callable=AsyncMock
             ) as mock_transition,
         ):
             scan_task = asyncio.create_task(service.incremental_recent_scan())
             await asyncio.wait_for(probes_ready.wait(), timeout=1)
 
             assert probes_finished == 0
-            mock_update.assert_not_called()
+            mock_reconcile.assert_not_called()
             mock_transition.assert_not_called()
 
             release_probes.set()
@@ -495,8 +533,9 @@ class TestPlexPollingService:
         assert result.metrics.deduped_items == 0
         assert result.metrics.skipped_on_error_items == 0
         assert max_active_writes == 1
-        assert mock_update.await_count == 2
-        assert mock_transition.await_count == 2
+        assert first_transition_started.is_set() is False
+        assert mock_reconcile.await_count == 2
+        assert mock_transition.await_count == 0
 
     @pytest.mark.asyncio
     async def test_incremental_recent_scan_collapses_duplicate_media_ids_within_cycle(
@@ -620,14 +659,25 @@ class TestPlexPollingService:
             )
         )
 
+        async def reconcile_to_available(request, seasons, availability):
+            return await _set_request_status(
+                request, RequestStatus.AVAILABLE, seasons, availability
+            )
+
         with (
             patch.object(
                 service, "_current_time", side_effect=[run_started, run_started, run_started]
             ),
             patch.object(
+                service.episode_sync,
+                "reconcile_existing_seasons_from_plex",
+                new_callable=AsyncMock,
+            ) as mock_reconcile,
+            patch.object(
                 service.lifecycle, "transition", new_callable=AsyncMock
             ) as mock_transition,
         ):
+            mock_reconcile.side_effect = reconcile_to_available
             result = await service.incremental_recent_scan()
 
         assert result.completed_requests == 2
@@ -639,10 +689,8 @@ class TestPlexPollingService:
         assert result.metrics.checkpoint.advanced is True
         mock_plex.check_movie_available.assert_not_called()
         mock_plex.get_episode_availability_result.assert_awaited_once_with("show-222")
-        mock_transition.assert_any_call(1, RequestStatus.COMPLETED, reason="Found on Plex")
-        mock_transition.assert_any_call(
-            2, RequestStatus.COMPLETED, reason="All episodes found on Plex"
-        )
+        mock_transition.assert_awaited_once_with(1, RequestStatus.COMPLETED, reason="Found on Plex")
+        mock_reconcile.assert_awaited_once_with(req2, req2.seasons, {(1, 1): True})
         service.scan_state.release_lock.assert_awaited_once()
         release_call = service.scan_state.release_lock.await_args
         assert release_call is not None
@@ -718,9 +766,22 @@ class TestPlexPollingService:
             )
         )
 
-        with patch.object(
-            service.lifecycle, "transition", new_callable=AsyncMock
-        ) as mock_transition:
+        async def reconcile_to_available(request, seasons, availability):
+            return await _set_request_status(
+                request, RequestStatus.AVAILABLE, seasons, availability
+            )
+
+        with (
+            patch.object(
+                service.episode_sync,
+                "reconcile_existing_seasons_from_plex",
+                new_callable=AsyncMock,
+            ) as mock_reconcile,
+            patch.object(
+                service.lifecycle, "transition", new_callable=AsyncMock
+            ) as mock_transition,
+        ):
+            mock_reconcile.side_effect = reconcile_to_available
             result = await service.incremental_recent_scan()
 
         assert result.completed_requests == 3
@@ -730,7 +791,8 @@ class TestPlexPollingService:
         mock_plex.get_show_by_tvdb.assert_not_called()
         mock_plex.get_episode_availability_result.assert_awaited_once_with("show-222")
         mock_plex.get_episode_availability.assert_not_called()
-        assert mock_transition.await_count == 3
+        assert mock_transition.await_count == 2
+        mock_reconcile.assert_awaited_once_with(tv_req, tv_req.seasons, {(1, 1): True})
 
     @pytest.mark.asyncio
     async def test_incremental_recent_scan_skips_when_lock_is_held(
@@ -937,7 +999,9 @@ class TestPlexPollingService:
 
         mock_plex.iter_recently_added_items = iter_recently_added_items
         mock_plex.lookup_show_by_tmdb = AsyncMock(
-            return_value=PlexLookupResult(item={"rating_key": "show-222", "Media": []}, authoritative=True)
+            return_value=PlexLookupResult(
+                item={"rating_key": "show-222", "Media": []}, authoritative=True
+            )
         )
         mock_plex.get_episode_availability_result = AsyncMock(
             return_value=PlexEpisodeAvailabilityResult(availability={}, authoritative=False)
@@ -1043,11 +1107,12 @@ class TestPlexPollingService:
         assert result.metrics.downgraded_requests == 0
         assert result.metrics.skipped_on_error_items == 0
         service.episode_sync.reconcile_existing_seasons_from_plex.assert_awaited_once()
-        mock_transition.assert_any_call(1, RequestStatus.COMPLETED, reason="Found on Plex")
-        mock_transition.assert_any_call(
-            2, RequestStatus.COMPLETED, reason="All episodes found on Plex"
-        )
-        assert mock_transition.await_count == 2
+        mock_transition.assert_awaited_once_with(1, RequestStatus.COMPLETED, reason="Found on Plex")
+
+
+async def _set_request_status(request, status, seasons, availability):
+    request.status = status
+    return seasons
 
     @pytest.mark.asyncio
     async def test_full_reconcile_scan_downgrades_stale_movie_on_clean_authoritative_miss(

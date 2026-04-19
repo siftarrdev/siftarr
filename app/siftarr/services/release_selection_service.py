@@ -25,6 +25,74 @@ from app.siftarr.services.staging_service import StagingService
 logger = logging.getLogger(__name__)
 
 
+async def _get_active_staged_torrents(
+    db: AsyncSession,
+    request_id: int,
+) -> list[StagedTorrent]:
+    """Load currently active staged/approved torrents for a request."""
+    result = await db.execute(
+        select(StagedTorrent)
+        .where(
+            StagedTorrent.request_id == request_id,
+            StagedTorrent.status.in_(["staged", "approved"]),
+        )
+        .order_by(StagedTorrent.created_at.asc(), StagedTorrent.id.asc())
+    )
+    return list(result.scalars().all())
+
+
+def _replacement_reason_for_selection(
+    current: StagedTorrent,
+    *,
+    selection_source: str,
+) -> str:
+    """Return a consistent audit reason for active selection replacement."""
+    if current.status == "approved":
+        return "Manually replaced approved selection from request details"
+    if selection_source == "manual":
+        return "Manually replaced staged selection from request details"
+    return "Replaced staged selection"
+
+
+def _retire_replaced_selection(
+    current: StagedTorrent,
+    replacement: StagedTorrent,
+    *,
+    selection_source: str,
+) -> None:
+    """Mark an active staged/approved torrent as replaced by another selection."""
+    current.status = "replaced"
+    current.replaced_by_id = replacement.id
+    current.replaced_at = datetime.now(UTC)
+    current.replacement_reason = _replacement_reason_for_selection(
+        current,
+        selection_source=selection_source,
+    )
+
+
+def _staged_selection_outcome(
+    *,
+    selection_source: str,
+    staged_count: int,
+    replaced_active_selection: bool,
+) -> tuple[str, str]:
+    """Return a clear operator-facing action/message pair for staging mode."""
+    if selection_source == "rule":
+        return (
+            "auto_staged",
+            f"Auto-staged {staged_count} release(s) for approval.",
+        )
+    if replaced_active_selection:
+        return (
+            "replaced_active_selection",
+            f"Replaced the active staged selection with {staged_count} release(s).",
+        )
+    return (
+        "manual_staged",
+        f"Manually staged {staged_count} release(s) for approval.",
+    )
+
+
 async def _purge_releases(
     db: AsyncSession,
     *,
@@ -254,16 +322,23 @@ async def use_releases(
     if runtime_settings.staging_mode_enabled:
         staging_service = StagingService(db)
         staged_ids: list[int] = []
+        replaced_active_selection = False
         for release in usable_releases:
-            existing_result = await db.execute(
-                select(StagedTorrent).where(
-                    StagedTorrent.request_id == request.id,
-                    StagedTorrent.title == release.title,
-                    StagedTorrent.status.in_(["staged", "approved"]),
-                )
+            active_staged = await _get_active_staged_torrents(db, request.id)
+            existing = next(
+                (stage for stage in active_staged if stage.title == release.title), None
             )
-            existing = existing_result.scalar_one_or_none()
             if existing is not None:
+                if selection_source == "manual":
+                    for current in active_staged:
+                        if current.id == existing.id:
+                            continue
+                        _retire_replaced_selection(
+                            current,
+                            existing,
+                            selection_source=selection_source,
+                        )
+                        replaced_active_selection = True
                 staged_ids.append(existing.id)
                 continue
 
@@ -273,6 +348,16 @@ async def use_releases(
                 score=release.score,
                 selection_source=selection_source,
             )
+
+            if selection_source == "manual":
+                for current in active_staged:
+                    _retire_replaced_selection(
+                        current,
+                        staged,
+                        selection_source=selection_source,
+                    )
+                    replaced_active_selection = True
+
             staged_ids.append(staged.id)
             logger.info(
                 "Release staged: request_id=%s title=%s staged_id=%s score=%s",
@@ -282,16 +367,27 @@ async def use_releases(
                 release.score,
             )
 
+        if replaced_active_selection:
+            await db.commit()
+
         await _set_request_status(db, request, RequestStatus.STAGED)
         await queue_service.remove_from_queue(request.id)
+        action, message = _staged_selection_outcome(
+            selection_source=selection_source,
+            staged_count=len(staged_ids),
+            replaced_active_selection=replaced_active_selection,
+        )
         logger.info(
-            "Request staged: request_id=%s staged_count=%s",
+            "Request staged: request_id=%s staged_count=%s action=%s selection_source=%s",
             request.id,
             len(staged_ids),
+            action,
+            selection_source,
         )
         return {
             "status": "staged",
-            "message": f"Staged {len(staged_ids)} release(s) for approval.",
+            "action": action,
+            "message": message,
             "staged_ids": staged_ids,
         }
 

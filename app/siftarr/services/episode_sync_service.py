@@ -21,7 +21,7 @@ logger = logging.getLogger(__name__)
 
 def _episode_needs_unreleased_status(air_date: date | None) -> bool:
     """Return whether an episode should be treated as unreleased."""
-    return air_date is not None and air_date > datetime.now(UTC).date()
+    return isinstance(air_date, date) and air_date > datetime.now(UTC).date()
 
 
 def _derive_episode_status(*, is_on_plex: bool, air_date: date | None) -> RequestStatus:
@@ -429,6 +429,10 @@ class EpisodeSyncService:
 
     async def _load_season_episodes(self, season: Season) -> list[Episode]:
         """Load episodes for a season via explicit async query (avoids lazy-load in async context)."""
+        loaded_episodes = getattr(season, "__dict__", {}).get("episodes")
+        if loaded_episodes is not None:
+            return list(loaded_episodes)
+
         episodes_result = await self.db.execute(
             select(Episode).where(Episode.season_id == season.id)
         )

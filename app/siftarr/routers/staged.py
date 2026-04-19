@@ -11,7 +11,12 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.siftarr.database import get_db
-from app.siftarr.models.request import MediaType, Request, RequestStatus
+from app.siftarr.models.request import (
+    MediaType,
+    Request,
+    RequestStatus,
+    is_active_staging_workflow_status,
+)
 from app.siftarr.models.staged_torrent import StagedTorrent
 from app.siftarr.services.lifecycle_service import LifecycleService
 from app.siftarr.services.qbittorrent_service import MediaCategory, QbittorrentService
@@ -323,7 +328,7 @@ async def replace_staged_torrent(
 
     await db.commit()
 
-    return RedirectResponse(url="/", status_code=303)
+    return RedirectResponse(url="/?tab=staged", status_code=303)
 
 
 @router.get("/download-status")
@@ -339,15 +344,23 @@ async def get_download_status(
 
     # Collect request IDs for status lookup
     request_ids = {t.request_id for t in torrents if t.request_id is not None}
-    request_statuses: dict[int, str] = {}
+    request_statuses: dict[int, RequestStatus] = {}
     if request_ids:
         req_result = await db.execute(
             select(Request.id, Request.status).where(Request.id.in_(request_ids))
         )
         for req_id, req_status in req_result.all():
-            request_statuses[req_id] = (
-                req_status.value if hasattr(req_status, "value") else str(req_status)
-            )
+            request_statuses[req_id] = req_status
+
+    torrents = [
+        torrent
+        for torrent in torrents
+        if torrent.request_id is None
+        or is_active_staging_workflow_status(request_statuses.get(torrent.request_id))
+    ]
+
+    if not torrents:
+        return JSONResponse({"torrents": []})
 
     runtime_settings = await get_effective_settings(db)
     qbittorrent = QbittorrentService(settings=runtime_settings)
@@ -372,10 +385,13 @@ async def get_download_status(
         else:
             qbit_progress = await qbittorrent.get_torrent_progress_by_name(torrent.title)
 
-        request_status = request_statuses.get(torrent.request_id or -1, "unknown")
-
-        if request_status == "completed":
-            continue
+        request_status_value = request_statuses.get(torrent.request_id or -1)
+        if isinstance(request_status_value, RequestStatus):
+            request_status = request_status_value.value
+        elif request_status_value is not None:
+            request_status = str(request_status_value)
+        else:
+            request_status = "unknown"
 
         torrent_data.append(
             {

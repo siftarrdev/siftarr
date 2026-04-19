@@ -13,7 +13,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.siftarr.database import get_db
 from app.siftarr.models.episode import Episode
-from app.siftarr.models.request import MediaType, RequestStatus
+from app.siftarr.models.request import (
+    MediaType,
+    RequestStatus,
+    is_active_staging_workflow_status,
+)
 from app.siftarr.models.request import Request as RequestModel
 from app.siftarr.models.season import Season
 from app.siftarr.models.staged_torrent import StagedTorrent
@@ -55,7 +59,11 @@ async def dashboard(
     async def _should_show_in_unreleased(req: RequestModel) -> bool:
         if req.status == RequestStatus.UNRELEASED:
             return True
-        if req.media_type != MediaType.TV or req.status != RequestStatus.PARTIALLY_AVAILABLE:
+        if req.media_type != MediaType.TV or req.status not in {
+            RequestStatus.PARTIALLY_AVAILABLE,
+            RequestStatus.AVAILABLE,
+            RequestStatus.COMPLETED,
+        }:
             return False
 
         seasons, episodes = await load_tv_seasons_with_episodes(db, req.id)
@@ -94,6 +102,7 @@ async def dashboard(
     staged_request_ids = {
         torrent.request_id for torrent in staged_torrents if torrent.request_id is not None
     }
+    raw_staged_request_statuses: dict[int, RequestStatus] = {}
     staged_request_statuses: dict[int, str] = {}
     if staged_request_ids:
         staged_request_result = await db.execute(
@@ -101,16 +110,19 @@ async def dashboard(
                 RequestModel.id.in_(staged_request_ids)
             )
         )
+        for request_id, status in staged_request_result.all():
+            raw_staged_request_statuses[request_id] = status
         staged_request_statuses = {
-            request_id: status.value for request_id, status in staged_request_result.all()
+            request_id: status.value for request_id, status in raw_staged_request_statuses.items()
         }
 
-    # Filter out torrents whose linked request is already COMPLETED
+    # Only keep request-linked torrents while the linked request is still
+    # actively staged or downloading.
     staged_torrents = [
         t
         for t in staged_torrents
         if t.request_id is None
-        or staged_request_statuses.get(t.request_id) != RequestStatus.COMPLETED.value
+        or is_active_staging_workflow_status(raw_staged_request_statuses.get(t.request_id))
     ]
 
     # Build mapping for replaced torrents to their replacements
@@ -131,6 +143,8 @@ async def dashboard(
     unreleased_requests = [
         req for req in unreleased_candidates if await _should_show_in_unreleased(req)
     ]
+    unreleased_request_ids = {req.id for req in unreleased_requests}
+    completed_requests = [req for req in completed_requests if req.id not in unreleased_request_ids]
     overseerr_service = OverseerrService(settings=effective_settings)
 
     async def _earliest_future_release(req_obj: RequestModel) -> tuple[int, str | None]:

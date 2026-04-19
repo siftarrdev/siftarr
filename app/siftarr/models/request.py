@@ -40,6 +40,24 @@ class RequestStatus(enum.StrEnum):
     DENIED = "denied"
 
 
+ACTIVE_STAGING_WORKFLOW_STATUSES: tuple[RequestStatus, ...] = (
+    RequestStatus.STAGED,
+    RequestStatus.DOWNLOADING,
+)
+
+
+def is_active_staging_workflow_status(status: RequestStatus | str | None) -> bool:
+    """Return whether a request state is still in active staging/downloading."""
+    if isinstance(status, RequestStatus):
+        return status in ACTIVE_STAGING_WORKFLOW_STATUSES
+    if status is None:
+        return False
+    try:
+        return RequestStatus(status) in ACTIVE_STAGING_WORKFLOW_STATUSES
+    except ValueError:
+        return False
+
+
 class Request(Base):
     __tablename__ = "requests"
     __table_args__ = (

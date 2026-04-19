@@ -1,10 +1,10 @@
 import logging
 from datetime import UTC, datetime
 
-from sqlalchemy import func, select
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.siftarr.models.request import Request, RequestStatus
+from app.siftarr.models.request import MediaType, Request, RequestStatus
 
 logger = logging.getLogger(__name__)
 
@@ -267,11 +267,42 @@ class LifecycleService:
         return list(result.scalars().all())
 
     async def get_unreleased_and_partial_requests(self, limit: int = 500) -> list[Request]:
-        """Get requests in UNRELEASED or PARTIALLY_AVAILABLE status."""
+        """Get requests that may need the Unreleased tab treatment."""
         result = await self.db.execute(
             select(Request)
             .where(
-                Request.status.in_([RequestStatus.UNRELEASED, RequestStatus.PARTIALLY_AVAILABLE])
+                Request.status.in_(
+                    [
+                        RequestStatus.UNRELEASED,
+                        RequestStatus.PARTIALLY_AVAILABLE,
+                        RequestStatus.AVAILABLE,
+                        RequestStatus.COMPLETED,
+                    ]
+                )
+            )
+            .order_by(Request.updated_at.desc())
+            .limit(limit)
+        )
+        return list(result.scalars().all())
+
+    async def get_release_recheck_requests(self, limit: int = 500) -> list[Request]:
+        """Get requests that should be revisited for unreleased/released state."""
+        result = await self.db.execute(
+            select(Request)
+            .where(
+                or_(
+                    Request.status == RequestStatus.UNRELEASED,
+                    and_(
+                        Request.media_type == MediaType.TV,
+                        Request.status.in_(
+                            [
+                                RequestStatus.PARTIALLY_AVAILABLE,
+                                RequestStatus.AVAILABLE,
+                                RequestStatus.COMPLETED,
+                            ]
+                        ),
+                    ),
+                )
             )
             .order_by(Request.updated_at.desc())
             .limit(limit)

@@ -669,6 +669,106 @@ class TestEpisodeSyncService:
         mock_db.commit.assert_awaited_once()
 
     @pytest.mark.asyncio
+    async def test_reconcile_existing_seasons_marks_all_requested_episodes_available_not_completed(
+        self, mock_db, mock_overseerr
+    ):
+        """When all requested aired episodes are on Plex, TV requests should aggregate to available."""
+        request = _make_request(id=1)
+        request.status = RequestStatus.DOWNLOADING
+
+        season = _make_season(season_number=1)
+        episode_one = _make_episode(season_id=season.id, episode_number=1)
+        episode_one.air_date = date(2024, 1, 1)
+        episode_two = _make_episode(season_id=season.id, episode_number=2)
+        episode_two.air_date = date(2024, 1, 8)
+
+        service = EpisodeSyncService(mock_db, overseerr=mock_overseerr)
+        mock_db.flush = AsyncMock()
+        mock_db.commit = AsyncMock()
+
+        with patch.object(service, "_load_season_episodes", new_callable=AsyncMock) as mock_load:
+            mock_load.return_value = [episode_one, episode_two]
+
+            await service.reconcile_existing_seasons_from_plex(
+                request,
+                [season],
+                {(1, 1): True, (1, 2): True},
+            )
+
+        assert episode_one.status == RequestStatus.AVAILABLE
+        assert episode_two.status == RequestStatus.AVAILABLE
+        assert season.status == RequestStatus.AVAILABLE
+        assert request.status == RequestStatus.AVAILABLE
+        mock_db.commit.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_reconcile_existing_seasons_preserves_partial_season_with_future_episodes(
+        self, mock_db, mock_overseerr
+    ):
+        """Future unreleased episodes should keep the season and request partially available."""
+        request = _make_request(id=1)
+        request.status = RequestStatus.DOWNLOADING
+
+        season = _make_season(season_number=2)
+        aired_episode = _make_episode(season_id=season.id, episode_number=1)
+        aired_episode.air_date = date(2024, 1, 1)
+        future_episode = _make_episode(season_id=season.id, episode_number=2)
+        future_episode.air_date = datetime.now(UTC).date() + timedelta(days=7)
+
+        service = EpisodeSyncService(mock_db, overseerr=mock_overseerr)
+        mock_db.flush = AsyncMock()
+        mock_db.commit = AsyncMock()
+
+        with patch.object(service, "_load_season_episodes", new_callable=AsyncMock) as mock_load:
+            mock_load.return_value = [aired_episode, future_episode]
+
+            await service.reconcile_existing_seasons_from_plex(
+                request,
+                [season],
+                {(2, 1): True, (2, 2): False},
+            )
+
+        assert aired_episode.status == RequestStatus.AVAILABLE
+        assert future_episode.status == RequestStatus.UNRELEASED
+        assert season.status == RequestStatus.PARTIALLY_AVAILABLE
+        assert request.status == RequestStatus.PARTIALLY_AVAILABLE
+        mock_db.commit.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_reconcile_existing_seasons_keeps_ongoing_show_partially_available(
+        self, mock_db, mock_overseerr
+    ):
+        """Ongoing shows with all currently aired episodes on Plex should not flatten to completed."""
+        request = _make_request(id=1)
+        request.status = RequestStatus.DOWNLOADING
+
+        available_season = _make_season(season_number=1)
+        available_episode = _make_episode(season_id=available_season.id, episode_number=1)
+        available_episode.air_date = date(2024, 1, 1)
+
+        future_season = _make_season(season_number=2)
+        future_episode = _make_episode(season_id=future_season.id, episode_number=1)
+        future_episode.air_date = datetime.now(UTC).date() + timedelta(days=14)
+
+        service = EpisodeSyncService(mock_db, overseerr=mock_overseerr)
+        mock_db.flush = AsyncMock()
+        mock_db.commit = AsyncMock()
+
+        with patch.object(service, "_load_season_episodes", new_callable=AsyncMock) as mock_load:
+            mock_load.side_effect = [[available_episode], [future_episode]]
+
+            await service.reconcile_existing_seasons_from_plex(
+                request,
+                [available_season, future_season],
+                {(1, 1): True, (2, 1): False},
+            )
+
+        assert available_season.status == RequestStatus.AVAILABLE
+        assert future_season.status == RequestStatus.UNRELEASED
+        assert request.status == RequestStatus.PARTIALLY_AVAILABLE
+        mock_db.commit.assert_awaited_once()
+
+    @pytest.mark.asyncio
     async def test_refresh_if_stale_reapplies_plex_when_available_and_pending_mix_exists(
         self, mock_db, mock_overseerr
     ):

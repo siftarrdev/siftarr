@@ -276,6 +276,82 @@ class TestDashboardRouter:
         assert unreleased_request in context["unreleased_requests"]
 
     @pytest.mark.asyncio
+    async def test_dashboard_hides_completed_ongoing_tv_from_finished_when_unreleased(
+        self, mock_db, monkeypatch
+    ):
+        """Finished-tab rows reclassified as unreleased should move out of completed results."""
+        completed_tv = MagicMock()
+        completed_tv.id = 21
+        completed_tv.status = RequestStatus.COMPLETED
+        completed_tv.overseerr_request_id = 99
+        completed_tv.title = "The Rookie"
+        completed_tv.media_type = MediaType.TV
+        completed_tv.created_at = datetime(2026, 4, 1, 12, 0, tzinfo=UTC)
+        completed_tv.requester_username = "lucas"
+        completed_tv.year = 2025
+        completed_tv.tmdb_id = 123
+        completed_tv.tvdb_id = 456
+
+        lifecycle_service = AsyncMock()
+        lifecycle_service.get_active_requests.return_value = []
+        lifecycle_service.get_requests_by_status.return_value = [completed_tv]
+        lifecycle_service.get_unreleased_and_partial_requests.return_value = [completed_tv]
+        lifecycle_service.get_requests_stats.return_value = {
+            "by_status": {
+                RequestStatus.COMPLETED.value: 1,
+                RequestStatus.UNRELEASED.value: 1,
+            }
+        }
+        monkeypatch.setattr(dashboard, "LifecycleService", lambda db: lifecycle_service)
+
+        monkeypatch.setattr(
+            dashboard,
+            "PendingQueueService",
+            lambda db: AsyncMock(get_all_pending=AsyncMock(return_value=[])),
+        )
+        monkeypatch.setattr(
+            dashboard,
+            "get_effective_settings",
+            AsyncMock(
+                return_value=MagicMock(
+                    overseerr_url="http://overseerr.test",
+                    staging_mode_enabled=False,
+                )
+            ),
+        )
+
+        fake_overseerr = AsyncMock()
+        fake_overseerr.get_media_details.return_value = {
+            "nextEpisodeToAir": {"airDate": "2026-05-01"}
+        }
+        monkeypatch.setattr(dashboard, "OverseerrService", lambda settings: fake_overseerr)
+
+        mock_db.execute.side_effect = [
+            MagicMock(scalars=MagicMock(return_value=MagicMock(all=MagicMock(return_value=[])))),
+            MagicMock(scalars=MagicMock(return_value=MagicMock(all=MagicMock(return_value=[])))),
+            MagicMock(scalars=MagicMock(return_value=MagicMock(all=MagicMock(return_value=[])))),
+        ]
+        monkeypatch.setattr(
+            dashboard,
+            "load_tv_seasons_with_episodes",
+            AsyncMock(
+                return_value=(
+                    [MagicMock(id=1, season_number=8, synced_at=None)],
+                    [
+                        MagicMock(status=RequestStatus.AVAILABLE),
+                        MagicMock(status=RequestStatus.UNRELEASED),
+                    ],
+                )
+            ),
+        )
+
+        response = await dashboard.dashboard(MagicMock(), db=mock_db)
+
+        context = response.context
+        assert completed_tv in context["unreleased_requests"]
+        assert completed_tv not in context["completed_requests"]
+
+    @pytest.mark.asyncio
     async def test_dashboard_renders_staged_torrents_for_refresh(self, mock_db, monkeypatch):
         """Dashboard should include staged torrents in the staged tab HTML."""
         lifecycle_service = AsyncMock()
@@ -326,6 +402,97 @@ class TestDashboardRouter:
         body = response.body.decode()
         assert "staged-torrents-body" in body
         assert "Test Torrent" in body
+
+    @pytest.mark.asyncio
+    async def test_dashboard_hides_stale_available_and_partial_staged_torrents(
+        self, mock_db, monkeypatch
+    ):
+        """Approved request-linked torrents should disappear once requests are resolved."""
+        lifecycle_service = AsyncMock()
+        lifecycle_service.get_active_requests.return_value = []
+        lifecycle_service.get_requests_by_status.return_value = []
+        lifecycle_service.get_unreleased_and_partial_requests.return_value = []
+        lifecycle_service.get_requests_stats.return_value = {"by_status": {}}
+        monkeypatch.setattr(dashboard, "LifecycleService", lambda db: lifecycle_service)
+
+        monkeypatch.setattr(
+            dashboard,
+            "PendingQueueService",
+            lambda db: AsyncMock(get_all_pending=AsyncMock(return_value=[])),
+        )
+        monkeypatch.setattr(
+            dashboard,
+            "get_effective_settings",
+            AsyncMock(
+                return_value=MagicMock(
+                    overseerr_url="http://overseerr.test",
+                    staging_mode_enabled=False,
+                )
+            ),
+        )
+
+        active_torrent = MagicMock()
+        active_torrent.id = 1
+        active_torrent.request_id = 100
+        active_torrent.title = "Still Downloading"
+        active_torrent.status = "approved"
+        active_torrent.size = 123
+        active_torrent.indexer = "Indexer"
+        active_torrent.score = 50
+        active_torrent.created_at = datetime(2026, 4, 1, 12, 0, tzinfo=UTC)
+        active_torrent.replaced_by_id = None
+        active_torrent.replacement_reason = None
+
+        available_torrent = MagicMock()
+        available_torrent.id = 2
+        available_torrent.request_id = 101
+        available_torrent.title = "Already Available"
+        available_torrent.status = "approved"
+        available_torrent.size = 123
+        available_torrent.indexer = "Indexer"
+        available_torrent.score = 45
+        available_torrent.created_at = datetime(2026, 4, 1, 11, 0, tzinfo=UTC)
+        available_torrent.replaced_by_id = None
+        available_torrent.replacement_reason = None
+
+        partial_torrent = MagicMock()
+        partial_torrent.id = 3
+        partial_torrent.request_id = 102
+        partial_torrent.title = "Partially Available"
+        partial_torrent.status = "approved"
+        partial_torrent.size = 123
+        partial_torrent.indexer = "Indexer"
+        partial_torrent.score = 40
+        partial_torrent.created_at = datetime(2026, 4, 1, 10, 0, tzinfo=UTC)
+        partial_torrent.replaced_by_id = None
+        partial_torrent.replacement_reason = None
+
+        staged_result = MagicMock(
+            scalars=MagicMock(
+                return_value=MagicMock(
+                    all=MagicMock(return_value=[active_torrent, available_torrent, partial_torrent])
+                )
+            )
+        )
+        request_status_result = MagicMock()
+        request_status_result.all.return_value = [
+            (100, RequestStatus.DOWNLOADING),
+            (101, RequestStatus.AVAILABLE),
+            (102, RequestStatus.PARTIALLY_AVAILABLE),
+        ]
+        empty_result = MagicMock(
+            scalars=MagicMock(return_value=MagicMock(all=MagicMock(return_value=[])))
+        )
+        mock_db.execute.side_effect = [staged_result, request_status_result, empty_result]
+
+        response = await dashboard.dashboard(MagicMock(), db=mock_db)
+
+        context = response.context
+        assert context["staged_torrents"] == [active_torrent]
+        body = response.body.decode()
+        assert "Still Downloading" in body
+        assert "Already Available" not in body
+        assert "Partially Available" not in body
 
     @pytest.mark.asyncio
     async def test_deny_request_success(self):
@@ -1416,6 +1583,124 @@ class TestDashboardRouter:
         assert body["releases"][0]["publish_date"] == published_at.isoformat()
 
     @pytest.mark.asyncio
+    async def test_request_details_surfaces_active_staged_torrent_metadata(
+        self, mock_db, monkeypatch, background_tasks
+    ):
+        """Request details should mark the current active staged torrent for replacement UX."""
+        request_record = MagicMock()
+        request_record.id = 21
+        request_record.media_type = MediaType.MOVIE
+        request_record.status = RequestStatus.STAGED
+        request_record.title = "Foundation"
+        request_record.overseerr_request_id = None
+
+        active_release = Release(
+            id=8,
+            request_id=21,
+            title="Foundation.2160p.WEB-DL",
+            size=30 * 1024 * 1024 * 1024,
+            seeders=55,
+            leechers=4,
+            download_url="https://example.test/foundation",
+            magnet_url=None,
+            info_hash=None,
+            indexer="IndexerA",
+            publish_date=None,
+            resolution="2160p",
+            codec=None,
+            release_group=None,
+            season_number=None,
+            episode_number=None,
+            season_coverage=None,
+            score=95,
+            passed_rules=True,
+            is_downloaded=False,
+        )
+        other_release = Release(
+            id=9,
+            request_id=21,
+            title="Foundation.1080p.WEB-DL",
+            size=20 * 1024 * 1024 * 1024,
+            seeders=65,
+            leechers=2,
+            download_url="https://example.test/foundation-1080p",
+            magnet_url=None,
+            info_hash=None,
+            indexer="IndexerB",
+            publish_date=None,
+            resolution="1080p",
+            codec=None,
+            release_group=None,
+            season_number=None,
+            episode_number=None,
+            season_coverage=None,
+            score=90,
+            passed_rules=True,
+            is_downloaded=False,
+        )
+        active_stage = MagicMock()
+        active_stage.id = 77
+        active_stage.title = active_release.title
+        active_stage.status = "staged"
+        active_stage.selection_source = "rule"
+
+        request_result = MagicMock()
+        request_result.scalar_one_or_none.return_value = request_record
+        release_result = MagicMock()
+        release_result.scalars.return_value.all.return_value = [active_release, other_release]
+        rules_result = MagicMock()
+        rules_result.scalars.return_value.all.return_value = []
+        active_stage_result = MagicMock()
+        active_stage_result.scalars.return_value.first.return_value = active_stage
+        mock_db.execute.side_effect = [
+            request_result,
+            release_result,
+            rules_result,
+            active_stage_result,
+        ]
+
+        monkeypatch.setattr(
+            dashboard_api, "get_effective_settings", AsyncMock(return_value=MagicMock())
+        )
+
+        class FakeOverseerrService:
+            def __init__(self, settings):
+                pass
+
+            async def close(self):
+                return None
+
+        fake_engine = MagicMock()
+        fake_engine.evaluate.return_value = MagicMock(
+            rejection_reason=None,
+            matches=[],
+            total_score=95,
+            passed=True,
+        )
+
+        monkeypatch.setattr(dashboard_api, "OverseerrService", FakeOverseerrService)
+        monkeypatch.setattr(
+            dashboard_api.RuleEngine,
+            "from_db_rules",
+            MagicMock(return_value=fake_engine),
+        )
+
+        response = await dashboard_api.request_details(
+            request_id=21, background_tasks=background_tasks, db=mock_db
+        )
+
+        body = json.loads(cast(bytes, response.body))
+        assert body["active_staged_torrent"] == {
+            "id": 77,
+            "title": active_release.title,
+            "status": "staged",
+            "selection_source": "rule",
+        }
+        assert body["releases"][0]["is_active_selection"] is True
+        assert body["releases"][0]["active_selection_source"] == "rule"
+        assert body["releases"][1]["is_active_selection"] is False
+
+    @pytest.mark.asyncio
     async def test_request_details_returns_cached_tv_data_and_sync_state(
         self, mock_db, monkeypatch, background_tasks
     ):
@@ -1929,7 +2214,7 @@ class TestDashboardRouter:
     async def test_use_request_release_redirects_pending_requests_to_pending_tab(
         self, mock_db, monkeypatch
     ):
-        """Stored release selection should default back to pending when request is pending."""
+        """Stored release selection should redirect to staged view to highlight the active pick."""
         request_record = MagicMock()
         request_record.id = 21
         request_record.status = RequestStatus.PENDING
@@ -1941,7 +2226,7 @@ class TestDashboardRouter:
         release_result.scalar_one_or_none.return_value = release_record
         mock_db.execute.side_effect = [request_result, release_result]
 
-        use_releases = AsyncMock()
+        use_releases = AsyncMock(return_value={"status": "staged"})
         monkeypatch.setattr(dashboard_actions, "use_releases", use_releases)
 
         response = await dashboard_actions.use_request_release(
@@ -1953,7 +2238,7 @@ class TestDashboardRouter:
         )
 
         assert response.status_code == 303
-        assert response.headers["location"] == "/?tab=pending"
+        assert response.headers["location"] == "/?tab=staged"
         use_releases.assert_awaited_once_with(
             mock_db,
             request_record,
@@ -1978,7 +2263,7 @@ class TestDashboardRouter:
         fake_engine = MagicMock()
         fake_engine.evaluate.return_value = MagicMock(total_score=55, passed=True, matches=[])
         persist_manual_release = AsyncMock(return_value=stored_release)
-        use_releases = AsyncMock(return_value={"status": "downloading"})
+        use_releases = AsyncMock(return_value={"status": "staged"})
 
         monkeypatch.setattr(
             dashboard_actions.RuleEngine,
@@ -2008,7 +2293,7 @@ class TestDashboardRouter:
         )
 
         assert response.status_code == 303
-        assert response.headers["location"] == "/?tab=pending"
+        assert response.headers["location"] == "/?tab=staged"
         persist_manual_release.assert_awaited_once()
         use_releases.assert_awaited_once_with(
             mock_db,
@@ -2016,6 +2301,85 @@ class TestDashboardRouter:
             [stored_release],
             selection_source="manual",
         )
+
+    @pytest.mark.asyncio
+    async def test_use_request_release_json_reports_auto_stage_outcome(self, mock_db, monkeypatch):
+        """JSON release selection responses should clearly call out auto-staging."""
+        request_record = MagicMock()
+        request_record.id = 21
+        request_record.status = RequestStatus.PENDING
+        release_record = MagicMock(id=99)
+
+        request_result = MagicMock()
+        request_result.scalar_one_or_none.return_value = request_record
+        release_result = MagicMock()
+        release_result.scalar_one_or_none.return_value = release_record
+        mock_db.execute.side_effect = [request_result, release_result]
+
+        use_releases = AsyncMock(return_value={"status": "staged", "action": "auto_staged"})
+        monkeypatch.setattr(dashboard_actions, "use_releases", use_releases)
+
+        response = await dashboard_actions.use_request_release(
+            request_id=21,
+            release_id=99,
+            http_request=MagicMock(headers={"accept": "application/json"}),
+            redirect_to=None,
+            db=mock_db,
+        )
+
+        body = json.loads(cast(bytes, response.body))
+        assert body == {"status": "ok", "message": "Request auto-staged successfully"}
+
+    @pytest.mark.asyncio
+    async def test_use_manual_release_json_reports_replacement_outcome(self, mock_db, monkeypatch):
+        """JSON manual selection responses should clearly call out replacements."""
+        request_record = MagicMock()
+        request_record.id = 21
+        request_record.status = RequestStatus.STAGED
+
+        request_result = MagicMock()
+        request_result.scalar_one_or_none.return_value = request_record
+        rules_result = MagicMock()
+        rules_result.scalars.return_value.all.return_value = []
+        mock_db.execute.side_effect = [request_result, rules_result]
+
+        stored_release = MagicMock(id=123)
+        fake_engine = MagicMock()
+        fake_engine.evaluate.return_value = MagicMock(total_score=55, passed=True, matches=[])
+        persist_manual_release = AsyncMock(return_value=stored_release)
+        use_releases = AsyncMock(
+            return_value={"status": "staged", "action": "replaced_active_selection"}
+        )
+
+        monkeypatch.setattr(
+            dashboard_actions.RuleEngine,
+            "from_db_rules",
+            MagicMock(return_value=fake_engine),
+        )
+        monkeypatch.setattr(dashboard_actions, "persist_manual_release", persist_manual_release)
+        monkeypatch.setattr(dashboard_actions, "use_releases", use_releases)
+
+        response = await dashboard_actions.use_manual_release(
+            request_id=21,
+            http_request=MagicMock(headers={"accept": "application/json"}),
+            title="Foundation.S01E01.1080p.WEB-DL",
+            size=2,
+            seeders=10,
+            leechers=1,
+            indexer="IndexerA",
+            download_url="https://example.test/foundation.torrent",
+            magnet_url=None,
+            info_hash="abc123",
+            publish_date="2026-04-16T00:00:00+00:00",
+            resolution="1080p",
+            codec="x265",
+            release_group="GROUP",
+            redirect_to=None,
+            db=mock_db,
+        )
+
+        body = json.loads(cast(bytes, response.body))
+        assert body == {"status": "ok", "message": "Active staged selection replaced successfully"}
 
     @pytest.mark.asyncio
     async def test_use_manual_release_rejects_invalid_publish_date(self, mock_db):
@@ -2108,5 +2472,35 @@ class TestDashboardRouter:
 
         assert "function renderAnnotation(" in template
         assert "function releaseAnnotationTone(" in template
+
+    def test_dashboard_template_includes_active_stage_replacement_copy(self):
+        """Request details template should explain replacement semantics for staged picks."""
+        from pathlib import Path
+
+        template_path = Path(__file__).parent.parent / "app/siftarr/templates/dashboard.html"
+        with open(template_path, encoding="utf-8") as handle:
+            template = handle.read()
+
+        assert "request-details-active-stage-banner" in template
+        assert "Replace staged" in template
+        assert "Stage release" in template
+        assert "Stage this torrent for review and approval." in template
+        assert "Selecting another result will replace it." in template
         assert "text-emerald-400" in template
         assert "text-red-400" in template
+
+    def test_dashboard_template_refreshes_full_staged_content(self):
+        """Staged refresh should replace the whole section so empty states can appear."""
+        from pathlib import Path
+
+        template_path = Path(__file__).parent.parent / "app/siftarr/templates/dashboard.html"
+        with open(template_path, encoding="utf-8") as handle:
+            template = handle.read()
+
+        assert "const stagedContent = document.getElementById('content-staged');" in template
+        assert "const newContent = doc.getElementById('content-staged');" in template
+        assert "stagedContent.innerHTML = newContent.innerHTML;" in template
+        assert (
+            "document.querySelectorAll('#staged-torrents-body tr[data-state=\"approved\"]')"
+            in template
+        )

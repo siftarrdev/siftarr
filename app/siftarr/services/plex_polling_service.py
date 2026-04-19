@@ -61,6 +61,7 @@ class PollDecision:
     reason: str
     requested_episode_count: int = 0
     completed_episodes: frozenset[EpisodeKey] = field(default_factory=frozenset)
+    episode_availability: dict[EpisodeKey, bool] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -864,17 +865,7 @@ class PlexPollingService:
         if requested_episodes and all(
             episode_result.availability.get(key, False) for key in requested_episodes
         ):
-            if before_status not in {RequestStatus.AVAILABLE, RequestStatus.COMPLETED}:
-                await self._run_serialized_write(
-                    self.lifecycle.transition(
-                        req.id,
-                        RequestStatus.COMPLETED,
-                        reason="All episodes found on Plex",
-                    )
-                )
-                req.status = RequestStatus.COMPLETED
-                return matched_count, 1, 0, 0
-            return matched_count, 0, 0, 0
+            return matched_count, int(req.status != before_status), 0, 0
 
         return matched_count, 0, int(req.status != before_status), 0
 
@@ -1144,13 +1135,19 @@ class PlexPollingService:
             if not requested_episodes:
                 continue
 
-            if all(availability.get((s, e), False) for s, e in requested_episodes):
+            completed_episodes = frozenset(
+                (season_number, episode_number)
+                for season_number, episode_number in requested_episodes
+                if availability.get((season_number, episode_number), False)
+            )
+            if len(completed_episodes) == len(requested_episodes):
                 decisions.append(
                     PollDecision(
                         request_id=req.id,
                         reason="All episodes found on Plex",
                         requested_episode_count=len(requested_episodes),
-                        completed_episodes=frozenset(requested_episodes),
+                        completed_episodes=completed_episodes,
+                        episode_availability=dict(availability),
                     )
                 )
 
@@ -1173,22 +1170,28 @@ class PlexPollingService:
             return await operation
 
     async def _apply_decision(self, req: Request, decision: PollDecision) -> None:
-        if decision.completed_episodes:
+        if decision.episode_availability:
             logger.info(
-                "PlexPollingService: TV '%s' all %d requested episode(s) available on Plex, "
-                "completing request_id=%s",
+                "PlexPollingService: TV '%s' has %d/%d requested episode(s) available on Plex, "
+                "reconciling request_id=%s",
                 req.title,
+                len(decision.completed_episodes),
                 decision.requested_episode_count,
                 req.id,
             )
-            await self._update_episode_statuses(req, decision.completed_episodes)
-        else:
-            logger.info(
-                "PlexPollingService: movie '%s' (tmdb_id=%s) found on Plex, completing request_id=%s",
-                req.title,
-                req.tmdb_id,
-                req.id,
+            await self.episode_sync.reconcile_existing_seasons_from_plex(
+                req,
+                req.seasons,
+                decision.episode_availability,
             )
+            return
+
+        logger.info(
+            "PlexPollingService: movie '%s' (tmdb_id=%s) found on Plex, completing request_id=%s",
+            req.title,
+            req.tmdb_id,
+            req.id,
+        )
 
         await self.lifecycle.transition(req.id, RequestStatus.COMPLETED, reason=decision.reason)
 
@@ -1202,9 +1205,7 @@ class PlexPollingService:
             return PollDecision(request_id=req.id, reason="Found on Plex")
         return None
 
-    async def _check_movie_authoritatively(
-        self, req: Request
-    ) -> tuple[PollDecision | None, bool]:
+    async def _check_movie_authoritatively(self, req: Request) -> tuple[PollDecision | None, bool]:
         """Check movie availability without collapsing transient Plex failures."""
         if not req.tmdb_id:
             return None, True

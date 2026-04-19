@@ -27,6 +27,7 @@ _REDIRECTABLE_STATUSES = {
     RequestStatus.PENDING,
     RequestStatus.PARTIALLY_AVAILABLE,
     RequestStatus.SEARCHING,
+    RequestStatus.AVAILABLE,
     RequestStatus.COMPLETED,  # Allow ongoing TV series to be re-classified as unreleased
 }
 
@@ -85,10 +86,16 @@ class UnreleasedEvaluator:
         current = request.status
 
         if verdict == "unreleased" and current in _REDIRECTABLE_STATUSES:
+            _logger.info(
+                "UnreleasedEvaluator: reclassifying request_id=%s title=%s from %s to unreleased",
+                request.id,
+                request.title,
+                current.value,
+            )
             updated = await self.lifecycle.transition(
                 request.id,
                 RequestStatus.UNRELEASED,
-                reason="content not yet released",
+                reason="reclassified to unreleased after release-status recheck",
             )
             if updated is not None:
                 return RequestStatus.UNRELEASED
