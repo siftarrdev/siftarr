@@ -105,6 +105,14 @@ async def dashboard(
             request_id: status.value for request_id, status in staged_request_result.all()
         }
 
+    # Filter out torrents whose linked request is already COMPLETED
+    staged_torrents = [
+        t
+        for t in staged_torrents
+        if t.request_id is None
+        or staged_request_statuses.get(t.request_id) != RequestStatus.COMPLETED.value
+    ]
+
     # Build mapping for replaced torrents to their replacements
     replaced_by_titles: dict[int, str] = {}
     replaced_ids = [t.replaced_by_id for t in staged_torrents if t.replaced_by_id]

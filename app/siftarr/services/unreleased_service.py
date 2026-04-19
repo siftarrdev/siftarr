@@ -27,6 +27,7 @@ _REDIRECTABLE_STATUSES = {
     RequestStatus.PENDING,
     RequestStatus.PARTIALLY_AVAILABLE,
     RequestStatus.SEARCHING,
+    RequestStatus.COMPLETED,  # Allow ongoing TV series to be re-classified as unreleased
 }
 
 

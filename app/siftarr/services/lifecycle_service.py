@@ -73,7 +73,9 @@ class LifecycleService:
             RequestStatus.FAILED,
             RequestStatus.DENIED,
         ],
-        RequestStatus.COMPLETED: [],  # Terminal state
+        RequestStatus.COMPLETED: [
+            RequestStatus.UNRELEASED
+        ],  # Re-classifiable for ongoing TV series
         RequestStatus.FAILED: [],  # Terminal state
         RequestStatus.DENIED: [],  # Terminal state
     }

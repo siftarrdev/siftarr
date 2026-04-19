@@ -213,13 +213,27 @@ class SchedulerService:
         This finds requests that were approved in Overseerr but
         don't exist in our local database yet.
         """
-        # TODO: Implement Overseerr polling
-        # This would require:
-        # 1. Query Overseerr API for approved requests
-        # 2. Check which ones aren't in local DB
-        # 3. Create Request entries for new ones
-        # 4. Queue them for processing
-        pass
+        logger = self._logger
+        try:
+            async with self.db_session_factory() as db:
+                from app.siftarr.routers.settings import _import_overseerr_requests
+                from app.siftarr.services.runtime_settings import get_effective_settings
+
+                runtime_settings = await get_effective_settings(db)
+                if not runtime_settings.overseerr_url or not runtime_settings.overseerr_api_key:
+                    logger.debug("Overseerr not configured, skipping poll")
+                    return
+                synced, skipped = await _import_overseerr_requests(db, runtime_settings)
+                if synced:
+                    logger.info(
+                        "Overseerr poll: synced %d new request(s) (%d skipped/existing)",
+                        synced,
+                        skipped,
+                    )
+                else:
+                    logger.debug("Overseerr poll: no new requests found (%d skipped)", skipped)
+        except Exception:
+            logger.exception("Error during Overseerr background poll")
 
     def start(self) -> None:
         """Start the background scheduler."""

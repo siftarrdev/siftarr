@@ -251,7 +251,8 @@ details[open] summary .accordion-chevron { transform: rotate(90deg); }
                     <div class="text-sm font-semibold text-white">Re-scan Plex Availability</div>
                     <div class="text-xs text-gray-500">Re-check existing requests against Plex and update availability/completion state</div>
                 </div>
-                <button type="button" onclick="startPlexRescan()" class="btn-primary btn-sm shrink-0">Re-scan Plex</button>
+                <button type="button" onclick="startPlexRescan(false)" class="btn-primary btn-sm shrink-0">Deep Re-scan</button>
+                <button type="button" onclick="startPlexRescan(true)" class="btn btn-secondary btn-sm shrink-0">Shallow Re-scan</button>
             </div>
 
             <form action="/settings/reseed-rules" method="post" class="flex items-center justify-between gap-4 py-3 first:pt-0 last:pb-0">
@@ -490,7 +491,7 @@ function closeOverseerrSync() {
 
 let plexEventSource = null;
 
-function startPlexRescan() {
+function startPlexRescan(shallow = false) {
     const modal = document.getElementById('plex-sync-modal');
     const bar = document.getElementById('plex-sync-progress-bar');
     const status = document.getElementById('plex-sync-status-text');
@@ -509,7 +510,8 @@ function startPlexRescan() {
     closeBtn.classList.add('opacity-50', 'cursor-not-allowed');
     modal.classList.remove('hidden');
 
-    plexEventSource = new EventSource('/settings/api/rescan-plex/stream');
+    const streamUrl = shallow ? '/settings/api/rescan-plex/stream?shallow=true' : '/settings/api/rescan-plex/stream';
+    plexEventSource = new EventSource(streamUrl);
 
     plexEventSource.onmessage = function(event) {
         const data = JSON.parse(event.data);
@@ -525,7 +527,7 @@ function startPlexRescan() {
                 renderActiveItems(activeList, activeWrap, data.active || []);
                 break;
             case 'processing':
-                const pct = Math.max(15, Math.round((data.current / data.total) * 85));
+                const pct = 10 + Math.round((data.current / data.total) * 80);
                 bar.style.width = pct + '%';
                 status.textContent = `Re-syncing ${data.current}/${data.total}: ${data.title}`;
                 renderActiveItems(activeList, activeWrap, data.active || (data.title ? [data.title] : []));

@@ -315,7 +315,9 @@ class TestSettingsRouter:
         )
         assert any(event.get("phase") == "processing" and event.get("active") for event in events)
         assert tv_rescan.await_count == 1
-        tv_rescan.assert_awaited_once_with(2, plex_service, runtime_settings)
+        tv_rescan.assert_awaited_once_with(
+            2, plex_service, runtime_settings, force_plex_refresh=True
+        )
 
     @pytest.mark.asyncio
     async def test_rescan_plex_uses_bounded_parallel_workers_and_reports_counts(self, monkeypatch):

@@ -11,7 +11,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.siftarr.database import get_db
-from app.siftarr.models.request import MediaType, Request
+from app.siftarr.models.request import MediaType, Request, RequestStatus
 from app.siftarr.models.staged_torrent import StagedTorrent
 from app.siftarr.services.lifecycle_service import LifecycleService
 from app.siftarr.services.qbittorrent_service import MediaCategory, QbittorrentService
@@ -91,7 +91,12 @@ async def _approve_torrent(torrent: StagedTorrent, db: AsyncSession) -> bool:
     torrent.status = "approved"
     if request:
         lifecycle_service = LifecycleService(db)
-        await lifecycle_service.mark_as_downloading(request.id)
+        if request.status not in (
+            RequestStatus.COMPLETED,
+            RequestStatus.FAILED,
+            RequestStatus.DENIED,
+        ):
+            await lifecycle_service.mark_as_downloading(request.id)
 
     try:
         if os.path.exists(torrent.torrent_path):
@@ -105,8 +110,6 @@ async def _approve_torrent(torrent: StagedTorrent, db: AsyncSession) -> bool:
 
 
 async def _discard_torrent(torrent: StagedTorrent, db: AsyncSession) -> bool:
-    from app.siftarr.models.request import RequestStatus
-
     if torrent.request_id:
         result = await db.execute(select(Request).where(Request.id == torrent.request_id))
         request = result.scalar_one_or_none()
@@ -370,6 +373,9 @@ async def get_download_status(
             qbit_progress = await qbittorrent.get_torrent_progress_by_name(torrent.title)
 
         request_status = request_statuses.get(torrent.request_id or -1, "unknown")
+
+        if request_status == "completed":
+            continue
 
         torrent_data.append(
             {
