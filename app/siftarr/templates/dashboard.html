@@ -353,6 +353,9 @@ details[open] summary .accordion-chevron { transform: rotate(90deg); }
                     </select>
                     <button type="button" onclick="bulkStagedAction('approve')" class="btn-primary btn-sm">Approve Selected</button>
                     <button type="button" onclick="bulkStagedAction('discard')" class="btn-danger btn-sm">Discard Selected</button>
+                    {% if qbittorrent_url %}
+                    <a href="{{ qbittorrent_url }}" target="_blank" rel="noopener noreferrer" class="btn-ghost btn-sm">Open qBittorrent ↗</a>
+                    {% endif %}
                 </div>
             </div>
             <div class="overflow-x-auto">
@@ -664,6 +667,7 @@ details[open] summary .accordion-chevron { transform: rotate(90deg); }
 
 <script>
 window.siftarrStagingModeEnabled = {{ 'true' if staging_mode_enabled else 'false' }};
+window.siftarrQbittorrentUrl = {{ qbittorrent_url | tojson }};
 const tableSortState = {
     active: { column: null, direction: 'asc' },
     pending: { column: null, direction: 'asc' },
@@ -736,41 +740,17 @@ function escapeHtml(value) {
         .replaceAll("'", '&#39;');
 }
 
-function renderRuleMatches(matches) {
-    if (!matches?.length) {
-        return '';
-    }
-
-    const matchedRules = matches.filter(m => m.matched);
-    if (!matchedRules.length) {
-        return '';
-    }
-
-    const ruleSpans = matchedRules.map(m => {
-        const isPositive = m.score_delta && m.score_delta > 0;
-        const colorClass = isPositive ? 'text-emerald-400' : 'text-orange-400';
-        return `<span class="${colorClass}">${escapeHtml(m.rule_name)}</span>`;
-    });
-
-    return `<div class="mt-1 text-xs text-gray-500">Matched: ${ruleSpans.join(' | ')}</div>`;
-}
-
 function renderAnnotation(value, toneClass = 'text-gray-400', dataAttr = '') {
     if (!value) return '';
     return `<span class="${toneClass}" ${dataAttr}>${escapeHtml(value)}</span>`;
 }
 
-function matchedRuleNames(matches) {
-    return (matches || [])
-        .filter((match) => match?.matched)
-        .map((match) => String(match.rule_name || '').toLowerCase())
-        .filter(Boolean);
-}
-
 function releaseAnnotationTone(release, field) {
     const isSizeFailure = !release.passed && typeof release.rejection_reason === 'string' && release.rejection_reason.toLowerCase().startsWith('size ');
     if (field === 'size') {
-        return isSizeFailure ? 'text-red-400' : 'text-gray-400';
+        if (isSizeFailure) return 'text-red-400';
+        if (release.size_passed === true) return 'text-emerald-400';
+        return 'text-gray-400';
     }
     if (field === 'resolution' || field === 'codec') {
         return release[field] ? 'text-emerald-400' : 'text-gray-400';
@@ -815,6 +795,7 @@ function renderReleaseCard(release, requestId) {
         renderAnnotation(release.resolution, releaseAnnotationTone(release, 'resolution'), 'data-release-resolution="true"'),
         renderAnnotation(release.codec, releaseAnnotationTone(release, 'codec'), 'data-release-codec="true"'),
         renderAnnotation(release.release_group, releaseAnnotationTone(release, 'group'), 'data-release-group="true"'),
+        release.files != null ? `<span class="text-gray-400">${release.files} file${release.files !== 1 ? 's' : ''}</span>` : null,
     ].filter(Boolean).join(' \u00B7 ');
     const availability = `Seeders ${release.seeders ?? 0} \u00B7 Leechers ${release.leechers ?? 0}`;
     const downloaded = release.downloaded ? '<span class="badge badge-blue">Already sent</span>' : '';
@@ -857,7 +838,6 @@ function renderReleaseCard(release, requestId) {
                     <div class="font-medium text-white text-sm break-words">${escapeHtml(release.title)}</div>
                     <div class="mt-1 text-xs text-gray-400">Score <span class="font-semibold text-emerald-400">${release.score}</span> &middot; ${secondaryMeta || '<span class="text-gray-400">No release metadata</span>'} &middot; ${escapeHtml(availability)}${publishAge ? ` &middot; <span data-release-upload-age="true">${escapeHtml(publishAge)}</span>` : ''}</div>
                     ${coverageHtml}
-                    ${renderRuleMatches(release.matches)}
                 </div>
                 <div class="flex shrink-0 flex-col items-end gap-2 text-right" data-release-status-column="true">
                     <span class="badge ${statusClass}">${escapeHtml(release.status_label || (release.passed ? 'Passed' : 'Rejected'))}</span>
@@ -1692,8 +1672,9 @@ async function openRequestDetails(requestId, explicitIndex = null) {
                     cacheIndicator.classList.remove('hidden');
                 }
             } else {
-                releases.innerHTML = '<div class="text-gray-500 text-sm">No cached results. Click \'Refresh Search\' to find releases.</div>';
+                releases.innerHTML = '<div class="text-gray-500 text-sm">No cached results – searching automatically...</div>';
                 if (cacheIndicator) cacheIndicator.classList.add('hidden');
+                searchRequestFromDetails();
             }
         }
     } catch (err) {

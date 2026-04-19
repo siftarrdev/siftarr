@@ -52,13 +52,13 @@ class DownloadCompletionService:
         Returns:
             Number of requests completed this cycle.
         """
-        # 1. Fetch all approved torrents whose request is DOWNLOADING
+        # 1. Fetch all approved torrents whose request is DOWNLOADING or STAGED
         stmt = (
             select(StagedTorrent, Request)
             .join(Request, Request.id == StagedTorrent.request_id)
             .where(
                 StagedTorrent.status == "approved",
-                Request.status == RequestStatus.DOWNLOADING,
+                Request.status.in_([RequestStatus.DOWNLOADING, RequestStatus.STAGED]),
             )
         )
         rows = list((await self.db.execute(stmt)).all())

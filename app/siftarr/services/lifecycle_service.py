@@ -61,6 +61,7 @@ class LifecycleService:
         RequestStatus.STAGED: [
             RequestStatus.DOWNLOADING,
             RequestStatus.PENDING,
+            RequestStatus.COMPLETED,
             RequestStatus.FAILED,
             RequestStatus.DENIED,
         ],

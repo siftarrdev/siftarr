@@ -220,7 +220,7 @@ class RuleEngine:
 
         Applicable rules are those where:
           - tv_target == TVTarget.SEASON_PACK, OR
-          - tv_target is None AND media_scope in ("tv", "both")
+          - tv_target is None AND media_scope == "tv"
 
         Returns False on first violation, True if all applicable rules pass,
         None if no applicable rules found.
@@ -229,7 +229,7 @@ class RuleEngine:
             rule
             for rule in self.size_limit_rules
             if rule.tv_target == TVTarget.SEASON_PACK
-            or (rule.tv_target is None and rule.media_scope in ("tv", "both"))
+            or (rule.tv_target is None and rule.media_scope == "tv")
         ]
 
         if not applicable:

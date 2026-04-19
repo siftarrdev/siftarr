@@ -224,6 +224,7 @@ async def dashboard(
             "active_requests": filtered_requests,
             "overseerr_url": str(effective_settings.overseerr_url or "").rstrip("/"),
             "staging_mode_enabled": effective_settings.staging_mode_enabled,
+            "qbittorrent_url": str(effective_settings.qbittorrent_url or "").rstrip("/"),
             "pending_requests": pending_requests,
             "pending_items_by_request_id": pending_items_by_request_id,
             "staged_torrents": staged_torrents,

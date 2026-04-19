@@ -27,6 +27,7 @@ class ProwlarrRelease(BaseModel):
     resolution: str | None = None
     codec: str | None = None
     release_group: str | None = None
+    files: int | None = None
 
 
 class ProwlarrSearchResult(BaseModel):
@@ -72,6 +73,7 @@ class ProwlarrService:
             resolution=resolution,
             codec=codec,
             release_group=release_group,
+            files=release.get("files"),
         )
 
     @staticmethod

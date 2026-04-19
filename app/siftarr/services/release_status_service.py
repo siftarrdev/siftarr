@@ -78,6 +78,7 @@ def classify_tv_request(
     local_episodes: Iterable[EpisodeLike],
     *,
     today: date | None = None,
+    has_empty_seasons: bool = False,
 ) -> Literal["released", "partial", "unreleased"]:
     if tv_details is None:
         return "released"
@@ -97,7 +98,9 @@ def classify_tv_request(
     if any_aired_locally:
         aired = [e for e in episodes if e.air_date is not None and e.air_date <= today]
         all_aired_downloaded = all(e.status in _AVAILABLE_EPISODE_STATUSES for e in aired)
-        has_future_or_unknown = any(e.air_date is None or e.air_date > today for e in episodes)
+        has_future_or_unknown = has_empty_seasons or any(
+            e.air_date is None or e.air_date > today for e in episodes
+        )
         if all_aired_downloaded and has_future_or_unknown:
             return "unreleased"
         return "released"
