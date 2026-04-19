@@ -85,6 +85,15 @@ def classify_tv_request(
 
     today = today or date.today()
     episodes = list(local_episodes)
+    next_episode = tv_details.get("nextEpisodeToAir")
+    next_episode_air_date = None
+    if isinstance(next_episode, dict):
+        next_episode_air_date = _parse_date(
+            next_episode.get("airDate") or next_episode.get("airDateUtc")
+        )
+    has_future_signal = has_empty_seasons or (
+        next_episode_air_date is not None and next_episode_air_date > today
+    )
 
     any_aired_locally = any(e.air_date is not None and e.air_date <= today for e in episodes)
     first_air = _parse_date(tv_details.get("firstAirDate"))
@@ -98,7 +107,7 @@ def classify_tv_request(
     if any_aired_locally:
         aired = [e for e in episodes if e.air_date is not None and e.air_date <= today]
         all_aired_downloaded = all(e.status in _AVAILABLE_EPISODE_STATUSES for e in aired)
-        has_future_or_unknown = has_empty_seasons or any(
+        has_future_or_unknown = has_future_signal or any(
             e.air_date is None or e.air_date > today for e in episodes
         )
         if all_aired_downloaded and has_future_or_unknown:

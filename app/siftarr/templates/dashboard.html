@@ -608,6 +608,7 @@ details[open] summary .accordion-chevron { transform: rotate(90deg); }
                             <p class="mt-1 text-xs text-gray-500">Ranked from highest rule score to lowest, including rejected candidates so you can tune your filters.</p>
                         </div>
                     </div>
+                    <div id="request-details-active-stage-banner" class="hidden rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-100 mt-2"></div>
                     <div id="release-cache-indicator" class="hidden text-xs text-gray-500 mt-1 flex items-center gap-1.5">
                         <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
                         <span id="release-cache-indicator-text">Showing cached results</span>
@@ -800,7 +801,20 @@ function renderReleaseCard(release, requestId) {
     const availability = `Seeders ${release.seeders ?? 0} \u00B7 Leechers ${release.leechers ?? 0}`;
     const downloaded = release.downloaded ? '<span class="badge badge-blue">Already sent</span>' : '';
     const currentTab = new URLSearchParams(window.location.search).get('tab') || 'active';
-    const actionVerb = window.siftarrStagingModeEnabled ? 'Stage' : 'Download';
+    const activeStagedTorrent = release.active_staged_torrent || currentActiveStagedTorrent;
+    const hasActiveStagedSelection = window.siftarrStagingModeEnabled && !!activeStagedTorrent;
+    const isActiveSelection = !!release.is_active_selection || !!(
+        hasActiveStagedSelection && activeStagedTorrent && release.title === activeStagedTorrent.title
+    );
+    const activeSelectionMode = window.siftarrStagingModeEnabled && isActiveSelection;
+    const activeSelectionBadge = activeSelectionMode
+        ? `<span class="badge ${
+            (release.active_selection_status || activeStagedTorrent?.status) === 'approved' ? 'badge-blue' : 'badge-yellow'
+        }">${escapeHtml((release.active_selection_source || activeStagedTorrent?.selection_source) === 'rule' ? 'Auto-selected and staged' : 'Currently staged')}</span>`
+        : '';
+    const actionVerb = window.siftarrStagingModeEnabled
+        ? (isActiveSelection ? 'Already staged' : hasActiveStagedSelection ? 'Replace staged' : 'Stage release')
+        : 'Download';
     const useLabel = release.passed ? actionVerb : `Force ${actionVerb}`;
     const storedReleaseId = release.stored_release_id || release.id;
     const formAction = storedReleaseId
@@ -821,7 +835,14 @@ function renderReleaseCard(release, requestId) {
         codec: release.codec || '',
         release_group: release.release_group || '',
     }));
-    const actionHtml = `<button type="button" class="btn-primary btn-sm" ${disableAction ? 'disabled title="No download source available"' : ''} data-stage-url="${escapeHtml(formAction)}" data-stage-fields="${manualDataJson}" onclick="stageRelease(this)">${useLabel}</button>`;
+    const actionTitle = window.siftarrStagingModeEnabled
+        ? (isActiveSelection
+            ? 'This torrent is already the active staged selection.'
+            : hasActiveStagedSelection
+                ? 'Replace the active staged torrent with this selection.'
+                : 'Stage this torrent for review and approval.')
+        : 'Send this torrent to qBittorrent.';
+    const actionHtml = `<button type="button" class="btn-primary btn-sm" ${disableAction || activeSelectionMode ? 'disabled' : ''} title="${escapeHtml(disableAction ? 'No download source available' : actionTitle)}" data-stage-url="${escapeHtml(formAction)}" data-stage-fields="${manualDataJson}" onclick="stageRelease(this)">${useLabel}</button>`;
     const publishAge = formatRelativePublishAge(release.publish_date);
     const coverageHtml = (Array.isArray(release.covered_seasons) || release.is_complete_series)
         ? renderCoverageBadge(release)
@@ -842,6 +863,7 @@ function renderReleaseCard(release, requestId) {
                 <div class="flex shrink-0 flex-col items-end gap-2 text-right" data-release-status-column="true">
                     <span class="badge ${statusClass}">${escapeHtml(release.status_label || (release.passed ? 'Passed' : 'Rejected'))}</span>
                     ${downloaded}
+                    ${activeSelectionBadge}
                     ${actionHtml}
                     ${rejectionHtml}
                 </div>
@@ -1141,7 +1163,7 @@ async function stageRelease(btn) {
     const fields = JSON.parse(btn.dataset.stageFields || '{}');
     const originalText = btn.textContent;
     btn.disabled = true;
-    btn.textContent = 'Staging…';
+    btn.textContent = window.siftarrStagingModeEnabled ? 'Updating…' : 'Sending…';
     try {
         const formData = new FormData();
         for (const [key, value] of Object.entries(fields)) {
@@ -1156,16 +1178,38 @@ async function stageRelease(btn) {
             const errData = await resp.json().catch(() => null);
             throw new Error(errData?.detail || `HTTP ${resp.status}`);
         }
-        btn.textContent = 'Staged ✓';
+        const payload = await resp.json().catch(() => ({}));
+        btn.textContent = window.siftarrStagingModeEnabled ? 'Active ✓' : 'Sent ✓';
         btn.classList.remove('btn-primary');
         btn.classList.add('btn-disabled');
-        showToast('Torrent staged successfully');
+        showToast(payload.message || (window.siftarrStagingModeEnabled ? 'Active staged selection updated' : 'Torrent sent successfully'));
         refreshStagedTabData();
+        if (window.siftarrStagingModeEnabled && currentRequestId) {
+            await openRequestDetails(currentRequestId, currentDetailsIndex);
+            showTab('staged');
+        }
     } catch (err) {
         btn.disabled = false;
         btn.textContent = originalText;
         showToast('Error: ' + err.message);
     }
+}
+
+function updateActiveStageBanner(data) {
+    const banner = document.getElementById('request-details-active-stage-banner');
+    if (!banner) return;
+    const active = data.active_staged_torrent;
+    currentActiveStagedTorrent = active || null;
+    if (!window.siftarrStagingModeEnabled || !active) {
+        banner.classList.add('hidden');
+        banner.textContent = '';
+        return;
+    }
+
+    const sourceLabel = active.selection_source === 'rule' ? 'Auto-selected torrent' : 'Active staged torrent';
+    const statusLabel = active.status === 'approved' ? 'sent to qBittorrent' : 'already staged';
+    banner.textContent = `${sourceLabel}: ${active.title} (${statusLabel}). Selecting another result will replace it.`;
+    banner.classList.remove('hidden');
 }
 
 let stagedTabRefreshInFlight = false;
@@ -1188,6 +1232,15 @@ async function _patchStagedDownloadStatus() {
         const response = await fetch('/staged/download-status');
         if (!response.ok) return;
         const data = await response.json();
+        const activeTorrentIds = new Set((data.torrents || []).map((torrent) => String(torrent.id)));
+        const staleApprovedRows = Array.from(
+            document.querySelectorAll('#staged-torrents-body tr[data-state="approved"]')
+        ).filter((row) => !activeTorrentIds.has(row.dataset.torrentId || ''));
+        if (staleApprovedRows.length > 0) {
+            await refreshStagedTabData();
+            return;
+        }
+
         for (const torrent of (data.torrents || [])) {
             const row = document.querySelector(`tr[data-torrent-id="${torrent.id}"]`);
             if (!row) continue;
@@ -1228,6 +1281,7 @@ async function _patchStagedDownloadStatus() {
                     const cls = rs === 'downloading' ? 'badge-blue' : rs === 'staged' ? 'badge-yellow' : 'badge-gray';
                     span.className = `badge ${cls}`;
                     span.textContent = rs;
+                    row.dataset.requeststate = rs;
                 }
             }
         }
@@ -1238,8 +1292,11 @@ async function _patchStagedDownloadStatus() {
 
 async function refreshStagedTabData() {
     if (stagedTabRefreshInFlight) return;
-    const stagedBody = document.getElementById('staged-torrents-body');
-    if (!stagedBody) return;
+    const stagedContent = document.getElementById('content-staged');
+    if (!stagedContent) return;
+
+    const priorFilter = document.getElementById('staged-filter-input')?.value || '';
+    const priorStatus = document.getElementById('staged-status-filter')?.value || '';
 
     stagedTabRefreshInFlight = true;
     try {
@@ -1248,10 +1305,14 @@ async function refreshStagedTabData() {
         const html = await response.text();
         const parser = new DOMParser();
         const doc = parser.parseFromString(html, 'text/html');
-        const newBody = doc.getElementById('staged-torrents-body');
-        if (!newBody) return;
+        const newContent = doc.getElementById('content-staged');
+        if (!newContent) return;
 
-        stagedBody.innerHTML = newBody.innerHTML;
+        stagedContent.innerHTML = newContent.innerHTML;
+        const stagedFilterInput = document.getElementById('staged-filter-input');
+        const stagedStatusFilter = document.getElementById('staged-status-filter');
+        if (stagedFilterInput) stagedFilterInput.value = priorFilter;
+        if (stagedStatusFilter) stagedStatusFilter.value = priorStatus;
         filterStagedTable();
         bindStagedSelectionHandlers();
     } catch (err) {
@@ -1310,6 +1371,7 @@ async function searchRequestFromDetails() {
 let currentReleases = [];
 let currentRequestId = null;
 let currentTvSeasons = [];
+let currentActiveStagedTorrent = null;
 
 function filterReleaseCards() {
     const filterEl = document.getElementById('release-filter-input');
@@ -1612,6 +1674,7 @@ async function openRequestDetails(requestId, explicitIndex = null) {
         closeTvSearchDropdown();
     }
     currentTvSeasons = [];
+    updateActiveStageBanner({ active_staged_torrent: null });
     setPoster(null, 'Loading poster');
     document.getElementById('release-results-header').classList.remove('hidden');
     document.getElementById('release-filter-input').classList.remove('hidden');
@@ -1651,6 +1714,7 @@ async function openRequestDetails(requestId, explicitIndex = null) {
 
         currentReleases = data.releases || [];
         currentRequestId = data.request.id;
+        updateActiveStageBanner(data);
 
         const cacheIndicator = document.getElementById('release-cache-indicator');
         const cacheIndicatorText = document.getElementById('release-cache-indicator-text');
@@ -1681,6 +1745,7 @@ async function openRequestDetails(requestId, explicitIndex = null) {
         title.textContent = 'Error loading details';
         meta.textContent = err.message || 'Unknown error';
         overview.textContent = '';
+        updateActiveStageBanner({ active_staged_torrent: null });
         setPoster(null, 'Poster unavailable');
         releases.innerHTML = '<div class="text-red-400 text-sm">Failed to load request details. Check that Overseerr is reachable.</div>';
     }
@@ -1773,13 +1838,21 @@ const activeSelectAll = document.getElementById('active-select-all');
 const pendingSelectAll = document.getElementById('pending-select-all');
 if (filterInput) filterInput.addEventListener('input', filterTable);
 if (pendingFilterInput) pendingFilterInput.addEventListener('input', filterPendingTable);
-if (stagedFilterInput) stagedFilterInput.addEventListener('input', filterStagedTable);
-if (stagedStatusFilter) stagedStatusFilter.addEventListener('change', filterStagedTable);
 if (finishedFilterInput) finishedFilterInput.addEventListener('input', filterFinishedTable);
 if (rejectedFilterInput) rejectedFilterInput.addEventListener('input', filterRejectedTable);
 if (unreleasedFilterInput) unreleasedFilterInput.addEventListener('input', filterUnreleasedTable);
 const releaseFilterInput = document.getElementById('release-filter-input');
 if (releaseFilterInput) releaseFilterInput.addEventListener('input', filterReleaseCards);
+document.addEventListener('input', (event) => {
+    if (event.target?.id === 'staged-filter-input') {
+        filterStagedTable();
+    }
+});
+document.addEventListener('change', (event) => {
+    if (event.target?.id === 'staged-status-filter') {
+        filterStagedTable();
+    }
+});
 function bindSelectAll(toggle, checkboxSelector) {
     if (!toggle) return;
     toggle.addEventListener('change', event => {
@@ -1793,13 +1866,13 @@ bindSelectAll(activeSelectAll, '.active-request-checkbox');
 bindSelectAll(pendingSelectAll, '.pending-request-checkbox');
 bindStagedSelectionHandlers();
 
-document.querySelectorAll('.sort-title').forEach(el => {
-    el.addEventListener('click', (e) => {
-        const th = el.closest('th');
-        if (!th || !th.dataset.sort) return;
-        const sortKey = th.dataset.sort === 'ovstatus' ? 'ovrank' : th.dataset.sort;
-        sortTable(th.dataset.table, sortKey);
-    });
+document.addEventListener('click', (e) => {
+    const sortTitle = e.target.closest('.sort-title');
+    if (!sortTitle) return;
+    const th = sortTitle.closest('th');
+    if (!th || !th.dataset.sort) return;
+    const sortKey = th.dataset.sort === 'ovstatus' ? 'ovrank' : th.dataset.sort;
+    sortTable(th.dataset.table, sortKey);
 });
 
 function openDenyModal(requestId, redirectTo) {

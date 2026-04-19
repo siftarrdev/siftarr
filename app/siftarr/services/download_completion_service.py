@@ -2,11 +2,16 @@
 
 import logging
 import re
+from typing import Any
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.siftarr.models.request import Request, RequestStatus
+from app.siftarr.models.request import (
+    ACTIVE_STAGING_WORKFLOW_STATUSES,
+    Request,
+    is_active_staging_workflow_status,
+)
 from app.siftarr.models.staged_torrent import StagedTorrent
 from app.siftarr.services.lifecycle_service import LifecycleService
 from app.siftarr.services.plex_polling_service import PlexPollingService
@@ -26,13 +31,13 @@ def _extract_hash(magnet_url: str | None) -> str | None:
 
 
 class DownloadCompletionService:
-    """Checks downloading torrents for completion and transitions requests to COMPLETED."""
+    """Checks finished downloads and reconciles request availability via Plex."""
 
     def __init__(
         self,
         db: AsyncSession,
         qbittorrent_service: QbittorrentService,
-        plex_polling_service: PlexPollingService,
+        plex_polling_service: PlexPollingService | Any,
     ) -> None:
         self.db = db
         self.qbittorrent = qbittorrent_service
@@ -40,28 +45,32 @@ class DownloadCompletionService:
         self.lifecycle = LifecycleService(db)
 
     async def check_downloading_requests(self) -> int:
-        """Check all approved torrents and complete requests when downloads finish.
+        """Check all approved torrents and reconcile requests when downloads finish.
 
         Steps:
         1. Query StagedTorrents with status=="approved" whose Request is DOWNLOADING.
         2. For each torrent determine qBit progress (via hash or name fragment).
         3. Mark torrents as qBit-done when progress >= 1.0 or not found in qBit.
         4. When ALL approved torrents for a request are qBit-done, check Plex.
-        5. If Plex confirms availability, mark the request COMPLETED via lifecycle.
+        5. If Plex confirms availability, reuse Plex polling reconciliation for the request.
 
         Returns:
-            Number of requests completed this cycle.
+            Number of requests reconciled this cycle.
         """
-        # 1. Fetch all approved torrents whose request is DOWNLOADING or STAGED
+        # 1. Fetch all approved torrents whose request is still actively staged or downloading.
         stmt = (
             select(StagedTorrent, Request)
             .join(Request, Request.id == StagedTorrent.request_id)
             .where(
                 StagedTorrent.status == "approved",
-                Request.status.in_([RequestStatus.DOWNLOADING, RequestStatus.STAGED]),
+                Request.status.in_(ACTIVE_STAGING_WORKFLOW_STATUSES),
             )
         )
-        rows = list((await self.db.execute(stmt)).all())
+        rows = [
+            (torrent, request)
+            for torrent, request in list((await self.db.execute(stmt)).all())
+            if is_active_staging_workflow_status(request.status)
+        ]
 
         if not rows:
             logger.debug("DownloadCompletionService: no active downloading torrents")
@@ -137,9 +146,10 @@ class DownloadCompletionService:
                     await self.plex_polling._apply_decision(full_request, decision)
                     completed += 1
                     logger.info(
-                        "DownloadCompletionService: completed request_id=%s title=%s",
+                        "DownloadCompletionService: reconciled request_id=%s title=%s via Plex (%s)",
                         request_id,
                         request.title,
+                        decision.reason,
                     )
                 else:
                     logger.info(

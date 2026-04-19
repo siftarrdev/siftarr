@@ -9,6 +9,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from app.siftarr.models.request import MediaType, RequestStatus
 from app.siftarr.services import scheduler_service
 from app.siftarr.services.plex_polling_service import PlexPollingService
 from app.siftarr.services.scheduler_service import (
@@ -486,3 +487,42 @@ async def test_legacy_poll_wrapper_delegates_to_incremental_job(monkeypatch):
     await service._poll_plex_availability()
 
     mock_run_incremental.assert_awaited_once_with(trigger_source="legacy_poll")
+
+
+@pytest.mark.asyncio
+async def test_recheck_unreleased_revisits_finished_and_available_tv_requests(monkeypatch):
+    """Scheduler recheck should revisit ongoing TV rows beyond current unreleased ones."""
+    db = AsyncMock()
+    completed_tv = SimpleNamespace(id=1, media_type=MediaType.TV, status=RequestStatus.COMPLETED)
+    available_tv = SimpleNamespace(id=2, media_type=MediaType.TV, status=RequestStatus.AVAILABLE)
+
+    lifecycle_service = AsyncMock()
+    lifecycle_service.get_release_recheck_requests.return_value = [completed_tv, available_tv]
+    monkeypatch.setattr(scheduler_service, "LifecycleService", lambda db_session: lifecycle_service)
+
+    runtime_settings = SimpleNamespace()
+    monkeypatch.setattr(
+        scheduler_service, "get_effective_settings", AsyncMock(return_value=runtime_settings)
+    )
+
+    overseerr_instance = AsyncMock()
+    monkeypatch.setattr(scheduler_service, "OverseerrService", lambda settings: overseerr_instance)
+
+    evaluator = AsyncMock()
+    evaluator.evaluate_and_apply = AsyncMock(
+        side_effect=[RequestStatus.UNRELEASED, RequestStatus.PENDING]
+    )
+    monkeypatch.setattr(
+        scheduler_service, "UnreleasedEvaluator", lambda db_session, overseerr: evaluator
+    )
+
+    queue_service = AsyncMock()
+    monkeypatch.setattr(scheduler_service, "PendingQueueService", lambda db_session: queue_service)
+
+    service = SchedulerService(lambda: _FakeSessionContext(db), logger=MagicMock())
+    await service._recheck_unreleased()
+
+    lifecycle_service.get_release_recheck_requests.assert_awaited_once_with(limit=500)
+    assert evaluator.evaluate_and_apply.await_count == 2
+    queue_service.add_to_queue.assert_awaited_once_with(2)
+    overseerr_instance.close.assert_awaited_once()

@@ -375,13 +375,13 @@ class SchedulerService:
         return str(result.mode)
 
     async def _recheck_unreleased(self) -> None:
-        """Re-evaluate requests currently in the UNRELEASED state."""
+        """Re-evaluate TV requests whose release state may have changed."""
         logger = self._logger
         try:
             async with self.db_session_factory() as db:
                 lifecycle = LifecycleService(db)
-                unreleased_requests = await lifecycle.get_unreleased_requests(limit=500)
-                if not unreleased_requests:
+                recheck_requests = await lifecycle.get_release_recheck_requests(limit=500)
+                if not recheck_requests:
                     return
 
                 runtime_settings = await get_effective_settings(db)
@@ -389,11 +389,11 @@ class SchedulerService:
                 try:
                     evaluator = UnreleasedEvaluator(db, overseerr)
                     queue_service = PendingQueueService(db)
-                    for request in unreleased_requests:
+                    for request in recheck_requests:
                         new_status = await evaluator.evaluate_and_apply(request)
                         if new_status == RequestStatus.PENDING:
                             await queue_service.add_to_queue(request.id)
-                    logger.info("Rechecked %d unreleased request(s)", len(unreleased_requests))
+                    logger.info("Rechecked %d TV release-state request(s)", len(recheck_requests))
                 finally:
                     await overseerr.close()
         except Exception:
