@@ -27,6 +27,8 @@ _REDIRECTABLE_STATUSES = {
     RequestStatus.PENDING,
     RequestStatus.PARTIALLY_AVAILABLE,
     RequestStatus.SEARCHING,
+    RequestStatus.AVAILABLE,
+    RequestStatus.COMPLETED,  # Allow ongoing TV series to be re-classified as unreleased
 }
 
 
@@ -57,10 +59,23 @@ class UnreleasedEvaluator:
             )
             resolved_local_episodes = list(result.scalars().all())
 
+        has_empty_seasons = False
+        if request.media_type == MediaType.TV:
+            seasons_result = await self.db.execute(
+                select(Season).where(Season.request_id == request.id)
+            )
+            all_seasons = list(seasons_result.scalars().all())
+            db_episodes: list[Episode] = [
+                ep for ep in (resolved_local_episodes or []) if isinstance(ep, Episode)
+            ]
+            season_ids_with_episodes = {ep.season_id for ep in db_episodes}
+            has_empty_seasons = any(s.id not in season_ids_with_episodes for s in all_seasons)
+
         return classify_request_release_verdict(
             request,
             media_details=media_details,
             local_episodes=resolved_local_episodes,
+            has_empty_seasons=has_empty_seasons,
         )
 
     async def apply_verdict(
@@ -71,10 +86,16 @@ class UnreleasedEvaluator:
         current = request.status
 
         if verdict == "unreleased" and current in _REDIRECTABLE_STATUSES:
+            _logger.info(
+                "UnreleasedEvaluator: reclassifying request_id=%s title=%s from %s to unreleased",
+                request.id,
+                request.title,
+                current.value,
+            )
             updated = await self.lifecycle.transition(
                 request.id,
                 RequestStatus.UNRELEASED,
-                reason="content not yet released",
+                reason="reclassified to unreleased after release-status recheck",
             )
             if updated is not None:
                 return RequestStatus.UNRELEASED
@@ -108,6 +129,7 @@ def classify_request_release_verdict(
     *,
     media_details: dict | None,
     local_episodes: Iterable[EpisodeLike] | None = None,
+    has_empty_seasons: bool = False,
 ) -> Literal["released", "unreleased"]:
     """Classify release state using already-fetched Overseerr details when available."""
     if request.tmdb_id is None:
@@ -116,7 +138,9 @@ def classify_request_release_verdict(
     if request.media_type == MediaType.MOVIE:
         return classify_movie(media_details)
 
-    verdict = classify_tv_request(media_details, local_episodes or ())
+    verdict = classify_tv_request(
+        media_details, local_episodes or (), has_empty_seasons=has_empty_seasons
+    )
     if verdict == "partial":
         return "released"
     return verdict

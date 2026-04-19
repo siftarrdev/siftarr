@@ -11,6 +11,7 @@ from app.siftarr.models.episode import Episode
 from app.siftarr.models.release import Release
 from app.siftarr.models.request import MediaType, Request, RequestStatus
 from app.siftarr.models.season import Season
+from app.siftarr.models.staged_torrent import StagedTorrent
 from app.siftarr.services import release_selection_service
 from app.siftarr.services.prowlarr_service import ProwlarrRelease
 from app.siftarr.services.rule_engine import ReleaseEvaluation
@@ -96,6 +97,8 @@ class TestReleaseSelectionService:
             )
 
         assert result["status"] == "staged"
+        assert result["action"] == "manual_staged"
+        assert result["message"] == "Manually staged 1 release(s) for approval."
         staging_service.save_release.assert_awaited_once()
         assert staging_service.save_release.await_args.kwargs["selection_source"] == "manual"
         queue_service.remove_from_queue.assert_awaited_once_with(request_record.id)
@@ -109,9 +112,11 @@ class TestReleaseSelectionService:
         queue_service = AsyncMock()
         staging_service = AsyncMock()
 
-        existing_stage = MagicMock(id=44)
+        existing_stage = MagicMock()
+        existing_stage.id = 44
+        existing_stage.title = selected_release.title
         existing_result = MagicMock()
-        existing_result.scalar_one_or_none.return_value = existing_stage
+        existing_result.scalars.return_value.all.return_value = [existing_stage]
         mock_db.execute.return_value = existing_result
 
         with pytest.MonkeyPatch.context() as monkeypatch:
@@ -139,9 +144,161 @@ class TestReleaseSelectionService:
             )
 
         assert result["status"] == "staged"
+        assert result["action"] == "auto_staged"
+        assert result["message"] == "Auto-staged 1 release(s) for approval."
         assert result["staged_ids"] == [existing_stage.id]
         staging_service.save_release.assert_not_awaited()
         queue_service.remove_from_queue.assert_awaited_once_with(request_record.id)
+
+    @pytest.mark.asyncio
+    async def test_use_releases_replaces_existing_active_stage_for_manual_selection(
+        self, mock_db, request_record, selected_release
+    ):
+        """Manual selections should retire the current active staged torrent instead of duplicating it."""
+        settings = MagicMock(staging_mode_enabled=True)
+        queue_service = AsyncMock()
+        staging_service = AsyncMock()
+
+        existing_stage = StagedTorrent(
+            id=44,
+            request_id=request_record.id,
+            torrent_path="/tmp/existing.torrent",
+            json_path="/tmp/existing.json",
+            original_filename="existing",
+            title="Auto Pick",
+            size=1,
+            indexer="Indexer A",
+            score=100,
+            status="staged",
+            selection_source="rule",
+        )
+        replacement_stage = StagedTorrent(
+            id=55,
+            request_id=request_record.id,
+            torrent_path="/tmp/replacement.torrent",
+            json_path="/tmp/replacement.json",
+            original_filename="replacement",
+            title=selected_release.title,
+            size=selected_release.size,
+            indexer=selected_release.indexer,
+            score=selected_release.score,
+            status="staged",
+            selection_source="manual",
+        )
+        staging_service.save_release.return_value = replacement_stage
+
+        active_result = MagicMock()
+        active_result.scalars.return_value.all.return_value = [existing_stage]
+        mock_db.execute.return_value = active_result
+
+        with pytest.MonkeyPatch.context() as monkeypatch:
+            monkeypatch.setattr(
+                release_selection_service,
+                "get_effective_settings",
+                AsyncMock(return_value=settings),
+            )
+            monkeypatch.setattr(
+                release_selection_service,
+                "PendingQueueService",
+                MagicMock(return_value=queue_service),
+            )
+            monkeypatch.setattr(
+                release_selection_service,
+                "StagingService",
+                MagicMock(return_value=staging_service),
+            )
+
+            result = await release_selection_service.use_releases(
+                mock_db,
+                request_record,
+                [selected_release],
+                selection_source="manual",
+            )
+
+        assert result["status"] == "staged"
+        assert result["action"] == "replaced_active_selection"
+        assert result["message"] == "Replaced the active staged selection with 1 release(s)."
+        assert result["staged_ids"] == [replacement_stage.id]
+        assert existing_stage.status == "replaced"
+        assert existing_stage.replaced_by_id == replacement_stage.id
+        assert existing_stage.replaced_at is not None
+        assert existing_stage.replacement_reason == (
+            "Manually replaced staged selection from request details"
+        )
+        queue_service.remove_from_queue.assert_awaited_once_with(request_record.id)
+
+    @pytest.mark.asyncio
+    async def test_use_releases_reuses_existing_manual_pick_and_retires_auto_pick(
+        self, mock_db, request_record, selected_release
+    ):
+        """Selecting an already-staged manual pick should still replace the active auto pick."""
+        settings = MagicMock(staging_mode_enabled=True)
+        queue_service = AsyncMock()
+        staging_service = AsyncMock()
+
+        auto_stage = StagedTorrent(
+            id=44,
+            request_id=request_record.id,
+            torrent_path="/tmp/auto.torrent",
+            json_path="/tmp/auto.json",
+            original_filename="auto",
+            title="Auto Pick",
+            size=1,
+            indexer="Indexer A",
+            score=100,
+            status="staged",
+            selection_source="rule",
+        )
+        manual_stage = StagedTorrent(
+            id=55,
+            request_id=request_record.id,
+            torrent_path="/tmp/manual.torrent",
+            json_path="/tmp/manual.json",
+            original_filename="manual",
+            title=selected_release.title,
+            size=selected_release.size,
+            indexer=selected_release.indexer,
+            score=selected_release.score,
+            status="staged",
+            selection_source="manual",
+        )
+
+        active_result = MagicMock()
+        active_result.scalars.return_value.all.return_value = [auto_stage, manual_stage]
+        mock_db.execute.return_value = active_result
+
+        with pytest.MonkeyPatch.context() as monkeypatch:
+            monkeypatch.setattr(
+                release_selection_service,
+                "get_effective_settings",
+                AsyncMock(return_value=settings),
+            )
+            monkeypatch.setattr(
+                release_selection_service,
+                "PendingQueueService",
+                MagicMock(return_value=queue_service),
+            )
+            monkeypatch.setattr(
+                release_selection_service,
+                "StagingService",
+                MagicMock(return_value=staging_service),
+            )
+
+            result = await release_selection_service.use_releases(
+                mock_db,
+                request_record,
+                [selected_release],
+                selection_source="manual",
+            )
+
+        assert result["status"] == "staged"
+        assert result["action"] == "replaced_active_selection"
+        assert result["message"] == "Replaced the active staged selection with 1 release(s)."
+        assert result["staged_ids"] == [manual_stage.id]
+        assert auto_stage.status == "replaced"
+        assert auto_stage.replaced_by_id == manual_stage.id
+        assert manual_stage.status == "staged"
+        staging_service.save_release.assert_not_awaited()
 
     @pytest.mark.asyncio
     async def test_persist_manual_release_upserts_existing_release(self, mock_db, request_record):

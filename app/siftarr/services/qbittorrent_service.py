@@ -198,6 +198,43 @@ class QbittorrentService:
         except Exception:
             return []
 
+    async def get_all_active_torrents(self) -> list[dict]:
+        """Get all active torrents from qBittorrent.
+
+        Returns:
+            A list of dicts with keys: hash, name, progress, state, category.
+        """
+        try:
+            torrents = await asyncio.to_thread(self.client.torrents_info)
+            return [
+                {
+                    "hash": t.hash,
+                    "name": t.name,
+                    "progress": t.progress,
+                    "state": t.state,
+                    "category": t.category,
+                }
+                for t in torrents
+            ]
+        except Exception:
+            return []
+
+    async def get_torrent_progress_by_name(self, name_fragment: str) -> float | None:
+        """Get progress of a torrent matching a name fragment.
+
+        Args:
+            name_fragment: Case-insensitive substring to search in torrent names.
+
+        Returns:
+            Progress (0.0 to 1.0) of the first matching torrent, or None if not found.
+        """
+        torrents = await self.get_all_active_torrents()
+        fragment_lower = name_fragment.lower()
+        for torrent in torrents:
+            if fragment_lower in (torrent.get("name") or "").lower():
+                return torrent["progress"]
+        return None
+
     async def delete_torrent(self, torrent_hash: str, delete_files: bool = False) -> bool:
         """Delete a torrent from qBittorrent.
 

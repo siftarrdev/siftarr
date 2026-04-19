@@ -5,6 +5,7 @@ import contextlib
 import json
 import logging
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Any
 
 from fastapi import APIRouter, Depends, Form, Request
@@ -23,15 +24,208 @@ from app.siftarr.services.connection_tester import ConnectionTester, ConnectionT
 from app.siftarr.services.overseerr_service import OverseerrService
 from app.siftarr.services.pending_queue_service import PendingQueueService
 from app.siftarr.services.plex_polling_service import PlexPollingService
+from app.siftarr.services.plex_scan_state_service import PlexScanStateService
 from app.siftarr.services.plex_service import PlexService
 from app.siftarr.services.release_selection_service import clear_release_search_cache
 from app.siftarr.services.rule_service import RuleService
 from app.siftarr.services.runtime_settings import get_effective_settings
+from app.siftarr.services.scheduler_service import (
+    PLEX_FULL_RECONCILE_JOB_NAME,
+    PLEX_INCREMENTAL_SYNC_JOB_NAME,
+)
 from app.siftarr.services.unreleased_service import evaluate_imported_request
 
 router = APIRouter(prefix="/settings", tags=["settings"])
 templates = Jinja2Templates(directory="app/siftarr/templates")
 logger = logging.getLogger(__name__)
+
+
+def _serialize_datetime(value: datetime | None) -> str | None:
+    """Serialize datetimes for compact status rendering."""
+    return value.isoformat(sep=" ", timespec="seconds") if value is not None else None
+
+
+def _build_compact_metrics_snapshot(metrics_payload: dict[str, Any] | None) -> str | None:
+    """Render a compact operator-facing metrics summary."""
+    if not isinstance(metrics_payload, dict):
+        return None
+
+    scan_payload = metrics_payload.get("scan")
+    if not isinstance(scan_payload, dict):
+        return None
+
+    parts: list[str] = []
+    if "completed_requests" in metrics_payload:
+        parts.append(f"completed={metrics_payload['completed_requests']}")
+    for source_key, label in [
+        ("scanned_items", "scanned"),
+        ("matched_requests", "matched"),
+        ("deduped_items", "deduped"),
+        ("downgraded_requests", "downgraded"),
+        ("skipped_on_error_items", "errors"),
+    ]:
+        value = scan_payload.get(source_key)
+        if value is not None:
+            parts.append(f"{label}={value}")
+
+    return ", ".join(parts) if parts else None
+
+
+def _coerce_int(value: Any) -> int:
+    """Return an integer-like value or 0 when unavailable."""
+    return value if isinstance(value, int) else 0
+
+
+def _get_scan_metrics_payload(metrics_payload: dict[str, Any] | None) -> dict[str, Any] | None:
+    """Extract the nested scan metrics payload if present."""
+    if not isinstance(metrics_payload, dict):
+        return None
+    scan_payload = metrics_payload.get("scan")
+    return scan_payload if isinstance(scan_payload, dict) else None
+
+
+def _build_plex_run_outcome_summary(
+    metrics_payload: dict[str, Any] | None,
+    *,
+    locked: bool = False,
+    lock_owner: str | None = None,
+    last_error: str | None = None,
+) -> str | None:
+    """Summarize the last known operator-facing outcome for a Plex job."""
+    if locked:
+        return f"Skipped due to lock ({lock_owner or 'another worker'})"
+
+    if not isinstance(metrics_payload, dict):
+        return "No completed run recorded"
+
+    scan_payload = _get_scan_metrics_payload(metrics_payload)
+    if scan_payload is None:
+        return "No completed run recorded"
+
+    mode = metrics_payload.get("mode")
+    skipped = _coerce_int(scan_payload.get("skipped_on_error_items"))
+    downgraded = _coerce_int(scan_payload.get("downgraded_requests"))
+    checkpoint_payload = scan_payload.get("checkpoint")
+    checkpoint_advanced = (
+        checkpoint_payload.get("advanced") if isinstance(checkpoint_payload, dict) else None
+    )
+
+    if mode == "incremental_recent_scan":
+        if skipped or last_error:
+            return (
+                "Incremental run partial; checkpoint retained after "
+                f"{max(skipped, 1)} transient/inconclusive item(s)"
+            )
+        if checkpoint_advanced is True:
+            return "Incremental run completed cleanly; checkpoint advanced"
+        return "Incremental run completed"
+
+    if mode == "full_reconcile_scan":
+        if skipped and downgraded:
+            return (
+                "Full run partial with guarded negative reconciliation; downgraded "
+                f"{downgraded} request(s), {skipped} item(s) stayed inconclusive"
+            )
+        if skipped:
+            return (
+                "Full run partial; guarded negative reconciliation withheld for "
+                f"{skipped} inconclusive item(s)"
+            )
+        if downgraded:
+            return (
+                "Full run completed with guarded negative reconciliation; downgraded "
+                f"{downgraded} request(s)"
+            )
+        return "Full run completed cleanly"
+
+    return None
+
+
+def _build_manual_plex_job_message(
+    job_label: str,
+    result: Any,
+) -> tuple[str, str]:
+    """Build a concise manual-trigger status message for Plex jobs."""
+    if result.status == "locked":
+        return f"{job_label} is already in progress.", "error"
+    if result.status != "completed":
+        return f"{job_label} failed: {result.error}", "error"
+
+    message = f"{job_label} completed. Transitioned {result.completed_requests} request(s)."
+    outcome_summary = _build_plex_run_outcome_summary(result.metrics_payload)
+    if outcome_summary == "Incremental run completed cleanly; checkpoint advanced":
+        message = (
+            f"{job_label} completed cleanly. Transitioned {result.completed_requests} request(s)."
+        )
+    elif outcome_summary and outcome_summary.startswith("Incremental run partial"):
+        message = (
+            f"{job_label} completed partially. "
+            f"Transitioned {result.completed_requests} request(s). "
+            f"{outcome_summary.removeprefix('Incremental run partial; ').capitalize()}."
+        )
+    elif outcome_summary and outcome_summary.startswith(
+        "Full run completed with guarded negative reconciliation"
+    ):
+        downgraded = _coerce_int(
+            (_get_scan_metrics_payload(result.metrics_payload) or {}).get("downgraded_requests")
+        )
+        message = (
+            f"{job_label} completed with guarded negative reconciliation. "
+            f"Transitioned {result.completed_requests} request(s) and downgraded "
+            f"{downgraded} request(s)."
+        )
+    elif outcome_summary and outcome_summary.startswith("Full run partial"):
+        message = (
+            f"{job_label} completed partially. "
+            f"Transitioned {result.completed_requests} request(s). "
+            f"{outcome_summary.removeprefix('Full run ').capitalize()}."
+        )
+
+    return message, "success"
+
+
+async def _build_plex_job_statuses(db: AsyncSession) -> list[dict[str, Any]]:
+    """Load persisted scheduler status for Plex scan jobs."""
+    state_service = PlexScanStateService(db)
+    job_rows = [
+        (
+            PLEX_INCREMENTAL_SYNC_JOB_NAME,
+            "Incremental Plex Sync",
+            "Fast recent-added availability scan",
+        ),
+        (
+            PLEX_FULL_RECONCILE_JOB_NAME,
+            "Full Plex Reconcile",
+            "Slower full-library reconciliation run",
+        ),
+    ]
+    statuses: list[dict[str, Any]] = []
+    for job_name, label, description in job_rows:
+        state = await state_service.get_state(job_name)
+        metrics_payload = state.metrics_payload if state is not None else None
+        statuses.append(
+            {
+                "job_name": job_name,
+                "label": label,
+                "description": description,
+                "last_success": _serialize_datetime(state.last_success_at if state else None),
+                "last_run": _serialize_datetime(state.last_finished_at if state else None),
+                "last_started": _serialize_datetime(state.last_started_at if state else None),
+                "checkpoint": _serialize_datetime(state.checkpoint_at if state else None),
+                "locked": bool(state and state.lock_owner),
+                "lock_owner": state.lock_owner if state else None,
+                "last_error": state.last_error if state else None,
+                "run_summary": _build_plex_run_outcome_summary(
+                    metrics_payload,
+                    locked=bool(state and state.lock_owner),
+                    lock_owner=state.lock_owner if state else None,
+                    last_error=state.last_error if state else None,
+                ),
+                "metrics_snapshot": _build_compact_metrics_snapshot(metrics_payload),
+                "metrics_payload": metrics_payload,
+            }
+        )
+    return statuses
 
 
 @dataclass(slots=True)
@@ -139,11 +333,30 @@ async def _rescan_plex_requests(
     plex: PlexService,
     *,
     on_event=None,
+    shallow: bool = False,
 ) -> tuple[int, int, int]:
+    """Run the legacy manual Plex reconcile path (TV refresh + compatibility poll)."""
     polling_service = PlexPollingService(db, plex)
     active_requests = await polling_service.get_active_requests()
     active_requests = [req for req in active_requests if req.status != RequestStatus.COMPLETED]
     tv_requests = [req for req in active_requests if req.media_type == MediaType.TV]
+
+    if shallow:
+        # Filter out TV requests where all episodes are already available
+        def _all_episodes_available(req: RequestModel) -> bool:
+            seasons = list(getattr(req, "seasons", []) or [])
+            if not seasons:
+                return False
+            for season in seasons:
+                episodes = list(getattr(season, "episodes", []) or [])
+                if not episodes:
+                    return False
+                for episode in episodes:
+                    if episode.status != RequestStatus.AVAILABLE:
+                        return False
+            return True
+
+        tv_requests = [req for req in tv_requests if not _all_episodes_available(req)]
 
     configured_concurrency = getattr(runtime_settings, "plex_sync_concurrency", 1)
     sync_concurrency = (
@@ -162,7 +375,9 @@ async def _rescan_plex_requests(
         )
 
     async def resync_worker(request: RequestModel) -> bool:
-        return await _rescan_plex_tv_request(request.id, plex, runtime_settings)
+        return await _rescan_plex_tv_request(
+            request.id, plex, runtime_settings, force_plex_refresh=not shallow
+        )
 
     if tv_requests:
         resync_results = await _run_bounded_with_progress(
@@ -273,6 +488,7 @@ async def _rescan_plex_tv_request(
     request_id: int,
     plex: PlexService,
     runtime_settings: Settings,
+    force_plex_refresh: bool = True,
 ) -> bool:
     """Resync one TV request on an isolated DB session."""
     from app.siftarr.services.episode_sync_service import EpisodeSyncService
@@ -282,7 +498,7 @@ async def _rescan_plex_tv_request(
         overseerr = OverseerrService(settings=runtime_settings)
         episode_sync = EpisodeSyncService(worker_db, overseerr=overseerr, plex=plex)
         try:
-            await episode_sync.sync_episodes(request_id, force_plex_refresh=True)
+            await episode_sync.sync_episodes(request_id, force_plex_refresh=force_plex_refresh)
         except Exception:
             await worker_db.rollback()
             logger.exception(
@@ -386,6 +602,7 @@ async def _build_settings_page_context(request: Request, db: AsyncSession) -> di
         await db.execute(select(RequestModel.status, func.count()).group_by(RequestModel.status))
     ).all()
     stats_by_status = {s.value: c for s, c in status_counts}
+    plex_jobs = await _build_plex_job_statuses(db)
 
     return {
         "request": request,
@@ -397,6 +614,7 @@ async def _build_settings_page_context(request: Request, db: AsyncSession) -> di
             "pending": stats_by_status.get(RequestStatus.PENDING.value, 0),
             "failed": stats_by_status.get(RequestStatus.FAILED.value, 0),
         },
+        "plex_jobs": plex_jobs,
         "env": eff_settings,
     }
 
@@ -423,7 +641,7 @@ async def rescan_plex(
     request: Request,
     db: AsyncSession = Depends(get_db),
 ) -> HTMLResponse:
-    """Re-scan Plex for availability across existing requests."""
+    """Run the legacy manual Plex reconcile path for existing requests."""
     context = await _build_settings_page_context(request, db)
 
     try:
@@ -439,7 +657,7 @@ async def rescan_plex(
             await plex.close()
 
         context["message"] = (
-            "Plex availability re-scan completed. "
+            "Legacy/manual Plex reconcile completed. "
             f"Re-synced {tv_resynced} TV request(s), had {tv_failed} failed TV request(s), "
             f"and transitioned {completed} request(s) to completed."
         )
@@ -625,21 +843,211 @@ async def retry_pending(
     """Manually trigger retry of pending items."""
     from app.siftarr.main import scheduler_service
 
+    context = await _build_settings_page_context(request, db)
     if scheduler_service:
         count = await scheduler_service.trigger_retry_now()
-        message = f"Retrying {count} pending items"
+        context["message"] = f"Retrying {count} pending items"
+        context["message_type"] = "success"
     else:
-        message = "Scheduler not available"
+        context["message"] = "Scheduler not available"
+        context["message_type"] = "error"
 
-    return templates.TemplateResponse(
-        request,
-        "settings.html",
-        {
-            "request": request,
-            "message": message,
-            "message_type": "success",
-        },
+    return templates.TemplateResponse(request, "settings.html", context)
+
+
+@router.post("/run-incremental-plex-sync")
+async def run_incremental_plex_sync(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+) -> HTMLResponse:
+    """Manually trigger the incremental Plex sync scheduler job."""
+    from app.siftarr.main import scheduler_service
+
+    context = await _build_settings_page_context(request, db)
+    if scheduler_service is None:
+        context["message"] = "Scheduler not available"
+        context["message_type"] = "error"
+        return templates.TemplateResponse(request, "settings.html", context)
+
+    result = await scheduler_service.trigger_incremental_plex_sync_now()
+    context["message"], context["message_type"] = _build_manual_plex_job_message(
+        "Incremental Plex sync",
+        result,
     )
+
+    context["plex_jobs"] = await _build_plex_job_statuses(db)
+    return templates.TemplateResponse(request, "settings.html", context)
+
+
+@router.post("/run-full-plex-reconcile")
+async def run_full_plex_reconcile(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+) -> HTMLResponse:
+    """Manually trigger the full Plex reconcile scheduler job."""
+    from app.siftarr.main import scheduler_service
+
+    context = await _build_settings_page_context(request, db)
+    if scheduler_service is None:
+        context["message"] = "Scheduler not available"
+        context["message_type"] = "error"
+        return templates.TemplateResponse(request, "settings.html", context)
+
+    result = await scheduler_service.trigger_full_plex_reconcile_now()
+    context["message"], context["message_type"] = _build_manual_plex_job_message(
+        "Full Plex reconcile",
+        result,
+    )
+
+    context["plex_jobs"] = await _build_plex_job_statuses(db)
+    return templates.TemplateResponse(request, "settings.html", context)
+
+
+async def _import_overseerr_requests(
+    db: AsyncSession,
+    runtime_settings: Settings,
+) -> tuple[int, int]:
+    """Fetch, filter, and import new Overseerr requests into the local DB.
+
+    Returns:
+        (synced_count, skipped_count)
+    """
+    overseerr_service = OverseerrService(settings=runtime_settings)
+    try:
+        overseerr_requests = await overseerr_service.get_all_requests(status=None)
+
+        if not overseerr_requests:
+            return 0, 0
+
+        result = await db.execute(
+            select(RequestModel.external_id, RequestModel.overseerr_request_id)
+        )
+        existing_rows = result.fetchall()
+        existing_external_ids = {row[0] for row in existing_rows}
+        existing_request_ids = {row[1] for row in existing_rows if row[1] is not None}
+
+        actionable_requests = []
+        for ov_req in overseerr_requests:
+            media = ov_req.get("media") or {}
+            request_status = overseerr_service.normalize_request_status(ov_req.get("status"))
+            media_status = overseerr_service.normalize_media_status(media.get("status"))
+            if request_status not in {"pending", "approved"}:
+                continue
+            if media_status == "available":
+                continue
+            actionable_requests.append(ov_req)
+
+        sync_concurrency = max(1, runtime_settings.overseerr_sync_concurrency)
+        sync_semaphore = asyncio.Semaphore(sync_concurrency)
+        media_details_tasks: dict[tuple[str, int], asyncio.Task[dict | None]] = {}
+        media_details_lock = asyncio.Lock()
+
+        prepared_requests = await asyncio.gather(
+            *(
+                _prepare_overseerr_import(
+                    ov_req,
+                    overseerr_service,
+                    sync_semaphore,
+                    media_details_tasks,
+                    media_details_lock,
+                )
+                for ov_req in actionable_requests
+            ),
+            return_exceptions=True,
+        )
+
+        synced_count = 0
+        skipped_count = 0
+        new_tv_requests: list[RequestModel] = []
+
+        for prepared_request in prepared_requests:
+            try:
+                if isinstance(prepared_request, BaseException):
+                    logger.exception(
+                        "Overseerr request prefetch failed during sync",
+                        exc_info=prepared_request,
+                    )
+                    skipped_count += 1
+                    continue
+
+                if prepared_request is None:
+                    skipped_count += 1
+                    continue
+
+                prepared = prepared_request
+
+                if (
+                    prepared.external_id in existing_external_ids
+                    or prepared.overseerr_request_id in existing_request_ids
+                ):
+                    skipped_count += 1
+                    continue
+
+                new_request = RequestModel(
+                    external_id=prepared.external_id,
+                    media_type=prepared.media_type,
+                    tmdb_id=prepared.tmdb_id,
+                    tvdb_id=prepared.tvdb_id,
+                    title=prepared.title,
+                    year=prepared.year,
+                    requested_seasons=str(prepared.requested_seasons)
+                    if prepared.requested_seasons
+                    else None,
+                    requested_episodes=str(prepared.requested_episodes)
+                    if prepared.requested_episodes
+                    else None,
+                    requester_username=prepared.requester_username,
+                    requester_email=prepared.requester_email,
+                    status=RequestStatus.PENDING,
+                    overseerr_request_id=prepared.overseerr_request_id,
+                )
+                db.add(new_request)
+                await db.flush()
+                await evaluate_imported_request(
+                    db,
+                    overseerr_service,
+                    new_request,
+                    logger=logger,
+                    prefetched_media_details=prepared.media_details,
+                    local_episodes=(),
+                )
+                if prepared.media_type == MediaType.TV:
+                    new_tv_requests.append(new_request)
+                existing_external_ids.add(prepared.external_id)
+                if prepared.overseerr_request_id is not None:
+                    existing_request_ids.add(prepared.overseerr_request_id)
+                synced_count += 1
+            except Exception:
+                logger.exception("Overseerr request import failed during sync")
+                skipped_count += 1
+                continue
+
+        await db.commit()
+
+        if synced_count > 0:
+            from app.siftarr.services.episode_sync_service import EpisodeSyncService
+
+            plex_service = PlexService(settings=runtime_settings)
+            try:
+                episode_sync = EpisodeSyncService(
+                    db,
+                    overseerr=overseerr_service,
+                    plex=plex_service,
+                )
+                for req in new_tv_requests:
+                    try:
+                        await episode_sync.sync_episodes(req.id)
+                    except Exception:
+                        logger.exception(
+                            "Episode sync failed for request_id=%s during import",
+                            req.id,
+                        )
+            finally:
+                await plex_service.close()
+
+        return synced_count, skipped_count
+    finally:
+        await overseerr_service.close()
 
 
 async def _sync_overseerr_generator():
@@ -664,228 +1072,41 @@ async def _sync_overseerr_generator():
                 return
 
             runtime_settings = await get_effective_settings(db)
-            overseerr_service = OverseerrService(settings=runtime_settings)
-            try:
-                yield _sse(
-                    _build_sse_progress(
-                        "fetching",
-                        title="Fetching requests from Overseerr...",
-                        active=[],
-                        message="Fetching requests from Overseerr...",
-                    )
+
+            yield _sse(
+                _build_sse_progress(
+                    "fetching",
+                    title="Fetching requests from Overseerr...",
+                    active=[],
+                    message="Fetching requests from Overseerr...",
                 )
-                overseerr_requests = await overseerr_service.get_all_requests(status=None)
+            )
 
-                if not overseerr_requests:
-                    yield _sse(
-                        _build_sse_progress(
-                            "complete",
-                            active=[],
-                            synced=0,
-                            skipped=0,
-                            message="No requests found in Overseerr",
-                        )
-                    )
-                    return
+            synced_count, skipped_count = await _import_overseerr_requests(db, runtime_settings)
 
-                result = await db.execute(
-                    select(RequestModel.external_id, RequestModel.overseerr_request_id)
+            if synced_count > 0:
+                message = f"Synced {synced_count} new request(s) from Overseerr"
+            elif synced_count == 0 and skipped_count == 0:
+                message = "No requests found in Overseerr"
+            else:
+                message = f"No new actionable requests to sync ({skipped_count} already existed or were already available)"
+
+            yield _sse(
+                _build_sse_progress(
+                    "complete",
+                    active=[],
+                    synced=synced_count,
+                    skipped=skipped_count,
+                    message=message,
                 )
-                existing_rows = result.fetchall()
-                existing_external_ids = {row[0] for row in existing_rows}
-                existing_request_ids = {row[1] for row in existing_rows if row[1] is not None}
-
-                actionable_requests = []
-                for ov_req in overseerr_requests:
-                    media = ov_req.get("media") or {}
-                    request_status = overseerr_service.normalize_request_status(
-                        ov_req.get("status")
-                    )
-                    media_status = overseerr_service.normalize_media_status(media.get("status"))
-                    if request_status not in {"pending", "approved"}:
-                        continue
-                    if media_status == "available":
-                        continue
-                    actionable_requests.append(ov_req)
-
-                total = len(actionable_requests)
-                yield _sse(
-                    _build_sse_progress(
-                        "fetching",
-                        title=f"Found {total} actionable request(s). Fetching details...",
-                        active=[
-                            (ov_req.get("media") or {}).get("title")
-                            or (ov_req.get("media") or {}).get("name")
-                            or str(
-                                (ov_req.get("media") or {}).get("tmdbId")
-                                or (ov_req.get("media") or {}).get("tvdbId")
-                                or ov_req.get("id")
-                            )
-                            for ov_req in actionable_requests[:16]
-                        ],
-                        message=f"Found {total} actionable request(s). Fetching details...",
-                    )
-                )
-
-                sync_concurrency = max(1, runtime_settings.overseerr_sync_concurrency)
-                sync_semaphore = asyncio.Semaphore(sync_concurrency)
-                media_details_tasks: dict[tuple[str, int], asyncio.Task[dict | None]] = {}
-                media_details_lock = asyncio.Lock()
-
-                prepared_requests = await asyncio.gather(
-                    *(
-                        _prepare_overseerr_import(
-                            ov_req,
-                            overseerr_service,
-                            sync_semaphore,
-                            media_details_tasks,
-                            media_details_lock,
-                        )
-                        for ov_req in actionable_requests
-                    ),
-                    return_exceptions=True,
-                )
-
-                synced_count = 0
-                skipped_count = 0
-                new_tv_requests: list[RequestModel] = []
-
-                for i, prepared_request in enumerate(prepared_requests):
-                    try:
-                        if isinstance(prepared_request, BaseException):
-                            logger.exception(
-                                "Overseerr request prefetch failed during sync",
-                                exc_info=prepared_request,
-                            )
-                            skipped_count += 1
-                            yield _sse(
-                                _build_sse_progress(
-                                    "processing",
-                                    current=i + 1,
-                                    total=total,
-                                    title="(prefetch error)",
-                                    active=["(prefetch error)"],
-                                )
-                            )
-                            continue
-
-                        if prepared_request is None:
-                            skipped_count += 1
-                            yield _sse(
-                                _build_sse_progress(
-                                    "processing",
-                                    current=i + 1,
-                                    total=total,
-                                    title="(skipped)",
-                                    active=["(skipped)"],
-                                )
-                            )
-                            continue
-
-                        prepared = prepared_request
-
-                        yield _sse(
-                            _build_sse_progress(
-                                "processing",
-                                current=i + 1,
-                                total=total,
-                                title=prepared.title or prepared.external_id,
-                                active=[prepared.title or prepared.external_id],
-                            )
-                        )
-
-                        if (
-                            prepared.external_id in existing_external_ids
-                            or prepared.overseerr_request_id in existing_request_ids
-                        ):
-                            skipped_count += 1
-                            continue
-
-                        new_request = RequestModel(
-                            external_id=prepared.external_id,
-                            media_type=prepared.media_type,
-                            tmdb_id=prepared.tmdb_id,
-                            tvdb_id=prepared.tvdb_id,
-                            title=prepared.title,
-                            year=prepared.year,
-                            requested_seasons=str(prepared.requested_seasons)
-                            if prepared.requested_seasons
-                            else None,
-                            requested_episodes=str(prepared.requested_episodes)
-                            if prepared.requested_episodes
-                            else None,
-                            requester_username=prepared.requester_username,
-                            requester_email=prepared.requester_email,
-                            status=RequestStatus.PENDING,
-                            overseerr_request_id=prepared.overseerr_request_id,
-                        )
-                        db.add(new_request)
-                        await db.flush()
-                        await evaluate_imported_request(
-                            db,
-                            overseerr_service,
-                            new_request,
-                            logger=logger,
-                            prefetched_media_details=prepared.media_details,
-                            local_episodes=(),
-                        )
-                        if prepared.media_type == MediaType.TV:
-                            new_tv_requests.append(new_request)
-                        existing_external_ids.add(prepared.external_id)
-                        if prepared.overseerr_request_id is not None:
-                            existing_request_ids.add(prepared.overseerr_request_id)
-                        synced_count += 1
-                    except Exception:
-                        logger.exception("Overseerr request import failed during sync")
-                        skipped_count += 1
-                        continue
-
-                await db.commit()
-
-                if synced_count > 0:
-                    from app.siftarr.services.episode_sync_service import EpisodeSyncService
-
-                    plex_service = PlexService(settings=runtime_settings)
-                    try:
-                        episode_sync = EpisodeSyncService(
-                            db,
-                            overseerr=overseerr_service,
-                            plex=plex_service,
-                        )
-                        for req in new_tv_requests:
-                            try:
-                                await episode_sync.sync_episodes(req.id)
-                            except Exception:
-                                logger.exception(
-                                    "Episode sync failed for request_id=%s during import",
-                                    req.id,
-                                )
-                    finally:
-                        await plex_service.close()
-
-                if synced_count > 0:
-                    message = f"Synced {synced_count} new request(s) from Overseerr"
-                else:
-                    message = f"No new actionable requests to sync ({skipped_count} already existed or were already available)"
-
-                yield _sse(
-                    _build_sse_progress(
-                        "complete",
-                        active=[],
-                        synced=synced_count,
-                        skipped=skipped_count,
-                        message=message,
-                    )
-                )
-            finally:
-                await overseerr_service.close()
+            )
 
     except Exception as e:
         logger.exception("Overseerr SSE sync failed")
         yield _sse(_build_sse_progress("error", active=[], message=f"Sync error: {e}"))
 
 
-async def _rescan_plex_generator():
+async def _rescan_plex_generator(shallow: bool = False):
     """Async generator that yields SSE events for Plex re-scan progress."""
 
     def _sse(data: dict) -> str:
@@ -919,6 +1140,7 @@ async def _rescan_plex_generator():
                         runtime_settings,
                         plex,
                         on_event=emit,
+                        shallow=shallow,
                     )
                 )
 
@@ -949,7 +1171,7 @@ async def _rescan_plex_generator():
                 resynced, failed, completed = await task
 
                 message = (
-                    f"Plex re-scan completed. "
+                    "Legacy/manual Plex reconcile completed. "
                     f"Re-synced {resynced} TV request(s), "
                     f"{failed} failed, "
                     f"{completed} transitioned to completed."
@@ -973,10 +1195,10 @@ async def _rescan_plex_generator():
 
 
 @router.get("/api/rescan-plex/stream")
-async def rescan_plex_stream() -> StreamingResponse:
+async def rescan_plex_stream(shallow: bool = False) -> StreamingResponse:
     """Stream Plex re-scan progress via SSE."""
     return StreamingResponse(
-        _rescan_plex_generator(),
+        _rescan_plex_generator(shallow=shallow),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",
@@ -1215,13 +1437,8 @@ async def reseed_rules(
     """Reseed default rules."""
     rule_service = RuleService(db)
     await rule_service.seed_default_rules()
+    context = await _build_settings_page_context(request, db)
+    context["message"] = "Default rules have been seeded"
+    context["message_type"] = "success"
 
-    return templates.TemplateResponse(
-        request,
-        "settings.html",
-        {
-            "request": request,
-            "message": "Default rules have been seeded",
-            "message_type": "success",
-        },
-    )
+    return templates.TemplateResponse(request, "settings.html", context)

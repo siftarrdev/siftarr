@@ -10,8 +10,9 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.siftarr.database import get_db
-from app.siftarr.models.request import MediaType, RequestStatus
+from app.siftarr.models.request import MediaType, RequestStatus, is_active_staging_workflow_status
 from app.siftarr.models.rule import Rule
+from app.siftarr.models.staged_torrent import StagedTorrent
 from app.siftarr.routers.dashboard_actions import _process_request_search
 from app.siftarr.services.overseerr_service import (
     OverseerrService,
@@ -164,7 +165,44 @@ async def request_details(
 
     matched = finalize_releases(matched)
 
+    active_staged_torrent = None
+    if is_active_staging_workflow_status(request.status):
+        active_staged_result = await db.execute(
+            select(StagedTorrent)
+            .where(
+                StagedTorrent.request_id == request_id,
+                StagedTorrent.status.in_(["staged", "approved"]),
+            )
+            .order_by(StagedTorrent.updated_at.desc(), StagedTorrent.created_at.desc())
+        )
+        active_staged_torrent = active_staged_result.scalars().first()
+
+    active_staged_payload: dict[str, object] | None = None
+    if active_staged_torrent is not None:
+        active_staged_payload = {
+            "id": active_staged_torrent.id,
+            "title": active_staged_torrent.title,
+            "status": active_staged_torrent.status,
+            "selection_source": active_staged_torrent.selection_source,
+        }
+
+    for release in matched:
+        is_active_selection = bool(
+            active_staged_torrent is not None
+            and release.get("title") == active_staged_torrent.title
+        )
+        release["is_active_selection"] = is_active_selection
+        release["active_selection_status"] = (
+            active_staged_torrent.status if is_active_selection and active_staged_torrent else None
+        )
+        release["active_selection_source"] = (
+            active_staged_torrent.selection_source
+            if is_active_selection and active_staged_torrent
+            else None
+        )
+
     details["releases"] = matched
+    details["active_staged_torrent"] = active_staged_payload
 
     if request.media_type == MediaType.TV:
         seasons, episodes = await load_tv_seasons_with_episodes(db, request_id)
@@ -224,7 +262,7 @@ async def request_details(
                     release.get("is_complete_series") or len(covered_seasons) >= known_total_seasons
                 )
             )
-            apply_release_size_per_season_metadata(release)
+            apply_release_size_per_season_metadata(release, rule_engine=engine)
 
         releases_by_season: dict[int, list[dict[str, object]]] = {}
         releases_by_episode: dict[tuple[int, int], list[dict[str, object]]] = {}

@@ -95,6 +95,10 @@ class TestSelectionRedirectUrl:
         request = _make_request(status=RequestStatus.SEARCHING)
         assert selection_redirect_url("/custom", request) == "/custom"
 
+    def test_prefers_staged_tab_when_requested(self) -> None:
+        request = _make_request(status=RequestStatus.PENDING)
+        assert selection_redirect_url(None, request, prefer_staged_view=True) == "/?tab=staged"
+
 
 # -- bulk_redirect_url ----------------------------------------------------------
 

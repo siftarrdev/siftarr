@@ -4,7 +4,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from app.siftarr.models.request import MediaType
+from app.siftarr.models.request import MediaType, RequestStatus
 from app.siftarr.routers import staged
 
 
@@ -195,3 +195,168 @@ class TestStagedRouter:
         assert response.status_code == 200
         assert torrent_one.status == "discarded"
         assert torrent_two.status == "discarded"
+
+    @pytest.mark.asyncio
+    async def test_replace_staged_torrent_redirects_to_staged_tab(self, mock_db, monkeypatch):
+        """Replacing a downloading torrent should keep the user on the staged tab."""
+        new_torrent = MagicMock()
+        new_torrent.id = 9
+        new_torrent.request_id = 4
+        new_torrent.magnet_url = "magnet:?xt=urn:btih:def"
+        new_torrent.torrent_path = "/tmp/new.torrent"
+        new_torrent.json_path = "/tmp/new.json"
+        new_torrent.status = "staged"
+
+        old_torrent = MagicMock()
+        old_torrent.id = 10
+        old_torrent.request_id = 4
+        old_torrent.status = "approved"
+
+        request = MagicMock()
+        request.id = 4
+        request.media_type = MediaType.TV
+
+        new_result = MagicMock()
+        new_result.scalar_one_or_none.return_value = new_torrent
+        request_result = MagicMock()
+        request_result.scalar_one_or_none.return_value = request
+        old_result = MagicMock()
+        old_result.scalar_one_or_none.return_value = old_torrent
+        mock_db.execute.side_effect = [new_result, request_result, old_result]
+
+        qbittorrent = AsyncMock()
+        qbittorrent.add_torrent.return_value = "hash456"
+        monkeypatch.setattr(staged, "get_effective_settings", AsyncMock(return_value=MagicMock()))
+        monkeypatch.setattr(staged, "QbittorrentService", MagicMock(return_value=qbittorrent))
+        monkeypatch.setattr(staged, "log_replacement_decision", MagicMock())
+        monkeypatch.setattr(staged.os.path, "exists", MagicMock(return_value=False))
+
+        response = await staged.replace_staged_torrent(
+            torrent_id=9, reason="Better quality", db=mock_db
+        )
+
+        assert response.status_code == 303
+        assert response.headers["location"] == "/?tab=staged"
+        assert old_torrent.status == "replaced"
+        assert new_torrent.status == "approved"
+
+
+class TestDownloadStatusEndpoint:
+    """Tests for GET /staged/download-status."""
+
+    @pytest.fixture
+    def mock_db(self):
+        return AsyncMock()
+
+    @pytest.mark.asyncio
+    async def test_returns_empty_when_no_approved_torrents(self, mock_db, monkeypatch):
+        """Returns empty list when no approved torrents."""
+        from app.siftarr.routers.staged import get_download_status
+
+        empty_result = MagicMock()
+        empty_result.scalars.return_value.all.return_value = []
+        mock_db.execute.return_value = empty_result
+
+        response = await get_download_status(db=mock_db)
+        assert response.status_code == 200
+        import json
+
+        body = json.loads(bytes(response.body))  # type: ignore[arg-type]
+        assert body == {"torrents": []}
+
+    @pytest.mark.asyncio
+    async def test_returns_torrent_status(self, mock_db, monkeypatch):
+        """Returns torrent list with qbit progress."""
+        import json
+
+        from app.siftarr.routers import staged as staged_module
+        from app.siftarr.routers.staged import get_download_status
+
+        torrent = MagicMock()
+        torrent.id = 5
+        torrent.title = "Test Movie"
+        torrent.request_id = 99
+        torrent.magnet_url = "magnet:?xt=urn:btih:da39a3ee5e6b4b0d3255bfef95601890afd80709"
+        torrent.status = "approved"
+
+        torrent_result = MagicMock()
+        torrent_result.scalars.return_value.all.return_value = [torrent]
+
+        request_status_result = MagicMock()
+        request_status_result.all.return_value = [(99, RequestStatus.DOWNLOADING)]
+
+        mock_db.execute.side_effect = [torrent_result, request_status_result]
+
+        qbit = AsyncMock()
+        qbit.get_torrent_info = AsyncMock(return_value={"progress": 0.6, "state": "downloading"})
+        monkeypatch.setattr(
+            staged_module, "get_effective_settings", AsyncMock(return_value=MagicMock())
+        )
+        monkeypatch.setattr(staged_module, "QbittorrentService", MagicMock(return_value=qbit))
+
+        response = await get_download_status(db=mock_db)
+        assert response.status_code == 200
+        body = json.loads(bytes(response.body))  # type: ignore[arg-type]
+        assert len(body["torrents"]) == 1
+        assert body["torrents"][0]["id"] == 5
+        assert body["torrents"][0]["qbit_progress"] == 0.6
+
+    @pytest.mark.asyncio
+    async def test_ignores_resolved_request_torrents(self, mock_db, monkeypatch):
+        """Approved torrents for available or partial requests should not poll as active."""
+        import json
+
+        from app.siftarr.routers import staged as staged_module
+        from app.siftarr.routers.staged import get_download_status
+
+        active_torrent = MagicMock()
+        active_torrent.id = 5
+        active_torrent.title = "Still Downloading"
+        active_torrent.request_id = 99
+        active_torrent.magnet_url = "magnet:?xt=urn:btih:da39a3ee5e6b4b0d3255bfef95601890afd80709"
+        active_torrent.status = "approved"
+
+        available_torrent = MagicMock()
+        available_torrent.id = 6
+        available_torrent.title = "Already Available"
+        available_torrent.request_id = 100
+        available_torrent.magnet_url = (
+            "magnet:?xt=urn:btih:ea39a3ee5e6b4b0d3255bfef95601890afd80709"
+        )
+        available_torrent.status = "approved"
+
+        partial_torrent = MagicMock()
+        partial_torrent.id = 7
+        partial_torrent.title = "Partially Available"
+        partial_torrent.request_id = 101
+        partial_torrent.magnet_url = "magnet:?xt=urn:btih:fa39a3ee5e6b4b0d3255bfef95601890afd80709"
+        partial_torrent.status = "approved"
+
+        torrent_result = MagicMock()
+        torrent_result.scalars.return_value.all.return_value = [
+            active_torrent,
+            available_torrent,
+            partial_torrent,
+        ]
+
+        request_status_result = MagicMock()
+        request_status_result.all.return_value = [
+            (99, RequestStatus.DOWNLOADING),
+            (100, RequestStatus.AVAILABLE),
+            (101, RequestStatus.PARTIALLY_AVAILABLE),
+        ]
+
+        mock_db.execute.side_effect = [torrent_result, request_status_result]
+
+        qbit = AsyncMock()
+        qbit.get_torrent_info = AsyncMock(return_value={"progress": 0.6, "state": "downloading"})
+        monkeypatch.setattr(
+            staged_module, "get_effective_settings", AsyncMock(return_value=MagicMock())
+        )
+        monkeypatch.setattr(staged_module, "QbittorrentService", MagicMock(return_value=qbit))
+
+        response = await get_download_status(db=mock_db)
+        assert response.status_code == 200
+        body = json.loads(bytes(response.body))  # type: ignore[arg-type]
+        assert [torrent["id"] for torrent in body["torrents"]] == [5]
+        qbit.get_torrent_info.assert_awaited_once()

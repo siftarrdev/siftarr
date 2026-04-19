@@ -33,6 +33,7 @@ class TestLifecycleService:
         assert service.can_transition(RequestStatus.PENDING, RequestStatus.SEARCHING)
         assert service.can_transition(RequestStatus.STAGED, RequestStatus.DOWNLOADING)
         assert service.can_transition(RequestStatus.STAGED, RequestStatus.PENDING)
+        assert service.can_transition(RequestStatus.STAGED, RequestStatus.COMPLETED)
         assert service.can_transition(RequestStatus.DOWNLOADING, RequestStatus.COMPLETED)
         assert service.can_transition(RequestStatus.DOWNLOADING, RequestStatus.FAILED)
 
@@ -54,7 +55,6 @@ class TestLifecycleService:
         assert not service.can_transition(RequestStatus.RECEIVED, RequestStatus.COMPLETED)
         assert not service.can_transition(RequestStatus.COMPLETED, RequestStatus.SEARCHING)
         assert not service.can_transition(RequestStatus.FAILED, RequestStatus.SEARCHING)
-        assert not service.can_transition(RequestStatus.STAGED, RequestStatus.COMPLETED)
         assert not service.can_transition(RequestStatus.PENDING, RequestStatus.RECEIVED)
 
     def test_can_transition_terminal_states(self, service):
