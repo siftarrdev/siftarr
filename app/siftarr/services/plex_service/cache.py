@@ -1,15 +1,12 @@
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, MutableMapping
 from contextlib import asynccontextmanager
-from typing import TYPE_CHECKING, Any, Self
+from typing import Any, Self
 
 import httpx
 
 from app.siftarr.config import Settings
 
 from .models import PlexLookupResult
-
-if TYPE_CHECKING:
-    from collections.abc import MutableMapping
 
 
 class PlexServiceCacheMixin:
