@@ -21,8 +21,14 @@ def test_direct_metadata_format():
 def test_search_result_format():
     container = {
         "SearchResult": [
-            {"score": 0.93, "Metadata": {"type": "show", "ratingKey": "100", "title": "The Rookie"}},
-            {"score": 0.85, "Metadata": {"type": "movie", "ratingKey": "200", "title": "Some Movie"}},
+            {
+                "score": 0.93,
+                "Metadata": {"type": "show", "ratingKey": "100", "title": "The Rookie"},
+            },
+            {
+                "score": 0.85,
+                "Metadata": {"type": "movie", "ratingKey": "200", "title": "Some Movie"},
+            },
         ]
     }
     result = PlexService._extract_metadata_items(container)
@@ -227,10 +233,17 @@ async def test_get_movie_by_tmdb_fallback_to_section_scan(service, mock_client, 
 
     sections_response = MagicMock()
     sections_response.status_code = 200
-    sections_response.json.return_value = {"MediaContainer": {"Directory": [{"key": "1", "type": "movie"}]}}
+    sections_response.json.return_value = {
+        "MediaContainer": {"Directory": [{"key": "1", "type": "movie"}]}
+    }
 
     original_client.get.return_value = error_response
-    original_client.get.side_effect = [error_response, error_response, sections_response, section_response]
+    original_client.get.side_effect = [
+        error_response,
+        error_response,
+        sections_response,
+        section_response,
+    ]
 
     result = await service.get_movie_by_tmdb(555)
     assert result is not None
@@ -369,7 +382,9 @@ async def test_get_show_by_tmdb_section_scan_fallback(service, monkeypatch):
 
     sections_response = MagicMock()
     sections_response.status_code = 200
-    sections_response.json.return_value = {"MediaContainer": {"Directory": [{"key": "2", "type": "show"}]}}
+    sections_response.json.return_value = {
+        "MediaContainer": {"Directory": [{"key": "2", "type": "show"}]}
+    }
 
     client.get.side_effect = [error_response, error_response, sections_response, section_response]
 
@@ -450,7 +465,9 @@ async def test_lookup_show_by_tvdb_reports_inconclusive_on_section_failure(servi
     sections_response = MagicMock()
     sections_response.status_code = 200
     sections_response.json.return_value = {
-        "MediaContainer": {"Directory": [{"key": "2", "type": "show"}, {"key": "3", "type": "show"}]}
+        "MediaContainer": {
+            "Directory": [{"key": "2", "type": "show"}, {"key": "3", "type": "show"}]
+        }
     }
     empty_search = MagicMock()
     empty_search.status_code = 200

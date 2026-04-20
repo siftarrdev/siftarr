@@ -289,7 +289,9 @@ async def test_incremental_recent_scan_uses_checkpoint_buffer_and_recent_matches
     mock_transition.assert_awaited_once_with(1, RequestStatus.COMPLETED, reason="Found on Plex")
     mock_reconcile.assert_awaited_once_with(req2, req2.seasons, {(1, 1): True})
     service.scan_state.release_lock.assert_awaited_once()
-    release_kwargs = service.scan_state.release_lock.await_args.kwargs
+    release_call = service.scan_state.release_lock.await_args
+    assert release_call is not None
+    release_kwargs = release_call.kwargs
     assert release_kwargs["success"] is True
     assert release_kwargs["checkpoint_at"] == run_started
     assert release_kwargs["last_error"] is None
@@ -412,7 +414,9 @@ async def test_incremental_recent_scan_retains_checkpoint_on_transient_recent_sc
 
     previous_checkpoint = datetime(2026, 4, 19, 12, 0, tzinfo=UTC)
     service.scan_state.recover_stale_lock = AsyncMock()
-    service.scan_state.acquire_lock = AsyncMock(return_value=SimpleNamespace(checkpoint_at=previous_checkpoint))
+    service.scan_state.acquire_lock = AsyncMock(
+        return_value=SimpleNamespace(checkpoint_at=previous_checkpoint)
+    )
     service.scan_state.release_lock = AsyncMock()
 
     async def iter_recently_added_items(media_type: str):
@@ -434,7 +438,9 @@ async def test_incremental_recent_scan_retains_checkpoint_on_transient_recent_sc
     assert result.clean_run is False
     assert result.last_error == "recently added unavailable"
     service.scan_state.release_lock.assert_awaited_once()
-    release_kwargs = service.scan_state.release_lock.await_args.kwargs
+    release_call = service.scan_state.release_lock.await_args
+    assert release_call is not None
+    release_kwargs = release_call.kwargs
     assert release_kwargs["success"] is False
     assert release_kwargs["checkpoint_at"] == previous_checkpoint
     assert release_kwargs["last_error"] == "recently added unavailable"
@@ -452,7 +458,9 @@ async def test_incremental_recent_scan_retains_checkpoint_on_request_probe_error
 
     previous_checkpoint = datetime(2026, 4, 19, 12, 0, tzinfo=UTC)
     service.scan_state.recover_stale_lock = AsyncMock()
-    service.scan_state.acquire_lock = AsyncMock(return_value=SimpleNamespace(checkpoint_at=previous_checkpoint))
+    service.scan_state.acquire_lock = AsyncMock(
+        return_value=SimpleNamespace(checkpoint_at=previous_checkpoint)
+    )
     service.scan_state.release_lock = AsyncMock()
 
     async def iter_recently_added_items(_: str):
@@ -481,7 +489,9 @@ async def test_incremental_recent_scan_retains_checkpoint_on_request_probe_error
     assert result.last_error == (
         "Incremental recent Plex scan had transient request probe errors; checkpoint retained"
     )
-    release_kwargs = service.scan_state.release_lock.await_args.kwargs
+    release_call = service.scan_state.release_lock.await_args
+    assert release_call is not None
+    release_kwargs = release_call.kwargs
     assert release_kwargs["success"] is False
     assert release_kwargs["checkpoint_at"] == previous_checkpoint
     assert release_kwargs["last_error"] == (
@@ -501,7 +511,9 @@ async def test_incremental_recent_scan_retains_checkpoint_on_non_authoritative_m
 
     previous_checkpoint = datetime(2026, 4, 19, 12, 0, tzinfo=UTC)
     service.scan_state.recover_stale_lock = AsyncMock()
-    service.scan_state.acquire_lock = AsyncMock(return_value=SimpleNamespace(checkpoint_at=previous_checkpoint))
+    service.scan_state.acquire_lock = AsyncMock(
+        return_value=SimpleNamespace(checkpoint_at=previous_checkpoint)
+    )
     service.scan_state.release_lock = AsyncMock()
 
     async def iter_recently_added_items(_: str):
@@ -532,7 +544,9 @@ async def test_incremental_recent_scan_retains_checkpoint_on_non_authoritative_m
     mock_plex.lookup_movie_by_tmdb.assert_awaited_once_with(111)
     mock_plex.check_movie_available.assert_not_called()
     mock_transition.assert_not_awaited()
-    release_kwargs = service.scan_state.release_lock.await_args.kwargs
+    release_call = service.scan_state.release_lock.await_args
+    assert release_call is not None
+    release_kwargs = release_call.kwargs
     assert release_kwargs["success"] is False
     assert release_kwargs["checkpoint_at"] == previous_checkpoint
     assert release_kwargs["metrics_payload"]["skipped_on_error_items"] == 1
@@ -555,7 +569,9 @@ async def test_incremental_recent_scan_retains_checkpoint_on_non_authoritative_t
 
     previous_checkpoint = datetime(2026, 4, 19, 12, 0, tzinfo=UTC)
     service.scan_state.recover_stale_lock = AsyncMock()
-    service.scan_state.acquire_lock = AsyncMock(return_value=SimpleNamespace(checkpoint_at=previous_checkpoint))
+    service.scan_state.acquire_lock = AsyncMock(
+        return_value=SimpleNamespace(checkpoint_at=previous_checkpoint)
+    )
     service.scan_state.release_lock = AsyncMock()
 
     async def iter_recently_added_items(_: str):
@@ -594,7 +610,9 @@ async def test_incremental_recent_scan_retains_checkpoint_on_non_authoritative_t
     mock_plex.get_episode_availability_result.assert_awaited_once_with("show-222")
     mock_plex.get_episode_availability.assert_not_called()
     mock_transition.assert_not_awaited()
-    release_kwargs = service.scan_state.release_lock.await_args.kwargs
+    release_call = service.scan_state.release_lock.await_args
+    assert release_call is not None
+    release_kwargs = release_call.kwargs
     assert release_kwargs["success"] is False
     assert release_kwargs["checkpoint_at"] == previous_checkpoint
     assert release_kwargs["metrics_payload"]["skipped_on_error_items"] == 1

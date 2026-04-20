@@ -3,7 +3,9 @@
 import asyncio
 import contextlib
 import logging
+from collections.abc import Awaitable
 from datetime import UTC, datetime
+from typing import TYPE_CHECKING, TypeVar
 from uuid import uuid4
 
 from app.siftarr.models.request import MediaType, Request
@@ -21,10 +23,85 @@ from .models import (
     ScanRunResult,
 )
 
+if TYPE_CHECKING:
+    from app.siftarr.services.plex_scan_state_service import PlexScanStateService
+    from app.siftarr.services.plex_service import PlexService
+
+T = TypeVar("T")
+
 logger = logging.getLogger(__name__)
 
 
 class IncrementalScanMixin:
+    plex: "PlexService"
+    scan_state: "PlexScanStateService"
+
+    async def get_active_requests(self) -> list[Request]:
+        raise NotImplementedError
+
+    def _get_incremental_lock_lease_duration(self):
+        raise NotImplementedError
+
+    def _get_incremental_checkpoint_buffer(self):
+        raise NotImplementedError
+
+    def _current_time(self) -> datetime:
+        raise NotImplementedError
+
+    def _coerce_datetime(self, value: datetime | None) -> datetime | None:
+        raise NotImplementedError
+
+    def _index_requests_by_media_identity(
+        self, requests: list[Request]
+    ) -> dict[MediaIdentity, tuple[Request, ...]]:
+        raise NotImplementedError
+
+    def _get_recent_item_canonical_identity(self, item: dict[str, object]) -> MediaIdentity | None:
+        raise NotImplementedError
+
+    def _get_recent_item_identity_candidates(self, item: dict[str, object]) -> set[MediaIdentity]:
+        raise NotImplementedError
+
+    def _item_has_media(self, item: dict[str, object]) -> bool:
+        raise NotImplementedError
+
+    def _get_concurrency_limit(self) -> int:
+        raise NotImplementedError
+
+    async def _probe_movie_group(
+        self,
+        requests: tuple[Request, ...],
+        *,
+        authoritative_required: bool = False,
+    ) -> ScanProbeResult:
+        raise NotImplementedError
+
+    def _get_show_dict_from_recent_item(self, item: dict[str, object]) -> dict[str, object] | None:
+        raise NotImplementedError
+
+    async def _probe_tv_group(
+        self,
+        requests: tuple[Request, ...],
+        show: dict[str, object] | None = None,
+        *,
+        authoritative_required: bool = False,
+    ) -> ScanProbeResult:
+        raise NotImplementedError
+
+    async def _apply_decisions(self, requests: list[Request], decisions: list[PollDecision]) -> int:
+        raise NotImplementedError
+
+    async def _run_serialized_write(self, operation: Awaitable[T]) -> T:
+        raise NotImplementedError
+
+    def _build_incremental_error_message(
+        self,
+        *,
+        recent_error_messages: list[str],
+        skipped_on_error_items: int,
+    ) -> str | None:
+        raise NotImplementedError
+
     async def incremental_recent_scan(
         self,
         on_progress: ProgressCallback | None = None,
@@ -365,7 +442,10 @@ class IncrementalScanMixin:
     async def _probe_recent_movie_match(self, match: RecentScanMatch) -> ScanProbeResult:
         if self._item_has_media(match.item):
             return ScanProbeResult(
-                decisions=tuple(PollDecision(request_id=req.id, reason="Found on Plex") for req in match.requests),
+                decisions=tuple(
+                    PollDecision(request_id=req.id, reason="Found on Plex")
+                    for req in match.requests
+                ),
                 matched_requests=len(match.requests),
             )
         return await self._probe_movie_group(match.requests, authoritative_required=True)

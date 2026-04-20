@@ -1,17 +1,38 @@
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from typing import Any
+from typing import TYPE_CHECKING, Any, Self
+
+import httpx
+
+from app.siftarr.config import Settings
 
 from .models import PlexLookupResult
 
+if TYPE_CHECKING:
+    from collections.abc import MutableMapping
+
 
 class PlexServiceCacheMixin:
+    settings: Settings
+    base_url: str | None
+    token: str | None
+    _scan_cycle_depth: int
+    _scan_cycle_guid_cache: MutableMapping[tuple[str, str], PlexLookupResult]
+    _scan_cycle_rating_key_cache: MutableMapping[str, dict[str, Any]]
+    _scan_cycle_sections_cache: MutableMapping[str, list[dict[str, Any]]]
+
+    async def _get_client(self) -> httpx.AsyncClient:
+        raise NotImplementedError
+
+    def _get_headers(self) -> dict[str, str]:
+        raise NotImplementedError
+
     def _is_available(self, metadata: dict[str, Any]) -> bool:
         """Check if a metadata entry has Media (is available on Plex)."""
         return "Media" in metadata and bool(metadata.get("Media"))
 
     @asynccontextmanager
-    async def scan_cycle(self) -> AsyncIterator["PlexService"]:
+    async def scan_cycle(self) -> AsyncIterator[Self]:
         """Enable per-scan caches for repeated Plex lookups."""
         self._scan_cycle_depth += 1
         if self._scan_cycle_depth == 1:

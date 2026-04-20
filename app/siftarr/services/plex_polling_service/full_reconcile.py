@@ -2,21 +2,58 @@
 
 import asyncio
 import logging
+from collections.abc import Awaitable
+from typing import TYPE_CHECKING, TypeVar
 
 from app.siftarr.models.request import MediaType, Request, RequestStatus
 
 from .models import (
-    MediaIdentity,
     NEGATIVE_RECONCILE_STATUSES,
+    MediaIdentity,
     ProgressCallback,
     ScanMetrics,
     ScanRunResult,
 )
 
+if TYPE_CHECKING:
+    from app.siftarr.services.episode_sync_service import EpisodeSyncService
+    from app.siftarr.services.lifecycle_service import LifecycleService
+    from app.siftarr.services.plex_service import PlexService
+
+T = TypeVar("T")
+
 logger = logging.getLogger(__name__)
 
 
 class FullReconcileMixin:
+    plex: "PlexService"
+    lifecycle: "LifecycleService"
+    episode_sync: "EpisodeSyncService"
+
+    async def get_full_reconcile_requests(self) -> list[Request]:
+        raise NotImplementedError
+
+    def _item_has_media(self, item: dict[str, object]) -> bool:
+        raise NotImplementedError
+
+    def _get_recent_item_identity_candidates(self, item: dict[str, object]) -> set[MediaIdentity]:
+        raise NotImplementedError
+
+    def _get_recent_item_canonical_identity(self, item: dict[str, object]) -> MediaIdentity | None:
+        raise NotImplementedError
+
+    def _get_request_media_type_for_item(self, item: dict[str, object]):
+        raise NotImplementedError
+
+    async def _run_serialized_write(self, operation: Awaitable[T]) -> T:
+        raise NotImplementedError
+
+    def _get_requested_episodes(self, req: Request) -> list[tuple[int, int]]:
+        raise NotImplementedError
+
+    def _get_request_media_identity_candidates(self, req: Request) -> set[MediaIdentity]:
+        raise NotImplementedError
+
     async def full_reconcile_scan(
         self, on_progress: ProgressCallback | None = None
     ) -> ScanRunResult:

@@ -28,12 +28,30 @@ async def test_full_reconcile_scan_builds_authoritative_presence_and_completes_m
     mock_plex.scan_library_items = AsyncMock(
         side_effect=[
             SimpleNamespace(
-                items=(({"type": "movie", "rating_key": "movie-111", "guids": ("tmdb://111",), "Media": [{"id": 1}]},)),
+                items=(
+                    (
+                        {
+                            "type": "movie",
+                            "rating_key": "movie-111",
+                            "guids": ("tmdb://111",),
+                            "Media": [{"id": 1}],
+                        },
+                    )
+                ),
                 authoritative=True,
                 failed_sections=(),
             ),
             SimpleNamespace(
-                items=(({"type": "show", "rating_key": "show-222", "guids": ("tmdb://222",), "Media": [{"id": 1}]},)),
+                items=(
+                    (
+                        {
+                            "type": "show",
+                            "rating_key": "show-222",
+                            "guids": ("tmdb://222",),
+                            "Media": [{"id": 1}],
+                        },
+                    )
+                ),
                 authoritative=True,
                 failed_sections=(),
             ),

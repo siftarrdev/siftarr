@@ -3,10 +3,11 @@ from typing import Any
 
 import httpx
 
+from .cache import PlexServiceCacheMixin
 from .models import PlexLibraryScanResult, PlexTransientScanError
 
 
-class PlexServiceLibraryScanMixin:
+class PlexServiceLibraryScanMixin(PlexServiceCacheMixin):
     async def _get_library_sections_metadata(
         self,
         media_type: str,

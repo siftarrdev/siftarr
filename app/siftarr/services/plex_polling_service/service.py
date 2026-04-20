@@ -41,11 +41,11 @@ T = TypeVar("T")
 
 
 class PlexPollingService(
+    ProbeMixin,
+    IdentityMixin,
     TargetedReconcileMixin,
     IncrementalScanMixin,
     FullReconcileMixin,
-    ProbeMixin,
-    IdentityMixin,
 ):
     """Polls Plex to check if requested media has become available."""
 

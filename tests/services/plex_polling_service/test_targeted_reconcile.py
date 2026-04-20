@@ -26,7 +26,9 @@ async def test_reconcile_request_tv_loads_request_and_reuses_episode_sync_path(
     mock_plex.get_episode_availability.return_value = {(1, 1): True, (1, 2): False}
 
     async def reconcile_to_partial(request, seasons, availability):
-        return await set_request_status(request, RequestStatus.PARTIALLY_AVAILABLE, seasons, availability)
+        return await set_request_status(
+            request, RequestStatus.PARTIALLY_AVAILABLE, seasons, availability
+        )
 
     with patch.object(
         service.episode_sync,
@@ -64,7 +66,9 @@ async def test_reconcile_request_tv_partial_availability(service, mock_db, mock_
     mock_plex.get_episode_availability.return_value = {(1, 1): False, (1, 2): True}
 
     async def reconcile_to_partial(request, seasons, availability):
-        return await set_request_status(request, RequestStatus.PARTIALLY_AVAILABLE, seasons, availability)
+        return await set_request_status(
+            request, RequestStatus.PARTIALLY_AVAILABLE, seasons, availability
+        )
 
     with patch.object(
         service.episode_sync,

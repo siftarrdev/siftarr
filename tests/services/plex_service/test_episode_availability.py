@@ -106,7 +106,9 @@ async def test_get_episode_availability_preserves_deterministic_filtering(servic
 
 
 @pytest.mark.asyncio
-async def test_get_episode_availability_result_returns_inconclusive_on_season_failure(service, monkeypatch):
+async def test_get_episode_availability_result_returns_inconclusive_on_season_failure(
+    service, monkeypatch
+):
     async def get_children(rating_key: str):
         if rating_key == "show-1":
             return [{"type": "season", "index": 1, "ratingKey": "season-1"}]

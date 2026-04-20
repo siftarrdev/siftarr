@@ -60,6 +60,7 @@ async def rescan_plex_requests(
     tv_requests = [req for req in active_requests if req.media_type == MediaType.TV]
 
     if shallow:
+
         def all_episodes_available(req: RequestModel) -> bool:
             seasons = list(getattr(req, "seasons", []) or [])
             if not seasons:
@@ -114,7 +115,9 @@ async def rescan_plex_requests(
     tv_failed = len(resync_results) - tv_resynced
 
     if on_event is not None:
-        await on_event(build_sse_progress_func("polling", title="Running Plex availability poll..."))
+        await on_event(
+            build_sse_progress_func("polling", title="Running Plex availability poll...")
+        )
 
     completed = await polling_service.poll(on_progress=on_event)
     return tv_resynced, tv_failed, completed

@@ -271,7 +271,9 @@ async def test_poll_caps_probe_concurrency(service, mock_db, mock_plex):
 
 @pytest.mark.asyncio
 async def test_update_episode_statuses(service, mock_db):
-    req = make_request(media_type=MediaType.TV, seasons=[make_season(1, [make_episode(1), make_episode(2)])])
+    req = make_request(
+        media_type=MediaType.TV, seasons=[make_season(1, [make_episode(1), make_episode(2)])]
+    )
 
     completed_episodes = frozenset({(1, 1), (1, 2)})
     await service._update_episode_statuses(req, completed_episodes)

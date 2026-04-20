@@ -1,5 +1,8 @@
 """Targeted request reconciliation helpers."""
 
+from collections.abc import Awaitable
+from typing import TYPE_CHECKING, TypeVar
+
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 
@@ -8,8 +11,41 @@ from app.siftarr.models.season import Season
 
 from .models import PollDecision, TargetedReconcileResult
 
+if TYPE_CHECKING:
+    from sqlalchemy.ext.asyncio import AsyncSession
+
+    from app.siftarr.services.plex_service import PlexService
+
+T = TypeVar("T")
+
 
 class TargetedReconcileMixin:
+    db: "AsyncSession"
+    plex: "PlexService"
+
+    async def _run_serialized_write(self, operation: Awaitable[T]) -> T:
+        raise NotImplementedError
+
+    async def _apply_decision(self, req: Request, decision: PollDecision) -> None:
+        raise NotImplementedError
+
+    async def _check_movie_authoritatively(self, req: Request) -> tuple[PollDecision | None, bool]:
+        raise NotImplementedError
+
+    async def _check_movie(self, req: Request) -> PollDecision | None:
+        raise NotImplementedError
+
+    async def _find_show_authoritatively(
+        self, req: Request
+    ) -> tuple[dict[str, object] | None, bool]:
+        raise NotImplementedError
+
+    async def _find_show(self, req: Request) -> dict | None:
+        raise NotImplementedError
+
+    def _get_requested_episodes(self, req: Request) -> list[tuple[int, int]]:
+        raise NotImplementedError
+
     async def reconcile_request(
         self,
         request_or_id: Request | int,

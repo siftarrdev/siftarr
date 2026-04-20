@@ -3,13 +3,13 @@ from typing import Any
 
 import httpx
 
-from .cache import PlexServiceCacheMixin
+from .library_scan import PlexServiceLibraryScanMixin
 from .models import _MODERN_GUID_PREFIXES, PlexLookupResult, PlexTransientScanError
 
 logger = logging.getLogger(__name__)
 
 
-class PlexServiceLookupMixin(PlexServiceCacheMixin):
+class PlexServiceLookupMixin(PlexServiceLibraryScanMixin):
     async def _scan_sections_for_guids(
         self,
         guid_values: tuple[str, ...],

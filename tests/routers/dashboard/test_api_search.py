@@ -90,7 +90,9 @@ async def test_search_all_season_packs_returns_coverage_metadata(mock_db, monkey
         query_time_ms=5,
     )
     monkeypatch.setattr(dashboard_api, "ProwlarrService", lambda settings: prowlarr_service)
-    monkeypatch.setattr(dashboard_api, "get_effective_settings", AsyncMock(return_value=MagicMock()))
+    monkeypatch.setattr(
+        dashboard_api, "get_effective_settings", AsyncMock(return_value=MagicMock())
+    )
 
     fake_evaluation = MagicMock(total_score=12.5, passed=True)
     fake_engine = MagicMock(evaluate=MagicMock(return_value=fake_evaluation))
@@ -126,7 +128,9 @@ async def test_search_all_season_packs_returns_coverage_metadata(mock_db, monkey
     assert body["releases"][2]["is_complete_series"] is True
     assert body["releases"][2]["size_per_season"] == "14.00 GB"
     assert body["releases"][2]["size_per_season_passed"] is True
-    assert "Foundation.Complete.S01.1080p.BluRay" not in [release["title"] for release in body["releases"]]
+    assert "Foundation.Complete.S01.1080p.BluRay" not in [
+        release["title"] for release in body["releases"]
+    ]
     assert body["releases"][0]["status"] == "passed"
     assert body["releases"][0]["status_label"] == "Passed"
     assert body["releases"][0]["stored_release_id"] is None
@@ -203,7 +207,9 @@ async def test_search_season_packs_excludes_multi_season_results(mock_db, monkey
         query_time_ms=5,
     )
     monkeypatch.setattr(dashboard_api, "ProwlarrService", lambda settings: prowlarr_service)
-    monkeypatch.setattr(dashboard_api, "get_effective_settings", AsyncMock(return_value=MagicMock()))
+    monkeypatch.setattr(
+        dashboard_api, "get_effective_settings", AsyncMock(return_value=MagicMock())
+    )
 
     fake_evaluation = MagicMock(total_score=12.5, passed=True)
     fake_engine = MagicMock(evaluate=MagicMock(return_value=fake_evaluation))
@@ -269,7 +275,9 @@ async def test_search_season_packs_orders_by_score_then_size(mock_db, monkeypatc
         query_time_ms=5,
     )
     monkeypatch.setattr(dashboard_api, "ProwlarrService", lambda settings: prowlarr_service)
-    monkeypatch.setattr(dashboard_api, "get_effective_settings", AsyncMock(return_value=MagicMock()))
+    monkeypatch.setattr(
+        dashboard_api, "get_effective_settings", AsyncMock(return_value=MagicMock())
+    )
 
     score_by_title = {
         larger_high_score.title: 100,
@@ -278,7 +286,9 @@ async def test_search_season_packs_orders_by_score_then_size(mock_db, monkeypatc
     }
     fake_engine = MagicMock(
         evaluate=MagicMock(
-            side_effect=lambda release: MagicMock(total_score=score_by_title[release.title], passed=True)
+            side_effect=lambda release: MagicMock(
+                total_score=score_by_title[release.title], passed=True
+            )
         )
     )
     monkeypatch.setattr(
@@ -337,7 +347,9 @@ async def test_search_season_packs_prioritizes_size_limit_passes(mock_db, monkey
         query_time_ms=5,
     )
     monkeypatch.setattr(dashboard_api, "ProwlarrService", lambda settings: prowlarr_service)
-    monkeypatch.setattr(dashboard_api, "get_effective_settings", AsyncMock(return_value=MagicMock()))
+    monkeypatch.setattr(
+        dashboard_api, "get_effective_settings", AsyncMock(return_value=MagicMock())
+    )
 
     score_by_title = {
         passing_size_but_other_rule_fail.title: 80,
@@ -472,7 +484,9 @@ async def test_search_episode_excludes_packs_and_multi_season_results(mock_db, m
         query_time_ms=5,
     )
     monkeypatch.setattr(dashboard_api, "ProwlarrService", lambda settings: prowlarr_service)
-    monkeypatch.setattr(dashboard_api, "get_effective_settings", AsyncMock(return_value=MagicMock()))
+    monkeypatch.setattr(
+        dashboard_api, "get_effective_settings", AsyncMock(return_value=MagicMock())
+    )
 
     fake_evaluation = MagicMock(total_score=12.5, passed=True)
     fake_engine = MagicMock(evaluate=MagicMock(return_value=fake_evaluation))
@@ -547,7 +561,9 @@ async def test_search_all_season_packs_orders_by_score_then_size(mock_db, monkey
         query_time_ms=5,
     )
     monkeypatch.setattr(dashboard_api, "ProwlarrService", lambda settings: prowlarr_service)
-    monkeypatch.setattr(dashboard_api, "get_effective_settings", AsyncMock(return_value=MagicMock()))
+    monkeypatch.setattr(
+        dashboard_api, "get_effective_settings", AsyncMock(return_value=MagicMock())
+    )
 
     score_by_title = {
         larger_high_score.title: 100,
@@ -556,7 +572,9 @@ async def test_search_all_season_packs_orders_by_score_then_size(mock_db, monkey
     }
     fake_engine = MagicMock(
         evaluate=MagicMock(
-            side_effect=lambda release: MagicMock(total_score=score_by_title[release.title], passed=True)
+            side_effect=lambda release: MagicMock(
+                total_score=score_by_title[release.title], passed=True
+            )
         )
     )
     monkeypatch.setattr(
@@ -623,7 +641,9 @@ async def test_search_episode_orders_by_score_then_size(mock_db, monkeypatch):
         query_time_ms=5,
     )
     monkeypatch.setattr(dashboard_api, "ProwlarrService", lambda settings: prowlarr_service)
-    monkeypatch.setattr(dashboard_api, "get_effective_settings", AsyncMock(return_value=MagicMock()))
+    monkeypatch.setattr(
+        dashboard_api, "get_effective_settings", AsyncMock(return_value=MagicMock())
+    )
 
     score_by_title = {
         larger_high_score.title: 100,
@@ -632,7 +652,9 @@ async def test_search_episode_orders_by_score_then_size(mock_db, monkeypatch):
     }
     fake_engine = MagicMock(
         evaluate=MagicMock(
-            side_effect=lambda release: MagicMock(total_score=score_by_title[release.title], passed=True)
+            side_effect=lambda release: MagicMock(
+                total_score=score_by_title[release.title], passed=True
+            )
         )
     )
     monkeypatch.setattr(

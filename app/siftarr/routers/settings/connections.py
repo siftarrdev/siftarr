@@ -12,7 +12,7 @@ from app.siftarr.services.connection_tester import ConnectionTestResult
 from .schemas import ConnectionTestResponse
 from .shared import router
 
-settings_router = sys.modules[__package__]
+settings_router = sys.modules[__package__ or "app.siftarr.routers.settings"]
 
 
 @router.post("/connections")
@@ -144,7 +144,9 @@ async def test_qbittorrent_connection(db: AsyncSession = Depends(get_db)) -> Con
 async def test_plex_connection(db: AsyncSession = Depends(get_db)) -> ConnectionTestResponse:
     """Test connection to Plex."""
     effective_settings = await settings_router._build_effective_settings_obj(db)
-    result: ConnectionTestResult = await settings_router.ConnectionTester.test_plex(effective_settings)
+    result: ConnectionTestResult = await settings_router.ConnectionTester.test_plex(
+        effective_settings
+    )
     return ConnectionTestResponse(
         service="plex",
         success=result.success,

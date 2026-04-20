@@ -10,7 +10,7 @@ from app.siftarr.database import get_db
 
 from .shared import logger, router, templates
 
-settings_router = sys.modules[__package__]
+settings_router = sys.modules[__package__ or "app.siftarr.routers.settings"]
 
 
 @router.post("/clear-cache")

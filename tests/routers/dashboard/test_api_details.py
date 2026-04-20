@@ -72,7 +72,9 @@ async def test_request_details_reuses_persisted_multi_season_coverage(
         episodes_two_result,
     ]
 
-    monkeypatch.setattr(dashboard_api, "get_effective_settings", AsyncMock(return_value=MagicMock()))
+    monkeypatch.setattr(
+        dashboard_api, "get_effective_settings", AsyncMock(return_value=MagicMock())
+    )
 
     class FakeOverseerrService:
         def __init__(self, settings):
@@ -234,7 +236,9 @@ async def test_request_details_orders_stored_releases_by_score_then_size(
         episodes_two_result,
     ]
 
-    monkeypatch.setattr(dashboard_api, "get_effective_settings", AsyncMock(return_value=MagicMock()))
+    monkeypatch.setattr(
+        dashboard_api, "get_effective_settings", AsyncMock(return_value=MagicMock())
+    )
 
     class FakeOverseerrService:
         def __init__(self, settings):
@@ -338,7 +342,9 @@ async def test_request_details_includes_release_status_reason_and_publish_date(
     rules_result.scalars.return_value.all.return_value = []
     mock_db.execute.side_effect = [request_result, release_result, rules_result]
 
-    monkeypatch.setattr(dashboard_api, "get_effective_settings", AsyncMock(return_value=MagicMock()))
+    monkeypatch.setattr(
+        dashboard_api, "get_effective_settings", AsyncMock(return_value=MagicMock())
+    )
 
     class FakeOverseerrService:
         def __init__(self, settings):
@@ -445,9 +451,16 @@ async def test_request_details_surfaces_active_staged_torrent_metadata(
     rules_result.scalars.return_value.all.return_value = []
     active_stage_result = MagicMock()
     active_stage_result.scalars.return_value.all.return_value = [active_stage]
-    mock_db.execute.side_effect = [request_result, release_result, rules_result, active_stage_result]
+    mock_db.execute.side_effect = [
+        request_result,
+        release_result,
+        rules_result,
+        active_stage_result,
+    ]
 
-    monkeypatch.setattr(dashboard_api, "get_effective_settings", AsyncMock(return_value=MagicMock()))
+    monkeypatch.setattr(
+        dashboard_api, "get_effective_settings", AsyncMock(return_value=MagicMock())
+    )
 
     class FakeOverseerrService:
         def __init__(self, settings):
@@ -578,7 +591,10 @@ async def test_request_details_tv_scopes_active_stage_to_matching_episode(
     request_result = MagicMock()
     request_result.scalar_one_or_none.return_value = request_record
     release_result = MagicMock()
-    release_result.scalars.return_value.all.return_value = [episode_one_release, episode_two_release]
+    release_result.scalars.return_value.all.return_value = [
+        episode_one_release,
+        episode_two_release,
+    ]
     rules_result = MagicMock()
     rules_result.scalars.return_value.all.return_value = []
     active_stage_result = MagicMock()
@@ -596,7 +612,9 @@ async def test_request_details_tv_scopes_active_stage_to_matching_episode(
         episodes_result,
     ]
 
-    monkeypatch.setattr(dashboard_api, "get_effective_settings", AsyncMock(return_value=MagicMock()))
+    monkeypatch.setattr(
+        dashboard_api, "get_effective_settings", AsyncMock(return_value=MagicMock())
+    )
 
     class FakeOverseerrService:
         def __init__(self, settings):
@@ -668,7 +686,9 @@ async def test_request_details_returns_cached_tv_data_and_sync_state(
     request_record.overseerr_request_id = None
 
     stale_synced_at = datetime.now(UTC).replace(tzinfo=None) - timedelta(days=2)
-    season_one = MagicMock(id=101, season_number=1, status=RequestStatus.PENDING, synced_at=stale_synced_at)
+    season_one = MagicMock(
+        id=101, season_number=1, status=RequestStatus.PENDING, synced_at=stale_synced_at
+    )
     episode_one = MagicMock(
         id=201,
         season_id=101,
@@ -697,7 +717,9 @@ async def test_request_details_returns_cached_tv_data_and_sync_state(
         episodes_result,
     ]
 
-    monkeypatch.setattr(dashboard_api, "get_effective_settings", AsyncMock(return_value=MagicMock()))
+    monkeypatch.setattr(
+        dashboard_api, "get_effective_settings", AsyncMock(return_value=MagicMock())
+    )
 
     class FakeOverseerrService:
         def __init__(self, settings):
@@ -743,7 +765,9 @@ async def test_get_request_seasons_returns_sync_state_without_inline_refresh(
     request_record.media_type = MediaType.TV
 
     synced_at = datetime.now(UTC).replace(tzinfo=None)
-    season_one = MagicMock(id=101, season_number=1, status=RequestStatus.AVAILABLE, synced_at=synced_at)
+    season_one = MagicMock(
+        id=101, season_number=1, status=RequestStatus.AVAILABLE, synced_at=synced_at
+    )
     episode_one = MagicMock(
         id=201,
         season_id=101,
@@ -836,7 +860,9 @@ async def test_request_details_serializes_unreleased_and_partial_tv_counts(
         episodes_result,
     ]
 
-    monkeypatch.setattr(dashboard_api, "get_effective_settings", AsyncMock(return_value=MagicMock()))
+    monkeypatch.setattr(
+        dashboard_api, "get_effective_settings", AsyncMock(return_value=MagicMock())
+    )
 
     class FakeOverseerrService:
         def __init__(self, settings):
@@ -926,7 +952,9 @@ async def test_request_details_flags_fresh_partial_tv_data_for_plex_enrichment(
         episodes_result,
     ]
 
-    monkeypatch.setattr(dashboard_api, "get_effective_settings", AsyncMock(return_value=MagicMock()))
+    monkeypatch.setattr(
+        dashboard_api, "get_effective_settings", AsyncMock(return_value=MagicMock())
+    )
 
     class FakeOverseerrService:
         def __init__(self, settings):
@@ -1023,7 +1051,9 @@ async def test_request_details_flags_pending_unreleased_tv_data_for_plex_enrichm
         episodes_result,
     ]
 
-    monkeypatch.setattr(dashboard_api, "get_effective_settings", AsyncMock(return_value=MagicMock()))
+    monkeypatch.setattr(
+        dashboard_api, "get_effective_settings", AsyncMock(return_value=MagicMock())
+    )
 
     class FakeOverseerrService:
         def __init__(self, settings):
@@ -1119,7 +1149,9 @@ async def test_request_details_surfaces_request_level_tv_aggregate_counts(
         episodes_result,
     ]
 
-    monkeypatch.setattr(dashboard_api, "get_effective_settings", AsyncMock(return_value=MagicMock()))
+    monkeypatch.setattr(
+        dashboard_api, "get_effective_settings", AsyncMock(return_value=MagicMock())
+    )
 
     class FakeOverseerrService:
         def __init__(self, settings):

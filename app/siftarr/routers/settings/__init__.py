@@ -1,11 +1,12 @@
 """Settings router package with compatibility re-exports."""
 
 from collections.abc import AsyncGenerator
+from importlib import import_module
 from typing import Any
 
 from app.siftarr.database import async_session_maker
-from app.siftarr.models.request import RequestStatus
 from app.siftarr.models.request import Request as RequestModel
+from app.siftarr.models.request import RequestStatus
 from app.siftarr.models.settings import Settings as DBSettings
 from app.siftarr.services.connection_tester import ConnectionTester
 from app.siftarr.services.overseerr_service import OverseerrService
@@ -231,26 +232,35 @@ async def _rescan_plex_generator(shallow: bool = False) -> AsyncGenerator[str, N
         yield event
 
 
-from .connections import (  # noqa: E402
-    get_connections_api,
-    reset_connections,
-    save_connections,
-    test_all_connections,
-    test_overseerr_connection,
-    test_plex_connection,
-    test_prowlarr_connection,
-    test_qbittorrent_connection,
-)
-from .imports import rescan_plex_stream, sync_overseerr, sync_overseerr_stream  # noqa: E402
-from .jobs import (  # noqa: E402
-    rescan_plex,
-    retry_pending,
-    run_full_plex_reconcile,
-    run_incremental_plex_sync,
-    toggle_staging_mode,
-)
-from .maintenance import clear_cache, reseed_rules  # noqa: E402
-from .page import get_settings_page  # noqa: E402
+_connections = import_module(".connections", __name__)
+_imports = import_module(".imports", __name__)
+_jobs = import_module(".jobs", __name__)
+_maintenance = import_module(".maintenance", __name__)
+_page = import_module(".page", __name__)
+
+get_connections_api = _connections.get_connections_api
+reset_connections = _connections.reset_connections
+save_connections = _connections.save_connections
+test_all_connections = _connections.test_all_connections
+test_overseerr_connection = _connections.test_overseerr_connection
+test_plex_connection = _connections.test_plex_connection
+test_prowlarr_connection = _connections.test_prowlarr_connection
+test_qbittorrent_connection = _connections.test_qbittorrent_connection
+
+rescan_plex_stream = _imports.rescan_plex_stream
+sync_overseerr = _imports.sync_overseerr
+sync_overseerr_stream = _imports.sync_overseerr_stream
+
+rescan_plex = _jobs.rescan_plex
+retry_pending = _jobs.retry_pending
+run_full_plex_reconcile = _jobs.run_full_plex_reconcile
+run_incremental_plex_sync = _jobs.run_incremental_plex_sync
+toggle_staging_mode = _jobs.toggle_staging_mode
+
+clear_cache = _maintenance.clear_cache
+reseed_rules = _maintenance.reseed_rules
+
+get_settings_page = _page.get_settings_page
 
 
 __all__ = [

@@ -7,7 +7,9 @@ from app.siftarr.services import release_selection_service
 
 
 @pytest.mark.asyncio
-async def test_use_releases_marks_manual_selection_source(mock_db, request_record, selected_release):
+async def test_use_releases_marks_manual_selection_source(
+    mock_db, request_record, selected_release
+):
     settings = MagicMock(staging_mode_enabled=True)
     queue_service = AsyncMock()
     staging_service = AsyncMock()

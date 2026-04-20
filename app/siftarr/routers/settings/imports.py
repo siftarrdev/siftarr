@@ -10,7 +10,7 @@ from app.siftarr.database import get_db
 
 from .shared import router, templates
 
-settings_router = sys.modules[__package__]
+settings_router = sys.modules[__package__ or "app.siftarr.routers.settings"]
 
 
 @router.get("/api/rescan-plex/stream")
@@ -50,7 +50,9 @@ async def sync_overseerr(
     context = await settings_router._build_settings_page_context(request, db)
     effective_settings = context["env"]
 
-    if not effective_settings.get("overseerr_url") or not effective_settings.get("overseerr_api_key"):
+    if not effective_settings.get("overseerr_url") or not effective_settings.get(
+        "overseerr_api_key"
+    ):
         context["message"] = "Overseerr is not configured. Please set URL and API key."
         context["message_type"] = "error"
         return templates.TemplateResponse(request, "settings.html", context)

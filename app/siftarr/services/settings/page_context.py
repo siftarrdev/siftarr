@@ -26,7 +26,9 @@ async def set_db_setting(
         db.add(setting)
 
 
-async def build_effective_settings(db: AsyncSession, *, get_effective_settings_func) -> dict[str, Any]:
+async def build_effective_settings(
+    db: AsyncSession, *, get_effective_settings_func
+) -> dict[str, Any]:
     """Build effective settings using DB overrides."""
     effective = await get_effective_settings_func(db)
     return {
@@ -76,7 +78,9 @@ async def build_settings_page_context(
     """Build the shared context required by the settings page."""
     effective_settings = await build_effective_settings_func(db)
 
-    result = await db.execute(select(settings_model).where(settings_model.key == "staging_mode_enabled"))
+    result = await db.execute(
+        select(settings_model).where(settings_model.key == "staging_mode_enabled")
+    )
     staging_setting = result.scalar_one_or_none()
     staging_enabled = staging_setting.value == "true" if staging_setting else True
 

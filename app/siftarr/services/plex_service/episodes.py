@@ -1,16 +1,18 @@
 import logging
+from typing import Any
 
 import httpx
 
 from app.siftarr.services.async_utils import gather_limited
 
+from .cache import PlexServiceCacheMixin
 from .models import PlexEpisodeAvailabilityResult, PlexTransientScanError
 
 logger = logging.getLogger(__name__)
 
 
-class PlexServiceEpisodesMixin:
-    async def get_show_children(self, rating_key: str) -> list[dict[str, object]]:
+class PlexServiceEpisodesMixin(PlexServiceCacheMixin):
+    async def get_show_children(self, rating_key: str) -> list[dict[str, Any]]:
         """Get all seasons for a show.
 
         Args:
@@ -45,7 +47,7 @@ class PlexServiceEpisodesMixin:
             logger.exception("PlexService: get_show_children(%s) failed", rating_key)
             return []
 
-    async def get_season_children(self, rating_key: str) -> list[dict[str, object]]:
+    async def get_season_children(self, rating_key: str) -> list[dict[str, Any]]:
         """Get all episodes for a season.
 
         Args:
@@ -80,7 +82,7 @@ class PlexServiceEpisodesMixin:
             logger.exception("PlexService: get_season_children(%s) failed", rating_key)
             return []
 
-    async def _get_metadata_children_strict(self, rating_key: str) -> list[dict[str, object]]:
+    async def _get_metadata_children_strict(self, rating_key: str) -> list[dict[str, Any]]:
         """Get metadata children and raise on transient Plex failures."""
         if not self.base_url or not self.token:
             return []
@@ -131,13 +133,13 @@ class PlexServiceEpisodesMixin:
             if season.get("type") != "season":
                 continue
             season_number = season.get("index")
-            if season_number is None:
+            if not isinstance(season_number, int):
                 continue
             season_rating_key = season.get("ratingKey")
             if not season_rating_key:
                 continue
 
-            season_infos.append((season_number, season_rating_key))
+            season_infos.append((season_number, str(season_rating_key)))
 
         season_episodes = await gather_limited(
             (season_rating_key for _, season_rating_key in season_infos),
@@ -152,7 +154,7 @@ class PlexServiceEpisodesMixin:
                 if episode.get("type") != "episode":
                     continue
                 episode_number = episode.get("index")
-                if episode_number is None:
+                if not isinstance(episode_number, int):
                     continue
                 is_available = self._is_available(episode)
                 availability[(season_number, episode_number)] = is_available
@@ -189,7 +191,7 @@ class PlexServiceEpisodesMixin:
                 continue
             season_number = season.get("index")
             season_rating_key = season.get("ratingKey")
-            if season_number is None or not season_rating_key:
+            if not isinstance(season_number, int) or not season_rating_key:
                 continue
             season_infos.append((season_number, str(season_rating_key)))
 
@@ -204,7 +206,7 @@ class PlexServiceEpisodesMixin:
                 if episode.get("type") != "episode":
                     continue
                 episode_number = episode.get("index")
-                if episode_number is None:
+                if not isinstance(episode_number, int):
                     continue
                 availability[(season_number, episode_number)] = self._is_available(episode)
 

@@ -338,9 +338,7 @@ async def test_dashboard_renders_staged_torrents_for_refresh(mock_db, monkeypatc
 
 
 @pytest.mark.asyncio
-async def test_dashboard_hides_stale_available_and_partial_staged_torrents(
-    mock_db, monkeypatch
-):
+async def test_dashboard_hides_stale_available_and_partial_staged_torrents(mock_db, monkeypatch):
     """Approved request-linked torrents should disappear once requests are resolved."""
     lifecycle_service = AsyncMock()
     lifecycle_service.get_active_requests.return_value = []

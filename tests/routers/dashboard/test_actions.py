@@ -215,7 +215,9 @@ async def test_use_manual_release_json_reports_replacement_outcome(mock_db, monk
     fake_engine = MagicMock()
     fake_engine.evaluate.return_value = MagicMock(total_score=55, passed=True, matches=[])
     persist_manual_release = AsyncMock(return_value=stored_release)
-    use_releases = AsyncMock(return_value={"status": "staged", "action": "replaced_active_selection"})
+    use_releases = AsyncMock(
+        return_value={"status": "staged", "action": "replaced_active_selection"}
+    )
 
     monkeypatch.setattr(
         dashboard_actions.RuleEngine,

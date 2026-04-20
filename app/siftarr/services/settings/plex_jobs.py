@@ -115,7 +115,9 @@ def build_manual_plex_job_message(job_label: str, result: Any) -> tuple[str, str
     message = f"{job_label} completed. Transitioned {result.completed_requests} request(s)."
     outcome_summary = build_plex_run_outcome_summary(result.metrics_payload)
     if outcome_summary == "Incremental run completed cleanly; checkpoint advanced":
-        message = f"{job_label} completed cleanly. Transitioned {result.completed_requests} request(s)."
+        message = (
+            f"{job_label} completed cleanly. Transitioned {result.completed_requests} request(s)."
+        )
     elif outcome_summary and outcome_summary.startswith("Incremental run partial"):
         message = (
             f"{job_label} completed partially. "
@@ -125,7 +127,9 @@ def build_manual_plex_job_message(job_label: str, result: Any) -> tuple[str, str
     elif outcome_summary and outcome_summary.startswith(
         "Full run completed with guarded negative reconciliation"
     ):
-        downgraded = _coerce_int((_get_scan_metrics_payload(result.metrics_payload) or {}).get("downgraded_requests"))
+        downgraded = _coerce_int(
+            (_get_scan_metrics_payload(result.metrics_payload) or {}).get("downgraded_requests")
+        )
         message = (
             f"{job_label} completed with guarded negative reconciliation. "
             f"Transitioned {result.completed_requests} request(s) and downgraded "

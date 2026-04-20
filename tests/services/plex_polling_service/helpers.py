@@ -34,9 +34,7 @@ def make_season(season_number: int, episodes: list) -> MagicMock:
     return season
 
 
-def make_episode(
-    episode_number: int, status: RequestStatus = RequestStatus.SEARCHING
-) -> MagicMock:
+def make_episode(episode_number: int, status: RequestStatus = RequestStatus.SEARCHING) -> MagicMock:
     episode = MagicMock()
     episode.episode_number = episode_number
     episode.status = status

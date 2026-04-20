@@ -7,7 +7,9 @@ from app.siftarr.services import release_selection_service
 
 
 @pytest.mark.asyncio
-async def test_use_releases_keeps_existing_staged_release(mock_db, request_record, selected_release):
+async def test_use_releases_keeps_existing_staged_release(
+    mock_db, request_record, selected_release
+):
     settings = MagicMock(staging_mode_enabled=True)
     queue_service = AsyncMock()
     staging_service = AsyncMock()
@@ -122,7 +124,10 @@ async def test_use_releases_replaces_existing_active_stage_for_manual_selection(
     assert existing_stage.status == "replaced"
     assert existing_stage.replaced_by_id == replacement_stage.id
     assert existing_stage.replaced_at is not None
-    assert existing_stage.replacement_reason == "Manually replaced staged selection from request details"
+    assert (
+        existing_stage.replacement_reason
+        == "Manually replaced staged selection from request details"
+    )
     queue_service.remove_from_queue.assert_awaited_once_with(request_record.id)
 
 

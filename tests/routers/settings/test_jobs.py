@@ -49,7 +49,9 @@ async def test_run_incremental_plex_sync_reports_success(monkeypatch, mock_db, b
     context = cast(dict, getattr(response, "context", None))
 
     assert context["message_type"] == "success"
-    assert context["message"] == "Incremental Plex sync completed cleanly. Transitioned 3 request(s)."
+    assert (
+        context["message"] == "Incremental Plex sync completed cleanly. Transitioned 3 request(s)."
+    )
     scheduler.trigger_incremental_plex_sync_now.assert_awaited_once()
 
 

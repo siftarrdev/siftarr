@@ -2,15 +2,30 @@
 
 import json
 import logging
+from collections.abc import Awaitable
+from typing import TYPE_CHECKING, TypeVar
 
 from app.siftarr.models.request import MediaType, Request, RequestStatus
 
 from .models import EpisodeKey, PollDecision, ScanProbeResult
 
+if TYPE_CHECKING:
+    from sqlalchemy.ext.asyncio import AsyncSession
+
+    from app.siftarr.services.plex_service import PlexService
+
+T = TypeVar("T")
+
 logger = logging.getLogger(__name__)
 
 
 class ProbeMixin:
+    db: "AsyncSession"
+    plex: "PlexService"
+
+    async def _run_serialized_write(self, operation: Awaitable[T]) -> T:
+        raise NotImplementedError
+
     async def _check_movie(self, req: Request) -> PollDecision | None:
         """Check if a movie request is available on Plex."""
         if not req.tmdb_id:

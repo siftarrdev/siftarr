@@ -20,7 +20,7 @@ def test_dashboard_template_uses_collapsible_episode_results(dashboard_template_
         template = handle.read()
 
     assert "episode-details-" in template
-    assert "<details id=\"' + episodeDetailsId + '\" class=\"group rounded-lg border" in template
+    assert '<details id="\' + episodeDetailsId + \'" class="group rounded-lg border' in template
     assert "if (details) details.open = true;" in template
 
 
@@ -90,4 +90,6 @@ def test_dashboard_template_refreshes_full_staged_content(dashboard_template_pat
     assert "const stagedContent = document.getElementById('content-staged');" in template
     assert "const newContent = doc.getElementById('content-staged');" in template
     assert "stagedContent.innerHTML = newContent.innerHTML;" in template
-    assert "document.querySelectorAll('#staged-torrents-body tr[data-state=\"approved\"]')" in template
+    assert (
+        "document.querySelectorAll('#staged-torrents-body tr[data-state=\"approved\"]')" in template
+    )

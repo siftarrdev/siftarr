@@ -44,7 +44,12 @@ async def test_iter_full_library_items_uses_pagination(service, mock_client):
             "size": 1,
             "totalSize": 3,
             "Metadata": [
-                {"type": "movie", "ratingKey": "103", "title": "Three", "Guid": [{"id": "tmdb://3"}]}
+                {
+                    "type": "movie",
+                    "ratingKey": "103",
+                    "title": "Three",
+                    "Guid": [{"id": "tmdb://3"}],
+                }
             ],
         }
     }
@@ -63,7 +68,9 @@ async def test_iter_full_library_items_uses_pagination(service, mock_client):
 async def test_iter_recently_added_items_uses_recently_added_endpoint(service, mock_client):
     sections_response = MagicMock()
     sections_response.status_code = 200
-    sections_response.json.return_value = {"MediaContainer": {"Directory": [{"key": "2", "type": "show"}]}}
+    sections_response.json.return_value = {
+        "MediaContainer": {"Directory": [{"key": "2", "type": "show"}]}
+    }
     recent_response = MagicMock()
     recent_response.status_code = 200
     recent_response.json.return_value = {
@@ -95,7 +102,9 @@ async def test_iter_recently_added_items_uses_recently_added_endpoint(service, m
 async def test_scan_cycle_caches_section_listing_and_lookup_results(service, mock_client):
     sections_response = MagicMock()
     sections_response.status_code = 200
-    sections_response.json.return_value = {"MediaContainer": {"Directory": [{"key": "9", "type": "movie"}]}}
+    sections_response.json.return_value = {
+        "MediaContainer": {"Directory": [{"key": "9", "type": "movie"}]}
+    }
     empty_search = MagicMock()
     empty_search.status_code = 200
     empty_search.json.return_value = {"MediaContainer": {}}

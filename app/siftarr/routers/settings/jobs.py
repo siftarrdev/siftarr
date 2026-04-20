@@ -12,7 +12,7 @@ from app.siftarr.models.settings import Settings as DBSettings
 
 from .shared import logger, router, templates
 
-settings_router = sys.modules[__package__]
+settings_router = sys.modules[__package__ or "app.siftarr.routers.settings"]
 
 
 @router.post("/rescan-plex")
