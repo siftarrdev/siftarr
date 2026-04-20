@@ -22,6 +22,8 @@ from app.siftarr.models.request import (
 from app.siftarr.models.staged_torrent import StagedTorrent
 from app.siftarr.services.activity_log_service import ActivityLogService
 from app.siftarr.services.lifecycle_service import LifecycleService
+from app.siftarr.services.plex_polling_service import PlexPollingService, TargetedReconcileResult
+from app.siftarr.services.plex_service import PlexService
 from app.siftarr.services.qbittorrent_service import MediaCategory, QbittorrentService
 from app.siftarr.services.runtime_settings import get_effective_settings
 from app.siftarr.services.staging_decision_logger import (
@@ -161,6 +163,107 @@ async def _discard_torrent(torrent: StagedTorrent, db: AsyncSession) -> bool:
         pass
 
     return True
+
+
+async def _log_download_completed_once(
+    db: AsyncSession,
+    *,
+    request_id: int,
+    torrent_id: int,
+    title: str,
+) -> None:
+    activity_log = ActivityLogService(db)
+    existing_log_result = await db.execute(
+        select(func.count())
+        .select_from(ActivityLog)
+        .where(
+            ActivityLog.request_id == request_id,
+            ActivityLog.event_type == EventType.DOWNLOAD_COMPLETED.value,
+        )
+    )
+    if existing_log_result.scalar() == 0:
+        await activity_log.log(
+            EventType.DOWNLOAD_COMPLETED,
+            request_id=request_id,
+            details={"torrent_id": torrent_id, "title": title},
+        )
+        await db.commit()
+
+
+async def _reconcile_request_via_plex(
+    db: AsyncSession,
+    *,
+    request_id: int,
+    title: str,
+    runtime_settings,
+) -> TargetedReconcileResult:
+    plex = PlexService(settings=runtime_settings)
+    try:
+        plex_polling = PlexPollingService(db, plex)
+        reconcile_result = await plex_polling.reconcile_request(request_id)
+
+        if reconcile_result.available:
+            try:
+                activity_log = ActivityLogService(db)
+                await activity_log.log(
+                    EventType.PLEX_AVAILABLE,
+                    request_id=request_id,
+                    details={"title": title, "reason": reconcile_result.reason},
+                )
+                await db.commit()
+            except Exception:
+                logger.exception("Failed to log plex_available for request_id=%s", request_id)
+
+        return reconcile_result
+    finally:
+        await plex.close()
+
+
+async def _resolve_download_completion(
+    db: AsyncSession,
+    *,
+    torrent: StagedTorrent,
+    qbit_done: bool,
+    runtime_settings,
+    reconciled_requests: dict[int, TargetedReconcileResult],
+) -> tuple[bool, str | None]:
+    if not qbit_done or not torrent.request_id:
+        return False, None
+
+    await _log_download_completed_once(
+        db,
+        request_id=torrent.request_id,
+        torrent_id=torrent.id,
+        title=torrent.title,
+    )
+
+    reconcile_result = reconciled_requests.get(torrent.request_id)
+    if reconcile_result is None:
+        reconcile_result = await _reconcile_request_via_plex(
+            db,
+            request_id=torrent.request_id,
+            title=torrent.title,
+            runtime_settings=runtime_settings,
+        )
+        reconciled_requests[torrent.request_id] = reconcile_result
+
+    status_after = reconcile_result.status_after
+    if isinstance(status_after, RequestStatus):
+        return reconcile_result.available, status_after.value
+    if status_after is not None:
+        return reconcile_result.available, str(status_after)
+    return reconcile_result.available, None
+
+
+def _should_refresh_staged_tab(
+    *,
+    qbit_complete: bool,
+    plex_available: bool,
+    request_status: str,
+    resolved_request_status: str,
+) -> bool:
+    """Return whether the staged tab should immediately refresh server-rendered state."""
+    return qbit_complete or plex_available or resolved_request_status != request_status
 
 
 @router.post("/{torrent_id}/approve", response_model=None)
@@ -384,6 +487,7 @@ async def get_download_status(
 
     runtime_settings = await get_effective_settings(db)
     qbittorrent = QbittorrentService(settings=runtime_settings)
+    reconciled_requests: dict[int, TargetedReconcileResult] = {}
 
     torrent_data = []
     for torrent in torrents:
@@ -413,39 +517,37 @@ async def get_download_status(
         else:
             request_status = "unknown"
 
-        qbit_complete = qbit_progress is not None and qbit_progress >= 1.0
+        qbit_complete = qbit_progress is None or qbit_progress >= 1.0
         plex_available = False
+        resolved_request_status = request_status
 
-        # Log download_completed only once: when qbit is done and we haven't logged it yet
-        if qbit_complete and torrent.request_id:
-            activity_log = ActivityLogService(db)
-            # Check if we already logged this completion
-            existing_log_result = await db.execute(
-                select(func.count())
-                .select_from(ActivityLog)
-                .where(
-                    ActivityLog.request_id == torrent.request_id,
-                    ActivityLog.event_type == EventType.DOWNLOAD_COMPLETED.value,
-                )
+        if torrent.request_id:
+            plex_available, reconciled_status = await _resolve_download_completion(
+                db,
+                torrent=torrent,
+                qbit_done=qbit_complete,
+                runtime_settings=runtime_settings,
+                reconciled_requests=reconciled_requests,
             )
-            if existing_log_result.scalar() == 0:
-                await activity_log.log(
-                    EventType.DOWNLOAD_COMPLETED,
-                    request_id=torrent.request_id,
-                    details={"torrent_id": torrent.id, "title": torrent.title},
-                )
-                await db.commit()
+            if reconciled_status is not None:
+                resolved_request_status = reconciled_status
 
         torrent_data.append(
             {
                 "id": torrent.id,
                 "title": torrent.title,
                 "request_id": torrent.request_id,
-                "request_status": request_status,
+                "request_status": resolved_request_status,
                 "qbit_progress": qbit_progress,
                 "qbit_state": qbit_state,
                 "qbit_complete": qbit_complete,
                 "plex_available": plex_available,
+                "refresh_staged_tab": _should_refresh_staged_tab(
+                    qbit_complete=qbit_complete,
+                    plex_available=plex_available,
+                    request_status=request_status,
+                    resolved_request_status=resolved_request_status,
+                ),
             }
         )
 
@@ -484,61 +586,19 @@ async def check_now(
     else:
         qbit_progress = await qbittorrent.get_torrent_progress_by_name(torrent.title)
 
-    qbit_complete = qbit_progress is not None and qbit_progress >= 1.0
+    qbit_complete = qbit_progress is None or qbit_progress >= 1.0
     plex_available = False
-
-    activity_log = ActivityLogService(db)
-
-    if qbit_complete:
-        # Log download_completed if not already logged
-        if torrent.request_id:
-            existing_log_result = await db.execute(
-                select(func.count())
-                .select_from(ActivityLog)
-                .where(
-                    ActivityLog.request_id == torrent.request_id,
-                    ActivityLog.event_type == EventType.DOWNLOAD_COMPLETED.value,
-                )
+    if torrent.request_id:
+        try:
+            plex_available, _ = await _resolve_download_completion(
+                db,
+                torrent=torrent,
+                qbit_done=qbit_complete,
+                runtime_settings=runtime_settings,
+                reconciled_requests={},
             )
-            if existing_log_result.scalar() == 0:
-                await activity_log.log(
-                    EventType.DOWNLOAD_COMPLETED,
-                    request_id=torrent.request_id,
-                    details={"torrent_id": torrent.id, "title": torrent.title},
-                )
-
-        # Attempt Plex check
-        if torrent.request_id:
-            try:
-                from app.siftarr.services.plex_service import PlexService
-
-                plex_service = PlexService(settings=runtime_settings)
-                request_result = await db.execute(
-                    select(Request).where(Request.id == torrent.request_id)
-                )
-                request_obj = request_result.scalar_one_or_none()
-                if request_obj:
-                    if request_obj.media_type == MediaType.MOVIE and request_obj.tmdb_id:
-                        plex_available = await plex_service.check_movie_available(
-                            request_obj.tmdb_id
-                        )
-                    elif request_obj.media_type == MediaType.TV:
-                        # For TV, check if show exists on Plex
-                        show = None
-                        if request_obj.tmdb_id:
-                            show = await plex_service.get_show_by_tmdb(request_obj.tmdb_id)
-                        if not show and request_obj.tvdb_id:
-                            show = await plex_service.get_show_by_tvdb(request_obj.tvdb_id)
-                        plex_available = show is not None
-
-                    if plex_available:
-                        await activity_log.log(
-                            EventType.PLEX_AVAILABLE,
-                            request_id=torrent.request_id,
-                            details={"torrent_id": torrent.id, "title": torrent.title},
-                        )
-            except Exception:
-                logger.exception("check-now: Plex check failed for torrent_id=%s", torrent_id)
+        except Exception:
+            logger.exception("check-now: Plex check failed for torrent_id=%s", torrent_id)
 
     await db.commit()
 

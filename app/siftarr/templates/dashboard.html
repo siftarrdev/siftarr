@@ -801,6 +801,8 @@ function formatRelativePublishAge(publishDate) {
 
 function renderReleaseCard(release, requestId) {
     const statusClass = release.passed ? 'badge-green' : 'badge-yellow';
+    const releaseScope = release.target_scope || {};
+    const isScopedEpisodeRelease = releaseScope.type === 'single_episode';
     const secondaryMeta = [
         renderAnnotation(release.size, releaseAnnotationTone(release, 'size'), 'data-release-size="true"'),
         renderAnnotation(release.indexer, releaseAnnotationTone(release, 'indexer'), 'data-release-indexer="true"'),
@@ -812,10 +814,10 @@ function renderReleaseCard(release, requestId) {
     const availability = `Seeders ${release.seeders ?? 0} \u00B7 Leechers ${release.leechers ?? 0}`;
     const downloaded = release.downloaded ? '<span class="badge badge-blue">Already sent</span>' : '';
     const currentTab = new URLSearchParams(window.location.search).get('tab') || 'active';
-    const activeStagedTorrent = release.active_staged_torrent || currentActiveStagedTorrent;
+    const activeStagedTorrent = release.active_staged_torrent || (isScopedEpisodeRelease ? null : currentActiveStagedTorrent);
     const hasActiveStagedSelection = window.siftarrStagingModeEnabled && !!activeStagedTorrent;
     const isActiveSelection = !!release.is_active_selection || !!(
-        hasActiveStagedSelection && activeStagedTorrent && release.title === activeStagedTorrent.title
+        !isScopedEpisodeRelease && hasActiveStagedSelection && activeStagedTorrent && release.title === activeStagedTorrent.title
     );
     const activeSelectionMode = window.siftarrStagingModeEnabled && isActiveSelection;
     const activeSelectionBadge = activeSelectionMode
@@ -1270,6 +1272,10 @@ async function _patchStagedDownloadStatus() {
         const response = await fetch('/staged/download-status');
         if (!response.ok) return;
         const data = await response.json();
+        if ((data.torrents || []).some((torrent) => torrent.refresh_staged_tab)) {
+            await refreshStagedTabData();
+            return;
+        }
         const activeTorrentIds = new Set((data.torrents || []).map((torrent) => String(torrent.id)));
         const staleApprovedRows = Array.from(
             document.querySelectorAll('#staged-torrents-body tr[data-state="approved"]')

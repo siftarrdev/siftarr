@@ -414,15 +414,18 @@ class SchedulerService:
 
                     runtime_settings = await get_effective_settings(db)
                     plex = PlexService(settings=runtime_settings)
-                    qbittorrent = QbittorrentService(settings=runtime_settings)
-                    plex_polling = PlexPollingService(db, plex)
-                    service = DownloadCompletionService(db, qbittorrent, plex_polling)
-                    completed = await service.check_downloading_requests()
-                    if completed:
-                        logger.info(
-                            "DownloadCompletionService: completed %d request(s) this cycle",
-                            completed,
-                        )
+                    try:
+                        qbittorrent = QbittorrentService(settings=runtime_settings)
+                        plex_polling = PlexPollingService(db, plex)
+                        service = DownloadCompletionService(db, qbittorrent, plex_polling)
+                        completed = await service.check_downloading_requests()
+                        if completed:
+                            logger.info(
+                                "DownloadCompletionService: completed %d request(s) this cycle",
+                                completed,
+                            )
+                    finally:
+                        await plex.close()
             except Exception:
                 logger.exception("Error during download completion check")
 
@@ -516,7 +519,7 @@ class SchedulerService:
 
         self.scheduler.add_job(
             self._check_download_completion,
-            trigger=IntervalTrigger(seconds=60),
+            trigger=IntervalTrigger(seconds=30),
             id="check_download_completion",
             name="Check qBittorrent download completion",
             replace_existing=True,

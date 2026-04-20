@@ -73,11 +73,13 @@ async def test_start_registers_split_plex_jobs(monkeypatch):
     job_ids = {job["id"] for job in fake.jobs}
     assert "plex_incremental_sync" in job_ids
     assert "plex_full_reconcile" in job_ids
+    assert "check_download_completion" in job_ids
     assert "poll_plex_availability" not in job_ids
 
     job_kwargs = {job["id"]: job for job in fake.jobs}
     assert job_kwargs["plex_incremental_sync"]["kwargs"] == {"trigger_source": "scheduler"}
     assert job_kwargs["plex_full_reconcile"]["kwargs"] == {"trigger_source": "scheduler"}
+    assert job_kwargs["check_download_completion"]["trigger"].interval.total_seconds() == 30
     assert fake.started is True
 
 
@@ -487,6 +489,49 @@ async def test_legacy_poll_wrapper_delegates_to_incremental_job(monkeypatch):
     await service._poll_plex_availability()
 
     mock_run_incremental.assert_awaited_once_with(trigger_source="legacy_poll")
+
+
+@pytest.mark.asyncio
+async def test_download_completion_check_closes_plex_service_on_error(monkeypatch):
+    """Download completion polling should always close PlexService."""
+    db = AsyncMock()
+    runtime_settings = SimpleNamespace()
+    monkeypatch.setattr(
+        scheduler_service, "get_effective_settings", AsyncMock(return_value=runtime_settings)
+    )
+
+    plex_instance = AsyncMock()
+    qbittorrent_instance = AsyncMock()
+    plex_polling_instance = AsyncMock()
+    download_completion_service = AsyncMock()
+    download_completion_service.check_downloading_requests = AsyncMock(
+        side_effect=RuntimeError("download boom")
+    )
+
+    monkeypatch.setattr(scheduler_service, "PlexService", lambda settings: plex_instance)
+    monkeypatch.setattr(
+        scheduler_service,
+        "QbittorrentService",
+        lambda settings: qbittorrent_instance,
+    )
+    monkeypatch.setattr(
+        scheduler_service,
+        "PlexPollingService",
+        lambda db_session, plex: plex_polling_instance,
+    )
+    monkeypatch.setattr(
+        "app.siftarr.services.download_completion_service.DownloadCompletionService",
+        lambda db_session, qbittorrent, plex_polling: download_completion_service,
+    )
+
+    logger = MagicMock()
+    service = SchedulerService(lambda: _FakeSessionContext(db), logger=logger)
+
+    await service._check_download_completion()
+
+    download_completion_service.check_downloading_requests.assert_awaited_once()
+    plex_instance.close.assert_awaited_once()
+    logger.exception.assert_called_once_with("Error during download completion check")
 
 
 @pytest.mark.asyncio

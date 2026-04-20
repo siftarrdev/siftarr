@@ -14,6 +14,7 @@ from app.siftarr.services.pending_queue_service import PendingQueueService
 from app.siftarr.services.prowlarr_service import ProwlarrRelease
 from app.siftarr.services.qbittorrent_service import MediaCategory, QbittorrentService
 from app.siftarr.services.release_parser import (
+    is_exact_single_episode_release,
     parse_release_coverage,
     parse_season_episode,
     serialize_release_coverage,
@@ -39,6 +40,38 @@ async def _get_active_staged_torrents(
         .order_by(StagedTorrent.created_at.asc(), StagedTorrent.id.asc())
     )
     return list(result.scalars().all())
+
+
+def _get_exact_single_episode_scope(title: str) -> tuple[int, int] | None:
+    """Return exact episode scope for titles that target one TV episode."""
+    coverage = parse_release_coverage(title)
+    season_number = coverage.season_number
+    episode_number = coverage.episode_number
+    if season_number is None or episode_number is None:
+        return None
+    if not is_exact_single_episode_release(title, season_number, episode_number):
+        return None
+    return season_number, episode_number
+
+
+def _filter_active_staged_torrents_for_release(
+    request: Request,
+    release: Release,
+    active_staged: list[StagedTorrent],
+) -> list[StagedTorrent]:
+    """Scope active staged torrents to the release target when appropriate."""
+    if request.media_type != MediaType.TV:
+        return active_staged
+
+    release_scope = _get_exact_single_episode_scope(release.title)
+    if release_scope is None:
+        return active_staged
+
+    return [
+        staged
+        for staged in active_staged
+        if _get_exact_single_episode_scope(staged.title) == release_scope
+    ]
 
 
 def _replacement_reason_for_selection(
@@ -325,12 +358,18 @@ async def use_releases(
         replaced_active_selection = False
         for release in usable_releases:
             active_staged = await _get_active_staged_torrents(db, request.id)
+            relevant_active_staged = _filter_active_staged_torrents_for_release(
+                request,
+                release,
+                active_staged,
+            )
             existing = next(
-                (stage for stage in active_staged if stage.title == release.title), None
+                (stage for stage in relevant_active_staged if stage.title == release.title),
+                None,
             )
             if existing is not None:
                 if selection_source == "manual":
-                    for current in active_staged:
+                    for current in relevant_active_staged:
                         if current.id == existing.id:
                             continue
                         _retire_replaced_selection(
@@ -350,7 +389,7 @@ async def use_releases(
             )
 
             if selection_source == "manual":
-                for current in active_staged:
+                for current in relevant_active_staged:
                     _retire_replaced_selection(
                         current,
                         staged,

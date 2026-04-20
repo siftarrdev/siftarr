@@ -52,7 +52,7 @@ class DownloadCompletionService:
         1. Query StagedTorrents with status=="approved" whose Request is DOWNLOADING.
         2. For each torrent determine qBit progress (via hash or name fragment).
         3. Mark torrents as qBit-done when progress >= 1.0 or not found in qBit.
-        4. When ALL approved torrents for a request are qBit-done, check Plex.
+        4. When ANY approved torrent for a request is qBit-done, check Plex.
         5. If Plex confirms availability, reuse Plex polling reconciliation for the request.
 
         Returns:
@@ -97,7 +97,7 @@ class DownloadCompletionService:
             if qbit_done:
                 done_torrent_ids.add(torrent.id)
 
-        # 4. Group by request_id: check if all approved torrents for each request are done
+        # 4. Group by request_id: check Plex once per request when any approved torrent is done
         request_map: dict[int, tuple[Request, list[StagedTorrent]]] = {}
         for torrent, request in rows:
             if request.id not in request_map:
@@ -106,12 +106,15 @@ class DownloadCompletionService:
 
         completed = 0
         for request_id, (request, torrents) in request_map.items():
-            if not all(t.id in done_torrent_ids for t in torrents):
+            done_torrents = [t for t in torrents if t.id in done_torrent_ids]
+            if not done_torrents:
                 continue
 
-            # 4b. All done – check Plex
+            # 4b. At least one torrent is done/missing – check Plex immediately.
             logger.info(
-                "DownloadCompletionService: all torrents done for request_id=%s title=%s, checking Plex",
+                "DownloadCompletionService: %d/%d torrent(s) done for request_id=%s title=%s, checking Plex",
+                len(done_torrents),
+                len(torrents),
                 request_id,
                 request.title,
             )
@@ -131,35 +134,10 @@ class DownloadCompletionService:
             except Exception:
                 logger.exception("Failed to log download_completed for request_id=%s", request_id)
 
-            # Delegate to PlexPollingService for a targeted poll on this request.
-            # We reuse the existing poll() which checks all non-terminal requests, but
-            # the cheapest path is to call the internal _check_* helpers directly.
             try:
-                from sqlalchemy.orm import selectinload
+                reconcile_result = await self.plex_polling.reconcile_request(request_id)
 
-                from app.siftarr.models.request import MediaType
-                from app.siftarr.models.season import Season
-                from app.siftarr.services.plex_polling_service import PollDecision
-
-                # Reload the request with season/episode relationships
-                req_result = await self.db.execute(
-                    select(Request)
-                    .where(Request.id == request_id)
-                    .options(selectinload(Request.seasons).selectinload(Season.episodes))
-                )
-                full_request = req_result.scalar_one_or_none()
-                if full_request is None:
-                    continue
-
-                if full_request.media_type == MediaType.MOVIE:
-                    decision: PollDecision | None = await self.plex_polling._check_movie(
-                        full_request
-                    )
-                else:
-                    decision = await self.plex_polling._check_tv(full_request)
-
-                if decision is not None:
-                    await self.plex_polling._apply_decision(full_request, decision)
+                if reconcile_result.available:
                     completed += 1
 
                     try:
@@ -171,7 +149,7 @@ class DownloadCompletionService:
                             request_id=request_id,
                             details={
                                 "title": request.title,
-                                "reason": decision.reason,
+                                "reason": reconcile_result.reason,
                             },
                         )
                     except Exception:
@@ -184,7 +162,7 @@ class DownloadCompletionService:
                         "DownloadCompletionService: reconciled request_id=%s title=%s via Plex (%s)",
                         request_id,
                         request.title,
-                        decision.reason,
+                        reconcile_result.reason,
                     )
                 else:
                     logger.info(

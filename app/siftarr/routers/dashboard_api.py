@@ -3,7 +3,8 @@
 import asyncio
 import json
 import logging
-from typing import Any
+from collections.abc import Mapping
+from typing import Any, cast
 
 from fastapi import APIRouter, BackgroundTasks, Depends
 from fastapi.responses import JSONResponse
@@ -53,6 +54,69 @@ from app.siftarr.services.type_utils import coerce_int_list
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/requests", tags=["dashboard-api"])
+
+SerializedObject = Mapping[str, object]
+
+
+def _serialize_target_scope(
+    *,
+    media_type: MediaType,
+    title: str,
+    season_number: int | None = None,
+    episode_number: int | None = None,
+    season_coverage: str | None = None,
+) -> dict[str, object]:
+    """Serialize lightweight targeting metadata for releases and staged torrents."""
+    if media_type != MediaType.TV:
+        return {"type": "request"}
+
+    coverage = parse_stored_release_coverage(season_coverage, season_number, episode_number)
+    scoped_season_number = coverage.season_number
+    scoped_episode_number = coverage.episode_number
+
+    if (
+        scoped_season_number is not None
+        and scoped_episode_number is not None
+        and is_exact_single_episode_release(title, scoped_season_number, scoped_episode_number)
+    ):
+        return {
+            "type": "single_episode",
+            "season_number": scoped_season_number,
+            "episode_number": scoped_episode_number,
+        }
+
+    return {"type": "broad"}
+
+
+def _as_serialized_object(value: object) -> SerializedObject | None:
+    """Return mapping values with object payloads for typed key access."""
+    if not isinstance(value, Mapping):
+        return None
+    return cast(SerializedObject, value)
+
+
+def _release_matches_active_stage(
+    release: SerializedObject,
+    active_stage: SerializedObject,
+    *,
+    media_type: MediaType,
+) -> bool:
+    """Return True when a serialized release matches an active staged torrent."""
+    if media_type != MediaType.TV:
+        return release.get("title") == active_stage.get("title")
+
+    release_scope = _as_serialized_object(release.get("target_scope"))
+    active_scope = _as_serialized_object(active_stage.get("target_scope"))
+    if (
+        release_scope is not None
+        and active_scope is not None
+        and release_scope.get("type") == active_scope.get("type") == "single_episode"
+    ):
+        return release_scope.get("season_number") == active_scope.get(
+            "season_number"
+        ) and release_scope.get("episode_number") == active_scope.get("episode_number")
+
+    return release.get("title") == active_stage.get("title")
 
 
 @router.get("/{request_id}/details")
@@ -161,13 +225,20 @@ async def request_details(
                     }
                     for m in evaluation.matches
                 ],
+                "target_scope": _serialize_target_scope(
+                    media_type=request.media_type,
+                    title=release.title,
+                    season_number=release.season_number,
+                    episode_number=release.episode_number,
+                    season_coverage=release.season_coverage,
+                ),
             }
         )
         matched.append(payload)
 
     matched = finalize_releases(matched)
 
-    active_staged_torrent = None
+    active_staged_torrents: list[StagedTorrent] = []
     if is_active_staging_workflow_status(request.status):
         active_staged_result = await db.execute(
             select(StagedTorrent)
@@ -177,34 +248,50 @@ async def request_details(
             )
             .order_by(StagedTorrent.updated_at.desc(), StagedTorrent.created_at.desc())
         )
-        active_staged_torrent = active_staged_result.scalars().first()
+        active_staged_torrents = list(active_staged_result.scalars().all())
 
-    active_staged_payload: dict[str, object] | None = None
-    if active_staged_torrent is not None:
-        active_staged_payload = {
+    active_staged_payloads = [
+        {
             "id": active_staged_torrent.id,
             "title": active_staged_torrent.title,
             "status": active_staged_torrent.status,
             "selection_source": active_staged_torrent.selection_source,
+            "target_scope": _serialize_target_scope(
+                media_type=request.media_type,
+                title=active_staged_torrent.title,
+                season_number=parse_release_coverage(active_staged_torrent.title).season_number,
+                episode_number=parse_release_coverage(active_staged_torrent.title).episode_number,
+            ),
         }
+        for active_staged_torrent in active_staged_torrents
+    ]
+    active_staged_payload = active_staged_payloads[0] if active_staged_payloads else None
 
     for release in matched:
-        is_active_selection = bool(
-            active_staged_torrent is not None
-            and release.get("title") == active_staged_torrent.title
+        matching_active_stage = next(
+            (
+                active_stage
+                for active_stage in active_staged_payloads
+                if _release_matches_active_stage(
+                    release,
+                    active_stage,
+                    media_type=request.media_type,
+                )
+            ),
+            None,
         )
-        release["is_active_selection"] = is_active_selection
+        release["is_active_selection"] = matching_active_stage is not None
         release["active_selection_status"] = (
-            active_staged_torrent.status if is_active_selection and active_staged_torrent else None
+            matching_active_stage.get("status") if matching_active_stage else None
         )
         release["active_selection_source"] = (
-            active_staged_torrent.selection_source
-            if is_active_selection and active_staged_torrent
-            else None
+            matching_active_stage.get("selection_source") if matching_active_stage else None
         )
+        release["active_staged_torrent"] = matching_active_stage
 
     details["releases"] = matched
     details["active_staged_torrent"] = active_staged_payload
+    details["active_staged_torrents"] = active_staged_payloads
 
     if request.media_type == MediaType.TV:
         seasons, episodes = await load_tv_seasons_with_episodes(db, request_id)

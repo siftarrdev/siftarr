@@ -10,6 +10,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+from sqlalchemy.orm import selectinload
 
 from app.siftarr.models._base import Base
 from app.siftarr.models.episode import Episode
@@ -485,6 +486,31 @@ async def test_combined_lifecycle_auto_stage_replace_complete_and_repair_to_unre
         class _FakePlexPolling:
             def __init__(self, db):
                 self.db = db
+
+            async def reconcile_request(self, request_id: int):
+                from app.siftarr.services.plex_polling_service import TargetedReconcileResult
+
+                full_request = await self.db.scalar(
+                    select(Request)
+                    .where(Request.id == request_id)
+                    .options(selectinload(Request.seasons).selectinload(Season.episodes))
+                )
+                assert full_request is not None
+
+                decision = await self._check_tv(full_request)
+                before_status = full_request.status
+                await self._apply_decision(full_request, decision)
+
+                return TargetedReconcileResult(
+                    request_id=full_request.id,
+                    matched=True,
+                    reconciled=True,
+                    status_before=before_status,
+                    status_after=full_request.status,
+                    reason=decision.reason,
+                    requested_episode_count=decision.requested_episode_count,
+                    completed_episodes=decision.completed_episodes,
+                )
 
             async def _check_tv(self, full_request):
                 return PollDecision(
