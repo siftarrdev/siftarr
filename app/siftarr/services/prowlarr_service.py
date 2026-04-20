@@ -59,6 +59,14 @@ class ProwlarrService:
         resolution = self._extract_resolution(title)
         codec = self._extract_codec(title)
         release_group = self._extract_release_group(title)
+        files = (
+            release.get("files")
+            or release.get("fileCount")
+            or release.get("filesCount")
+            or release.get("file_count")
+            or release.get("numFiles")
+            or release.get("numberOfFiles")
+        )
 
         return ProwlarrRelease(
             title=title,
@@ -73,7 +81,7 @@ class ProwlarrService:
             resolution=resolution,
             codec=codec,
             release_group=release_group,
-            files=release.get("files"),
+            files=files,
         )
 
     @staticmethod

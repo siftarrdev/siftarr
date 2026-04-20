@@ -86,6 +86,24 @@ class TestProwlarrService:
         assert len(releases) == 1
         assert releases[0]["title"] == "Return.to.Me.2000.1080p.x264-GROUP"
 
+    def test_parse_release_info_supports_alternate_file_count_fields(self) -> None:
+        """Movie releases should preserve file counts from alternate Prowlarr fields."""
+        service = ProwlarrService()
+
+        release = service._parse_release_info(
+            {
+                "title": "What.a.Girl.Wants.2003.1080p.WEBRip.x264",
+                "size": 123,
+                "seeders": 10,
+                "leechers": 1,
+                "downloadUrl": "https://example.com/torrent",
+                "indexer": "Test",
+                "fileCount": 1,
+            }
+        )
+
+        assert release.files == 1
+
     def test_build_movie_query_uses_tmdbid_tokens(self) -> None:
         """Movie queries should encode metadata in the query string."""
         query = ProwlarrService._build_movie_query("Return to Me", 1234, 2000)

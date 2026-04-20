@@ -625,6 +625,27 @@ class TestRuleEngine:
 
         assert result.passed is False
 
+    def test_cam_ts_rule_does_not_match_normal_words(self):
+        """Test that the camera/TS exclusion does not match substrings in words."""
+        engine = RuleEngine(
+            exclusion_patterns=[
+                (1, "Reject Camera/TS/Screener", r"\b(?:CAM|TS|HDCAM|SCR|TELESYNC)\b"),
+            ],
+        )
+
+        release = ProwlarrRelease(
+            title="What a Girl Wants 2003 1080p WEBRip x264",
+            size=1024,
+            seeders=10,
+            leechers=2,
+            download_url="http://example.com",
+            indexer="test",
+        )
+
+        result = engine.evaluate(release)
+
+        assert result.passed is True
+
     def test_rule_match_dataclass(self):
         """Test RuleMatch dataclass."""
         match = RuleMatch(

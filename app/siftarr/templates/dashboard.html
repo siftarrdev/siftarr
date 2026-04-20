@@ -585,6 +585,7 @@ details[open] summary .accordion-chevron { transform: rotate(90deg); }
                     <div class="flex-1 min-w-0">
                         <div class="form-label">Synopsis</div>
                         <p id="request-details-overview" class="mt-1 text-sm text-gray-300 leading-relaxed whitespace-pre-wrap"></p>
+                        <div id="request-details-meta-row" class="mt-3 flex flex-wrap gap-2 text-xs text-gray-400"></div>
                     </div>
                     <a id="request-details-overseerr-link" href="#" target="_blank" rel="noopener noreferrer" class="hidden shrink-0 btn-ghost btn-sm">Open in Overseerr</a>
                     <button id="request-details-search-btn" onclick="searchRequestFromDetails()" class="hidden shrink-0 btn-ghost btn-sm"><svg class="inline w-3.5 h-3.5 mr-1 -mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>Refresh Search</button>
@@ -759,8 +760,12 @@ function releaseAnnotationTone(release, field) {
         if (release.size_passed === true) return 'text-emerald-400';
         return 'text-gray-400';
     }
-    if (field === 'resolution' || field === 'codec') {
+    if (field === 'resolution') {
         return release[field] ? 'text-emerald-400' : 'text-gray-400';
+    }
+    if (field === 'codec') {
+        const codec = String(release.codec || '').toLowerCase();
+        return /(av1|265)/.test(codec) ? 'text-emerald-400' : 'text-gray-400';
     }
     return 'text-gray-400';
 }
@@ -863,7 +868,7 @@ function renderReleaseCard(release, requestId) {
             <div class="flex flex-col gap-2 lg:flex-row lg:items-start lg:justify-between">
                 <div class="min-w-0">
                     <div class="font-medium text-white text-sm break-words">${escapeHtml(release.title)}</div>
-                    <div class="mt-1 text-xs text-gray-400">Score <span class="font-semibold text-emerald-400">${release.score}</span> &middot; ${secondaryMeta || '<span class="text-gray-400">No release metadata</span>'} &middot; ${escapeHtml(availability)}${publishAge ? ` &middot; <span data-release-upload-age="true">${escapeHtml(publishAge)}</span>` : ''}</div>
+                    <div class="mt-1 text-xs text-gray-400">Score <span class="font-semibold text-emerald-400">${release.score}</span> &middot; ${secondaryMeta || '<span class="text-gray-400">No release metadata</span>'} &middot; ${escapeHtml(availability)}${publishAge ? ` &middot; <span data-release-upload-age="true">${escapeHtml(publishAge)}</span>` : ''}${release.files != null ? ` &middot; <span class="text-gray-400">${release.files} file${release.files !== 1 ? 's' : ''}</span>` : ''}</div>
                     ${coverageHtml}
                 </div>
                 <div class="flex shrink-0 flex-col items-end gap-2 text-right" data-release-status-column="true">
@@ -1220,7 +1225,6 @@ async function stageRelease(btn) {
         refreshStagedTabData();
         if (window.siftarrStagingModeEnabled && currentRequestId) {
             await openRequestDetails(currentRequestId, currentDetailsIndex);
-            showTab('staged');
         }
     } catch (err) {
         btn.disabled = false;
@@ -1390,6 +1394,7 @@ async function searchRequestFromDetails() {
         } else if (cacheInd) {
             cacheInd.classList.add('hidden');
         }
+        renderTimeline(currentRequestTimeline);
     } catch (err) {
         if (releasesContainer) {
             releasesContainer.innerHTML = '<div class="text-red-400 text-sm">Search failed: ' + escapeHtml(err.message) + '</div>';
@@ -1406,6 +1411,7 @@ let currentReleases = [];
 let currentRequestId = null;
 let currentTvSeasons = [];
 let currentActiveStagedTorrent = null;
+let currentRequestTimeline = [];
 
 function filterReleaseCards() {
     const filterEl = document.getElementById('release-filter-input');
@@ -1747,6 +1753,14 @@ async function openRequestDetails(requestId, explicitIndex = null) {
         title.textContent = data.request.title;
         meta.textContent = `${data.request.media_type || 'unknown'} \u00B7 ${data.request.status || 'unknown'} \u00B7 ${data.overseerr?.status || 'unknown'} in Overseerr`;
         overview.textContent = data.overseerr?.overview || 'No synopsis available.';
+        const metaRow = document.getElementById('request-details-meta-row');
+        if (metaRow) {
+            const items = [];
+            if (data.request.year) items.push(`<span class="badge badge-gray">Year ${escapeHtml(String(data.request.year))}</span>`);
+            if (data.request.media_type) items.push(`<span class="badge badge-gray">${escapeHtml(String(data.request.media_type).toUpperCase())}</span>`);
+            if (data.request.status) items.push(`<span class="badge badge-gray">${escapeHtml(String(data.request.status).replace(/_/g, ' '))}</span>`);
+            metaRow.innerHTML = items.join('');
+        }
         setPoster(data.overseerr?.poster, data.request.title);
         if (overseerrLink && data.overseerr?.url) {
             overseerrLink.href = data.overseerr.url;
@@ -1795,7 +1809,8 @@ async function openRequestDetails(requestId, explicitIndex = null) {
             }
         }
 
-        renderTimeline(data.timeline || []);
+        currentRequestTimeline = data.timeline || [];
+        renderTimeline(currentRequestTimeline);
     } catch (err) {
         title.textContent = 'Error loading details';
         meta.textContent = err.message || 'Unknown error';
