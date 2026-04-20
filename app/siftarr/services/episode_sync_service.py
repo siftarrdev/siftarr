@@ -21,7 +21,7 @@ logger = logging.getLogger(__name__)
 
 def _episode_needs_unreleased_status(air_date: date | None) -> bool:
     """Return whether an episode should be treated as unreleased."""
-    return air_date is not None and air_date > datetime.now(UTC).date()
+    return isinstance(air_date, date) and air_date > datetime.now(UTC).date()
 
 
 def _derive_episode_status(*, is_on_plex: bool, air_date: date | None) -> RequestStatus:
@@ -149,6 +149,44 @@ class EpisodeSyncService:
         """Persist aggregate TV request status from current season statuses."""
         request.status = _derive_request_status_from_seasons(seasons)
         await self.db.flush()
+
+    async def _persist_episode_availability(
+        self,
+        request: Request,
+        seasons: list[Season],
+        availability: dict[tuple[int, int], bool],
+    ) -> list[Season]:
+        """Persist season/request aggregates from authoritative Plex availability."""
+        for season in seasons:
+            episodes = sorted(
+                await self._load_season_episodes(season),
+                key=lambda episode: episode.episode_number,
+            )
+
+            for episode in episodes:
+                is_on_plex = availability.get((season.season_number, episode.episode_number), False)
+                episode.status = _derive_episode_status(
+                    is_on_plex=is_on_plex,
+                    air_date=episode.air_date,
+                )
+
+            await self.db.flush()
+            season.status = _derive_season_status(episodes)
+
+        await self._update_request_status(request, seasons)
+        await self.db.commit()
+        return seasons
+
+    async def reconcile_existing_seasons_from_plex(
+        self,
+        request: Request,
+        seasons: list[Season],
+        availability: dict[tuple[int, int], bool],
+    ) -> list[Season]:
+        """Recompute persisted TV availability from an authoritative Plex view."""
+        if not seasons:
+            return seasons
+        return await self._persist_episode_availability(request, seasons, availability)
 
     @staticmethod
     def _get_season_episodes_payload(
@@ -391,6 +429,10 @@ class EpisodeSyncService:
 
     async def _load_season_episodes(self, season: Season) -> list[Episode]:
         """Load episodes for a season via explicit async query (avoids lazy-load in async context)."""
+        loaded_episodes = getattr(season, "__dict__", {}).get("episodes")
+        if loaded_episodes is not None:
+            return list(loaded_episodes)
+
         episodes_result = await self.db.execute(
             select(Episode).where(Episode.season_id == season.id)
         )
@@ -429,27 +471,7 @@ class EpisodeSyncService:
                 await self.db.commit()
                 return seasons
 
-            for season in seasons:
-                episodes = sorted(
-                    await self._load_season_episodes(season),
-                    key=lambda episode: episode.episode_number,
-                )
-
-                for episode in episodes:
-                    is_on_plex = availability.get(
-                        (season.season_number, episode.episode_number), False
-                    )
-                    episode.status = _derive_episode_status(
-                        is_on_plex=is_on_plex,
-                        air_date=episode.air_date,
-                    )
-
-                await self.db.flush()
-                season.status = _derive_season_status(episodes)
-
-            await self._update_request_status(request, seasons)
-
-            await self.db.commit()
+            await self._persist_episode_availability(request, seasons, availability)
 
             logger.info(
                 "EpisodeSyncService: applied Plex availability for request %s (%d episodes on Plex)",

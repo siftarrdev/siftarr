@@ -36,6 +36,18 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/requests", tags=["dashboard-actions"])
 
 
+def _selection_success_message(result: dict[str, object]) -> str:
+    """Return a clear response message for release-selection actions."""
+    action = result.get("action")
+    if action == "auto_staged":
+        return "Request auto-staged successfully"
+    if action == "replaced_active_selection":
+        return "Active staged selection replaced successfully"
+    if action == "manual_staged":
+        return "Request manually staged successfully"
+    return str(result.get("message") or "Torrent sent successfully")
+
+
 async def _evaluate_manual_release_for_request(
     db: AsyncSession,
     request: RequestModel,
@@ -186,11 +198,20 @@ async def use_request_release(
     if not release:
         raise HTTPException(status_code=404, detail="Release not found")
 
-    await use_releases(db, request, [release], selection_source="manual")
+    result = await use_releases(db, request, [release], selection_source="manual")
     if "application/json" in http_request.headers.get("accept", ""):
-        return JSONResponse({"status": "ok", "message": "Torrent staged successfully"})
+        return JSONResponse(
+            {
+                "status": "ok",
+                "message": _selection_success_message(result),
+            }
+        )
     return RedirectResponse(
-        url=selection_redirect_url(redirect_to, request),
+        url=selection_redirect_url(
+            redirect_to,
+            request,
+            prefer_staged_view=result.get("status") == "staged",
+        ),
         status_code=303,
     )
 
@@ -239,11 +260,20 @@ async def use_manual_release(
         release_group=release_group,
     )
 
-    await _select_manual_release_for_request(db, request, release)
+    result = await _select_manual_release_for_request(db, request, release)
     if "application/json" in http_request.headers.get("accept", ""):
-        return JSONResponse({"status": "ok", "message": "Torrent staged successfully"})
+        return JSONResponse(
+            {
+                "status": "ok",
+                "message": _selection_success_message(result),
+            }
+        )
     return RedirectResponse(
-        url=selection_redirect_url(redirect_to, request),
+        url=selection_redirect_url(
+            redirect_to,
+            request,
+            prefer_staged_view=result.get("status") == "staged",
+        ),
         status_code=303,
     )
 

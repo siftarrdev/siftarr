@@ -214,6 +214,35 @@ class RuleEngine:
         gib = size_bytes / 1024 / 1024 / 1024
         return f"{gib:.2f} GB"
 
+    def evaluate_per_season_size(self, size_bytes: int) -> bool | None:
+        """
+        Evaluate a per-season size against SEASON_PACK size-limit rules.
+
+        Applicable rules are those where:
+          - tv_target == TVTarget.SEASON_PACK, OR
+          - tv_target is None AND media_scope == "tv"
+
+        Returns False on first violation, True if all applicable rules pass,
+        None if no applicable rules found.
+        """
+        applicable = [
+            rule
+            for rule in self.size_limit_rules
+            if rule.tv_target == TVTarget.SEASON_PACK
+            or (rule.tv_target is None and rule.media_scope == "tv")
+        ]
+
+        if not applicable:
+            return None
+
+        for rule in applicable:
+            if rule.min_size_bytes is not None and size_bytes < rule.min_size_bytes:
+                return False
+            if rule.max_size_bytes is not None and size_bytes > rule.max_size_bytes:
+                return False
+
+        return True
+
     def evaluate(self, release: ProwlarrRelease) -> ReleaseEvaluation:
         """
         Evaluate a single release against all rules.

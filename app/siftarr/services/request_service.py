@@ -30,10 +30,17 @@ def ensure_tvdb_id(request: RequestModel) -> int:
     return request.tvdb_id
 
 
-def selection_redirect_url(redirect_to: str | None, request: RequestModel) -> str:
+def selection_redirect_url(
+    redirect_to: str | None,
+    request: RequestModel,
+    *,
+    prefer_staged_view: bool = False,
+) -> str:
     """Return a sensible redirect target after release actions."""
     if redirect_to:
         return redirect_to
+    if prefer_staged_view:
+        return "/?tab=staged"
     return "/?tab=pending" if request.status == RequestStatus.PENDING else "/?tab=active"
 
 
