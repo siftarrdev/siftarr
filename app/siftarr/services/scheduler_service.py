@@ -25,8 +25,9 @@ from app.siftarr.services.plex_service import PlexService
 from app.siftarr.services.prowlarr_service import ProwlarrService
 from app.siftarr.services.qbittorrent_service import QbittorrentService
 from app.siftarr.services.runtime_settings import get_effective_settings
+from app.siftarr.services.settings import overseerr_import as overseerr_import_service
 from app.siftarr.services.tv_decision_service import TVDecisionService
-from app.siftarr.services.unreleased_service import UnreleasedEvaluator
+from app.siftarr.services.unreleased_service import UnreleasedEvaluator, evaluate_imported_request
 
 PLEX_INCREMENTAL_SYNC_JOB_NAME = "plex_recent_scan"
 PLEX_FULL_RECONCILE_JOB_NAME = "plex_full_reconcile"
@@ -439,14 +440,19 @@ class SchedulerService:
         logger = self._logger
         try:
             async with self.db_session_factory() as db:
-                from app.siftarr.routers.settings import _import_overseerr_requests
-                from app.siftarr.services.runtime_settings import get_effective_settings
-
                 runtime_settings = await get_effective_settings(db)
                 if not runtime_settings.overseerr_url or not runtime_settings.overseerr_api_key:
                     logger.debug("Overseerr not configured, skipping poll")
                     return
-                synced, skipped = await _import_overseerr_requests(db, runtime_settings)
+                synced, skipped = await overseerr_import_service.import_overseerr_requests(
+                    db,
+                    runtime_settings,
+                    overseerr_service_cls=OverseerrService,
+                    plex_service_cls=PlexService,
+                    evaluate_imported_request_func=evaluate_imported_request,
+                    prepare_overseerr_import_func=overseerr_import_service.prepare_overseerr_import,
+                    logger=logger,
+                )
                 if synced:
                     logger.info(
                         "Overseerr poll: synced %d new request(s) (%d skipped/existing)",

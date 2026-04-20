@@ -492,6 +492,44 @@ async def test_legacy_poll_wrapper_delegates_to_incremental_job(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_poll_overseerr_uses_settings_service_import_helper(monkeypatch):
+    """Overseerr polling should call the extracted settings import helper directly."""
+
+    db = AsyncMock()
+    runtime_settings = SimpleNamespace(overseerr_url="https://overseerr", overseerr_api_key="key")
+    monkeypatch.setattr(
+        scheduler_service, "get_effective_settings", AsyncMock(return_value=runtime_settings)
+    )
+
+    import_requests = AsyncMock(return_value=(2, 1))
+    monkeypatch.setattr(
+        scheduler_service.overseerr_import_service,
+        "import_overseerr_requests",
+        import_requests,
+    )
+
+    logger = MagicMock()
+    service = SchedulerService(lambda: _FakeSessionContext(db), logger=logger)
+
+    await service._poll_overseerr()
+
+    import_requests.assert_awaited_once_with(
+        db,
+        runtime_settings,
+        overseerr_service_cls=scheduler_service.OverseerrService,
+        plex_service_cls=scheduler_service.PlexService,
+        evaluate_imported_request_func=scheduler_service.evaluate_imported_request,
+        prepare_overseerr_import_func=scheduler_service.overseerr_import_service.prepare_overseerr_import,
+        logger=logger,
+    )
+    logger.info.assert_called_once_with(
+        "Overseerr poll: synced %d new request(s) (%d skipped/existing)",
+        2,
+        1,
+    )
+
+
+@pytest.mark.asyncio
 async def test_download_completion_check_closes_plex_service_on_error(monkeypatch):
     """Download completion polling should always close PlexService."""
     db = AsyncMock()
