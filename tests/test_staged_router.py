@@ -246,7 +246,11 @@ class TestDownloadStatusEndpoint:
 
     @pytest.fixture
     def mock_db(self):
-        return AsyncMock()
+        db = AsyncMock()
+        db.add = MagicMock()
+        db.flush = AsyncMock()
+        db.commit = AsyncMock()
+        return db
 
     @pytest.mark.asyncio
     async def test_returns_empty_when_no_approved_torrents(self, mock_db, monkeypatch):
@@ -300,6 +304,7 @@ class TestDownloadStatusEndpoint:
         assert len(body["torrents"]) == 1
         assert body["torrents"][0]["id"] == 5
         assert body["torrents"][0]["qbit_progress"] == 0.6
+        assert body["torrents"][0]["refresh_staged_tab"] is False
 
     @pytest.mark.asyncio
     async def test_ignores_resolved_request_torrents(self, mock_db, monkeypatch):
@@ -360,3 +365,114 @@ class TestDownloadStatusEndpoint:
         body = json.loads(bytes(response.body))  # type: ignore[arg-type]
         assert [torrent["id"] for torrent in body["torrents"]] == [5]
         qbit.get_torrent_info.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_download_status_does_not_reconcile_on_get(self, mock_db, monkeypatch):
+        """GET download-status should not perform Plex reconciliation side effects."""
+        import json
+
+        from app.siftarr.routers import staged as staged_module
+        from app.siftarr.routers.staged import get_download_status
+
+        torrent = MagicMock()
+        torrent.id = 5
+        torrent.title = "Test Show S01E01"
+        torrent.request_id = 99
+        torrent.magnet_url = "magnet:?xt=urn:btih:da39a3ee5e6b4b0d3255bfef95601890afd80709"
+        torrent.status = "approved"
+
+        torrent_result = MagicMock()
+        torrent_result.scalars.return_value.all.return_value = [torrent]
+
+        request_status_result = MagicMock()
+        request_status_result.all.return_value = [(99, RequestStatus.DOWNLOADING)]
+
+        mock_db.execute.side_effect = [torrent_result, request_status_result]
+
+        qbit = AsyncMock()
+        qbit.get_torrent_info = AsyncMock(return_value={"progress": 1.0, "state": "uploading"})
+
+        monkeypatch.setattr(
+            staged_module, "get_effective_settings", AsyncMock(return_value=MagicMock())
+        )
+        monkeypatch.setattr(staged_module, "QbittorrentService", MagicMock(return_value=qbit))
+
+        response = await get_download_status(db=mock_db)
+
+        body = json.loads(bytes(response.body))  # type: ignore[arg-type]
+        assert body["torrents"][0]["qbit_complete"] is True
+        assert body["torrents"][0]["plex_available"] is False
+        assert body["torrents"][0]["request_status"] == RequestStatus.DOWNLOADING.value
+        assert body["torrents"][0]["refresh_staged_tab"] is True
+
+    @pytest.mark.asyncio
+    async def test_reconcile_request_via_plex_closes_service_on_error(self, mock_db, monkeypatch):
+        """Targeted reconciliation should always close PlexService."""
+        from app.siftarr.routers.staged import _reconcile_request_via_plex
+
+        runtime_settings = MagicMock()
+        plex_service = AsyncMock()
+        plex_polling = AsyncMock()
+        plex_polling.reconcile_request = AsyncMock(side_effect=RuntimeError("plex boom"))
+
+        monkeypatch.setattr(staged, "PlexService", MagicMock(return_value=plex_service))
+        monkeypatch.setattr(staged, "PlexPollingService", MagicMock(return_value=plex_polling))
+
+        with pytest.raises(RuntimeError, match="plex boom"):
+            await _reconcile_request_via_plex(
+                mock_db,
+                request_id=99,
+                title="Test Show S01E01",
+                runtime_settings=runtime_settings,
+            )
+
+        plex_service.close.assert_awaited_once()
+
+
+class TestCheckNowEndpoint:
+    @pytest.fixture
+    def mock_db(self):
+        db = AsyncMock()
+        db.add = MagicMock()
+        db.flush = AsyncMock()
+        db.commit = AsyncMock()
+        return db
+
+    @pytest.mark.asyncio
+    async def test_check_now_does_not_reconcile_incomplete_torrent(self, mock_db, monkeypatch):
+        """Incomplete check-now requests should not trigger Plex reconciliation."""
+        import json
+
+        from app.siftarr.routers import staged as staged_module
+        from app.siftarr.routers.staged import check_now
+
+        torrent = MagicMock()
+        torrent.id = 7
+        torrent.title = "Test Show S01E01"
+        torrent.request_id = 77
+        torrent.magnet_url = "magnet:?xt=urn:btih:da39a3ee5e6b4b0d3255bfef95601890afd80709"
+
+        torrent_result = MagicMock()
+        torrent_result.scalar_one_or_none.return_value = torrent
+        mock_db.execute = AsyncMock(return_value=torrent_result)
+        mock_db.commit = AsyncMock()
+
+        qbit = AsyncMock()
+        qbit.get_torrent_info = AsyncMock(return_value={"progress": 0.2, "state": "downloading"})
+        plex_polling = AsyncMock()
+
+        monkeypatch.setattr(
+            staged_module, "get_effective_settings", AsyncMock(return_value=MagicMock())
+        )
+        monkeypatch.setattr(staged_module, "QbittorrentService", MagicMock(return_value=qbit))
+        monkeypatch.setattr(staged_module, "PlexService", MagicMock(return_value=AsyncMock()))
+        monkeypatch.setattr(
+            staged_module, "PlexPollingService", MagicMock(return_value=plex_polling)
+        )
+
+        response = await check_now(torrent_id=7, db=mock_db)
+
+        body = json.loads(bytes(response.body))  # type: ignore[arg-type]
+        assert body["qbit_complete"] is False
+        assert body["plex_available"] is False
+        plex_polling.reconcile_request.assert_not_called()

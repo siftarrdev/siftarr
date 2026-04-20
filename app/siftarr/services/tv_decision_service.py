@@ -13,6 +13,7 @@ from app.siftarr.models.release import Release
 from app.siftarr.models.request import MediaType, Request, RequestStatus
 from app.siftarr.models.rule import Rule
 from app.siftarr.models.season import Season
+from app.siftarr.services.activity_log_service import ActivityLogService
 from app.siftarr.services.pending_queue_service import PendingQueueService
 from app.siftarr.services.prowlarr_service import ProwlarrSearchResult, ProwlarrService
 from app.siftarr.services.qbittorrent_service import QbittorrentService
@@ -359,6 +360,23 @@ class TVDecisionService:
             len(all_search_errors),
         )
 
+        try:
+            from app.siftarr.models.activity_log import EventType
+
+            activity_log = ActivityLogService(self.db)
+            await activity_log.log(
+                EventType.RULE_EVALUATION,
+                request_id=request_id,
+                details={
+                    "evaluated": len(all_evaluated_releases),
+                    "passed_packs": len(pack_candidates),
+                    "passed_episodes": len(episode_evaluations),
+                    "search_errors": len(all_search_errors),
+                },
+            )
+        except Exception:
+            logger.exception("Failed to log rule_evaluation for request_id=%s", request_id)
+
         all_selected_releases: list[ReleaseEvaluation] = []
 
         selected_pack_releases, uncovered_seasons = self._select_pack_releases(
@@ -412,6 +430,22 @@ class TVDecisionService:
                 stored_releases,
                 selection_source="rule",
             )
+
+            try:
+                from app.siftarr.models.activity_log import EventType
+
+                activity_log = ActivityLogService(self.db)
+                await activity_log.log(
+                    EventType.RELEASE_STAGED,
+                    request_id=request_id,
+                    details={
+                        "release_count": len(all_selected_releases),
+                        "titles": [e.release.title for e in all_selected_releases[:5]],
+                        "action": action_result.get("status"),
+                    },
+                )
+            except Exception:
+                logger.exception("Failed to log release_staged for request_id=%s", request_id)
 
             if action_result.get("status") in ("completed", "downloading", "staged"):
                 status_map = {

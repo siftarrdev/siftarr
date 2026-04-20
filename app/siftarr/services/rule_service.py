@@ -39,7 +39,7 @@ DEFAULT_RULES: list[RuleData] = [
         "name": "Reject Camera/TS/Screener",
         "rule_type": RuleType.EXCLUSION,
         "media_scope": "both",
-        "pattern": r"CAM|TS|HDCAM|SCR|TELESYNC",
+        "pattern": r"\b(?:CAM|TS|HDCAM|SCR|TELESYNC)\b",
         "score": 0,
         "priority": 1,
         "description": "Reject low-quality camera recordings and screeners",

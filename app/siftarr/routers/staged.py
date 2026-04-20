@@ -1,5 +1,6 @@
 """Staged torrent management router."""
 
+import logging
 import os
 import re
 from datetime import UTC, datetime
@@ -11,6 +12,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.siftarr.database import get_db
+from app.siftarr.models.activity_log import EventType
 from app.siftarr.models.request import (
     MediaType,
     Request,
@@ -18,13 +20,18 @@ from app.siftarr.models.request import (
     is_active_staging_workflow_status,
 )
 from app.siftarr.models.staged_torrent import StagedTorrent
+from app.siftarr.services.activity_log_service import ActivityLogService
 from app.siftarr.services.lifecycle_service import LifecycleService
+from app.siftarr.services.plex_polling_service import PlexPollingService, TargetedReconcileResult
+from app.siftarr.services.plex_service import PlexService
 from app.siftarr.services.qbittorrent_service import MediaCategory, QbittorrentService
 from app.siftarr.services.runtime_settings import get_effective_settings
 from app.siftarr.services.staging_decision_logger import (
     log_replacement_decision,
     log_staging_decision,
 )
+
+logger = logging.getLogger(__name__)
 
 _BTIH_RE = re.compile(r"urn:btih:([0-9a-fA-F]{40}|[2-7A-Za-z]{32})", re.IGNORECASE)
 
@@ -88,6 +95,21 @@ async def _approve_torrent(torrent: StagedTorrent, db: AsyncSession) -> bool:
     if not success:
         return False
 
+    try:
+        activity_log = ActivityLogService(db)
+        await activity_log.log(
+            EventType.RELEASE_APPROVED,
+            request_id=torrent.request_id,
+            details={"torrent_id": torrent.id, "title": torrent.title},
+        )
+        await activity_log.log(
+            EventType.DOWNLOAD_STARTED,
+            request_id=torrent.request_id,
+            details={"torrent_id": torrent.id, "title": torrent.title},
+        )
+    except Exception:
+        logger.exception("Failed to log activity for torrent_id=%s approval", torrent.id)
+
     log_staging_decision(
         request=request,
         approved_torrent=torrent,
@@ -141,6 +163,71 @@ async def _discard_torrent(torrent: StagedTorrent, db: AsyncSession) -> bool:
         pass
 
     return True
+
+
+async def _reconcile_request_via_plex(
+    db: AsyncSession,
+    *,
+    request_id: int,
+    title: str,
+    runtime_settings,
+) -> TargetedReconcileResult:
+    plex = PlexService(settings=runtime_settings)
+    try:
+        plex_polling = PlexPollingService(db, plex)
+        reconcile_result = await plex_polling.reconcile_request(request_id)
+
+        if reconcile_result.available:
+            try:
+                activity_log = ActivityLogService(db)
+                await activity_log.log(
+                    EventType.PLEX_AVAILABLE,
+                    request_id=request_id,
+                    details={"title": title, "reason": reconcile_result.reason},
+                )
+                await db.commit()
+            except Exception:
+                logger.exception("Failed to log plex_available for request_id=%s", request_id)
+
+        return reconcile_result
+    finally:
+        await plex.close()
+
+
+async def _resolve_download_completion(
+    db: AsyncSession,
+    *,
+    torrent: StagedTorrent,
+    qbit_done: bool,
+    runtime_settings,
+) -> tuple[bool, str | None]:
+    if not qbit_done or not torrent.request_id:
+        return False, None
+
+    reconcile_result = await _reconcile_request_via_plex(
+        db,
+        request_id=torrent.request_id,
+        title=torrent.title,
+        runtime_settings=runtime_settings,
+    )
+
+    status_after = reconcile_result.status_after
+    if isinstance(status_after, RequestStatus):
+        return reconcile_result.available, status_after.value
+    if status_after is not None:
+        return reconcile_result.available, str(status_after)
+    return reconcile_result.available, None
+
+
+def _should_refresh_staged_tab(
+    *,
+    qbit_complete: bool,
+    plex_available: bool,
+    request_status: str,
+    resolved_request_status: str,
+) -> bool:
+    """Return whether the staged tab should immediately refresh server-rendered state."""
+    return qbit_complete or plex_available or resolved_request_status != request_status
 
 
 @router.post("/{torrent_id}/approve", response_model=None)
@@ -393,15 +480,84 @@ async def get_download_status(
         else:
             request_status = "unknown"
 
+        qbit_complete = qbit_progress is None or qbit_progress >= 1.0
+        plex_available = False
+        resolved_request_status = request_status
+
         torrent_data.append(
             {
                 "id": torrent.id,
                 "title": torrent.title,
                 "request_id": torrent.request_id,
-                "request_status": request_status,
+                "request_status": resolved_request_status,
                 "qbit_progress": qbit_progress,
                 "qbit_state": qbit_state,
+                "qbit_complete": qbit_complete,
+                "plex_available": plex_available,
+                "refresh_staged_tab": _should_refresh_staged_tab(
+                    qbit_complete=qbit_complete,
+                    plex_available=plex_available,
+                    request_status=request_status,
+                    resolved_request_status=resolved_request_status,
+                ),
             }
         )
 
     return JSONResponse({"torrents": torrent_data})
+
+
+@router.post("/{torrent_id}/check-now")
+async def check_now(
+    torrent_id: int,
+    db: AsyncSession = Depends(get_db),
+) -> JSONResponse:
+    """Manually check download + Plex status for a single torrent."""
+    result = await db.execute(select(StagedTorrent).where(StagedTorrent.id == torrent_id))
+    torrent = result.scalar_one_or_none()
+
+    if not torrent:
+        raise HTTPException(status_code=404, detail="Staged torrent not found")
+
+    runtime_settings = await get_effective_settings(db)
+    qbittorrent = QbittorrentService(settings=runtime_settings)
+
+    qbit_progress: float | None = None
+    qbit_state: str | None = None
+
+    torrent_hash: str | None = None
+    if torrent.magnet_url:
+        m = _BTIH_RE.search(torrent.magnet_url)
+        if m:
+            torrent_hash = m.group(1).lower()
+
+    if torrent_hash:
+        info = await qbittorrent.get_torrent_info(torrent_hash)
+        if info:
+            qbit_progress = info["progress"]
+            qbit_state = info["state"]
+    else:
+        qbit_progress = await qbittorrent.get_torrent_progress_by_name(torrent.title)
+
+    qbit_complete = qbit_progress is None or qbit_progress >= 1.0
+    plex_available = False
+    if torrent.request_id:
+        try:
+            plex_available, _ = await _resolve_download_completion(
+                db,
+                torrent=torrent,
+                qbit_done=qbit_complete,
+                runtime_settings=runtime_settings,
+            )
+        except Exception:
+            logger.exception("check-now: Plex check failed for torrent_id=%s", torrent_id)
+
+    await db.commit()
+
+    return JSONResponse(
+        {
+            "qbit_progress": qbit_progress,
+            "qbit_state": qbit_state,
+            "qbit_complete": qbit_complete,
+            "plex_available": plex_available,
+        }
+    )

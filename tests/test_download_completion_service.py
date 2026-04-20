@@ -18,6 +18,13 @@ def _rows_result(rows: list) -> MagicMock:
     return result
 
 
+def _request_id_rows(request_ids: list[int]) -> MagicMock:
+    """Create a mock execute result that returns request_id tuples from .all()."""
+    result = MagicMock()
+    result.all.return_value = [(request_id,) for request_id in request_ids]
+    return result
+
+
 class TestExtractHash:
     def test_extracts_hex_hash(self):
         magnet = "magnet:?xt=urn:btih:da39a3ee5e6b4b0d3255bfef95601890afd80709&dn=test"
@@ -35,6 +42,9 @@ class TestDownloadCompletionService:
     def mock_db(self):
         db = AsyncMock()
         db.execute = AsyncMock()
+        db.add = MagicMock()
+        db.flush = AsyncMock()
+        db.commit = AsyncMock()
         return db
 
     @pytest.fixture
@@ -60,6 +70,7 @@ class TestDownloadCompletionService:
     async def test_torrent_not_in_qbit_treated_as_done(self, mock_db, mock_qbit, mock_plex_polling):
         """A torrent not found in qBit is treated as completed."""
         from app.siftarr.models.request import MediaType, RequestStatus
+        from app.siftarr.services.plex_polling_service import TargetedReconcileResult
 
         torrent = MagicMock()
         torrent.id = 1
@@ -77,27 +88,32 @@ class TestDownloadCompletionService:
         mock_qbit.get_torrent_info = AsyncMock(return_value=None)
 
         # Plex not found either
-        mock_plex_polling._check_movie = AsyncMock(return_value=None)
+        mock_plex_polling.reconcile_request = AsyncMock(
+            return_value=TargetedReconcileResult(
+                request_id=10,
+                matched=False,
+                reconciled=False,
+                status_before=RequestStatus.DOWNLOADING,
+                status_after=RequestStatus.DOWNLOADING,
+            )
+        )
 
-        # Reload request with selectinload
-        req_result = MagicMock()
-        req_result.scalar_one_or_none.return_value = request
         mock_db.execute.side_effect = [
             _rows_result([(torrent, request)]),
-            req_result,
+            _request_id_rows([]),
         ]
 
         service = DownloadCompletionService(mock_db, mock_qbit, mock_plex_polling)
         result = await service.check_downloading_requests()
         # Plex returned None, so not completed
         assert result == 0
-        mock_plex_polling._check_movie.assert_called_once()
+        mock_plex_polling.reconcile_request.assert_called_once_with(10)
 
     @pytest.mark.asyncio
     async def test_plex_confirms_completion(self, mock_db, mock_qbit, mock_plex_polling):
         """When Plex confirms, request is reconciled through Plex polling."""
         from app.siftarr.models.request import MediaType, RequestStatus
-        from app.siftarr.services.plex_polling_service import PollDecision
+        from app.siftarr.services.plex_polling_service import TargetedReconcileResult
 
         torrent = MagicMock()
         torrent.id = 1
@@ -111,23 +127,28 @@ class TestDownloadCompletionService:
         request.media_type = MediaType.MOVIE
         request.status = RequestStatus.DOWNLOADING
 
-        decision = PollDecision(request_id=10, reason="Found on Plex")
-        mock_plex_polling._check_movie = AsyncMock(return_value=decision)
-        mock_plex_polling._apply_decision = AsyncMock()
+        mock_plex_polling.reconcile_request = AsyncMock(
+            return_value=TargetedReconcileResult(
+                request_id=10,
+                matched=True,
+                reconciled=True,
+                status_before=RequestStatus.DOWNLOADING,
+                status_after=RequestStatus.COMPLETED,
+                reason="Found on Plex",
+            )
+        )
         mock_qbit.get_torrent_info = AsyncMock(return_value=None)
 
-        req_result = MagicMock()
-        req_result.scalar_one_or_none.return_value = request
         mock_db.execute.side_effect = [
             _rows_result([(torrent, request)]),
-            req_result,
+            _request_id_rows([]),
         ]
 
         service = DownloadCompletionService(mock_db, mock_qbit, mock_plex_polling)
         result = await service.check_downloading_requests()
 
         assert result == 1
-        mock_plex_polling._apply_decision.assert_called_once()
+        mock_plex_polling.reconcile_request.assert_called_once_with(10)
 
     @pytest.mark.asyncio
     async def test_tv_completion_uses_reconcile_path_for_available_show(
@@ -135,7 +156,7 @@ class TestDownloadCompletionService:
     ):
         """TV download completion should reuse the Plex reconciliation path, not force completed."""
         from app.siftarr.models.request import MediaType, RequestStatus
-        from app.siftarr.services.plex_polling_service import PollDecision
+        from app.siftarr.services.plex_polling_service import TargetedReconcileResult
 
         torrent = MagicMock()
         torrent.id = 1
@@ -149,30 +170,30 @@ class TestDownloadCompletionService:
         request.media_type = MediaType.TV
         request.status = RequestStatus.DOWNLOADING
 
-        decision = PollDecision(
-            request_id=10,
-            reason="All episodes found on Plex",
-            requested_episode_count=2,
-            completed_episodes=frozenset({(1, 1), (1, 2)}),
-            episode_availability={(1, 1): True, (1, 2): True, (2, 1): False},
+        mock_plex_polling.reconcile_request = AsyncMock(
+            return_value=TargetedReconcileResult(
+                request_id=10,
+                matched=True,
+                reconciled=True,
+                status_before=RequestStatus.DOWNLOADING,
+                status_after=RequestStatus.AVAILABLE,
+                reason="All episodes found on Plex",
+                requested_episode_count=2,
+                completed_episodes=frozenset({(1, 1), (1, 2)}),
+            )
         )
-        mock_plex_polling._check_tv = AsyncMock(return_value=decision)
-        mock_plex_polling._apply_decision = AsyncMock()
         mock_qbit.get_torrent_info = AsyncMock(return_value=None)
 
-        req_result = MagicMock()
-        req_result.scalar_one_or_none.return_value = request
         mock_db.execute.side_effect = [
             _rows_result([(torrent, request)]),
-            req_result,
+            _request_id_rows([]),
         ]
 
         service = DownloadCompletionService(mock_db, mock_qbit, mock_plex_polling)
         result = await service.check_downloading_requests()
 
         assert result == 1
-        mock_plex_polling._check_tv.assert_called_once_with(request)
-        mock_plex_polling._apply_decision.assert_called_once_with(request, decision)
+        mock_plex_polling.reconcile_request.assert_called_once_with(10)
 
     @pytest.mark.asyncio
     async def test_logs_plex_reconcile_reason_for_completed_request(
@@ -180,7 +201,7 @@ class TestDownloadCompletionService:
     ):
         """Completion logging should explain the Plex reconciliation outcome."""
         from app.siftarr.models.request import MediaType, RequestStatus
-        from app.siftarr.services.plex_polling_service import PollDecision
+        from app.siftarr.services.plex_polling_service import TargetedReconcileResult
 
         torrent = MagicMock()
         torrent.id = 1
@@ -194,20 +215,24 @@ class TestDownloadCompletionService:
         request.media_type = MediaType.TV
         request.status = RequestStatus.DOWNLOADING
 
-        decision = PollDecision(
-            request_id=10,
-            reason="All episodes found on Plex",
-            requested_episode_count=1,
-            completed_episodes=frozenset({(1, 1)}),
-            episode_availability={(1, 1): True},
+        mock_plex_polling.reconcile_request = AsyncMock(
+            return_value=TargetedReconcileResult(
+                request_id=10,
+                matched=True,
+                reconciled=True,
+                status_before=RequestStatus.DOWNLOADING,
+                status_after=RequestStatus.AVAILABLE,
+                reason="All episodes found on Plex",
+                requested_episode_count=1,
+                completed_episodes=frozenset({(1, 1)}),
+            )
         )
-        mock_plex_polling._check_tv = AsyncMock(return_value=decision)
-        mock_plex_polling._apply_decision = AsyncMock()
         mock_qbit.get_torrent_info = AsyncMock(return_value=None)
 
-        req_result = MagicMock()
-        req_result.scalar_one_or_none.return_value = request
-        mock_db.execute.side_effect = [_rows_result([(torrent, request)]), req_result]
+        mock_db.execute.side_effect = [
+            _rows_result([(torrent, request)]),
+            _request_id_rows([]),
+        ]
 
         service = DownloadCompletionService(mock_db, mock_qbit, mock_plex_polling)
 
@@ -265,5 +290,134 @@ class TestDownloadCompletionService:
 
         assert result == 0
         mock_qbit.get_torrent_info.assert_not_called()
-        mock_plex_polling._check_movie.assert_not_called()
-        mock_plex_polling._check_tv.assert_not_called()
+        mock_plex_polling.reconcile_request.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_incomplete_torrent_does_not_trigger_plex_reconciliation(
+        self, mock_db, mock_qbit, mock_plex_polling
+    ):
+        """Incomplete torrents should not call the shared Plex reconciliation path."""
+        from app.siftarr.models.request import MediaType, RequestStatus
+
+        torrent = MagicMock()
+        torrent.id = 1
+        torrent.request_id = 10
+        torrent.title = "Test Show S01E01"
+        torrent.magnet_url = "magnet:?xt=urn:btih:da39a3ee5e6b4b0d3255bfef95601890afd80709"
+
+        request = MagicMock()
+        request.id = 10
+        request.title = "Test Show"
+        request.media_type = MediaType.TV
+        request.status = RequestStatus.DOWNLOADING
+
+        mock_qbit.get_torrent_info = AsyncMock(
+            return_value={"progress": 0.4, "state": "downloading"}
+        )
+        mock_db.execute.side_effect = [_rows_result([(torrent, request)])]
+
+        service = DownloadCompletionService(mock_db, mock_qbit, mock_plex_polling)
+        result = await service.check_downloading_requests()
+
+        assert result == 0
+        mock_plex_polling.reconcile_request.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_tv_request_reconciles_when_any_approved_torrent_finishes(
+        self, mock_db, mock_qbit, mock_plex_polling
+    ):
+        """A completed TV episode should trigger Plex reconciliation even if siblings still download."""
+        from app.siftarr.models.request import MediaType, RequestStatus
+        from app.siftarr.services.plex_polling_service import TargetedReconcileResult
+
+        completed_torrent = MagicMock()
+        completed_torrent.id = 1
+        completed_torrent.request_id = 10
+        completed_torrent.title = "Test Show S01E01"
+        completed_torrent.magnet_url = (
+            "magnet:?xt=urn:btih:da39a3ee5e6b4b0d3255bfef95601890afd80709"
+        )
+
+        downloading_torrent = MagicMock()
+        downloading_torrent.id = 2
+        downloading_torrent.request_id = 10
+        downloading_torrent.title = "Test Show S01E02"
+        downloading_torrent.magnet_url = (
+            "magnet:?xt=urn:btih:ea39a3ee5e6b4b0d3255bfef95601890afd80709"
+        )
+
+        request = MagicMock()
+        request.id = 10
+        request.title = "Test Show"
+        request.media_type = MediaType.TV
+        request.status = RequestStatus.DOWNLOADING
+
+        mock_qbit.get_torrent_info = AsyncMock(
+            side_effect=[
+                {"progress": 1.0, "state": "uploading"},
+                {"progress": 0.5, "state": "downloading"},
+            ]
+        )
+        mock_plex_polling.reconcile_request = AsyncMock(
+            return_value=TargetedReconcileResult(
+                request_id=10,
+                matched=True,
+                reconciled=True,
+                status_before=RequestStatus.DOWNLOADING,
+                status_after=RequestStatus.PARTIALLY_AVAILABLE,
+                reason="Episode found on Plex",
+                requested_episode_count=2,
+                completed_episodes=frozenset({(1, 1)}),
+            )
+        )
+        mock_db.execute.side_effect = [
+            _rows_result([(completed_torrent, request), (downloading_torrent, request)]),
+            _request_id_rows([]),
+        ]
+
+        service = DownloadCompletionService(mock_db, mock_qbit, mock_plex_polling)
+        result = await service.check_downloading_requests()
+
+        assert result == 1
+        mock_plex_polling.reconcile_request.assert_called_once_with(10)
+
+    @pytest.mark.asyncio
+    async def test_download_completed_log_is_deduplicated(
+        self, mock_db, mock_qbit, mock_plex_polling
+    ):
+        """Existing download_completed activity should not be logged again."""
+        from app.siftarr.models.request import MediaType, RequestStatus
+        from app.siftarr.services.plex_polling_service import TargetedReconcileResult
+
+        torrent = MagicMock()
+        torrent.id = 1
+        torrent.request_id = 10
+        torrent.title = "Test Show S01E01"
+        torrent.magnet_url = "magnet:?xt=urn:btih:da39a3ee5e6b4b0d3255bfef95601890afd80709"
+
+        request = MagicMock()
+        request.id = 10
+        request.title = "Test Show"
+        request.media_type = MediaType.TV
+        request.status = RequestStatus.DOWNLOADING
+
+        mock_qbit.get_torrent_info = AsyncMock(return_value={"progress": 1.0, "state": "uploading"})
+        mock_plex_polling.reconcile_request = AsyncMock(
+            return_value=TargetedReconcileResult(
+                request_id=10,
+                matched=False,
+                reconciled=False,
+                status_before=RequestStatus.DOWNLOADING,
+                status_after=RequestStatus.DOWNLOADING,
+            )
+        )
+        mock_db.execute.side_effect = [
+            _rows_result([(torrent, request)]),
+            _request_id_rows([10]),
+        ]
+
+        service = DownloadCompletionService(mock_db, mock_qbit, mock_plex_polling)
+        result = await service.check_downloading_requests()
+
+        assert result == 0
+        mock_db.add.assert_not_called()

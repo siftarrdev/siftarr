@@ -1,6 +1,7 @@
 """Database models for Siftarr."""
 
 from app.siftarr.models._base import Base
+from app.siftarr.models.activity_log import ActivityLog, EventType
 from app.siftarr.models.episode import Episode
 from app.siftarr.models.pending_queue import PendingQueue
 from app.siftarr.models.plex_scan_state import PlexScanState
@@ -12,8 +13,10 @@ from app.siftarr.models.settings import Settings
 from app.siftarr.models.staged_torrent import StagedTorrent
 
 __all__ = [
+    "ActivityLog",
     "Base",
     "Episode",
+    "EventType",
     "MediaType",
     "PlexScanState",
     "Request",

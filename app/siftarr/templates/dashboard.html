@@ -412,6 +412,8 @@ details[open] summary .accordion-chevron { transform: rotate(90deg); }
                                     <button type="button" onclick="postStagedAction('/staged/{{ torrent.id }}/discard', '/?tab=staged')" class="text-red-400 hover:text-red-300 font-medium">Discard</button>
                                     {% elif torrent.status == 'replaced' %}
                                     <span class="text-gray-500 text-xs" title="Replaced{% if torrent.replacement_reason %}: {{ torrent.replacement_reason }}{% endif %}">Replaced</span>
+                                    {% elif torrent.status == 'approved' %}
+                                    <button type="button" onclick="checkNow({{ torrent.id }})" class="bg-brand-500 hover:bg-brand-400 text-white text-xs px-2 py-0.5 rounded">Check Now</button>
                                     {% else %}
                                     {% if not torrent.request_id %}<span class="text-gray-600">No actions</span>{% endif %}
                                     {% endif %}
@@ -583,6 +585,7 @@ details[open] summary .accordion-chevron { transform: rotate(90deg); }
                     <div class="flex-1 min-w-0">
                         <div class="form-label">Synopsis</div>
                         <p id="request-details-overview" class="mt-1 text-sm text-gray-300 leading-relaxed whitespace-pre-wrap"></p>
+                        <div id="request-details-meta-row" class="mt-3 flex flex-wrap gap-2 text-xs text-gray-400"></div>
                     </div>
                     <a id="request-details-overseerr-link" href="#" target="_blank" rel="noopener noreferrer" class="hidden shrink-0 btn-ghost btn-sm">Open in Overseerr</a>
                     <button id="request-details-search-btn" onclick="searchRequestFromDetails()" class="hidden shrink-0 btn-ghost btn-sm"><svg class="inline w-3.5 h-3.5 mr-1 -mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>Refresh Search</button>
@@ -615,6 +618,10 @@ details[open] summary .accordion-chevron { transform: rotate(90deg); }
                     </div>
                     <input type="text" id="release-filter-input" placeholder="Filter results by title..." class="form-input mt-2 mb-2 w-full lg:w-64">
                     <div id="request-details-releases" class="mt-1 space-y-1"></div>
+                </div>
+                <div id="request-details-timeline" class="hidden">
+                    <div class="form-label mb-2">Activity Timeline</div>
+                    <div id="timeline-entries" class="relative pl-4 border-l border-gray-700/40 space-y-3"></div>
                 </div>
             </div>
         </div>
@@ -753,8 +760,12 @@ function releaseAnnotationTone(release, field) {
         if (release.size_passed === true) return 'text-emerald-400';
         return 'text-gray-400';
     }
-    if (field === 'resolution' || field === 'codec') {
+    if (field === 'resolution') {
         return release[field] ? 'text-emerald-400' : 'text-gray-400';
+    }
+    if (field === 'codec') {
+        const codec = String(release.codec || '').toLowerCase();
+        return /(av1|265)/.test(codec) ? 'text-emerald-400' : 'text-gray-400';
     }
     return 'text-gray-400';
 }
@@ -790,6 +801,8 @@ function formatRelativePublishAge(publishDate) {
 
 function renderReleaseCard(release, requestId) {
     const statusClass = release.passed ? 'badge-green' : 'badge-yellow';
+    const releaseScope = release.target_scope || {};
+    const isScopedEpisodeRelease = releaseScope.type === 'single_episode';
     const secondaryMeta = [
         renderAnnotation(release.size, releaseAnnotationTone(release, 'size'), 'data-release-size="true"'),
         renderAnnotation(release.indexer, releaseAnnotationTone(release, 'indexer'), 'data-release-indexer="true"'),
@@ -801,10 +814,10 @@ function renderReleaseCard(release, requestId) {
     const availability = `Seeders ${release.seeders ?? 0} \u00B7 Leechers ${release.leechers ?? 0}`;
     const downloaded = release.downloaded ? '<span class="badge badge-blue">Already sent</span>' : '';
     const currentTab = new URLSearchParams(window.location.search).get('tab') || 'active';
-    const activeStagedTorrent = release.active_staged_torrent || currentActiveStagedTorrent;
+    const activeStagedTorrent = release.active_staged_torrent || (isScopedEpisodeRelease ? null : currentActiveStagedTorrent);
     const hasActiveStagedSelection = window.siftarrStagingModeEnabled && !!activeStagedTorrent;
     const isActiveSelection = !!release.is_active_selection || !!(
-        hasActiveStagedSelection && activeStagedTorrent && release.title === activeStagedTorrent.title
+        !isScopedEpisodeRelease && hasActiveStagedSelection && activeStagedTorrent && release.title === activeStagedTorrent.title
     );
     const activeSelectionMode = window.siftarrStagingModeEnabled && isActiveSelection;
     const activeSelectionBadge = activeSelectionMode
@@ -857,7 +870,7 @@ function renderReleaseCard(release, requestId) {
             <div class="flex flex-col gap-2 lg:flex-row lg:items-start lg:justify-between">
                 <div class="min-w-0">
                     <div class="font-medium text-white text-sm break-words">${escapeHtml(release.title)}</div>
-                    <div class="mt-1 text-xs text-gray-400">Score <span class="font-semibold text-emerald-400">${release.score}</span> &middot; ${secondaryMeta || '<span class="text-gray-400">No release metadata</span>'} &middot; ${escapeHtml(availability)}${publishAge ? ` &middot; <span data-release-upload-age="true">${escapeHtml(publishAge)}</span>` : ''}</div>
+                    <div class="mt-1 text-xs text-gray-400">Score <span class="font-semibold text-emerald-400">${release.score}</span> &middot; ${secondaryMeta || '<span class="text-gray-400">No release metadata</span>'} &middot; ${escapeHtml(availability)}${publishAge ? ` &middot; <span data-release-upload-age="true">${escapeHtml(publishAge)}</span>` : ''}${release.files != null ? ` &middot; <span class="text-gray-400">${release.files} file${release.files !== 1 ? 's' : ''}</span>` : ''}</div>
                     ${coverageHtml}
                 </div>
                 <div class="flex shrink-0 flex-col items-end gap-2 text-right" data-release-status-column="true">
@@ -969,12 +982,17 @@ function renderSeasonAccordion(data) {
                     '</div>' +
                     '<div class="flex items-center gap-2 shrink-0">' +
                         '<span class="badge ' + badgeClass + '">' + escapeHtml(ep.status || 'unknown') + '</span>' +
+                        (ep.status !== 'available' && ep.status !== 'completed'
+                            ? '<button onclick="markEpisodeAvailable(' + requestId + ', ' + ep.id + '); event.stopPropagation();" class="bg-brand-500 hover:bg-brand-400 text-white text-xs px-2 py-0.5 rounded">Mark Available</button>'
+                            : '') +
                         '<button onclick="searchEpisode(' + requestId + ', ' + season.season_number + ', ' + ep.episode_number + '); event.stopPropagation();" class="btn-ghost btn-sm">Search</button>' +
                     '</div>' +
                 '</summary>' +
                 '<div id="' + episodeSearchId + '" class="ml-7 mr-3 mb-3 space-y-1">' + episodeReleasesHtml + '</div>' +
             '</details>';
         }).join('');
+
+        var hasMarkable = (season.episodes || []).some(function(ep) { return ep.status !== 'available' && ep.status !== 'completed'; });
 
         var summaryBits = [season.available_count + '/' + season.total_count + ' available'];
         if (season.pending_count) summaryBits.push(season.pending_count + ' pending');
@@ -990,6 +1008,9 @@ function renderSeasonAccordion(data) {
                 '</div>' +
                 '<div class="flex items-center gap-2 shrink-0">' +
                     '<span class="badge ' + seasonBadgeClass + '">' + escapeHtml(season.status || 'unknown') + '</span>' +
+                    (hasMarkable
+                        ? '<button onclick="markSeasonAvailable(' + requestId + ', ' + season.id + '); event.stopPropagation();" class="bg-brand-500 hover:bg-brand-400 text-white text-xs px-2 py-0.5 rounded">Mark All Available</button>'
+                        : '') +
                     '<button onclick="searchSeasonPacks(' + requestId + ', ' + season.season_number + '); event.stopPropagation();" class="btn-primary btn-sm">Search Season Packs</button>' +
                 '</div>' +
             '</summary>' +
@@ -999,6 +1020,26 @@ function renderSeasonAccordion(data) {
             '</div>' +
         '</details>';
     }).join('') + '</div>';
+}
+
+async function markEpisodeAvailable(requestId, episodeId) {
+    try {
+        var response = await fetch('/requests/' + requestId + '/episodes/' + episodeId + '/mark-available', { method: 'POST' });
+        if (!response.ok) throw new Error('Server error: ' + response.status);
+        openRequestDetails(requestId);
+    } catch (e) {
+        console.error('Failed to mark episode available:', e);
+    }
+}
+
+async function markSeasonAvailable(requestId, seasonId) {
+    try {
+        var response = await fetch('/requests/' + requestId + '/seasons/' + seasonId + '/mark-all-available', { method: 'POST' });
+        if (!response.ok) throw new Error('Server error: ' + response.status);
+        openRequestDetails(requestId);
+    } catch (e) {
+        console.error('Failed to mark season available:', e);
+    }
 }
 
 async function searchSeasonPacks(requestId, seasonNumber) {
@@ -1186,7 +1227,6 @@ async function stageRelease(btn) {
         refreshStagedTabData();
         if (window.siftarrStagingModeEnabled && currentRequestId) {
             await openRequestDetails(currentRequestId, currentDetailsIndex);
-            showTab('staged');
         }
     } catch (err) {
         btn.disabled = false;
@@ -1232,6 +1272,10 @@ async function _patchStagedDownloadStatus() {
         const response = await fetch('/staged/download-status');
         if (!response.ok) return;
         const data = await response.json();
+        if ((data.torrents || []).some((torrent) => torrent.refresh_staged_tab)) {
+            await refreshStagedTabData();
+            return;
+        }
         const activeTorrentIds = new Set((data.torrents || []).map((torrent) => String(torrent.id)));
         const staleApprovedRows = Array.from(
             document.querySelectorAll('#staged-torrents-body tr[data-state="approved"]')
@@ -1356,6 +1400,7 @@ async function searchRequestFromDetails() {
         } else if (cacheInd) {
             cacheInd.classList.add('hidden');
         }
+        renderTimeline(currentRequestTimeline);
     } catch (err) {
         if (releasesContainer) {
             releasesContainer.innerHTML = '<div class="text-red-400 text-sm">Search failed: ' + escapeHtml(err.message) + '</div>';
@@ -1372,6 +1417,7 @@ let currentReleases = [];
 let currentRequestId = null;
 let currentTvSeasons = [];
 let currentActiveStagedTorrent = null;
+let currentRequestTimeline = [];
 
 function filterReleaseCards() {
     const filterEl = document.getElementById('release-filter-input');
@@ -1479,6 +1525,25 @@ function filterStagedTable() {
         const torrentState = row.dataset.state || '';
         row.style.display = textContent.includes(filter) && (!selectedStatus || torrentState === selectedStatus) ? '' : 'none';
     });
+}
+
+async function checkNow(torrentId) {
+    try {
+        const response = await fetch('/staged/' + torrentId + '/check-now', { method: 'POST' });
+        if (!response.ok) {
+            const errorData = await response.json().catch(() => null);
+            throw new Error(errorData?.detail || 'Server error: ' + response.status);
+        }
+        const data = await response.json();
+        let msg = 'Check complete.';
+        if (data.qbit_complete) msg += ' Download done.';
+        else if (data.qbit_progress !== null) msg += ' Download ' + Math.round(data.qbit_progress * 100) + '%.';
+        if (data.plex_available) msg += ' Available on Plex!';
+        showToast(msg);
+        await refreshStagedTabData();
+    } catch (err) {
+        showToast('Error: ' + err.message);
+    }
 }
 
 async function postStagedAction(actionUrl, redirectTo = '/?tab=staged') {
@@ -1694,6 +1759,14 @@ async function openRequestDetails(requestId, explicitIndex = null) {
         title.textContent = data.request.title;
         meta.textContent = `${data.request.media_type || 'unknown'} \u00B7 ${data.request.status || 'unknown'} \u00B7 ${data.overseerr?.status || 'unknown'} in Overseerr`;
         overview.textContent = data.overseerr?.overview || 'No synopsis available.';
+        const metaRow = document.getElementById('request-details-meta-row');
+        if (metaRow) {
+            const items = [];
+            if (data.request.year) items.push(`<span class="badge badge-gray">Year ${escapeHtml(String(data.request.year))}</span>`);
+            if (data.request.media_type) items.push(`<span class="badge badge-gray">${escapeHtml(String(data.request.media_type).toUpperCase())}</span>`);
+            if (data.request.status) items.push(`<span class="badge badge-gray">${escapeHtml(String(data.request.status).replace(/_/g, ' '))}</span>`);
+            metaRow.innerHTML = items.join('');
+        }
         setPoster(data.overseerr?.poster, data.request.title);
         if (overseerrLink && data.overseerr?.url) {
             overseerrLink.href = data.overseerr.url;
@@ -1741,6 +1814,9 @@ async function openRequestDetails(requestId, explicitIndex = null) {
                 searchRequestFromDetails();
             }
         }
+
+        currentRequestTimeline = data.timeline || [];
+        renderTimeline(currentRequestTimeline);
     } catch (err) {
         title.textContent = 'Error loading details';
         meta.textContent = err.message || 'Unknown error';
@@ -1774,6 +1850,85 @@ async function refreshPlexAndReload() {
 }
 
 function closeRequestDetails() { document.getElementById('request-details-modal').classList.add('hidden'); }
+
+function renderTimeline(timelineData) {
+    const container = document.getElementById('request-details-timeline');
+    const entries = document.getElementById('timeline-entries');
+    if (!timelineData || timelineData.length === 0) {
+        container.classList.add('hidden');
+        return;
+    }
+    container.classList.remove('hidden');
+    const colorMap = {
+        search_started: 'bg-blue-500',
+        search_completed: 'bg-blue-500',
+        rule_evaluation: 'bg-yellow-500',
+        release_staged: 'bg-orange-500',
+        release_approved: 'bg-orange-500',
+        download_started: 'bg-purple-500',
+        download_completed: 'bg-purple-500',
+        plex_available: 'bg-green-500',
+        episode_marked_available: 'bg-green-500',
+        error: 'bg-red-500',
+        request_status_changed: 'bg-gray-500',
+    };
+    const labelMap = {
+        search_started: 'Search started',
+        search_completed: 'Search completed',
+        rule_evaluation: 'Rules evaluated',
+        release_staged: 'Release staged',
+        release_approved: 'Release approved',
+        download_started: 'Download started',
+        download_completed: 'Download completed',
+        plex_available: 'Available on Plex',
+        episode_marked_available: 'Episode marked available',
+        error: 'Error',
+        request_status_changed: 'Status changed',
+    };
+    entries.innerHTML = timelineData.map(entry => {
+        const dot = colorMap[entry.event_type] || 'bg-gray-500';
+        const label = labelMap[entry.event_type] || entry.event_type.replace(/_/g, ' ');
+        let detail = '';
+        if (entry.details) {
+            const d = entry.details;
+            if (entry.event_type === 'request_status_changed' && d.old_status && d.new_status) {
+                detail = `${d.old_status} → ${d.new_status}`;
+                if (d.reason) detail += ` (${d.reason})`;
+            } else if (entry.event_type === 'search_completed' && d.result_count !== undefined) {
+                detail = `${d.result_count} results found`;
+            } else if (entry.event_type === 'release_staged' && d.title) {
+                detail = d.title;
+            } else if (entry.event_type === 'error' && d.error) {
+                detail = d.error;
+            } else if (entry.event_type === 'episode_marked_available' && d.episode) {
+                detail = `S${String(d.season || '?').padStart(2,'0')}E${String(d.episode).padStart(2,'0')}`;
+            } else if (entry.event_type === 'rule_evaluation') {
+                const parts = [];
+                if (d.passed !== undefined) parts.push(`${d.passed} passed`);
+                if (d.failed !== undefined) parts.push(`${d.failed} failed`);
+                if (d.title) parts.push(d.title);
+                detail = parts.join(', ');
+            } else {
+                const summary = Object.entries(d).slice(0, 3).map(([k, v]) => `${k}: ${v}`).join(', ');
+                if (summary) detail = summary;
+            }
+        }
+        const ts = entry.created_at ? new Date(entry.created_at).toLocaleString() : '';
+        const safeLabel = escapeHtml(label);
+        const safeTs = escapeHtml(ts);
+        const safeDetail = detail ? escapeHtml(String(detail)) : '';
+        return `<div class="relative flex items-start gap-3 -ml-[1.15rem]">
+            <div class="w-2.5 h-2.5 rounded-full ${dot} mt-1.5 shrink-0 ring-2 ring-surface-900"></div>
+            <div class="min-w-0 flex-1">
+                <div class="flex items-baseline gap-2 flex-wrap">
+                    <span class="text-sm font-medium text-gray-200">${safeLabel}</span>
+                    <span class="text-xs text-gray-500">${safeTs}</span>
+                </div>
+                ${safeDetail ? `<p class="text-xs text-gray-400 mt-0.5 break-words">${safeDetail}</p>` : ''}
+            </div>
+        </div>`;
+    }).join('');
+}
 
 // Navigation state for prev/next in details modal
 let visibleRequests = []; // Array of {id, title} objects for current view
