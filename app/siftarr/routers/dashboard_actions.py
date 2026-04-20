@@ -10,9 +10,13 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.siftarr.database import get_db
-from app.siftarr.models.request import MediaType
+from app.siftarr.models import EventType
+from app.siftarr.models.episode import Episode
+from app.siftarr.models.request import MediaType, RequestStatus
 from app.siftarr.models.request import Request as RequestModel
 from app.siftarr.models.rule import Rule
+from app.siftarr.models.season import Season
+from app.siftarr.services.activity_log_service import ActivityLogService
 from app.siftarr.services.lifecycle_service import LifecycleService
 from app.siftarr.services.media_helpers import extract_media_title_and_year
 from app.siftarr.services.overseerr_service import OverseerrService
@@ -76,6 +80,16 @@ async def _process_request_search(
     db: AsyncSession,
 ) -> dict:
     """Run torrent search for a request and clean up queue state on success."""
+    try:
+        activity_log = ActivityLogService(db)
+        await activity_log.log(
+            EventType.SEARCH_STARTED,
+            request_id=request.id,
+            details={"title": request.title, "media_type": request.media_type.value},
+        )
+    except Exception:
+        logger.exception("Failed to log search_started for request_id=%s", request.id)
+
     runtime_settings = await get_effective_settings(db)
 
     # Backfill year if missing (e.g. Overseerr was unreachable at creation time)
@@ -110,6 +124,20 @@ async def _process_request_search(
         decision_service = TVDecisionService(db, prowlarr_service, qbittorrent_service)
 
     result = await decision_service.process_request(request.id)
+
+    try:
+        activity_log = ActivityLogService(db)
+        await activity_log.log(
+            EventType.SEARCH_COMPLETED,
+            request_id=request.id,
+            details={
+                "status": result.get("status"),
+                "message": result.get("message"),
+            },
+        )
+    except Exception:
+        logger.exception("Failed to log search_completed for request_id=%s", request.id)
+
     if result.get("status") == "completed":
         await queue_service.remove_from_queue(request.id)
 
@@ -290,3 +318,114 @@ async def deny_request(
 
     await _deny_request_record(request, db, reason=reason)
     return RedirectResponse(url=redirect_to or "/", status_code=303)
+
+
+def _recalculate_season_status(season: Season) -> RequestStatus:
+    """Compute season status from its episodes."""
+    statuses = {ep.status for ep in season.episodes}
+    if statuses <= {RequestStatus.AVAILABLE, RequestStatus.COMPLETED}:
+        return RequestStatus.AVAILABLE
+    if statuses & {RequestStatus.AVAILABLE, RequestStatus.COMPLETED}:
+        return RequestStatus.PARTIALLY_AVAILABLE
+    return season.status
+
+
+def _recalculate_request_status(request: RequestModel) -> RequestStatus:
+    """Compute request status from its seasons."""
+    if not request.seasons:
+        return request.status
+    season_statuses = {s.status for s in request.seasons}
+    if season_statuses <= {RequestStatus.AVAILABLE, RequestStatus.COMPLETED}:
+        return RequestStatus.AVAILABLE
+    if season_statuses & {RequestStatus.AVAILABLE, RequestStatus.PARTIALLY_AVAILABLE}:
+        return RequestStatus.PARTIALLY_AVAILABLE
+    return request.status
+
+
+@router.post("/{request_id}/episodes/{episode_id}/mark-available")
+async def mark_episode_available(
+    request_id: int,
+    episode_id: int,
+    db: AsyncSession = Depends(get_db),
+) -> JSONResponse:
+    """Mark a single episode as available and recalculate season/request status."""
+    result = await db.execute(select(Episode).where(Episode.id == episode_id))
+    episode = result.scalar_one_or_none()
+    if not episode:
+        raise HTTPException(status_code=404, detail="Episode not found")
+
+    # Load season with episodes
+    season_result = await db.execute(select(Season).where(Season.id == episode.season_id))
+    season = season_result.scalar_one_or_none()
+    if not season or season.request_id != request_id:
+        raise HTTPException(status_code=404, detail="Episode does not belong to this request")
+
+    if episode.status in (RequestStatus.AVAILABLE, RequestStatus.COMPLETED):
+        raise HTTPException(status_code=400, detail="Episode is already available or completed")
+
+    episode.status = RequestStatus.AVAILABLE
+
+    # Eagerly load all episodes for recalculation
+    await db.refresh(season, ["episodes"])
+    season.status = _recalculate_season_status(season)
+
+    # Load request with seasons
+    req_result = await db.execute(select(RequestModel).where(RequestModel.id == request_id))
+    request = req_result.scalar_one_or_none()
+    if not request:
+        raise HTTPException(status_code=404, detail="Request not found")
+    await db.refresh(request, ["seasons"])
+    for s in request.seasons:
+        await db.refresh(s, ["episodes"])
+    request.status = _recalculate_request_status(request)
+
+    activity_log = ActivityLogService(db)
+    await activity_log.log(
+        EventType.EPISODE_MARKED_AVAILABLE,
+        request_id=request_id,
+        details={"episode_id": episode_id, "season_id": season.id},
+    )
+
+    await db.commit()
+    return JSONResponse({"status": "ok"})
+
+
+@router.post("/{request_id}/seasons/{season_id}/mark-all-available")
+async def mark_season_all_available(
+    request_id: int,
+    season_id: int,
+    db: AsyncSession = Depends(get_db),
+) -> JSONResponse:
+    """Mark all episodes in a season as available and recalculate statuses."""
+    season_result = await db.execute(select(Season).where(Season.id == season_id))
+    season = season_result.scalar_one_or_none()
+    if not season or season.request_id != request_id:
+        raise HTTPException(
+            status_code=404, detail="Season not found or does not belong to this request"
+        )
+
+    await db.refresh(season, ["episodes"])
+
+    activity_log = ActivityLogService(db)
+    for ep in season.episodes:
+        if ep.status not in (RequestStatus.AVAILABLE, RequestStatus.COMPLETED):
+            ep.status = RequestStatus.AVAILABLE
+            await activity_log.log(
+                EventType.EPISODE_MARKED_AVAILABLE,
+                request_id=request_id,
+                details={"episode_id": ep.id, "season_id": season_id},
+            )
+
+    season.status = _recalculate_season_status(season)
+
+    req_result = await db.execute(select(RequestModel).where(RequestModel.id == request_id))
+    request = req_result.scalar_one_or_none()
+    if not request:
+        raise HTTPException(status_code=404, detail="Request not found")
+    await db.refresh(request, ["seasons"])
+    for s in request.seasons:
+        await db.refresh(s, ["episodes"])
+    request.status = _recalculate_request_status(request)
+
+    await db.commit()
+    return JSONResponse({"status": "ok"})

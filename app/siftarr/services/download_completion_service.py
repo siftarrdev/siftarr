@@ -13,6 +13,7 @@ from app.siftarr.models.request import (
     is_active_staging_workflow_status,
 )
 from app.siftarr.models.staged_torrent import StagedTorrent
+from app.siftarr.services.activity_log_service import ActivityLogService
 from app.siftarr.services.lifecycle_service import LifecycleService
 from app.siftarr.services.plex_polling_service import PlexPollingService
 from app.siftarr.services.qbittorrent_service import QbittorrentService
@@ -115,6 +116,21 @@ class DownloadCompletionService:
                 request.title,
             )
 
+            try:
+                from app.siftarr.models.activity_log import EventType
+
+                activity_log = ActivityLogService(self.db)
+                await activity_log.log(
+                    EventType.DOWNLOAD_COMPLETED,
+                    request_id=request_id,
+                    details={
+                        "title": request.title,
+                        "torrent_count": len(torrents),
+                    },
+                )
+            except Exception:
+                logger.exception("Failed to log download_completed for request_id=%s", request_id)
+
             # Delegate to PlexPollingService for a targeted poll on this request.
             # We reuse the existing poll() which checks all non-terminal requests, but
             # the cheapest path is to call the internal _check_* helpers directly.
@@ -145,6 +161,25 @@ class DownloadCompletionService:
                 if decision is not None:
                     await self.plex_polling._apply_decision(full_request, decision)
                     completed += 1
+
+                    try:
+                        from app.siftarr.models.activity_log import EventType
+
+                        activity_log = ActivityLogService(self.db)
+                        await activity_log.log(
+                            EventType.PLEX_AVAILABLE,
+                            request_id=request_id,
+                            details={
+                                "title": request.title,
+                                "reason": decision.reason,
+                            },
+                        )
+                    except Exception:
+                        logger.exception(
+                            "Failed to log plex_available for request_id=%s",
+                            request_id,
+                        )
+
                     logger.info(
                         "DownloadCompletionService: reconciled request_id=%s title=%s via Plex (%s)",
                         request_id,

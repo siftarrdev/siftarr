@@ -412,6 +412,8 @@ details[open] summary .accordion-chevron { transform: rotate(90deg); }
                                     <button type="button" onclick="postStagedAction('/staged/{{ torrent.id }}/discard', '/?tab=staged')" class="text-red-400 hover:text-red-300 font-medium">Discard</button>
                                     {% elif torrent.status == 'replaced' %}
                                     <span class="text-gray-500 text-xs" title="Replaced{% if torrent.replacement_reason %}: {{ torrent.replacement_reason }}{% endif %}">Replaced</span>
+                                    {% elif torrent.status == 'approved' %}
+                                    <button type="button" onclick="checkNow({{ torrent.id }})" class="bg-brand-500 hover:bg-brand-400 text-white text-xs px-2 py-0.5 rounded">Check Now</button>
                                     {% else %}
                                     {% if not torrent.request_id %}<span class="text-gray-600">No actions</span>{% endif %}
                                     {% endif %}
@@ -615,6 +617,10 @@ details[open] summary .accordion-chevron { transform: rotate(90deg); }
                     </div>
                     <input type="text" id="release-filter-input" placeholder="Filter results by title..." class="form-input mt-2 mb-2 w-full lg:w-64">
                     <div id="request-details-releases" class="mt-1 space-y-1"></div>
+                </div>
+                <div id="request-details-timeline" class="hidden">
+                    <div class="form-label mb-2">Activity Timeline</div>
+                    <div id="timeline-entries" class="relative pl-4 border-l border-gray-700/40 space-y-3"></div>
                 </div>
             </div>
         </div>
@@ -969,12 +975,17 @@ function renderSeasonAccordion(data) {
                     '</div>' +
                     '<div class="flex items-center gap-2 shrink-0">' +
                         '<span class="badge ' + badgeClass + '">' + escapeHtml(ep.status || 'unknown') + '</span>' +
+                        (ep.status !== 'available' && ep.status !== 'completed'
+                            ? '<button onclick="markEpisodeAvailable(' + requestId + ', ' + ep.id + '); event.stopPropagation();" class="bg-brand-500 hover:bg-brand-400 text-white text-xs px-2 py-0.5 rounded">Mark Available</button>'
+                            : '') +
                         '<button onclick="searchEpisode(' + requestId + ', ' + season.season_number + ', ' + ep.episode_number + '); event.stopPropagation();" class="btn-ghost btn-sm">Search</button>' +
                     '</div>' +
                 '</summary>' +
                 '<div id="' + episodeSearchId + '" class="ml-7 mr-3 mb-3 space-y-1">' + episodeReleasesHtml + '</div>' +
             '</details>';
         }).join('');
+
+        var hasMarkable = (season.episodes || []).some(function(ep) { return ep.status !== 'available' && ep.status !== 'completed'; });
 
         var summaryBits = [season.available_count + '/' + season.total_count + ' available'];
         if (season.pending_count) summaryBits.push(season.pending_count + ' pending');
@@ -990,6 +1001,9 @@ function renderSeasonAccordion(data) {
                 '</div>' +
                 '<div class="flex items-center gap-2 shrink-0">' +
                     '<span class="badge ' + seasonBadgeClass + '">' + escapeHtml(season.status || 'unknown') + '</span>' +
+                    (hasMarkable
+                        ? '<button onclick="markSeasonAvailable(' + requestId + ', ' + season.id + '); event.stopPropagation();" class="bg-brand-500 hover:bg-brand-400 text-white text-xs px-2 py-0.5 rounded">Mark All Available</button>'
+                        : '') +
                     '<button onclick="searchSeasonPacks(' + requestId + ', ' + season.season_number + '); event.stopPropagation();" class="btn-primary btn-sm">Search Season Packs</button>' +
                 '</div>' +
             '</summary>' +
@@ -999,6 +1013,26 @@ function renderSeasonAccordion(data) {
             '</div>' +
         '</details>';
     }).join('') + '</div>';
+}
+
+async function markEpisodeAvailable(requestId, episodeId) {
+    try {
+        var response = await fetch('/requests/' + requestId + '/episodes/' + episodeId + '/mark-available', { method: 'POST' });
+        if (!response.ok) throw new Error('Server error: ' + response.status);
+        openRequestDetails(requestId);
+    } catch (e) {
+        console.error('Failed to mark episode available:', e);
+    }
+}
+
+async function markSeasonAvailable(requestId, seasonId) {
+    try {
+        var response = await fetch('/requests/' + requestId + '/seasons/' + seasonId + '/mark-all-available', { method: 'POST' });
+        if (!response.ok) throw new Error('Server error: ' + response.status);
+        openRequestDetails(requestId);
+    } catch (e) {
+        console.error('Failed to mark season available:', e);
+    }
 }
 
 async function searchSeasonPacks(requestId, seasonNumber) {
@@ -1481,6 +1515,25 @@ function filterStagedTable() {
     });
 }
 
+async function checkNow(torrentId) {
+    try {
+        const response = await fetch('/staged/' + torrentId + '/check-now', { method: 'POST' });
+        if (!response.ok) {
+            const errorData = await response.json().catch(() => null);
+            throw new Error(errorData?.detail || 'Server error: ' + response.status);
+        }
+        const data = await response.json();
+        let msg = 'Check complete.';
+        if (data.qbit_complete) msg += ' Download done.';
+        else if (data.qbit_progress !== null) msg += ' Download ' + Math.round(data.qbit_progress * 100) + '%.';
+        if (data.plex_available) msg += ' Available on Plex!';
+        showToast(msg);
+        await refreshStagedTabData();
+    } catch (err) {
+        showToast('Error: ' + err.message);
+    }
+}
+
 async function postStagedAction(actionUrl, redirectTo = '/?tab=staged') {
     try {
         const formData = new FormData();
@@ -1741,6 +1794,8 @@ async function openRequestDetails(requestId, explicitIndex = null) {
                 searchRequestFromDetails();
             }
         }
+
+        renderTimeline(data.timeline || []);
     } catch (err) {
         title.textContent = 'Error loading details';
         meta.textContent = err.message || 'Unknown error';
@@ -1774,6 +1829,82 @@ async function refreshPlexAndReload() {
 }
 
 function closeRequestDetails() { document.getElementById('request-details-modal').classList.add('hidden'); }
+
+function renderTimeline(timelineData) {
+    const container = document.getElementById('request-details-timeline');
+    const entries = document.getElementById('timeline-entries');
+    if (!timelineData || timelineData.length === 0) {
+        container.classList.add('hidden');
+        return;
+    }
+    container.classList.remove('hidden');
+    const colorMap = {
+        search_started: 'bg-blue-500',
+        search_completed: 'bg-blue-500',
+        rule_evaluation: 'bg-yellow-500',
+        release_staged: 'bg-orange-500',
+        release_approved: 'bg-orange-500',
+        download_started: 'bg-purple-500',
+        download_completed: 'bg-purple-500',
+        plex_available: 'bg-green-500',
+        episode_marked_available: 'bg-green-500',
+        error: 'bg-red-500',
+        request_status_changed: 'bg-gray-500',
+    };
+    const labelMap = {
+        search_started: 'Search started',
+        search_completed: 'Search completed',
+        rule_evaluation: 'Rules evaluated',
+        release_staged: 'Release staged',
+        release_approved: 'Release approved',
+        download_started: 'Download started',
+        download_completed: 'Download completed',
+        plex_available: 'Available on Plex',
+        episode_marked_available: 'Episode marked available',
+        error: 'Error',
+        request_status_changed: 'Status changed',
+    };
+    entries.innerHTML = timelineData.map(entry => {
+        const dot = colorMap[entry.event_type] || 'bg-gray-500';
+        const label = labelMap[entry.event_type] || entry.event_type.replace(/_/g, ' ');
+        let detail = '';
+        if (entry.details) {
+            const d = entry.details;
+            if (entry.event_type === 'request_status_changed' && d.old_status && d.new_status) {
+                detail = `${d.old_status} → ${d.new_status}`;
+                if (d.reason) detail += ` (${d.reason})`;
+            } else if (entry.event_type === 'search_completed' && d.result_count !== undefined) {
+                detail = `${d.result_count} results found`;
+            } else if (entry.event_type === 'release_staged' && d.title) {
+                detail = d.title;
+            } else if (entry.event_type === 'error' && d.error) {
+                detail = d.error;
+            } else if (entry.event_type === 'episode_marked_available' && d.episode) {
+                detail = `S${String(d.season || '?').padStart(2,'0')}E${String(d.episode).padStart(2,'0')}`;
+            } else if (entry.event_type === 'rule_evaluation') {
+                const parts = [];
+                if (d.passed !== undefined) parts.push(`${d.passed} passed`);
+                if (d.failed !== undefined) parts.push(`${d.failed} failed`);
+                if (d.title) parts.push(d.title);
+                detail = parts.join(', ');
+            } else {
+                const summary = Object.entries(d).slice(0, 3).map(([k, v]) => `${k}: ${v}`).join(', ');
+                if (summary) detail = summary;
+            }
+        }
+        const ts = entry.created_at ? new Date(entry.created_at).toLocaleString() : '';
+        return `<div class="relative flex items-start gap-3 -ml-[1.15rem]">
+            <div class="w-2.5 h-2.5 rounded-full ${dot} mt-1.5 shrink-0 ring-2 ring-surface-900"></div>
+            <div class="min-w-0 flex-1">
+                <div class="flex items-baseline gap-2 flex-wrap">
+                    <span class="text-sm font-medium text-gray-200">${label}</span>
+                    <span class="text-xs text-gray-500">${ts}</span>
+                </div>
+                ${detail ? `<p class="text-xs text-gray-400 mt-0.5 break-words">${detail}</p>` : ''}
+            </div>
+        </div>`;
+    }).join('');
+}
 
 // Navigation state for prev/next in details modal
 let visibleRequests = []; // Array of {id, title} objects for current view

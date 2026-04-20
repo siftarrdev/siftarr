@@ -1,6 +1,7 @@
 """Dashboard JSON API router for request details, search, and state mutations."""
 
 import asyncio
+import json
 import logging
 from typing import Any
 
@@ -14,6 +15,7 @@ from app.siftarr.models.request import MediaType, RequestStatus, is_active_stagi
 from app.siftarr.models.rule import Rule
 from app.siftarr.models.staged_torrent import StagedTorrent
 from app.siftarr.routers.dashboard_actions import _process_request_search
+from app.siftarr.services.activity_log_service import ActivityLogService
 from app.siftarr.services.overseerr_service import (
     OverseerrService,
     build_overseerr_media_url,
@@ -294,6 +296,21 @@ async def request_details(
             "sync_state": sync_state,
             "aggregate_counts": count_request_episode_states(seasons_data),
         }
+
+    # Timeline: activity log entries for this request
+    activity_service = ActivityLogService(db)
+    timeline_entries = await activity_service.get_timeline(request_id, limit=200)
+    # Reverse to chronological order (oldest first) since get_timeline returns newest first
+    timeline_entries.reverse()
+    details["timeline"] = [
+        {
+            "id": entry.id,
+            "event_type": entry.event_type,
+            "details": json.loads(entry.details) if entry.details else None,
+            "created_at": entry.created_at.isoformat() if entry.created_at else None,
+        }
+        for entry in timeline_entries
+    ]
 
     return JSONResponse(details, background=background_tasks)
 

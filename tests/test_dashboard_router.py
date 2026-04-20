@@ -19,6 +19,14 @@ from app.siftarr.services.prowlarr_service import ProwlarrRelease, ProwlarrSearc
 class TestDashboardRouter:
     """Test cases for dashboard router helpers and actions."""
 
+    @pytest.fixture(autouse=True)
+    def _mock_activity_log_service(self, monkeypatch):
+        """Patch ActivityLogService so timeline queries don't consume db.execute mocks."""
+        mock_cls = MagicMock()
+        mock_instance = mock_cls.return_value
+        mock_instance.get_timeline = AsyncMock(return_value=[])
+        monkeypatch.setattr(dashboard_api, "ActivityLogService", mock_cls)
+
     @pytest.fixture
     def mock_db(self):
         """Create a mock database session."""

@@ -4,7 +4,9 @@ from datetime import UTC, datetime
 from sqlalchemy import and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.siftarr.models.activity_log import EventType
 from app.siftarr.models.request import MediaType, Request, RequestStatus
+from app.siftarr.services.activity_log_service import ActivityLogService
 
 logger = logging.getLogger(__name__)
 
@@ -29,6 +31,8 @@ class LifecycleService:
             RequestStatus.UNRELEASED,
             RequestStatus.FAILED,
             RequestStatus.DENIED,
+            RequestStatus.PARTIALLY_AVAILABLE,
+            RequestStatus.AVAILABLE,
         ],
         RequestStatus.SEARCHING: [
             RequestStatus.PENDING,
@@ -38,6 +42,8 @@ class LifecycleService:
             RequestStatus.UNRELEASED,
             RequestStatus.FAILED,
             RequestStatus.DENIED,
+            RequestStatus.PARTIALLY_AVAILABLE,
+            RequestStatus.AVAILABLE,
         ],
         RequestStatus.PENDING: [
             RequestStatus.SEARCHING,
@@ -47,11 +53,15 @@ class LifecycleService:
             RequestStatus.UNRELEASED,
             RequestStatus.FAILED,
             RequestStatus.DENIED,
+            RequestStatus.PARTIALLY_AVAILABLE,
+            RequestStatus.AVAILABLE,
         ],
         RequestStatus.PARTIALLY_AVAILABLE: [
             RequestStatus.COMPLETED,
             RequestStatus.UNRELEASED,
             RequestStatus.PENDING,
+            RequestStatus.AVAILABLE,
+            RequestStatus.SEARCHING,
         ],
         RequestStatus.UNRELEASED: [
             RequestStatus.PENDING,
@@ -65,6 +75,8 @@ class LifecycleService:
             RequestStatus.COMPLETED,
             RequestStatus.FAILED,
             RequestStatus.DENIED,
+            RequestStatus.PARTIALLY_AVAILABLE,
+            RequestStatus.AVAILABLE,
         ],
         RequestStatus.DOWNLOADING: [
             RequestStatus.DOWNLOADING,
@@ -73,6 +85,8 @@ class LifecycleService:
             RequestStatus.COMPLETED,
             RequestStatus.FAILED,
             RequestStatus.DENIED,
+            RequestStatus.PARTIALLY_AVAILABLE,
+            RequestStatus.AVAILABLE,
         ],
         RequestStatus.COMPLETED: [
             RequestStatus.UNRELEASED,
@@ -135,6 +149,20 @@ class LifecycleService:
             new_status.value,
             f" (reason: {reason})" if reason else "",
         )
+
+        try:
+            activity_log = ActivityLogService(self.db)
+            await activity_log.log(
+                EventType.REQUEST_STATUS_CHANGED,
+                request_id=request_id,
+                details={
+                    "old_status": old_status.value,
+                    "new_status": new_status.value,
+                    "reason": reason,
+                },
+            )
+        except Exception:
+            logger.exception("Failed to log activity for request_id=%s transition", request_id)
 
         return request
 

@@ -6,6 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.siftarr.models.release import Release
 from app.siftarr.models.request import MediaType, Request, RequestStatus
 from app.siftarr.models.rule import Rule
+from app.siftarr.services.activity_log_service import ActivityLogService
 from app.siftarr.services.pending_queue_service import PendingQueueService
 from app.siftarr.services.prowlarr_service import ProwlarrService
 from app.siftarr.services.qbittorrent_service import QbittorrentService
@@ -151,6 +152,22 @@ class MovieDecisionService:
             len(passed_results),
         )
 
+        try:
+            from app.siftarr.models.activity_log import EventType
+
+            activity_log = ActivityLogService(self.db)
+            await activity_log.log(
+                EventType.RULE_EVALUATION,
+                request_id=request_id,
+                details={
+                    "evaluated": len(all_evaluated),
+                    "passed": len(passed_results),
+                    "best_score": best.total_score if best else None,
+                },
+            )
+        except Exception:
+            logger.exception("Failed to log rule_evaluation for request_id=%s", request_id)
+
         if best:
             logger.info(
                 "Movie selected release: request_id=%s title=%s score=%s indexer=%s size=%s",
@@ -174,6 +191,24 @@ class MovieDecisionService:
                 [stored_release] if stored_release else [],
                 selection_source="rule",
             )
+
+            try:
+                from app.siftarr.models.activity_log import EventType
+
+                activity_log = ActivityLogService(self.db)
+                await activity_log.log(
+                    EventType.RELEASE_STAGED,
+                    request_id=request_id,
+                    details={
+                        "title": best.release.title,
+                        "score": best.total_score,
+                        "indexer": best.release.indexer,
+                        "size": best.release.size,
+                        "action": action_result.get("status"),
+                    },
+                )
+            except Exception:
+                logger.exception("Failed to log release_staged for request_id=%s", request_id)
 
             return {
                 "status": action_result["status"],
