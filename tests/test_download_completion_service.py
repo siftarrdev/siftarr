@@ -18,6 +18,13 @@ def _rows_result(rows: list) -> MagicMock:
     return result
 
 
+def _request_id_rows(request_ids: list[int]) -> MagicMock:
+    """Create a mock execute result that returns request_id tuples from .all()."""
+    result = MagicMock()
+    result.all.return_value = [(request_id,) for request_id in request_ids]
+    return result
+
+
 class TestExtractHash:
     def test_extracts_hex_hash(self):
         magnet = "magnet:?xt=urn:btih:da39a3ee5e6b4b0d3255bfef95601890afd80709&dn=test"
@@ -91,7 +98,10 @@ class TestDownloadCompletionService:
             )
         )
 
-        mock_db.execute.side_effect = [_rows_result([(torrent, request)])]
+        mock_db.execute.side_effect = [
+            _rows_result([(torrent, request)]),
+            _request_id_rows([]),
+        ]
 
         service = DownloadCompletionService(mock_db, mock_qbit, mock_plex_polling)
         result = await service.check_downloading_requests()
@@ -129,7 +139,10 @@ class TestDownloadCompletionService:
         )
         mock_qbit.get_torrent_info = AsyncMock(return_value=None)
 
-        mock_db.execute.side_effect = [_rows_result([(torrent, request)])]
+        mock_db.execute.side_effect = [
+            _rows_result([(torrent, request)]),
+            _request_id_rows([]),
+        ]
 
         service = DownloadCompletionService(mock_db, mock_qbit, mock_plex_polling)
         result = await service.check_downloading_requests()
@@ -171,7 +184,10 @@ class TestDownloadCompletionService:
         )
         mock_qbit.get_torrent_info = AsyncMock(return_value=None)
 
-        mock_db.execute.side_effect = [_rows_result([(torrent, request)])]
+        mock_db.execute.side_effect = [
+            _rows_result([(torrent, request)]),
+            _request_id_rows([]),
+        ]
 
         service = DownloadCompletionService(mock_db, mock_qbit, mock_plex_polling)
         result = await service.check_downloading_requests()
@@ -213,7 +229,10 @@ class TestDownloadCompletionService:
         )
         mock_qbit.get_torrent_info = AsyncMock(return_value=None)
 
-        mock_db.execute.side_effect = [_rows_result([(torrent, request)])]
+        mock_db.execute.side_effect = [
+            _rows_result([(torrent, request)]),
+            _request_id_rows([]),
+        ]
 
         service = DownloadCompletionService(mock_db, mock_qbit, mock_plex_polling)
 
@@ -352,7 +371,8 @@ class TestDownloadCompletionService:
             )
         )
         mock_db.execute.side_effect = [
-            _rows_result([(completed_torrent, request), (downloading_torrent, request)])
+            _rows_result([(completed_torrent, request), (downloading_torrent, request)]),
+            _request_id_rows([]),
         ]
 
         service = DownloadCompletionService(mock_db, mock_qbit, mock_plex_polling)
@@ -381,9 +401,6 @@ class TestDownloadCompletionService:
         request.media_type = MediaType.TV
         request.status = RequestStatus.DOWNLOADING
 
-        existing_log_result = MagicMock()
-        existing_log_result.scalar_one_or_none.return_value = 123
-
         mock_qbit.get_torrent_info = AsyncMock(return_value={"progress": 1.0, "state": "uploading"})
         mock_plex_polling.reconcile_request = AsyncMock(
             return_value=TargetedReconcileResult(
@@ -394,7 +411,10 @@ class TestDownloadCompletionService:
                 status_after=RequestStatus.DOWNLOADING,
             )
         )
-        mock_db.execute.side_effect = [_rows_result([(torrent, request)]), existing_log_result]
+        mock_db.execute.side_effect = [
+            _rows_result([(torrent, request)]),
+            _request_id_rows([10]),
+        ]
 
         service = DownloadCompletionService(mock_db, mock_qbit, mock_plex_polling)
         result = await service.check_downloading_requests()

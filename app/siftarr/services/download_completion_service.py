@@ -107,11 +107,29 @@ class DownloadCompletionService:
 
         completed = 0
         activity_log = ActivityLogService(self.db)
+        ready_request_map: dict[int, tuple[Request, list[StagedTorrent], list[StagedTorrent]]] = {}
         for request_id, (request, torrents) in request_map.items():
             done_torrents = [t for t in torrents if t.id in done_torrent_ids]
-            if not done_torrents:
-                continue
+            if done_torrents:
+                ready_request_map[request_id] = (request, torrents, done_torrents)
 
+        if not ready_request_map:
+            logger.info("DownloadCompletionService: completed %d request(s) this cycle", completed)
+            return completed
+
+        existing_download_completed_logs_result = await self.db.execute(
+            select(ActivityLog.request_id).where(
+                ActivityLog.request_id.in_(set(ready_request_map)),
+                ActivityLog.event_type == EventType.DOWNLOAD_COMPLETED.value,
+            )
+        )
+        existing_download_completed_logs = {
+            request_id
+            for (request_id,) in existing_download_completed_logs_result.all()
+            if request_id is not None
+        }
+
+        for request_id, (request, torrents, done_torrents) in ready_request_map.items():
             # 4b. At least one torrent is done/missing – check Plex immediately.
             logger.info(
                 "DownloadCompletionService: %d/%d torrent(s) done for request_id=%s title=%s, checking Plex",
@@ -122,15 +140,7 @@ class DownloadCompletionService:
             )
 
             try:
-                existing_log = await self.db.execute(
-                    select(ActivityLog.id)
-                    .where(
-                        ActivityLog.request_id == request_id,
-                        ActivityLog.event_type == EventType.DOWNLOAD_COMPLETED.value,
-                    )
-                    .limit(1)
-                )
-                if existing_log.scalar_one_or_none() is None:
+                if request_id not in existing_download_completed_logs:
                     await activity_log.log(
                         EventType.DOWNLOAD_COMPLETED,
                         request_id=request_id,
@@ -139,6 +149,7 @@ class DownloadCompletionService:
                             "torrent_count": len(torrents),
                         },
                     )
+                    existing_download_completed_logs.add(request_id)
                     await self.db.commit()
             except Exception:
                 logger.exception("Failed to log download_completed for request_id=%s", request_id)
