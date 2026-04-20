@@ -161,8 +161,10 @@ class LifecycleService:
                     "reason": reason,
                 },
             )
+            await self.db.commit()
         except Exception:
             logger.exception("Failed to log activity for request_id=%s transition", request_id)
+            await self.db.rollback()
 
         return request
 

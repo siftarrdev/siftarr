@@ -8,11 +8,11 @@ from datetime import UTC, datetime
 from fastapi import APIRouter, Depends, Form, HTTPException
 from fastapi import Request as FastAPIRequest
 from fastapi.responses import JSONResponse, RedirectResponse
-from sqlalchemy import func, select
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.siftarr.database import get_db
-from app.siftarr.models.activity_log import ActivityLog, EventType
+from app.siftarr.models.activity_log import EventType
 from app.siftarr.models.request import (
     MediaType,
     Request,
@@ -165,31 +165,6 @@ async def _discard_torrent(torrent: StagedTorrent, db: AsyncSession) -> bool:
     return True
 
 
-async def _log_download_completed_once(
-    db: AsyncSession,
-    *,
-    request_id: int,
-    torrent_id: int,
-    title: str,
-) -> None:
-    activity_log = ActivityLogService(db)
-    existing_log_result = await db.execute(
-        select(func.count())
-        .select_from(ActivityLog)
-        .where(
-            ActivityLog.request_id == request_id,
-            ActivityLog.event_type == EventType.DOWNLOAD_COMPLETED.value,
-        )
-    )
-    if existing_log_result.scalar() == 0:
-        await activity_log.log(
-            EventType.DOWNLOAD_COMPLETED,
-            request_id=request_id,
-            details={"torrent_id": torrent_id, "title": title},
-        )
-        await db.commit()
-
-
 async def _reconcile_request_via_plex(
     db: AsyncSession,
     *,
@@ -225,27 +200,16 @@ async def _resolve_download_completion(
     torrent: StagedTorrent,
     qbit_done: bool,
     runtime_settings,
-    reconciled_requests: dict[int, TargetedReconcileResult],
 ) -> tuple[bool, str | None]:
     if not qbit_done or not torrent.request_id:
         return False, None
 
-    await _log_download_completed_once(
+    reconcile_result = await _reconcile_request_via_plex(
         db,
         request_id=torrent.request_id,
-        torrent_id=torrent.id,
         title=torrent.title,
+        runtime_settings=runtime_settings,
     )
-
-    reconcile_result = reconciled_requests.get(torrent.request_id)
-    if reconcile_result is None:
-        reconcile_result = await _reconcile_request_via_plex(
-            db,
-            request_id=torrent.request_id,
-            title=torrent.title,
-            runtime_settings=runtime_settings,
-        )
-        reconciled_requests[torrent.request_id] = reconcile_result
 
     status_after = reconcile_result.status_after
     if isinstance(status_after, RequestStatus):
@@ -487,7 +451,6 @@ async def get_download_status(
 
     runtime_settings = await get_effective_settings(db)
     qbittorrent = QbittorrentService(settings=runtime_settings)
-    reconciled_requests: dict[int, TargetedReconcileResult] = {}
 
     torrent_data = []
     for torrent in torrents:
@@ -520,17 +483,6 @@ async def get_download_status(
         qbit_complete = qbit_progress is None or qbit_progress >= 1.0
         plex_available = False
         resolved_request_status = request_status
-
-        if torrent.request_id:
-            plex_available, reconciled_status = await _resolve_download_completion(
-                db,
-                torrent=torrent,
-                qbit_done=qbit_complete,
-                runtime_settings=runtime_settings,
-                reconciled_requests=reconciled_requests,
-            )
-            if reconciled_status is not None:
-                resolved_request_status = reconciled_status
 
         torrent_data.append(
             {
@@ -595,7 +547,6 @@ async def check_now(
                 torrent=torrent,
                 qbit_done=qbit_complete,
                 runtime_settings=runtime_settings,
-                reconciled_requests={},
             )
         except Exception:
             logger.exception("check-now: Plex check failed for torrent_id=%s", torrent_id)

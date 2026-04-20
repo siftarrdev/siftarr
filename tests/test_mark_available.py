@@ -67,6 +67,10 @@ class TestRecalculateSeasonStatus:
         season = _make_season(eps, status=RequestStatus.DOWNLOADING)
         assert _recalculate_season_status(season) == RequestStatus.DOWNLOADING
 
+    def test_no_episodes_keeps_existing_status(self):
+        season = _make_season([], status=RequestStatus.PENDING)
+        assert _recalculate_season_status(season) == RequestStatus.PENDING
+
 
 class TestRecalculateRequestStatus:
     def test_all_seasons_available(self):

@@ -7,6 +7,7 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.siftarr.models.activity_log import ActivityLog, EventType
 from app.siftarr.models.request import (
     ACTIVE_STAGING_WORKFLOW_STATUSES,
     Request,
@@ -105,6 +106,7 @@ class DownloadCompletionService:
             request_map[request.id][1].append(torrent)
 
         completed = 0
+        activity_log = ActivityLogService(self.db)
         for request_id, (request, torrents) in request_map.items():
             done_torrents = [t for t in torrents if t.id in done_torrent_ids]
             if not done_torrents:
@@ -120,17 +122,24 @@ class DownloadCompletionService:
             )
 
             try:
-                from app.siftarr.models.activity_log import EventType
-
-                activity_log = ActivityLogService(self.db)
-                await activity_log.log(
-                    EventType.DOWNLOAD_COMPLETED,
-                    request_id=request_id,
-                    details={
-                        "title": request.title,
-                        "torrent_count": len(torrents),
-                    },
+                existing_log = await self.db.execute(
+                    select(ActivityLog.id)
+                    .where(
+                        ActivityLog.request_id == request_id,
+                        ActivityLog.event_type == EventType.DOWNLOAD_COMPLETED.value,
+                    )
+                    .limit(1)
                 )
+                if existing_log.scalar_one_or_none() is None:
+                    await activity_log.log(
+                        EventType.DOWNLOAD_COMPLETED,
+                        request_id=request_id,
+                        details={
+                            "title": request.title,
+                            "torrent_count": len(torrents),
+                        },
+                    )
+                    await self.db.commit()
             except Exception:
                 logger.exception("Failed to log download_completed for request_id=%s", request_id)
 
@@ -141,9 +150,6 @@ class DownloadCompletionService:
                     completed += 1
 
                     try:
-                        from app.siftarr.models.activity_log import EventType
-
-                        activity_log = ActivityLogService(self.db)
                         await activity_log.log(
                             EventType.PLEX_AVAILABLE,
                             request_id=request_id,
@@ -152,6 +158,7 @@ class DownloadCompletionService:
                                 "reason": reconcile_result.reason,
                             },
                         )
+                        await self.db.commit()
                     except Exception:
                         logger.exception(
                             "Failed to log plex_available for request_id=%s",

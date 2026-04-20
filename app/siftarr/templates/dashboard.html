@@ -1914,14 +1914,17 @@ function renderTimeline(timelineData) {
             }
         }
         const ts = entry.created_at ? new Date(entry.created_at).toLocaleString() : '';
+        const safeLabel = escapeHtml(label);
+        const safeTs = escapeHtml(ts);
+        const safeDetail = detail ? escapeHtml(String(detail)) : '';
         return `<div class="relative flex items-start gap-3 -ml-[1.15rem]">
             <div class="w-2.5 h-2.5 rounded-full ${dot} mt-1.5 shrink-0 ring-2 ring-surface-900"></div>
             <div class="min-w-0 flex-1">
                 <div class="flex items-baseline gap-2 flex-wrap">
-                    <span class="text-sm font-medium text-gray-200">${label}</span>
-                    <span class="text-xs text-gray-500">${ts}</span>
+                    <span class="text-sm font-medium text-gray-200">${safeLabel}</span>
+                    <span class="text-xs text-gray-500">${safeTs}</span>
                 </div>
-                ${detail ? `<p class="text-xs text-gray-400 mt-0.5 break-words">${detail}</p>` : ''}
+                ${safeDetail ? `<p class="text-xs text-gray-400 mt-0.5 break-words">${safeDetail}</p>` : ''}
             </div>
         </div>`;
     }).join('');

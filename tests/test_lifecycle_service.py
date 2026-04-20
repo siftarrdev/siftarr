@@ -1,6 +1,6 @@
 """Tests for LifecycleService."""
 
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, call, patch
 
 import pytest
 
@@ -14,7 +14,9 @@ class TestLifecycleService:
     @pytest.fixture
     def mock_db(self):
         """Create a mock database session."""
-        return AsyncMock()
+        db = AsyncMock()
+        db.add = MagicMock()
+        return db
 
     @pytest.fixture
     def service(self, mock_db):
@@ -79,7 +81,8 @@ class TestLifecycleService:
 
         assert result == mock_request
         assert result.status == RequestStatus.SEARCHING
-        mock_db.commit.assert_called_once()
+        assert mock_db.commit.call_count == 2
+        assert mock_db.commit.call_args_list == [call(), call()]
         mock_db.refresh.assert_called_once()
 
     @pytest.mark.asyncio

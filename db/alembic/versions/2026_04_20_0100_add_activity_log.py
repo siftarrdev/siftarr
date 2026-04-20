@@ -24,7 +24,7 @@ def upgrade() -> None:
         sa.Column("request_id", sa.Integer(), nullable=True),
         sa.Column("event_type", sa.String(length=50), nullable=False),
         sa.Column("details", sa.Text(), nullable=True),
-        sa.Column("created_at", sa.DateTime(), nullable=True),
+        sa.Column("created_at", sa.DateTime(), nullable=False, server_default=sa.func.now()),
         sa.PrimaryKeyConstraint("id"),
         sa.ForeignKeyConstraint(["request_id"], ["requests.id"]),
     )

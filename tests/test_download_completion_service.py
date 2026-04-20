@@ -360,3 +360,44 @@ class TestDownloadCompletionService:
 
         assert result == 1
         mock_plex_polling.reconcile_request.assert_called_once_with(10)
+
+    @pytest.mark.asyncio
+    async def test_download_completed_log_is_deduplicated(
+        self, mock_db, mock_qbit, mock_plex_polling
+    ):
+        """Existing download_completed activity should not be logged again."""
+        from app.siftarr.models.request import MediaType, RequestStatus
+        from app.siftarr.services.plex_polling_service import TargetedReconcileResult
+
+        torrent = MagicMock()
+        torrent.id = 1
+        torrent.request_id = 10
+        torrent.title = "Test Show S01E01"
+        torrent.magnet_url = "magnet:?xt=urn:btih:da39a3ee5e6b4b0d3255bfef95601890afd80709"
+
+        request = MagicMock()
+        request.id = 10
+        request.title = "Test Show"
+        request.media_type = MediaType.TV
+        request.status = RequestStatus.DOWNLOADING
+
+        existing_log_result = MagicMock()
+        existing_log_result.scalar_one_or_none.return_value = 123
+
+        mock_qbit.get_torrent_info = AsyncMock(return_value={"progress": 1.0, "state": "uploading"})
+        mock_plex_polling.reconcile_request = AsyncMock(
+            return_value=TargetedReconcileResult(
+                request_id=10,
+                matched=False,
+                reconciled=False,
+                status_before=RequestStatus.DOWNLOADING,
+                status_after=RequestStatus.DOWNLOADING,
+            )
+        )
+        mock_db.execute.side_effect = [_rows_result([(torrent, request)]), existing_log_result]
+
+        service = DownloadCompletionService(mock_db, mock_qbit, mock_plex_polling)
+        result = await service.check_downloading_requests()
+
+        assert result == 0
+        mock_db.add.assert_not_called()

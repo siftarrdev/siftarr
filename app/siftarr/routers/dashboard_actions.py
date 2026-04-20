@@ -322,6 +322,8 @@ async def deny_request(
 
 def _recalculate_season_status(season: Season) -> RequestStatus:
     """Compute season status from its episodes."""
+    if not season.episodes:
+        return season.status
     statuses = {ep.status for ep in season.episodes}
     if statuses <= {RequestStatus.AVAILABLE, RequestStatus.COMPLETED}:
         return RequestStatus.AVAILABLE
@@ -375,8 +377,6 @@ async def mark_episode_available(
     if not request:
         raise HTTPException(status_code=404, detail="Request not found")
     await db.refresh(request, ["seasons"])
-    for s in request.seasons:
-        await db.refresh(s, ["episodes"])
     request.status = _recalculate_request_status(request)
 
     activity_log = ActivityLogService(db)
@@ -423,8 +423,6 @@ async def mark_season_all_available(
     if not request:
         raise HTTPException(status_code=404, detail="Request not found")
     await db.refresh(request, ["seasons"])
-    for s in request.seasons:
-        await db.refresh(s, ["episodes"])
     request.status = _recalculate_request_status(request)
 
     await db.commit()

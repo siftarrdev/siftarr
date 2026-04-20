@@ -41,7 +41,7 @@ class ActivityLog(Base):
     )
     event_type: Mapped[str] = mapped_column(String(50), nullable=False)
     details: Mapped[str | None] = mapped_column(Text, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utc_now)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utc_now, nullable=False)
 
     def __repr__(self) -> str:
         return f"<ActivityLog(id={self.id}, event_type='{self.event_type}', request_id={self.request_id})>"
