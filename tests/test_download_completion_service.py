@@ -151,7 +151,7 @@ class TestDownloadCompletionService:
         mock_plex_polling.reconcile_request.assert_called_once_with(10)
 
     @pytest.mark.asyncio
-    async def test_tv_completion_uses_reconcile_path_for_available_show(
+    async def test_tv_completion_uses_reconcile_path_for_completed_show(
         self, mock_db, mock_qbit, mock_plex_polling
     ):
         """TV download completion should reuse the Plex reconciliation path, not force completed."""
@@ -176,7 +176,7 @@ class TestDownloadCompletionService:
                 matched=True,
                 reconciled=True,
                 status_before=RequestStatus.DOWNLOADING,
-                status_after=RequestStatus.AVAILABLE,
+                status_after=RequestStatus.COMPLETED,
                 reason="All episodes found on Plex",
                 requested_episode_count=2,
                 completed_episodes=frozenset({(1, 1), (1, 2)}),
@@ -221,7 +221,7 @@ class TestDownloadCompletionService:
                 matched=True,
                 reconciled=True,
                 status_before=RequestStatus.DOWNLOADING,
-                status_after=RequestStatus.AVAILABLE,
+                status_after=RequestStatus.COMPLETED,
                 reason="All episodes found on Plex",
                 requested_episode_count=1,
                 completed_episodes=frozenset({(1, 1)}),
@@ -252,36 +252,36 @@ class TestDownloadCompletionService:
         """Resolved requests should not be treated as active downloads."""
         from app.siftarr.models.request import MediaType, RequestStatus
 
-        available_torrent = MagicMock()
-        available_torrent.id = 1
-        available_torrent.request_id = 10
-        available_torrent.title = "Already Available"
-        available_torrent.magnet_url = (
+        completed_torrent = MagicMock()
+        completed_torrent.id = 1
+        completed_torrent.request_id = 10
+        completed_torrent.title = "Already Completed"
+        completed_torrent.magnet_url = (
             "magnet:?xt=urn:btih:da39a3ee5e6b4b0d3255bfef95601890afd80709"
         )
 
-        available_request = MagicMock()
-        available_request.id = 10
-        available_request.title = "Already Available"
-        available_request.media_type = MediaType.MOVIE
-        available_request.status = RequestStatus.AVAILABLE
+        completed_request = MagicMock()
+        completed_request.id = 10
+        completed_request.title = "Already Completed"
+        completed_request.media_type = MediaType.MOVIE
+        completed_request.status = RequestStatus.COMPLETED
 
-        partial_torrent = MagicMock()
-        partial_torrent.id = 2
-        partial_torrent.request_id = 11
-        partial_torrent.title = "Partially Available"
-        partial_torrent.magnet_url = "magnet:?xt=urn:btih:ea39a3ee5e6b4b0d3255bfef95601890afd80709"
+        pending_torrent = MagicMock()
+        pending_torrent.id = 2
+        pending_torrent.request_id = 11
+        pending_torrent.title = "Pending Request"
+        pending_torrent.magnet_url = "magnet:?xt=urn:btih:ea39a3ee5e6b4b0d3255bfef95601890afd80709"
 
-        partial_request = MagicMock()
-        partial_request.id = 11
-        partial_request.title = "Partially Available"
-        partial_request.media_type = MediaType.TV
-        partial_request.status = RequestStatus.PARTIALLY_AVAILABLE
+        pending_request = MagicMock()
+        pending_request.id = 11
+        pending_request.title = "Pending Request"
+        pending_request.media_type = MediaType.TV
+        pending_request.status = RequestStatus.PENDING
 
         mock_db.execute.return_value = _rows_result(
             [
-                (available_torrent, available_request),
-                (partial_torrent, partial_request),
+                (completed_torrent, completed_request),
+                (pending_torrent, pending_request),
             ]
         )
 
@@ -364,7 +364,7 @@ class TestDownloadCompletionService:
                 matched=True,
                 reconciled=True,
                 status_before=RequestStatus.DOWNLOADING,
-                status_after=RequestStatus.PARTIALLY_AVAILABLE,
+                status_after=RequestStatus.PENDING,
                 reason="Episode found on Plex",
                 requested_episode_count=2,
                 completed_episodes=frozenset({(1, 1)}),

@@ -11,6 +11,7 @@ from fastapi.responses import JSONResponse, RedirectResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.siftarr.config import get_settings
 from app.siftarr.database import get_db
 from app.siftarr.models.activity_log import EventType
 from app.siftarr.models.request import (
@@ -25,7 +26,6 @@ from app.siftarr.services.lifecycle_service import LifecycleService
 from app.siftarr.services.plex_polling_service import PlexPollingService, TargetedReconcileResult
 from app.siftarr.services.plex_service import PlexService
 from app.siftarr.services.qbittorrent_service import MediaCategory, QbittorrentService
-from app.siftarr.services.runtime_settings import get_effective_settings
 from app.siftarr.services.staging_decision_logger import (
     log_replacement_decision,
     log_staging_decision,
@@ -78,7 +78,7 @@ async def _approve_torrent(torrent: StagedTorrent, db: AsyncSession) -> bool:
         )
         rules_selected_torrent = rules_selected_result.scalars().first()
 
-    runtime_settings = await get_effective_settings(db)
+    runtime_settings = get_settings()
     qbittorrent = QbittorrentService(settings=runtime_settings)
 
     if torrent.magnet_url:
@@ -120,7 +120,7 @@ async def _approve_torrent(torrent: StagedTorrent, db: AsyncSession) -> bool:
             RequestStatus.FAILED,
             RequestStatus.DENIED,
         ):
-            await lifecycle_service.mark_as_downloading(request.id)
+            await lifecycle_service.transition(request.id, RequestStatus.DOWNLOADING)
 
     try:
         if os.path.exists(torrent.torrent_path):
@@ -147,7 +147,7 @@ async def _discard_torrent(torrent: StagedTorrent, db: AsyncSession) -> bool:
                 )
             if request.status == RequestStatus.STAGED:
                 lifecycle_service = LifecycleService(db)
-                await lifecycle_service.mark_as_pending(torrent.request_id)
+                await lifecycle_service.transition(torrent.request_id, RequestStatus.PENDING)
 
     torrent.status = "discarded"
 
@@ -361,7 +361,7 @@ async def replace_staged_torrent(
         category = MediaCategory.MOVIES
 
     # Add new torrent to qBittorrent
-    runtime_settings = await get_effective_settings(db)
+    runtime_settings = get_settings()
     qbittorrent = QbittorrentService(settings=runtime_settings)
     success = False
 
@@ -443,7 +443,7 @@ async def get_download_status(
     if not torrents:
         return JSONResponse({"torrents": []})
 
-    runtime_settings = await get_effective_settings(db)
+    runtime_settings = get_settings()
     qbittorrent = QbittorrentService(settings=runtime_settings)
 
     torrent_data = []
@@ -512,7 +512,7 @@ async def check_now(
     if not torrent:
         raise HTTPException(status_code=404, detail="Staged torrent not found")
 
-    runtime_settings = await get_effective_settings(db)
+    runtime_settings = get_settings()
     qbittorrent = QbittorrentService(settings=runtime_settings)
 
     qbit_progress: float | None = None

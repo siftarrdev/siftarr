@@ -30,7 +30,7 @@ class Season(Base):
     request_id: Mapped[int] = mapped_column(ForeignKey("requests.id"), nullable=False)
     season_number: Mapped[int] = mapped_column(Integer, nullable=False)
     status: Mapped[RequestStatus] = mapped_column(
-        SQLEnum(RequestStatus), default=RequestStatus.RECEIVED
+        SQLEnum(RequestStatus), default=RequestStatus.PENDING
     )
     synced_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 

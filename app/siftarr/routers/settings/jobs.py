@@ -4,11 +4,10 @@ import sys
 
 from fastapi import Depends, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.siftarr.config import get_settings
 from app.siftarr.database import get_db
-from app.siftarr.models.settings import Settings as DBSettings
 
 from .shared import logger, router, templates
 
@@ -23,7 +22,7 @@ async def rescan_plex(
     """Run the legacy manual Plex reconcile path for existing requests."""
     context = await settings_router._build_settings_page_context(request, db)
     try:
-        runtime_settings = await settings_router.get_effective_settings(db)
+        runtime_settings = get_settings()
         plex = settings_router.PlexService(settings=runtime_settings)
         try:
             tv_resynced, tv_failed, completed = await settings_router._rescan_plex_requests(
@@ -50,21 +49,13 @@ async def rescan_plex(
 @router.post("/staging")
 async def toggle_staging_mode(db: AsyncSession = Depends(get_db)) -> RedirectResponse:
     """Toggle staging mode."""
-    result = await db.execute(select(DBSettings).where(DBSettings.key == "staging_mode_enabled"))
-    staging_setting = result.scalar_one_or_none()
-
-    if staging_setting:
-        staging_setting.value = "false" if staging_setting.value == "true" else "true"
-    else:
-        db.add(
-            DBSettings(
-                key="staging_mode_enabled",
-                value="true",
-                description="Enable staging mode to save torrents locally",
-            )
-        )
-
-    await db.commit()
+    del db
+    staging_enabled = get_settings().staging_mode_enabled
+    await settings_router._set_db_setting(
+        None,
+        "staging_mode_enabled",
+        "false" if staging_enabled else "true",
+    )
     return RedirectResponse(url="/settings", status_code=303)
 
 

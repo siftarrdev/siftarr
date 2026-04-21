@@ -11,6 +11,7 @@ from fastapi.templating import Jinja2Templates
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.siftarr.config import get_settings
 from app.siftarr.database import get_db
 from app.siftarr.models.episode import Episode
 from app.siftarr.models.request import (
@@ -24,8 +25,6 @@ from app.siftarr.models.staged_torrent import StagedTorrent
 from app.siftarr.services.http_client import get_shared_client
 from app.siftarr.services.lifecycle_service import LifecycleService
 from app.siftarr.services.overseerr_service import OverseerrService
-from app.siftarr.services.pending_queue_service import PendingQueueService
-from app.siftarr.services.runtime_settings import get_effective_settings
 from app.siftarr.services.tv_details_service import load_tv_seasons_with_episodes
 
 logger = logging.getLogger(__name__)
@@ -41,8 +40,7 @@ async def dashboard(
 ):
     """Display main dashboard."""
     lifecycle_service = LifecycleService(db)
-    queue_service = PendingQueueService(db)
-    effective_settings = await get_effective_settings(db)
+    effective_settings = get_settings()
 
     # Get active requests
     active_requests = await lifecycle_service.get_active_requests(limit=500)
@@ -60,8 +58,7 @@ async def dashboard(
         if req.status == RequestStatus.UNRELEASED:
             return True
         if req.media_type != MediaType.TV or req.status not in {
-            RequestStatus.PARTIALLY_AVAILABLE,
-            RequestStatus.AVAILABLE,
+            RequestStatus.PENDING,
             RequestStatus.COMPLETED,
         }:
             return False
@@ -81,15 +78,11 @@ async def dashboard(
             pending_requests.append(req)
             continue
         if (
-            req.status == RequestStatus.PARTIALLY_AVAILABLE
+            req.status == RequestStatus.PENDING
             and req.media_type == MediaType.TV
             and await _tv_has_pending_episodes(req.id)
         ):
             pending_requests.append(req)
-
-    # Get pending items and pending requests
-    pending_items = await queue_service.get_all_pending()
-    pending_items_by_request_id = {item.request_id: item for item in pending_items}
 
     # Get selected torrents that are either waiting in staging or already sent to qBittorrent.
     result = await db.execute(
@@ -139,7 +132,7 @@ async def dashboard(
         RequestStatus.COMPLETED, limit=500
     )
 
-    unreleased_candidates = await lifecycle_service.get_unreleased_and_partial_requests(limit=500)
+    unreleased_candidates = await lifecycle_service.get_unreleased_requests(limit=500)
     unreleased_requests = [
         req for req in unreleased_candidates if await _should_show_in_unreleased(req)
     ]
@@ -248,7 +241,6 @@ async def dashboard(
             "staging_mode_enabled": effective_settings.staging_mode_enabled,
             "qbittorrent_url": str(effective_settings.qbittorrent_url or "").rstrip("/"),
             "pending_requests": pending_requests,
-            "pending_items_by_request_id": pending_items_by_request_id,
             "staged_torrents": staged_torrents,
             "staged_request_statuses": staged_request_statuses,
             "replaced_by_titles": replaced_by_titles,

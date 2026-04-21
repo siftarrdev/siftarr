@@ -3,7 +3,7 @@
 import json
 from datetime import UTC, datetime, timedelta
 from typing import cast
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -70,9 +70,7 @@ async def test_request_details_reuses_persisted_multi_season_coverage(
         episodes_two_result,
     ]
 
-    monkeypatch.setattr(
-        dashboard_api, "get_effective_settings", AsyncMock(return_value=MagicMock())
-    )
+    monkeypatch.setattr(dashboard_api, "get_settings", lambda: MagicMock())
 
     class FakeOverseerrService:
         def __init__(self, settings):
@@ -231,9 +229,7 @@ async def test_request_details_orders_stored_releases_by_score_then_size(
         episodes_two_result,
     ]
 
-    monkeypatch.setattr(
-        dashboard_api, "get_effective_settings", AsyncMock(return_value=MagicMock())
-    )
+    monkeypatch.setattr(dashboard_api, "get_settings", lambda: MagicMock())
 
     class FakeOverseerrService:
         def __init__(self, settings):
@@ -336,9 +332,7 @@ async def test_request_details_includes_release_status_reason_and_publish_date(
     rules_result.scalars.return_value.all.return_value = []
     mock_db.execute.side_effect = [request_result, release_result, rules_result]
 
-    monkeypatch.setattr(
-        dashboard_api, "get_effective_settings", AsyncMock(return_value=MagicMock())
-    )
+    monkeypatch.setattr(dashboard_api, "get_settings", lambda: MagicMock())
 
     class FakeOverseerrService:
         def __init__(self, settings):

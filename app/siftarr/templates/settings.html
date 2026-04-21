@@ -173,7 +173,7 @@ details[open] summary .accordion-chevron { transform: rotate(90deg); }
             <svg class="accordion-chevron w-4 h-4 text-gray-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
             <div>
                 <h2 class="section-title">Plex Scheduler Status</h2>
-                <p class="section-subtitle">Persisted status for incremental and full Plex jobs</p>
+                <p class="section-subtitle">In-memory status for incremental and full Plex jobs</p>
             </div>
         </summary>
         <div class="card-body grid grid-cols-1 xl:grid-cols-2 gap-4">
@@ -200,10 +200,6 @@ details[open] summary .accordion-chevron { transform: rotate(90deg); }
                     <div class="rounded-lg bg-surface-900/70 p-3">
                         <dt class="text-gray-500">Last Run</dt>
                         <dd class="text-gray-200 mt-1">{{ job.last_run or job.last_started or 'Never' }}</dd>
-                    </div>
-                    <div class="rounded-lg bg-surface-900/70 p-3">
-                        <dt class="text-gray-500">Checkpoint</dt>
-                        <dd class="text-gray-200 mt-1">{{ job.checkpoint or 'None' }}</dd>
                     </div>
                     <div class="rounded-lg bg-surface-900/70 p-3">
                         <dt class="text-gray-500">Lock</dt>

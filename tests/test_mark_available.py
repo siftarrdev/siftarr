@@ -24,7 +24,7 @@ def _make_episode(status: RequestStatus, ep_id: int = 1) -> MagicMock:
 
 def _make_season(
     episodes: list,
-    status: RequestStatus = RequestStatus.RECEIVED,
+    status: RequestStatus = RequestStatus.PENDING,
     request_id: int = 1,
     season_id: int = 1,
 ) -> MagicMock:
@@ -37,7 +37,7 @@ def _make_season(
 
 
 def _make_request(
-    seasons: list, status: RequestStatus = RequestStatus.RECEIVED, request_id: int = 1
+    seasons: list, status: RequestStatus = RequestStatus.PENDING, request_id: int = 1
 ) -> MagicMock:
     r = MagicMock()
     r.id = request_id
@@ -47,23 +47,18 @@ def _make_request(
 
 
 class TestRecalculateSeasonStatus:
-    def test_all_available(self):
-        eps = [_make_episode(RequestStatus.AVAILABLE), _make_episode(RequestStatus.AVAILABLE, 2)]
+    def test_all_completed(self):
+        eps = [_make_episode(RequestStatus.COMPLETED), _make_episode(RequestStatus.COMPLETED, 2)]
         season = _make_season(eps)
-        assert _recalculate_season_status(season) == RequestStatus.AVAILABLE
+        assert _recalculate_season_status(season) == RequestStatus.COMPLETED
 
-    def test_mixed_available_and_completed(self):
-        eps = [_make_episode(RequestStatus.AVAILABLE), _make_episode(RequestStatus.COMPLETED, 2)]
+    def test_mixed_completed_and_pending(self):
+        eps = [_make_episode(RequestStatus.COMPLETED), _make_episode(RequestStatus.PENDING, 2)]
         season = _make_season(eps)
-        assert _recalculate_season_status(season) == RequestStatus.AVAILABLE
+        assert _recalculate_season_status(season) == RequestStatus.PENDING
 
-    def test_partially_available(self):
-        eps = [_make_episode(RequestStatus.AVAILABLE), _make_episode(RequestStatus.RECEIVED, 2)]
-        season = _make_season(eps)
-        assert _recalculate_season_status(season) == RequestStatus.PARTIALLY_AVAILABLE
-
-    def test_none_available(self):
-        eps = [_make_episode(RequestStatus.RECEIVED), _make_episode(RequestStatus.RECEIVED, 2)]
+    def test_none_completed_keeps_status(self):
+        eps = [_make_episode(RequestStatus.PENDING), _make_episode(RequestStatus.PENDING, 2)]
         season = _make_season(eps, status=RequestStatus.DOWNLOADING)
         assert _recalculate_season_status(season) == RequestStatus.DOWNLOADING
 
@@ -73,42 +68,42 @@ class TestRecalculateSeasonStatus:
 
 
 class TestRecalculateRequestStatus:
-    def test_all_seasons_available(self):
-        s1 = _make_season([], status=RequestStatus.AVAILABLE)
-        s2 = _make_season([], status=RequestStatus.AVAILABLE, season_id=2)
+    def test_all_seasons_completed(self):
+        s1 = _make_season([], status=RequestStatus.COMPLETED)
+        s2 = _make_season([], status=RequestStatus.COMPLETED, season_id=2)
         req = _make_request([s1, s2])
-        assert _recalculate_request_status(req) == RequestStatus.AVAILABLE
+        assert _recalculate_request_status(req) == RequestStatus.COMPLETED
 
     def test_mixed_seasons(self):
-        s1 = _make_season([], status=RequestStatus.AVAILABLE)
-        s2 = _make_season([], status=RequestStatus.RECEIVED, season_id=2)
+        s1 = _make_season([], status=RequestStatus.COMPLETED)
+        s2 = _make_season([], status=RequestStatus.PENDING, season_id=2)
         req = _make_request([s1, s2])
-        assert _recalculate_request_status(req) == RequestStatus.PARTIALLY_AVAILABLE
+        assert _recalculate_request_status(req) == RequestStatus.PENDING
 
     def test_no_seasons(self):
         req = _make_request([], status=RequestStatus.PENDING)
         assert _recalculate_request_status(req) == RequestStatus.PENDING
 
-    def test_partially_available_season(self):
-        s1 = _make_season([], status=RequestStatus.PARTIALLY_AVAILABLE)
-        s2 = _make_season([], status=RequestStatus.RECEIVED, season_id=2)
+    def test_pending_season(self):
+        s1 = _make_season([], status=RequestStatus.PENDING)
+        s2 = _make_season([], status=RequestStatus.PENDING, season_id=2)
         req = _make_request([s1, s2])
-        assert _recalculate_request_status(req) == RequestStatus.PARTIALLY_AVAILABLE
+        assert _recalculate_request_status(req) == RequestStatus.PENDING
 
 
 class TestMarkEpisodeAvailableEndpoint:
     """Integration-style tests using mocked DB for the mark-available endpoint logic."""
 
     @pytest.mark.asyncio
-    async def test_already_available_raises_400(self):
-        """Marking an already-available episode should raise HTTPException(400)."""
+    async def test_already_completed_raises_400(self):
+        """Marking an already-completed episode should raise HTTPException(400)."""
         from fastapi import HTTPException
 
         from app.siftarr.routers.dashboard_actions import mark_episode_available
 
         ep = MagicMock()
         ep.id = 1
-        ep.status = RequestStatus.AVAILABLE
+        ep.status = RequestStatus.COMPLETED
         ep.season_id = 10
 
         season = MagicMock()

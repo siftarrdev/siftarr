@@ -69,19 +69,13 @@ def build_plex_run_outcome_summary(
     mode = metrics_payload.get("mode")
     skipped = _coerce_int(scan_payload.get("skipped_on_error_items"))
     downgraded = _coerce_int(scan_payload.get("downgraded_requests"))
-    checkpoint_payload = scan_payload.get("checkpoint")
-    checkpoint_advanced = (
-        checkpoint_payload.get("advanced") if isinstance(checkpoint_payload, dict) else None
-    )
 
     if mode == "incremental_recent_scan":
         if skipped or last_error:
             return (
-                "Incremental run partial; checkpoint retained after "
-                f"{max(skipped, 1)} transient/inconclusive item(s)"
+                "Incremental run partial; "
+                f"{max(skipped, 1)} transient/inconclusive item(s) remained"
             )
-        if checkpoint_advanced is True:
-            return "Incremental run completed cleanly; checkpoint advanced"
         return "Incremental run completed"
 
     if mode == "full_reconcile_scan":
@@ -114,7 +108,7 @@ def build_manual_plex_job_message(job_label: str, result: Any) -> tuple[str, str
 
     message = f"{job_label} completed. Transitioned {result.completed_requests} request(s)."
     outcome_summary = build_plex_run_outcome_summary(result.metrics_payload)
-    if outcome_summary == "Incremental run completed cleanly; checkpoint advanced":
+    if outcome_summary == "Incremental run completed":
         message = (
             f"{job_label} completed cleanly. Transitioned {result.completed_requests} request(s)."
         )
@@ -148,37 +142,46 @@ def build_manual_plex_job_message(job_label: str, result: Any) -> tuple[str, str
 async def build_plex_job_statuses(
     db: AsyncSession,
     *,
-    plex_scan_state_service_cls,
     incremental_job_name: str,
     full_job_name: str,
 ) -> list[dict[str, Any]]:
-    """Load persisted scheduler status for Plex scan jobs."""
-    state_service = plex_scan_state_service_cls(db)
+    """Load in-memory scheduler status for Plex scan jobs."""
+    del db
+    from app.siftarr.main import scheduler_service
+
     job_rows = [
         (incremental_job_name, "Incremental Plex Sync", "Fast recent-added availability scan"),
         (full_job_name, "Full Plex Reconcile", "Slower full-library reconciliation run"),
     ]
+    job_state = (
+        await scheduler_service.get_plex_job_state_snapshot()
+        if scheduler_service is not None
+        else {}
+    )
+
     statuses: list[dict[str, Any]] = []
     for job_name, label, description in job_rows:
-        state = await state_service.get_state(job_name)
-        metrics_payload = state.metrics_payload if state is not None else None
+        state = job_state.get(job_name, {})
+        metrics_payload = state.get("metrics_payload")
+        locked = bool(state.get("locked", False))
+        lock_owner = state.get("lock_owner")
+        last_error = state.get("last_error")
         statuses.append(
             {
                 "job_name": job_name,
                 "label": label,
                 "description": description,
-                "last_success": serialize_datetime(state.last_success_at if state else None),
-                "last_run": serialize_datetime(state.last_finished_at if state else None),
-                "last_started": serialize_datetime(state.last_started_at if state else None),
-                "checkpoint": serialize_datetime(state.checkpoint_at if state else None),
-                "locked": bool(state and state.lock_owner),
-                "lock_owner": state.lock_owner if state else None,
-                "last_error": state.last_error if state else None,
+                "last_success": serialize_datetime(state.get("last_success")),
+                "last_run": serialize_datetime(state.get("last_run")),
+                "last_started": serialize_datetime(state.get("last_started")),
+                "locked": locked,
+                "lock_owner": lock_owner,
+                "last_error": last_error,
                 "run_summary": build_plex_run_outcome_summary(
                     metrics_payload,
-                    locked=bool(state and state.lock_owner),
-                    lock_owner=state.lock_owner if state else None,
-                    last_error=state.last_error if state else None,
+                    locked=locked,
+                    lock_owner=lock_owner,
+                    last_error=last_error,
                 ),
                 "metrics_snapshot": build_compact_metrics_snapshot(metrics_payload),
                 "metrics_payload": metrics_payload,

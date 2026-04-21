@@ -2,7 +2,7 @@
 
 import json
 from typing import cast
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -86,9 +86,7 @@ async def test_request_details_surfaces_active_staged_torrent_metadata(
         active_stage_result,
     ]
 
-    monkeypatch.setattr(
-        dashboard_api, "get_effective_settings", AsyncMock(return_value=MagicMock())
-    )
+    monkeypatch.setattr(dashboard_api, "get_settings", lambda: MagicMock())
 
     class FakeOverseerrService:
         def __init__(self, settings):
@@ -236,9 +234,7 @@ async def test_request_details_tv_scopes_active_stage_to_matching_episode(
         episodes_result,
     ]
 
-    monkeypatch.setattr(
-        dashboard_api, "get_effective_settings", AsyncMock(return_value=MagicMock())
-    )
+    monkeypatch.setattr(dashboard_api, "get_settings", lambda: MagicMock())
 
     class FakeOverseerrService:
         def __init__(self, settings):

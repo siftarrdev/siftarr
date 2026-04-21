@@ -3,7 +3,7 @@
 import json
 from datetime import UTC, datetime, timedelta
 from typing import cast
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -13,10 +13,10 @@ from app.siftarr.services import tv_details_service
 
 
 @pytest.mark.asyncio
-async def test_request_details_serializes_unreleased_and_partial_tv_counts(
+async def test_request_details_serializes_unreleased_and_pending_tv_counts(
     mock_db, monkeypatch, background_tasks
 ):
-    """TV details should preserve partial availability and unreleased episodes."""
+    """TV details should preserve completed, pending, and unreleased episodes."""
     request_record = MagicMock()
     request_record.id = 21
     request_record.media_type = MediaType.TV
@@ -28,7 +28,7 @@ async def test_request_details_serializes_unreleased_and_partial_tv_counts(
     season_one = MagicMock(
         id=101,
         season_number=8,
-        status=RequestStatus.PARTIALLY_AVAILABLE,
+        status=RequestStatus.PENDING,
         synced_at=synced_at,
     )
     available_episode = MagicMock(
@@ -37,7 +37,7 @@ async def test_request_details_serializes_unreleased_and_partial_tv_counts(
         episode_number=15,
         title="Episode 15",
         air_date=None,
-        status=RequestStatus.AVAILABLE,
+        status=RequestStatus.COMPLETED,
         release_id=None,
     )
     future_episode = MagicMock(
@@ -68,9 +68,7 @@ async def test_request_details_serializes_unreleased_and_partial_tv_counts(
         episodes_result,
     ]
 
-    monkeypatch.setattr(
-        dashboard_api, "get_effective_settings", AsyncMock(return_value=MagicMock())
-    )
+    monkeypatch.setattr(dashboard_api, "get_settings", lambda: MagicMock())
 
     class FakeOverseerrService:
         def __init__(self, settings):
@@ -94,21 +92,21 @@ async def test_request_details_serializes_unreleased_and_partial_tv_counts(
 
     body = json.loads(cast(bytes, response.body))
     season_payload = body["tv_info"]["seasons"][0]
-    assert season_payload["status"] == RequestStatus.PARTIALLY_AVAILABLE.value
+    assert season_payload["status"] == RequestStatus.PENDING.value
     assert season_payload["available_count"] == 1
     assert season_payload["pending_count"] == 0
     assert season_payload["unreleased_count"] == 1
     assert [episode["status"] for episode in season_payload["episodes"]] == [
-        RequestStatus.AVAILABLE.value,
+        RequestStatus.COMPLETED.value,
         RequestStatus.UNRELEASED.value,
     ]
 
 
 @pytest.mark.asyncio
-async def test_request_details_flags_fresh_partial_tv_data_for_plex_enrichment(
+async def test_request_details_flags_fresh_pending_tv_data_for_plex_enrichment(
     mock_db, monkeypatch, background_tasks
 ):
-    """Fresh partial seasons with 0 available episodes should trigger Plex enrichment."""
+    """Fresh pending seasons with 0 completed episodes should trigger Plex enrichment."""
     request_record = MagicMock()
     request_record.id = 21
     request_record.media_type = MediaType.TV
@@ -120,7 +118,7 @@ async def test_request_details_flags_fresh_partial_tv_data_for_plex_enrichment(
     season_one = MagicMock(
         id=101,
         season_number=8,
-        status=RequestStatus.PARTIALLY_AVAILABLE,
+        status=RequestStatus.PENDING,
         synced_at=synced_at,
     )
     pending_episode = MagicMock(
@@ -160,9 +158,7 @@ async def test_request_details_flags_fresh_partial_tv_data_for_plex_enrichment(
         episodes_result,
     ]
 
-    monkeypatch.setattr(
-        dashboard_api, "get_effective_settings", AsyncMock(return_value=MagicMock())
-    )
+    monkeypatch.setattr(dashboard_api, "get_settings", lambda: MagicMock())
 
     class FakeOverseerrService:
         def __init__(self, settings):
@@ -192,7 +188,7 @@ async def test_request_details_flags_fresh_partial_tv_data_for_plex_enrichment(
 
     body = json.loads(cast(bytes, response.body))
     season_payload = body["tv_info"]["seasons"][0]
-    assert season_payload["status"] == RequestStatus.PARTIALLY_AVAILABLE.value
+    assert season_payload["status"] == RequestStatus.PENDING.value
     assert season_payload["available_count"] == 0
     assert season_payload["total_count"] == 2
     assert season_payload["pending_count"] == 1
@@ -259,9 +255,7 @@ async def test_request_details_flags_pending_unreleased_tv_data_for_plex_enrichm
         episodes_result,
     ]
 
-    monkeypatch.setattr(
-        dashboard_api, "get_effective_settings", AsyncMock(return_value=MagicMock())
-    )
+    monkeypatch.setattr(dashboard_api, "get_settings", lambda: MagicMock())
 
     class FakeOverseerrService:
         def __init__(self, settings):
@@ -296,7 +290,7 @@ async def test_request_details_surfaces_request_level_tv_aggregate_counts(
     request_record = MagicMock()
     request_record.id = 21
     request_record.media_type = MediaType.TV
-    request_record.status = RequestStatus.PARTIALLY_AVAILABLE
+    request_record.status = RequestStatus.PENDING
     request_record.title = "The Rookie"
     request_record.overseerr_request_id = None
 
@@ -304,7 +298,7 @@ async def test_request_details_surfaces_request_level_tv_aggregate_counts(
     season_one = MagicMock(
         id=101,
         season_number=8,
-        status=RequestStatus.PARTIALLY_AVAILABLE,
+        status=RequestStatus.PENDING,
         synced_at=synced_at,
     )
     available_episode = MagicMock(
@@ -313,7 +307,7 @@ async def test_request_details_surfaces_request_level_tv_aggregate_counts(
         episode_number=15,
         title="Episode 15",
         air_date=None,
-        status=RequestStatus.AVAILABLE,
+        status=RequestStatus.COMPLETED,
         release_id=None,
     )
     pending_episode = MagicMock(
@@ -357,9 +351,7 @@ async def test_request_details_surfaces_request_level_tv_aggregate_counts(
         episodes_result,
     ]
 
-    monkeypatch.setattr(
-        dashboard_api, "get_effective_settings", AsyncMock(return_value=MagicMock())
-    )
+    monkeypatch.setattr(dashboard_api, "get_settings", lambda: MagicMock())
 
     class FakeOverseerrService:
         def __init__(self, settings):
@@ -382,7 +374,7 @@ async def test_request_details_surfaces_request_level_tv_aggregate_counts(
     )
 
     body = json.loads(cast(bytes, response.body))
-    assert body["request"]["status"] == RequestStatus.PARTIALLY_AVAILABLE.value
+    assert body["request"]["status"] == RequestStatus.PENDING.value
     assert body["tv_info"]["aggregate_counts"] == {
         "available": 1,
         "pending": 1,

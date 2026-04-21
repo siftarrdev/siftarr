@@ -3,7 +3,7 @@
 import json
 from datetime import UTC, datetime, timedelta
 from typing import cast
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -56,9 +56,7 @@ async def test_request_details_returns_cached_tv_data_and_sync_state(
         episodes_result,
     ]
 
-    monkeypatch.setattr(
-        dashboard_api, "get_effective_settings", AsyncMock(return_value=MagicMock())
-    )
+    monkeypatch.setattr(dashboard_api, "get_settings", lambda: MagicMock())
 
     class FakeOverseerrService:
         def __init__(self, settings):
@@ -105,7 +103,7 @@ async def test_get_request_seasons_returns_sync_state_without_inline_refresh(
 
     synced_at = datetime.now(UTC).replace(tzinfo=None)
     season_one = MagicMock(
-        id=101, season_number=1, status=RequestStatus.AVAILABLE, synced_at=synced_at
+        id=101, season_number=1, status=RequestStatus.COMPLETED, synced_at=synced_at
     )
     episode_one = MagicMock(
         id=201,
@@ -113,7 +111,7 @@ async def test_get_request_seasons_returns_sync_state_without_inline_refresh(
         episode_number=1,
         title="Pilot",
         air_date=None,
-        status=RequestStatus.AVAILABLE,
+        status=RequestStatus.COMPLETED,
         release_id=None,
     )
 
@@ -137,7 +135,7 @@ async def test_get_request_seasons_returns_sync_state_without_inline_refresh(
     )
 
     body = json.loads(cast(bytes, response.body))
-    assert body["seasons"][0]["episodes"][0]["status"] == RequestStatus.AVAILABLE.value
+    assert body["seasons"][0]["episodes"][0]["status"] == RequestStatus.COMPLETED.value
     assert body["sync_state"]["stale"] is False
     assert body["sync_state"]["refresh_in_progress"] is False
     assert scheduled == []

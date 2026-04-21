@@ -6,6 +6,7 @@ from fastapi import Depends, Request
 from fastapi.responses import HTMLResponse, StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.siftarr.config import get_settings
 from app.siftarr.database import get_db
 
 from .shared import router, templates
@@ -58,7 +59,7 @@ async def sync_overseerr(
         return templates.TemplateResponse(request, "settings.html", context)
 
     try:
-        runtime_settings = await settings_router.get_effective_settings(db)
+        runtime_settings = get_settings()
         synced_count, skipped_count = await settings_router._import_overseerr_requests(
             db,
             runtime_settings,

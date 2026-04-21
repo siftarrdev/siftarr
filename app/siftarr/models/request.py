@@ -11,7 +11,6 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.siftarr.models._base import Base  # noqa: PLC0414
 
 if TYPE_CHECKING:
-    from app.siftarr.models.pending_queue import PendingQueue
     from app.siftarr.models.release import Release
     from app.siftarr.models.season import Season
 
@@ -27,7 +26,6 @@ class MediaType(enum.StrEnum):
 
 
 class RequestStatus(enum.StrEnum):
-    RECEIVED = "received"
     SEARCHING = "searching"
     PENDING = "pending"
     UNRELEASED = "unreleased"
@@ -35,8 +33,6 @@ class RequestStatus(enum.StrEnum):
     DOWNLOADING = "downloading"
     COMPLETED = "completed"
     FAILED = "failed"
-    AVAILABLE = "available"
-    PARTIALLY_AVAILABLE = "partially_available"
     DENIED = "denied"
 
 
@@ -73,14 +69,13 @@ class Request(Base):
     tvdb_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
     title: Mapped[str] = mapped_column(String(500), nullable=False)
     year: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    requested_seasons: Mapped[str | None] = mapped_column(
-        String(100), nullable=True
-    )  # JSON array string
-    requested_episodes: Mapped[str | None] = mapped_column(
-        String(255), nullable=True
-    )  # JSON array string
     status: Mapped[RequestStatus] = mapped_column(
-        SQLEnum(RequestStatus), default=RequestStatus.RECEIVED
+        SQLEnum(RequestStatus), default=RequestStatus.PENDING
+    )
+    next_retry_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, default=None)
+    retry_count: Mapped[int] = mapped_column(Integer, default=0)
+    last_plex_check_at: Mapped[datetime | None] = mapped_column(
+        DateTime, nullable=True, default=None
     )
     requester_username: Mapped[str | None] = mapped_column(String(255), nullable=True)
     requester_email: Mapped[str | None] = mapped_column(String(255), nullable=True)
@@ -96,9 +91,6 @@ class Request(Base):
     )
     seasons: Mapped[list["Season"]] = relationship(
         "Season", back_populates="request", cascade="all, delete-orphan"
-    )
-    pending_item: Mapped["PendingQueue | None"] = relationship(
-        "PendingQueue", back_populates="request", uselist=False
     )
 
     def __repr__(self) -> str:

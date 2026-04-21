@@ -32,7 +32,7 @@ def _make_season(request_id=1, season_number=1, synced_at=None):
     season.id = season_number
     season.request_id = request_id
     season.season_number = season_number
-    season.status = RequestStatus.RECEIVED
+    season.status = RequestStatus.PENDING
     season.synced_at = synced_at
     season.episodes = []
     return season
@@ -45,7 +45,7 @@ def _make_episode(season_id=1, episode_number=1):
     ep.episode_number = episode_number
     ep.title = f"Episode {episode_number}"
     ep.air_date = None
-    ep.status = RequestStatus.RECEIVED
+    ep.status = RequestStatus.PENDING
     return ep
 
 
@@ -432,14 +432,14 @@ class TestEpisodeSyncService:
         assert seasons == [season]
 
     @pytest.mark.asyncio
-    async def test_refresh_if_stale_applies_plex_to_fresh_partial_season_without_available_episodes(
+    async def test_refresh_if_stale_applies_plex_to_fresh_pending_season_without_completed_episodes(
         self, mock_db, mock_overseerr
     ):
-        """Fresh partial seasons should still trigger Plex enrichment when 0/x are resolved."""
+        """Fresh pending seasons should still trigger Plex enrichment when 0/x are resolved."""
         request = _make_request(id=1, overseerr_request_id=55)
         request.plex_rating_key = "plex-123"
         season = _make_season(synced_at=datetime.now(UTC))
-        season.status = RequestStatus.PARTIALLY_AVAILABLE
+        season.status = RequestStatus.PENDING
         episode_one = _make_episode(season_id=season.id, episode_number=1)
         episode_one.status = RequestStatus.PENDING
         episode_two = _make_episode(season_id=season.id, episode_number=2)
@@ -471,10 +471,10 @@ class TestEpisodeSyncService:
         assert seasons == [season]
 
     @pytest.mark.asyncio
-    async def test_sync_from_overseerr_keeps_partial_season_episodes_pending_or_unreleased(
+    async def test_sync_from_overseerr_keeps_pending_season_episodes_pending_or_unreleased(
         self, service, mock_db, mock_overseerr
     ):
-        """Fresh Overseerr-only partial seasons should not stamp episode rows partially_available."""
+        """Fresh Overseerr-only pending seasons should not stamp episode rows pending."""
         request = _make_request(id=1, tmdb_id=71527, overseerr_request_id=55)
 
         req_result = MagicMock()
@@ -519,10 +519,10 @@ class TestEpisodeSyncService:
         ]
 
     @pytest.mark.asyncio
-    async def test_sync_from_overseerr_ignores_available_status_for_episode_state(
+    async def test_sync_from_overseerr_ignores_completed_status_for_episode_state(
         self, service, mock_db, mock_overseerr
     ):
-        """TV episode state should not be seeded from Overseerr availability."""
+        """TV episode state should not be seeded from Overseerr completion."""
         request = _make_request(id=1, tmdb_id=71527, overseerr_request_id=55)
 
         req_result = MagicMock()
@@ -566,11 +566,11 @@ class TestEpisodeSyncService:
             RequestStatus.UNRELEASED,
         ]
 
-    def test_derive_episode_status_prioritizes_available_then_unreleased(self):
-        """Episode status should prefer Plex availability, then future-airing unreleased state."""
+    def test_derive_episode_status_prioritizes_completed_then_unreleased(self):
+        """Episode status should prefer Plex completion, then future-airing unreleased state."""
         tomorrow = datetime.now(UTC).date() + timedelta(days=1)
 
-        assert _derive_episode_status(is_on_plex=True, air_date=tomorrow) == RequestStatus.AVAILABLE
+        assert _derive_episode_status(is_on_plex=True, air_date=tomorrow) == RequestStatus.COMPLETED
         assert (
             _derive_episode_status(is_on_plex=False, air_date=tomorrow) == RequestStatus.UNRELEASED
         )
@@ -579,46 +579,39 @@ class TestEpisodeSyncService:
             == RequestStatus.PENDING
         )
 
-    def test_derive_season_status_keeps_partial_when_available_and_unreleased_mix(self):
-        """Mixed available and unreleased episodes should keep the season partially available."""
+    def test_derive_season_status_keeps_pending_when_completed_and_unreleased_mix(self):
+        """Mixed completed and unreleased episodes should keep the season pending."""
         episode_one = _make_episode()
-        episode_one.status = RequestStatus.AVAILABLE
+        episode_one.status = RequestStatus.COMPLETED
         episode_two = _make_episode(episode_number=2)
         episode_two.status = RequestStatus.UNRELEASED
 
-        assert (
-            _derive_season_status([episode_one, episode_two]) == RequestStatus.PARTIALLY_AVAILABLE
-        )
+        assert _derive_season_status([episode_one, episode_two]) == RequestStatus.PENDING
 
-    def test_derive_request_status_from_seasons_supports_partial_and_unreleased(self):
+    def test_derive_request_status_from_seasons_supports_pending_and_unreleased(self):
         """Request aggregate status should roll up from season statuses."""
         available = _make_season(season_number=1)
-        available.status = RequestStatus.AVAILABLE
+        available.status = RequestStatus.COMPLETED
         future = _make_season(season_number=2)
         future.status = RequestStatus.UNRELEASED
         pending = _make_season(season_number=3)
         pending.status = RequestStatus.PENDING
 
-        assert _derive_request_status_from_seasons([available]) == RequestStatus.AVAILABLE
+        assert _derive_request_status_from_seasons([available]) == RequestStatus.COMPLETED
         assert _derive_request_status_from_seasons([future]) == RequestStatus.UNRELEASED
-        assert (
-            _derive_request_status_from_seasons([available, future])
-            == RequestStatus.PARTIALLY_AVAILABLE
-        )
+        assert _derive_request_status_from_seasons([available, future]) == RequestStatus.PENDING
         assert _derive_request_status_from_seasons([pending, future]) == RequestStatus.PENDING
 
     @pytest.mark.asyncio
-    async def test_apply_fallback_statuses_preserves_unreleased_and_partial_availability(
-        self, mock_db
-    ):
-        """Fallback logic should not flatten future episodes or partial seasons to pending."""
+    async def test_apply_fallback_statuses_preserves_unreleased_and_pending(self, mock_db):
+        """Fallback logic should not flatten future episodes or pending seasons to pending."""
         season = _make_season(season_number=8)
-        season.status = RequestStatus.PARTIALLY_AVAILABLE
+        season.status = RequestStatus.PENDING
         available_episode = _make_episode(season_id=season.id, episode_number=1)
-        available_episode.status = RequestStatus.AVAILABLE
+        available_episode.status = RequestStatus.COMPLETED
         future_episode = _make_episode(season_id=season.id, episode_number=16)
         future_episode.air_date = datetime.now(UTC).date() + timedelta(days=7)
-        future_episode.status = RequestStatus.PARTIALLY_AVAILABLE
+        future_episode.status = RequestStatus.PENDING
 
         # Mock _load_season_episodes to return the test episodes directly
         # (avoids needing a full DB query setup for unit tests)
@@ -628,12 +621,12 @@ class TestEpisodeSyncService:
 
             await service._apply_fallback_statuses([season])
 
-        assert available_episode.status == RequestStatus.AVAILABLE
+        assert available_episode.status == RequestStatus.COMPLETED
         assert future_episode.status == RequestStatus.UNRELEASED
-        assert season.status == RequestStatus.PARTIALLY_AVAILABLE
+        assert season.status == RequestStatus.PENDING
 
     @pytest.mark.asyncio
-    async def test_apply_plex_availability_updates_request_status(self, mock_db, mock_overseerr):
+    async def test_apply_plex_completed_updates_request_status(self, mock_db, mock_overseerr):
         """Plex-enriched season state should also persist the request aggregate status."""
         request = _make_request(id=1)
         request.title = "The Rookie"
@@ -664,15 +657,15 @@ class TestEpisodeSyncService:
             seasons = await service._apply_plex_availability(request, [season])
 
         assert seasons == [season]
-        assert season.status == RequestStatus.PARTIALLY_AVAILABLE
-        assert request.status == RequestStatus.PARTIALLY_AVAILABLE
+        assert season.status == RequestStatus.PENDING
+        assert request.status == RequestStatus.PENDING
         mock_db.commit.assert_awaited_once()
 
     @pytest.mark.asyncio
-    async def test_reconcile_existing_seasons_marks_all_requested_episodes_available_not_completed(
+    async def test_reconcile_existing_seasons_marks_all_requested_episodes_completed(
         self, mock_db, mock_overseerr
     ):
-        """When all requested aired episodes are on Plex, TV requests should aggregate to available."""
+        """When all requested aired episodes are on Plex, TV requests should aggregate to completed."""
         request = _make_request(id=1)
         request.status = RequestStatus.DOWNLOADING
 
@@ -695,17 +688,17 @@ class TestEpisodeSyncService:
                 {(1, 1): True, (1, 2): True},
             )
 
-        assert episode_one.status == RequestStatus.AVAILABLE
-        assert episode_two.status == RequestStatus.AVAILABLE
-        assert season.status == RequestStatus.AVAILABLE
-        assert request.status == RequestStatus.AVAILABLE
+        assert episode_one.status == RequestStatus.COMPLETED
+        assert episode_two.status == RequestStatus.COMPLETED
+        assert season.status == RequestStatus.COMPLETED
+        assert request.status == RequestStatus.COMPLETED
         mock_db.commit.assert_awaited_once()
 
     @pytest.mark.asyncio
-    async def test_reconcile_existing_seasons_preserves_partial_season_with_future_episodes(
+    async def test_reconcile_existing_seasons_preserves_pending_season_with_future_episodes(
         self, mock_db, mock_overseerr
     ):
-        """Future unreleased episodes should keep the season and request partially available."""
+        """Future unreleased episodes should keep the season and request pending."""
         request = _make_request(id=1)
         request.status = RequestStatus.DOWNLOADING
 
@@ -728,14 +721,14 @@ class TestEpisodeSyncService:
                 {(2, 1): True, (2, 2): False},
             )
 
-        assert aired_episode.status == RequestStatus.AVAILABLE
+        assert aired_episode.status == RequestStatus.COMPLETED
         assert future_episode.status == RequestStatus.UNRELEASED
-        assert season.status == RequestStatus.PARTIALLY_AVAILABLE
-        assert request.status == RequestStatus.PARTIALLY_AVAILABLE
+        assert season.status == RequestStatus.PENDING
+        assert request.status == RequestStatus.PENDING
         mock_db.commit.assert_awaited_once()
 
     @pytest.mark.asyncio
-    async def test_reconcile_existing_seasons_keeps_ongoing_show_partially_available(
+    async def test_reconcile_existing_seasons_keeps_ongoing_show_pending(
         self, mock_db, mock_overseerr
     ):
         """Ongoing shows with all currently aired episodes on Plex should not flatten to completed."""
@@ -763,22 +756,22 @@ class TestEpisodeSyncService:
                 {(1, 1): True, (2, 1): False},
             )
 
-        assert available_season.status == RequestStatus.AVAILABLE
+        assert available_season.status == RequestStatus.COMPLETED
         assert future_season.status == RequestStatus.UNRELEASED
-        assert request.status == RequestStatus.PARTIALLY_AVAILABLE
+        assert request.status == RequestStatus.PENDING
         mock_db.commit.assert_awaited_once()
 
     @pytest.mark.asyncio
-    async def test_refresh_if_stale_reapplies_plex_when_available_and_pending_mix_exists(
+    async def test_refresh_if_stale_reapplies_plex_when_completed_and_pending_mix_exists(
         self, mock_db, mock_overseerr
     ):
-        """Fresh seasons with available+pending episodes should still re-enrich from Plex."""
+        """Fresh seasons with completed+pending episodes should still re-enrich from Plex."""
         request = _make_request(id=1, overseerr_request_id=55)
         request.plex_rating_key = "plex-123"
         season = _make_season(synced_at=datetime.now(UTC))
-        season.status = RequestStatus.PARTIALLY_AVAILABLE
+        season.status = RequestStatus.PENDING
         available_episode = _make_episode(season_id=season.id, episode_number=1)
-        available_episode.status = RequestStatus.AVAILABLE
+        available_episode.status = RequestStatus.COMPLETED
         pending_episode = _make_episode(season_id=season.id, episode_number=2)
         pending_episode.status = RequestStatus.PENDING
         season.episodes = [available_episode, pending_episode]

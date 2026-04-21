@@ -207,8 +207,7 @@
                         </thead>
                         <tbody class="divide-y divide-gray-700/40" id="pending-requests-body">
                             {% for req in pending_requests %}
-                            {% set pending_item = pending_items_by_request_id.get(req.id) %}
-                            <tr class="hover:bg-surface-850/80 cursor-pointer transition-colors" onclick="openRequestDetails({{ req.id }})" data-request-id="{{ req.id }}" data-title="{{ req.title|lower }}" data-type="{{ req.media_type.value|lower }}" data-requestedby="{{ req.requester_username|default('Unknown')|lower }}" data-nextretry="{{ pending_item.next_retry_at.strftime('%Y-%m-%d %H:%M') if pending_item and pending_item.next_retry_at else '0000-00-00 00:00' }}" data-lasterror="{{ (pending_item.last_error or '-')|lower if pending_item else '-' }}" data-year="{{ req.year or 0 }}">
+                            <tr class="hover:bg-surface-850/80 cursor-pointer transition-colors" onclick="openRequestDetails({{ req.id }})" data-request-id="{{ req.id }}" data-title="{{ req.title|lower }}" data-type="{{ req.media_type.value|lower }}" data-requestedby="{{ req.requester_username|default('Unknown')|lower }}" data-nextretry="{{ req.next_retry_at.strftime('%Y-%m-%d %H:%M') if req.next_retry_at else '0000-00-00 00:00' }}" data-lasterror="{{ (req.rejection_reason or '-')|lower }}" data-year="{{ req.year or 0 }}">
                                 <td class="px-4 py-3.5 whitespace-nowrap text-sm" onclick="event.stopPropagation()">
                                     <input name="request_ids" value="{{ req.id }}" type="checkbox" class="pending-request-checkbox rounded border-gray-600 bg-surface-900 text-brand-500 focus:ring-brand-500">
                                 </td>
@@ -216,8 +215,8 @@
                                 <td class="px-4 py-3.5 whitespace-nowrap text-sm text-gray-500 tabular-nums" data-sort-value="{{ req.year or 0 }}">{{ req.year or '-' }}</td>
                                 <td class="px-4 py-3.5 whitespace-nowrap text-sm capitalize text-gray-400">{{ req.media_type.value }}</td>
                                 <td class="px-4 py-3.5 whitespace-nowrap text-sm text-gray-400">{{ req.requester_username or 'Unknown' }}</td>
-                                <td class="px-4 py-3.5 whitespace-nowrap text-sm text-gray-500 tabular-nums">{{ pending_item.next_retry_at.strftime('%Y-%m-%d %H:%M') if pending_item and pending_item.next_retry_at else 'Ready now' }}</td>
-                                <td class="px-4 py-3.5 text-sm max-w-[12rem] overflow-hidden text-ellipsis {% if pending_item and pending_item.last_error %}text-red-400{% else %}text-gray-600{% endif %}">{{ pending_item.last_error if pending_item and pending_item.last_error else '-' }}</td>
+                                <td class="px-4 py-3.5 whitespace-nowrap text-sm text-gray-500 tabular-nums">{{ req.next_retry_at.strftime('%Y-%m-%d %H:%M') if req.next_retry_at else 'Ready now' }}</td>
+                                <td class="px-4 py-3.5 text-sm max-w-[12rem] overflow-hidden text-ellipsis {% if req.rejection_reason %}text-red-400{% else %}text-gray-600{% endif %}">{{ req.rejection_reason if req.rejection_reason else '-' }}</td>
                                 <td class="px-4 py-3.5 whitespace-nowrap text-sm" onclick="event.stopPropagation()">
                                     <div class="flex items-center gap-3">
                                         <button type="button" onclick="openRequestDetails({{ req.id }})" class="text-brand-400 hover:text-brand-300 font-medium">Details</button>

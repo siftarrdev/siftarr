@@ -30,7 +30,7 @@ async def save_connections(
     plex_token: str | None = Form(None),
     tz: str | None = Form(None),
 ) -> RedirectResponse:
-    """Save connection settings to database."""
+    """Save connection settings as runtime environment overrides."""
     del request
     await settings_router._set_db_setting(db, "overseerr_url", overseerr_url or "", "Overseerr URL")
     await settings_router._set_db_setting(
@@ -74,8 +74,20 @@ async def save_connections(
 
 @router.post("/connections/reset")
 async def reset_connections(request: Request) -> RedirectResponse:
-    """Reset connection settings by clearing database values."""
+    """Reset connection settings by clearing runtime environment overrides."""
     del request
+    settings_router._clear_runtime_setting(
+        "overseerr_url",
+        "overseerr_api_key",
+        "prowlarr_url",
+        "prowlarr_api_key",
+        "qbittorrent_url",
+        "qbittorrent_username",
+        "qbittorrent_password",
+        "plex_url",
+        "plex_token",
+        "tz",
+    )
     return RedirectResponse(url="/settings?reset=true", status_code=303)
 
 

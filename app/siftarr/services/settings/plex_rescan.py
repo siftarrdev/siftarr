@@ -4,6 +4,7 @@ import asyncio
 import contextlib
 from typing import Any
 
+from app.siftarr.config import get_settings
 from app.siftarr.models.request import MediaType, RequestStatus
 from app.siftarr.models.request import Request as RequestModel
 
@@ -70,7 +71,7 @@ async def rescan_plex_requests(
                 if not episodes:
                     return False
                 for episode in episodes:
-                    if episode.status != RequestStatus.AVAILABLE:
+                    if episode.status != RequestStatus.COMPLETED:
                         return False
             return True
 
@@ -127,7 +128,6 @@ async def rescan_plex_generator(
     *,
     shallow: bool = False,
     async_session_maker,
-    get_effective_settings_func,
     plex_service_cls,
     rescan_plex_requests_func,
     build_sse_progress_func,
@@ -138,7 +138,7 @@ async def rescan_plex_generator(
         yield serialize_sse({"phase": "connecting"})
 
         async with async_session_maker() as db:
-            runtime_settings = await get_effective_settings_func(db)
+            runtime_settings = get_settings()
             plex = plex_service_cls(settings=runtime_settings)
             try:
                 queue: asyncio.Queue[dict[str, Any] | None] = asyncio.Queue()

@@ -151,11 +151,10 @@ async def test_settings_page_includes_plex_job_status_and_manual_job_actions(
                         "last_success": "2026-04-19 12:00:00",
                         "last_run": "2026-04-19 12:05:00",
                         "last_started": "2026-04-19 12:04:00",
-                        "checkpoint": "2026-04-19 12:03:00",
                         "locked": False,
                         "lock_owner": None,
                         "last_error": None,
-                        "run_summary": "Incremental run completed cleanly; checkpoint advanced",
+                        "run_summary": "Incremental run completed",
                         "metrics_snapshot": "completed=2, scanned=4",
                     },
                     {
@@ -164,7 +163,6 @@ async def test_settings_page_includes_plex_job_status_and_manual_job_actions(
                         "last_success": None,
                         "last_run": None,
                         "last_started": None,
-                        "checkpoint": None,
                         "locked": True,
                         "lock_owner": "worker-1",
                         "last_error": "plex timeout",
@@ -186,5 +184,5 @@ async def test_settings_page_includes_plex_job_status_and_manual_job_actions(
     assert "Run Full Plex Reconcile" in body
     assert "Metrics Snapshot" in body
     assert "Last Outcome" in body
-    assert "Incremental run completed cleanly; checkpoint advanced" in body
+    assert "Incremental run completed" in body
     assert "worker-1" in body

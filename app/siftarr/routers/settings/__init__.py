@@ -1,22 +1,20 @@
 """Settings router package with compatibility re-exports."""
 
+import os
 from collections.abc import AsyncGenerator
 from importlib import import_module
 from typing import Any
 
+from app.siftarr.config import get_settings
 from app.siftarr.database import async_session_maker
 from app.siftarr.models.request import Request as RequestModel
 from app.siftarr.models.request import RequestStatus
-from app.siftarr.models.settings import Settings as DBSettings
 from app.siftarr.services.connection_tester import ConnectionTester
 from app.siftarr.services.overseerr_service import OverseerrService
-from app.siftarr.services.pending_queue_service import PendingQueueService
 from app.siftarr.services.plex_polling_service import PlexPollingService
-from app.siftarr.services.plex_scan_state_service import PlexScanStateService
 from app.siftarr.services.plex_service import PlexService
 from app.siftarr.services.release_selection_service import clear_release_search_cache
 from app.siftarr.services.rule_service import RuleService
-from app.siftarr.services.runtime_settings import get_effective_settings
 from app.siftarr.services.scheduler_service import (
     PLEX_FULL_RECONCILE_JOB_NAME,
     PLEX_INCREMENTAL_SYNC_JOB_NAME,
@@ -30,6 +28,20 @@ from app.siftarr.services.unreleased_service import evaluate_imported_request
 
 from .schemas import ConnectionSettings, ConnectionTestResponse
 from .shared import logger, router, templates
+
+_RUNTIME_SETTINGS_ENV_KEYS = {
+    "overseerr_url": "OVERSEERR_URL",
+    "overseerr_api_key": "OVERSEERR_API_KEY",
+    "prowlarr_url": "PROWLARR_URL",
+    "prowlarr_api_key": "PROWLARR_API_KEY",
+    "qbittorrent_url": "QBITTORRENT_URL",
+    "qbittorrent_username": "QBITTORRENT_USERNAME",
+    "qbittorrent_password": "QBITTORRENT_PASSWORD",
+    "plex_url": "PLEX_URL",
+    "plex_token": "PLEX_TOKEN",
+    "tz": "TZ",
+    "staging_mode_enabled": "STAGING_MODE_ENABLED",
+}
 
 
 def _serialize_datetime(value):
@@ -62,7 +74,6 @@ def _build_manual_plex_job_message(job_label: str, result: Any) -> tuple[str, st
 async def _build_plex_job_statuses(db) -> list[dict[str, Any]]:
     return await plex_jobs_service.build_plex_job_statuses(
         db,
-        plex_scan_state_service_cls=PlexScanStateService,
         incremental_job_name=PLEX_INCREMENTAL_SYNC_JOB_NAME,
         full_job_name=PLEX_FULL_RECONCILE_JOB_NAME,
     )
@@ -106,36 +117,32 @@ async def _run_bounded_with_progress(
 
 
 async def _set_db_setting(db, key: str, value: str, description: str | None = None) -> None:
-    await page_context_service.set_db_setting(
-        db,
-        key,
-        value,
-        description,
-        settings_model=DBSettings,
-    )
+    del db, description
+    env_name = _RUNTIME_SETTINGS_ENV_KEYS.get(key, key.upper())
+    os.environ[env_name] = value
+    get_settings.cache_clear()
+
+
+def _clear_runtime_setting(*keys: str) -> None:
+    for key in keys:
+        env_name = _RUNTIME_SETTINGS_ENV_KEYS.get(key, key.upper())
+        os.environ.pop(env_name, None)
+    get_settings.cache_clear()
 
 
 async def _build_effective_settings(db) -> dict[str, Any]:
-    return await page_context_service.build_effective_settings(
-        db,
-        get_effective_settings_func=get_effective_settings,
-    )
+    del db
+    return await page_context_service.build_effective_settings()
 
 
 async def _build_effective_settings_obj(db):
-    return await page_context_service.build_effective_settings_obj(
-        db,
-        build_effective_settings_func=_build_effective_settings,
-    )
+    return await page_context_service.build_effective_settings_obj(db)
 
 
 async def _build_settings_page_context(request, db) -> dict[str, Any]:
     return await page_context_service.build_settings_page_context(
         request,
         db,
-        build_effective_settings_func=_build_effective_settings,
-        settings_model=DBSettings,
-        pending_queue_service_cls=PendingQueueService,
         request_model=RequestModel,
         request_status_enum=RequestStatus,
         build_plex_job_statuses_func=_build_plex_job_statuses,
@@ -211,7 +218,6 @@ async def _sync_overseerr_generator() -> AsyncGenerator[str, None]:
     async for event in overseerr_import_service.sync_overseerr_generator(
         async_session_maker=async_session_maker,
         build_effective_settings_func=_build_effective_settings,
-        get_effective_settings_func=get_effective_settings,
         import_overseerr_requests_func=_import_overseerr_requests,
         build_sse_progress_func=_build_sse_progress,
         logger=logger,
@@ -223,7 +229,6 @@ async def _rescan_plex_generator(shallow: bool = False) -> AsyncGenerator[str, N
     async for event in plex_rescan_service.rescan_plex_generator(
         shallow=shallow,
         async_session_maker=async_session_maker,
-        get_effective_settings_func=get_effective_settings,
         plex_service_cls=PlexService,
         rescan_plex_requests_func=_rescan_plex_requests,
         build_sse_progress_func=_build_sse_progress,
@@ -268,9 +273,7 @@ __all__ = [
     "ConnectionTestResponse",
     "ConnectionTester",
     "OverseerrService",
-    "PendingQueueService",
     "PlexPollingService",
-    "PlexScanStateService",
     "PlexService",
     "RuleService",
     "async_session_maker",
@@ -278,7 +281,6 @@ __all__ = [
     "clear_release_search_cache",
     "evaluate_imported_request",
     "get_connections_api",
-    "get_effective_settings",
     "get_settings_page",
     "logger",
     "rescan_plex",

@@ -11,6 +11,7 @@ from fastapi.responses import JSONResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.siftarr.config import get_settings
 from app.siftarr.database import get_db
 from app.siftarr.models.request import MediaType, RequestStatus, is_active_staging_workflow_status
 from app.siftarr.models.rule import Rule
@@ -42,7 +43,6 @@ from app.siftarr.services.request_service import (
     validate_tv_request,
 )
 from app.siftarr.services.rule_engine import RuleEngine
-from app.siftarr.services.runtime_settings import get_effective_settings
 from app.siftarr.services.tv_details_service import (
     compute_sync_metadata,
     count_request_episode_states,
@@ -129,7 +129,7 @@ async def request_details(
 
     request = await load_request_or_404(db, request_id)
 
-    effective_settings = await get_effective_settings(db)
+    effective_settings = get_settings()
     overseerr_service = OverseerrService(settings=effective_settings)
     details: dict[str, object] = {
         "request": {
@@ -312,7 +312,7 @@ async def request_details(
             known_season_numbers.append(season.season_number)
             season_episodes = episodes_by_season.get(season.id, [])
             available_count = sum(
-                1 for ep in season_episodes if ep.status == RequestStatus.AVAILABLE
+                1 for ep in season_episodes if ep.status == RequestStatus.COMPLETED
             )
             state_counts = count_season_episode_states(season_episodes)
             season_data = {
@@ -543,7 +543,7 @@ async def search_season_packs(
     validate_tv_request(request)
     tvdb_id = ensure_tvdb_id(request)
 
-    runtime_settings = await get_effective_settings(db)
+    runtime_settings = get_settings()
     prowlarr = ProwlarrService(settings=runtime_settings)
 
     try:
@@ -598,7 +598,7 @@ async def search_all_season_packs(
     seasons = list(seasons_result.scalars().all())
     known_total_seasons = len(seasons) or None
 
-    runtime_settings = await get_effective_settings(db)
+    runtime_settings = get_settings()
     prowlarr = ProwlarrService(settings=runtime_settings)
 
     try:
@@ -655,7 +655,7 @@ async def search_episode(
     validate_tv_request(request)
     tvdb_id = ensure_tvdb_id(request)
 
-    runtime_settings = await get_effective_settings(db)
+    runtime_settings = get_settings()
     prowlarr = ProwlarrService(settings=runtime_settings)
 
     try:
@@ -706,7 +706,7 @@ async def refresh_plex(
     if request.media_type != MediaType.TV:
         return JSONResponse({"error": "Request is not a TV show"})
 
-    effective_settings = await get_effective_settings(db)
+    effective_settings = get_settings()
     plex_service = PlexService(settings=effective_settings)
 
     try:

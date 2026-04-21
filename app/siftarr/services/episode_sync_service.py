@@ -27,7 +27,7 @@ def _episode_needs_unreleased_status(air_date: date | None) -> bool:
 def _derive_episode_status(*, is_on_plex: bool, air_date: date | None) -> RequestStatus:
     """Derive an episode status from Plex availability and air date."""
     if is_on_plex:
-        return RequestStatus.AVAILABLE
+        return RequestStatus.COMPLETED
     if _episode_needs_unreleased_status(air_date):
         return RequestStatus.UNRELEASED
     return RequestStatus.PENDING
@@ -39,17 +39,17 @@ def _derive_season_status(episodes: list[Episode]) -> RequestStatus:
         return RequestStatus.PENDING
 
     statuses = {episode.status for episode in episodes}
-    if statuses == {RequestStatus.AVAILABLE}:
-        return RequestStatus.AVAILABLE
+    if statuses == {RequestStatus.COMPLETED}:
+        return RequestStatus.COMPLETED
     if statuses == {RequestStatus.UNRELEASED}:
         return RequestStatus.UNRELEASED
-    if RequestStatus.AVAILABLE in statuses:
-        return RequestStatus.PARTIALLY_AVAILABLE
+    if RequestStatus.COMPLETED in statuses:
+        return RequestStatus.PENDING
     if RequestStatus.PENDING in statuses and RequestStatus.UNRELEASED in statuses:
         return RequestStatus.PENDING
     if RequestStatus.PENDING in statuses:
         return RequestStatus.PENDING
-    return RequestStatus.PARTIALLY_AVAILABLE
+    return RequestStatus.PENDING
 
 
 def _derive_request_status_from_seasons(seasons: list[Season]) -> RequestStatus:
@@ -58,17 +58,17 @@ def _derive_request_status_from_seasons(seasons: list[Season]) -> RequestStatus:
         return RequestStatus.PENDING
 
     statuses = {season.status for season in seasons}
-    if statuses == {RequestStatus.AVAILABLE}:
-        return RequestStatus.AVAILABLE
+    if statuses == {RequestStatus.COMPLETED}:
+        return RequestStatus.COMPLETED
     if statuses == {RequestStatus.UNRELEASED}:
         return RequestStatus.UNRELEASED
-    if RequestStatus.AVAILABLE in statuses or RequestStatus.PARTIALLY_AVAILABLE in statuses:
-        return RequestStatus.PARTIALLY_AVAILABLE
+    if RequestStatus.COMPLETED in statuses or RequestStatus.PENDING in statuses:
+        return RequestStatus.PENDING
     if RequestStatus.PENDING in statuses and RequestStatus.UNRELEASED in statuses:
         return RequestStatus.PENDING
     if RequestStatus.PENDING in statuses:
         return RequestStatus.PENDING
-    return RequestStatus.PARTIALLY_AVAILABLE
+    return RequestStatus.PENDING
 
 
 class EpisodeSyncService:
@@ -491,8 +491,8 @@ class EpisodeSyncService:
 
         Overseerr reports season-level statuses like 'partially_available'.  Applying that
         same status to every individual episode is semantically wrong — episodes should be
-        either AVAILABLE (on Plex) or PENDING (needs search).  When we can't reach Plex, we
-        convert PARTIALLY_AVAILABLE episodes to PENDING so the UI and search logic work
+        either COMPLETED (on Plex) or PENDING (needs search).  When we can't reach Plex, we
+        convert any non-standard episode statuses to PENDING so the UI and search logic work
         correctly.
         """
         for season in seasons:
@@ -502,8 +502,8 @@ class EpisodeSyncService:
             )
 
             for episode in episodes:
-                if episode.status == RequestStatus.PARTIALLY_AVAILABLE or episode.status not in {
-                    RequestStatus.AVAILABLE,
+                if episode.status == RequestStatus.PENDING or episode.status not in {
+                    RequestStatus.COMPLETED,
                     RequestStatus.PENDING,
                     RequestStatus.UNRELEASED,
                 }:

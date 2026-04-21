@@ -25,17 +25,15 @@ async def test_reconcile_request_tv_loads_request_and_reuses_episode_sync_path(
     mock_plex.get_show_by_tmdb.return_value = {"rating_key": "42"}
     mock_plex.get_episode_availability.return_value = {(1, 1): True, (1, 2): False}
 
-    async def reconcile_to_partial(request, seasons, availability):
-        return await set_request_status(
-            request, RequestStatus.PARTIALLY_AVAILABLE, seasons, availability
-        )
+    async def reconcile_to_pending(request, seasons, availability):
+        return await set_request_status(request, RequestStatus.PENDING, seasons, availability)
 
     with patch.object(
         service.episode_sync,
         "reconcile_existing_seasons_from_plex",
         new_callable=AsyncMock,
     ) as mock_reconcile:
-        mock_reconcile.side_effect = reconcile_to_partial
+        mock_reconcile.side_effect = reconcile_to_pending
         result = await service.reconcile_request(77)
 
     assert result.request_id == 77
@@ -43,7 +41,7 @@ async def test_reconcile_request_tv_loads_request_and_reuses_episode_sync_path(
     assert result.reconciled is True
     assert result.available is True
     assert result.status_before == RequestStatus.DOWNLOADING
-    assert result.status_after == RequestStatus.PARTIALLY_AVAILABLE
+    assert result.status_after == RequestStatus.PENDING
     assert result.reason == "Some episodes found on Plex"
     assert result.completed_episodes == frozenset({(1, 1)})
     mock_reconcile.assert_awaited_once_with(req, req.seasons, {(1, 1): True, (1, 2): False})
@@ -65,24 +63,22 @@ async def test_reconcile_request_tv_partial_availability(service, mock_db, mock_
     mock_plex.get_show_by_tmdb.return_value = {"rating_key": "42"}
     mock_plex.get_episode_availability.return_value = {(1, 1): False, (1, 2): True}
 
-    async def reconcile_to_partial(request, seasons, availability):
-        return await set_request_status(
-            request, RequestStatus.PARTIALLY_AVAILABLE, seasons, availability
-        )
+    async def reconcile_to_pending(request, seasons, availability):
+        return await set_request_status(request, RequestStatus.PENDING, seasons, availability)
 
     with patch.object(
         service.episode_sync,
         "reconcile_existing_seasons_from_plex",
         new_callable=AsyncMock,
     ) as mock_reconcile:
-        mock_reconcile.side_effect = reconcile_to_partial
+        mock_reconcile.side_effect = reconcile_to_pending
         result = await service.reconcile_request(req)
 
     assert result.matched is True
     assert result.reconciled is True
     assert result.available is True
     assert result.status_before == RequestStatus.PENDING
-    assert result.status_after == RequestStatus.PARTIALLY_AVAILABLE
+    assert result.status_after == RequestStatus.PENDING
     assert result.reason == "Some episodes found on Plex"
     assert result.requested_episode_count == 2
     assert result.completed_episodes == frozenset({(1, 2)})
@@ -94,7 +90,7 @@ async def test_reconcile_request_tv_full_availability(service, mock_db, mock_ple
     req = make_request(
         id=79,
         media_type=MediaType.TV,
-        status=RequestStatus.PARTIALLY_AVAILABLE,
+        status=RequestStatus.PENDING,
         tmdb_id=999,
         seasons=[make_season(1, [make_episode(1), make_episode(2)])],
     )
@@ -105,22 +101,22 @@ async def test_reconcile_request_tv_full_availability(service, mock_db, mock_ple
     mock_plex.get_show_by_tmdb.return_value = {"rating_key": "42"}
     mock_plex.get_episode_availability.return_value = {(1, 1): True, (1, 2): True}
 
-    async def reconcile_to_available(request, seasons, availability):
-        return await set_request_status(request, RequestStatus.AVAILABLE, seasons, availability)
+    async def reconcile_to_completed(request, seasons, availability):
+        return await set_request_status(request, RequestStatus.COMPLETED, seasons, availability)
 
     with patch.object(
         service.episode_sync,
         "reconcile_existing_seasons_from_plex",
         new_callable=AsyncMock,
     ) as mock_reconcile:
-        mock_reconcile.side_effect = reconcile_to_available
+        mock_reconcile.side_effect = reconcile_to_completed
         result = await service.reconcile_request(79)
 
     assert result.matched is True
     assert result.reconciled is True
     assert result.available is True
-    assert result.status_before == RequestStatus.PARTIALLY_AVAILABLE
-    assert result.status_after == RequestStatus.AVAILABLE
+    assert result.status_before == RequestStatus.PENDING
+    assert result.status_after == RequestStatus.COMPLETED
     assert result.reason == "All episodes found on Plex"
     assert result.requested_episode_count == 2
     assert result.completed_episodes == frozenset({(1, 1), (1, 2)})
