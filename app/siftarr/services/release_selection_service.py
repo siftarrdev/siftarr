@@ -6,6 +6,7 @@ from datetime import UTC, datetime
 from sqlalchemy import delete, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.siftarr.config import get_settings
 from app.siftarr.models.release import Release
 from app.siftarr.models.request import MediaType, Request, RequestStatus
 from app.siftarr.models.staged_torrent import StagedTorrent
@@ -19,7 +20,6 @@ from app.siftarr.services.release_parser import (
     serialize_release_coverage,
 )
 from app.siftarr.services.rule_engine import ReleaseEvaluation
-from app.siftarr.services.runtime_settings import get_effective_settings
 from app.siftarr.services.staging_service import StagingService
 
 logger = logging.getLogger(__name__)
@@ -328,7 +328,7 @@ async def use_releases(
         selection_source,
     )
 
-    runtime_settings = await get_effective_settings(db)
+    runtime_settings = get_settings()
     queue_service = PendingQueueService(db)
     usable_releases = [release for release in releases if release is not None]
     if not usable_releases:

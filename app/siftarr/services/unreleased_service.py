@@ -23,11 +23,8 @@ from app.siftarr.services.overseerr_service import OverseerrService
 _logger = logging.getLogger(__name__)
 
 _REDIRECTABLE_STATUSES = {
-    RequestStatus.RECEIVED,
     RequestStatus.PENDING,
-    RequestStatus.PARTIALLY_AVAILABLE,
     RequestStatus.SEARCHING,
-    RequestStatus.AVAILABLE,
     RequestStatus.COMPLETED,  # Allow ongoing TV series to be re-classified as unreleased
 }
 

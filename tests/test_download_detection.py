@@ -45,7 +45,7 @@ def _make_request(
 
 
 class TestGetDownloadStatus:
-    """Test that get_download_status includes qbit_complete and plex_available."""
+    """Test that get_download_status includes qbit_complete and Plex completion fields."""
 
     @pytest.mark.asyncio
     async def test_response_includes_qbit_complete_and_plex_available_fields(self):
@@ -73,9 +73,7 @@ class TestGetDownloadStatus:
         mock_db.execute = AsyncMock(side_effect=[mock_result_1, mock_result_2, mock_scalar_3])
 
         with (
-            patch(
-                "app.siftarr.routers.staged.get_effective_settings", new_callable=AsyncMock
-            ) as mock_settings,
+            patch("app.siftarr.routers.staged.get_settings") as mock_settings,
             patch("app.siftarr.routers.staged.QbittorrentService") as MockQbit,
             patch("app.siftarr.routers.staged.PlexService") as MockPlex,
             patch("app.siftarr.routers.staged.PlexPollingService") as MockPlexPolling,
@@ -132,9 +130,7 @@ class TestGetDownloadStatus:
         mock_db.execute = AsyncMock(side_effect=[mock_result_1, mock_result_2])
 
         with (
-            patch(
-                "app.siftarr.routers.staged.get_effective_settings", new_callable=AsyncMock
-            ) as mock_settings,
+            patch("app.siftarr.routers.staged.get_settings") as mock_settings,
             patch("app.siftarr.routers.staged.QbittorrentService") as MockQbit,
         ):
             mock_settings.return_value = MagicMock()
@@ -169,9 +165,7 @@ class TestCheckNow:
         mock_db.execute = AsyncMock(return_value=mock_result)
 
         with (
-            patch(
-                "app.siftarr.routers.staged.get_effective_settings", new_callable=AsyncMock
-            ) as mock_settings,
+            patch("app.siftarr.routers.staged.get_settings") as mock_settings,
             patch("app.siftarr.routers.staged.QbittorrentService") as MockQbit,
         ):
             mock_settings.return_value = MagicMock()
@@ -211,9 +205,7 @@ class TestCheckNow:
         mock_db.add = MagicMock()
 
         with (
-            patch(
-                "app.siftarr.routers.staged.get_effective_settings", new_callable=AsyncMock
-            ) as mock_settings,
+            patch("app.siftarr.routers.staged.get_settings") as mock_settings,
             patch("app.siftarr.routers.staged.QbittorrentService") as MockQbit,
             patch("app.siftarr.routers.staged.PlexService") as MockPlex,
             patch("app.siftarr.routers.staged.PlexPollingService") as MockPlexPolling,

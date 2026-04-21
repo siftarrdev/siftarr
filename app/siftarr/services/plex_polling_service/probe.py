@@ -1,6 +1,5 @@
 """Probe helpers shared by poll, targeted, and incremental flows."""
 
-import json
 import logging
 from collections.abc import Awaitable
 from typing import TYPE_CHECKING, TypeVar
@@ -218,22 +217,9 @@ class ProbeMixin:
     def _get_requested_episodes(self, req: Request) -> list[EpisodeKey]:
         """Get list of (season, episode) tuples from request's seasons/episodes."""
         episodes: list[EpisodeKey] = []
-
-        if req.seasons:
-            for season in req.seasons:
-                for ep in season.episodes:
-                    episodes.append((season.season_number, ep.episode_number))
-            return episodes
-
-        if req.requested_episodes:
-            try:
-                ep_list = json.loads(req.requested_episodes)
-                for item in ep_list:
-                    if isinstance(item, dict) and "season" in item and "episode" in item:
-                        episodes.append((item["season"], item["episode"]))
-            except (json.JSONDecodeError, TypeError):
-                pass
-
+        for season in req.seasons:
+            for episode in season.episodes:
+                episodes.append((season.season_number, episode.episode_number))
         return episodes
 
     async def _update_episode_statuses(

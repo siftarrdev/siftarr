@@ -30,18 +30,11 @@ async def test_pending_requests_include_searching_requests(mock_db, monkeypatch)
 
     monkeypatch.setattr(
         dashboard,
-        "PendingQueueService",
-        lambda db: AsyncMock(get_all_pending=AsyncMock(return_value=[])),
-    )
-
-    monkeypatch.setattr(
-        dashboard,
-        "get_effective_settings",
-        AsyncMock(
-            return_value=MagicMock(
-                overseerr_url="http://overseerr.test",
-                staging_mode_enabled=False,
-            )
+        "get_settings",
+        lambda: MagicMock(
+            overseerr_url="http://overseerr.test",
+            staging_mode_enabled=False,
+            qbittorrent_url="http://qb.test",
         ),
     )
 
@@ -73,7 +66,7 @@ async def test_dashboard_restores_unreleased_tab_and_requests(mock_db, monkeypat
     lifecycle_service = AsyncMock()
     lifecycle_service.get_active_requests.return_value = [unreleased_request]
     lifecycle_service.get_requests_by_status.return_value = []
-    lifecycle_service.get_unreleased_and_partial_requests.return_value = [unreleased_request]
+    lifecycle_service.get_unreleased_requests.return_value = [unreleased_request]
     lifecycle_service.get_requests_stats.return_value = {
         "by_status": {RequestStatus.UNRELEASED.value: 1},
     }
@@ -81,17 +74,11 @@ async def test_dashboard_restores_unreleased_tab_and_requests(mock_db, monkeypat
 
     monkeypatch.setattr(
         dashboard,
-        "PendingQueueService",
-        lambda db: AsyncMock(get_all_pending=AsyncMock(return_value=[])),
-    )
-    monkeypatch.setattr(
-        dashboard,
-        "get_effective_settings",
-        AsyncMock(
-            return_value=MagicMock(
-                overseerr_url="http://overseerr.test",
-                staging_mode_enabled=False,
-            )
+        "get_settings",
+        lambda: MagicMock(
+            overseerr_url="http://overseerr.test",
+            staging_mode_enabled=False,
+            qbittorrent_url="http://qb.test",
         ),
     )
 
@@ -120,10 +107,10 @@ async def test_dashboard_restores_unreleased_tab_and_requests(mock_db, monkeypat
 
 @pytest.mark.asyncio
 async def test_dashboard_separates_mixed_pending_from_true_unreleased(mock_db, monkeypatch):
-    """TV shows with pending episodes should stay out of Unreleased tab."""
+    """TV shows with pending episodes should stay out of the Unreleased tab."""
     mixed_request = MagicMock()
     mixed_request.id = 7
-    mixed_request.status = RequestStatus.PARTIALLY_AVAILABLE
+    mixed_request.status = RequestStatus.PENDING
     mixed_request.overseerr_request_id = 11
     mixed_request.title = "High Potential"
     mixed_request.media_type = MediaType.TV
@@ -148,31 +135,25 @@ async def test_dashboard_separates_mixed_pending_from_true_unreleased(mock_db, m
     lifecycle_service = AsyncMock()
     lifecycle_service.get_active_requests.return_value = [mixed_request, unreleased_request]
     lifecycle_service.get_requests_by_status.return_value = []
-    lifecycle_service.get_unreleased_and_partial_requests.return_value = [
+    lifecycle_service.get_unreleased_requests.return_value = [
         mixed_request,
         unreleased_request,
     ]
     lifecycle_service.get_requests_stats.return_value = {
         "by_status": {
             RequestStatus.UNRELEASED.value: 1,
-            RequestStatus.PARTIALLY_AVAILABLE.value: 1,
+            RequestStatus.PENDING.value: 1,
         },
     }
     monkeypatch.setattr(dashboard, "LifecycleService", lambda db: lifecycle_service)
 
     monkeypatch.setattr(
         dashboard,
-        "PendingQueueService",
-        lambda db: AsyncMock(get_all_pending=AsyncMock(return_value=[])),
-    )
-    monkeypatch.setattr(
-        dashboard,
-        "get_effective_settings",
-        AsyncMock(
-            return_value=MagicMock(
-                overseerr_url="http://overseerr.test",
-                staging_mode_enabled=False,
-            )
+        "get_settings",
+        lambda: MagicMock(
+            overseerr_url="http://overseerr.test",
+            staging_mode_enabled=False,
+            qbittorrent_url="http://qb.test",
         ),
     )
 
@@ -190,8 +171,8 @@ async def test_dashboard_separates_mixed_pending_from_true_unreleased(mock_db, m
 
     seasons = [MagicMock(id=1, season_number=8, synced_at=None)]
     episodes = [
-        MagicMock(status=RequestStatus.AVAILABLE),
-        MagicMock(status=RequestStatus.AVAILABLE),
+        MagicMock(status=RequestStatus.COMPLETED),
+        MagicMock(status=RequestStatus.COMPLETED),
         MagicMock(status=RequestStatus.PENDING),
         MagicMock(status=RequestStatus.PENDING),
     ]
@@ -229,7 +210,7 @@ async def test_dashboard_hides_completed_ongoing_tv_from_finished_when_unrelease
     lifecycle_service = AsyncMock()
     lifecycle_service.get_active_requests.return_value = []
     lifecycle_service.get_requests_by_status.return_value = [completed_tv]
-    lifecycle_service.get_unreleased_and_partial_requests.return_value = [completed_tv]
+    lifecycle_service.get_unreleased_requests.return_value = [completed_tv]
     lifecycle_service.get_requests_stats.return_value = {
         "by_status": {
             RequestStatus.COMPLETED.value: 1,
@@ -240,17 +221,11 @@ async def test_dashboard_hides_completed_ongoing_tv_from_finished_when_unrelease
 
     monkeypatch.setattr(
         dashboard,
-        "PendingQueueService",
-        lambda db: AsyncMock(get_all_pending=AsyncMock(return_value=[])),
-    )
-    monkeypatch.setattr(
-        dashboard,
-        "get_effective_settings",
-        AsyncMock(
-            return_value=MagicMock(
-                overseerr_url="http://overseerr.test",
-                staging_mode_enabled=False,
-            )
+        "get_settings",
+        lambda: MagicMock(
+            overseerr_url="http://overseerr.test",
+            staging_mode_enabled=False,
+            qbittorrent_url="http://qb.test",
         ),
     )
 
@@ -270,7 +245,7 @@ async def test_dashboard_hides_completed_ongoing_tv_from_finished_when_unrelease
             return_value=(
                 [MagicMock(id=1, season_number=8, synced_at=None)],
                 [
-                    MagicMock(status=RequestStatus.AVAILABLE),
+                    MagicMock(status=RequestStatus.COMPLETED),
                     MagicMock(status=RequestStatus.UNRELEASED),
                 ],
             )
@@ -290,23 +265,17 @@ async def test_dashboard_renders_staged_torrents_for_refresh(mock_db, monkeypatc
     lifecycle_service = AsyncMock()
     lifecycle_service.get_active_requests.return_value = []
     lifecycle_service.get_requests_by_status.return_value = []
-    lifecycle_service.get_unreleased_and_partial_requests.return_value = []
+    lifecycle_service.get_unreleased_requests.return_value = []
     lifecycle_service.get_requests_stats.return_value = {"by_status": {}}
     monkeypatch.setattr(dashboard, "LifecycleService", lambda db: lifecycle_service)
 
     monkeypatch.setattr(
         dashboard,
-        "PendingQueueService",
-        lambda db: AsyncMock(get_all_pending=AsyncMock(return_value=[])),
-    )
-    monkeypatch.setattr(
-        dashboard,
-        "get_effective_settings",
-        AsyncMock(
-            return_value=MagicMock(
-                overseerr_url="http://overseerr.test",
-                staging_mode_enabled=False,
-            )
+        "get_settings",
+        lambda: MagicMock(
+            overseerr_url="http://overseerr.test",
+            staging_mode_enabled=False,
+            qbittorrent_url="http://qb.test",
         ),
     )
 
@@ -338,28 +307,22 @@ async def test_dashboard_renders_staged_torrents_for_refresh(mock_db, monkeypatc
 
 
 @pytest.mark.asyncio
-async def test_dashboard_hides_stale_available_and_partial_staged_torrents(mock_db, monkeypatch):
+async def test_dashboard_hides_stale_completed_and_pending_staged_torrents(mock_db, monkeypatch):
     """Approved request-linked torrents should disappear once requests are resolved."""
     lifecycle_service = AsyncMock()
     lifecycle_service.get_active_requests.return_value = []
     lifecycle_service.get_requests_by_status.return_value = []
-    lifecycle_service.get_unreleased_and_partial_requests.return_value = []
+    lifecycle_service.get_unreleased_requests.return_value = []
     lifecycle_service.get_requests_stats.return_value = {"by_status": {}}
     monkeypatch.setattr(dashboard, "LifecycleService", lambda db: lifecycle_service)
 
     monkeypatch.setattr(
         dashboard,
-        "PendingQueueService",
-        lambda db: AsyncMock(get_all_pending=AsyncMock(return_value=[])),
-    )
-    monkeypatch.setattr(
-        dashboard,
-        "get_effective_settings",
-        AsyncMock(
-            return_value=MagicMock(
-                overseerr_url="http://overseerr.test",
-                staging_mode_enabled=False,
-            )
+        "get_settings",
+        lambda: MagicMock(
+            overseerr_url="http://overseerr.test",
+            staging_mode_enabled=False,
+            qbittorrent_url="http://qb.test",
         ),
     )
 
@@ -375,42 +338,42 @@ async def test_dashboard_hides_stale_available_and_partial_staged_torrents(mock_
     active_torrent.replaced_by_id = None
     active_torrent.replacement_reason = None
 
-    available_torrent = MagicMock()
-    available_torrent.id = 2
-    available_torrent.request_id = 101
-    available_torrent.title = "Already Available"
-    available_torrent.status = "approved"
-    available_torrent.size = 123
-    available_torrent.indexer = "Indexer"
-    available_torrent.score = 45
-    available_torrent.created_at = datetime(2026, 4, 1, 11, 0, tzinfo=UTC)
-    available_torrent.replaced_by_id = None
-    available_torrent.replacement_reason = None
+    completed_torrent = MagicMock()
+    completed_torrent.id = 2
+    completed_torrent.request_id = 101
+    completed_torrent.title = "Already Completed"
+    completed_torrent.status = "approved"
+    completed_torrent.size = 123
+    completed_torrent.indexer = "Indexer"
+    completed_torrent.score = 45
+    completed_torrent.created_at = datetime(2026, 4, 1, 11, 0, tzinfo=UTC)
+    completed_torrent.replaced_by_id = None
+    completed_torrent.replacement_reason = None
 
-    partial_torrent = MagicMock()
-    partial_torrent.id = 3
-    partial_torrent.request_id = 102
-    partial_torrent.title = "Partially Available"
-    partial_torrent.status = "approved"
-    partial_torrent.size = 123
-    partial_torrent.indexer = "Indexer"
-    partial_torrent.score = 40
-    partial_torrent.created_at = datetime(2026, 4, 1, 10, 0, tzinfo=UTC)
-    partial_torrent.replaced_by_id = None
-    partial_torrent.replacement_reason = None
+    pending_torrent = MagicMock()
+    pending_torrent.id = 3
+    pending_torrent.request_id = 102
+    pending_torrent.title = "Still Pending"
+    pending_torrent.status = "approved"
+    pending_torrent.size = 123
+    pending_torrent.indexer = "Indexer"
+    pending_torrent.score = 40
+    pending_torrent.created_at = datetime(2026, 4, 1, 10, 0, tzinfo=UTC)
+    pending_torrent.replaced_by_id = None
+    pending_torrent.replacement_reason = None
 
     staged_result = MagicMock(
         scalars=MagicMock(
             return_value=MagicMock(
-                all=MagicMock(return_value=[active_torrent, available_torrent, partial_torrent])
+                all=MagicMock(return_value=[active_torrent, completed_torrent, pending_torrent])
             )
         )
     )
     request_status_result = MagicMock()
     request_status_result.all.return_value = [
         (100, RequestStatus.DOWNLOADING),
-        (101, RequestStatus.AVAILABLE),
-        (102, RequestStatus.PARTIALLY_AVAILABLE),
+        (101, RequestStatus.COMPLETED),
+        (102, RequestStatus.PENDING),
     ]
     empty_result = MagicMock(
         scalars=MagicMock(return_value=MagicMock(all=MagicMock(return_value=[])))
@@ -423,5 +386,5 @@ async def test_dashboard_hides_stale_available_and_partial_staged_torrents(mock_
     assert context["staged_torrents"] == [active_torrent]
     body = response.body.decode()
     assert "Still Downloading" in body
-    assert "Already Available" not in body
-    assert "Partially Available" not in body
+    assert "Already Completed" not in body
+    assert "Still Pending" not in body

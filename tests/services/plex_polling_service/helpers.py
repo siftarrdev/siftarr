@@ -21,7 +21,6 @@ def make_request(
     req.tvdb_id = tvdb_id
     req.title = title
     req.seasons = seasons or []
-    req.requested_episodes = None
     req.plex_rating_key = plex_rating_key
     return req
 

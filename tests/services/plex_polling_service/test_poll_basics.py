@@ -75,8 +75,8 @@ async def test_poll_tv_all_episodes_available(service, mock_db, mock_plex):
     mock_plex.get_show_by_tmdb.return_value = {"rating_key": "42"}
     mock_plex.get_episode_availability.return_value = {(1, 1): True, (1, 2): True}
 
-    async def reconcile_to_available(request, seasons, availability):
-        return await set_request_status(request, RequestStatus.AVAILABLE, seasons, availability)
+    async def reconcile_to_completed(request, seasons, availability):
+        return await set_request_status(request, RequestStatus.COMPLETED, seasons, availability)
 
     with (
         patch.object(
@@ -86,7 +86,7 @@ async def test_poll_tv_all_episodes_available(service, mock_db, mock_plex):
         ) as mock_reconcile,
         patch.object(service.lifecycle, "transition", new_callable=AsyncMock) as mock_transition,
     ):
-        mock_reconcile.side_effect = reconcile_to_available
+        mock_reconcile.side_effect = reconcile_to_completed
         completed = await service.poll()
 
     assert completed == 1
@@ -115,13 +115,13 @@ async def test_poll_tv_partial_episodes(service, mock_db, mock_plex):
 
 
 @pytest.mark.asyncio
-async def test_poll_partially_available_request_can_complete(service, mock_db, mock_plex):
+async def test_poll_pending_request_can_complete(service, mock_db, mock_plex):
     ep1 = make_episode(1, status=RequestStatus.COMPLETED)
     ep2 = make_episode(2, status=RequestStatus.PENDING)
     season = make_season(1, [ep1, ep2])
     req = make_request(
         media_type=MediaType.TV,
-        status=RequestStatus.PARTIALLY_AVAILABLE,
+        status=RequestStatus.PENDING,
         tmdb_id=999,
         seasons=[season],
     )
@@ -132,8 +132,8 @@ async def test_poll_partially_available_request_can_complete(service, mock_db, m
     mock_plex.get_show_by_tmdb.return_value = {"rating_key": "42"}
     mock_plex.get_episode_availability.return_value = {(1, 1): True, (1, 2): True}
 
-    async def reconcile_to_available(request, seasons, availability):
-        return await set_request_status(request, RequestStatus.AVAILABLE, seasons, availability)
+    async def reconcile_to_completed(request, seasons, availability):
+        return await set_request_status(request, RequestStatus.COMPLETED, seasons, availability)
 
     with (
         patch.object(
@@ -143,7 +143,7 @@ async def test_poll_partially_available_request_can_complete(service, mock_db, m
         ) as mock_reconcile,
         patch.object(service.lifecycle, "transition", new_callable=AsyncMock) as mock_transition,
     ):
-        mock_reconcile.side_effect = reconcile_to_available
+        mock_reconcile.side_effect = reconcile_to_completed
         completed = await service.poll()
 
     assert completed == 1
@@ -184,8 +184,8 @@ async def test_poll_tv_fallback_to_tvdb(service, mock_db, mock_plex):
     mock_plex.get_show_by_tvdb.return_value = {"rating_key": "55"}
     mock_plex.get_episode_availability.return_value = {(1, 1): True}
 
-    async def reconcile_to_available(request, seasons, availability):
-        return await set_request_status(request, RequestStatus.AVAILABLE, seasons, availability)
+    async def reconcile_to_completed(request, seasons, availability):
+        return await set_request_status(request, RequestStatus.COMPLETED, seasons, availability)
 
     with (
         patch.object(
@@ -195,7 +195,7 @@ async def test_poll_tv_fallback_to_tvdb(service, mock_db, mock_plex):
         ) as mock_reconcile,
         patch.object(service.lifecycle, "transition", new_callable=AsyncMock) as mock_transition,
     ):
-        mock_reconcile.side_effect = reconcile_to_available
+        mock_reconcile.side_effect = reconcile_to_completed
         completed = await service.poll()
 
     assert completed == 1

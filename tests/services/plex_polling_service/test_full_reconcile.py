@@ -65,7 +65,7 @@ async def test_full_reconcile_scan_builds_authoritative_presence_and_completes_m
         assert req is tv_req
         assert seasons == tv_req.seasons
         assert availability == {(1, 1): True, (1, 2): True}
-        req.status = RequestStatus.AVAILABLE
+        req.status = RequestStatus.COMPLETED
         return seasons
 
     service.episode_sync.reconcile_existing_seasons_from_plex = AsyncMock(
@@ -198,7 +198,7 @@ async def test_full_reconcile_scan_skips_tv_negative_sync_when_episode_scan_fail
     req = make_request(
         id=2,
         media_type=MediaType.TV,
-        status=RequestStatus.PARTIALLY_AVAILABLE,
+        status=RequestStatus.PENDING,
         tmdb_id=222,
         title="Show B",
         seasons=[make_season(1, [make_episode(1)])],
@@ -244,7 +244,7 @@ async def test_full_reconcile_scan_skips_tv_negative_sync_when_episode_scan_fail
 async def test_full_reconcile_scan_counts_deduped_presence_items_without_double_downgrading(
     service, mock_db, mock_plex
 ):
-    req = make_request(id=1, tmdb_id=111, title="Movie A", status=RequestStatus.AVAILABLE)
+    req = make_request(id=1, tmdb_id=111, title="Movie A", status=RequestStatus.COMPLETED)
     mock_result = MagicMock()
     mock_result.scalars.return_value.all.return_value = [req]
     mock_db.execute.return_value = mock_result

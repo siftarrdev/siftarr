@@ -27,7 +27,7 @@ class Episode(Base):
     title: Mapped[str | None] = mapped_column(String(500), nullable=True)
     air_date: Mapped[date | None] = mapped_column(Date, nullable=True)
     status: Mapped[RequestStatus] = mapped_column(
-        SQLEnum(RequestStatus), default=RequestStatus.RECEIVED
+        SQLEnum(RequestStatus), default=RequestStatus.PENDING
     )
     season: Mapped["Season"] = relationship("Season", back_populates="episodes")
 

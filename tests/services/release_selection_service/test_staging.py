@@ -23,8 +23,8 @@ async def test_use_releases_marks_manual_selection_source(
     with pytest.MonkeyPatch.context() as monkeypatch:
         monkeypatch.setattr(
             release_selection_service,
-            "get_effective_settings",
-            AsyncMock(return_value=settings),
+            "get_settings",
+            MagicMock(return_value=settings),
         )
         monkeypatch.setattr(
             release_selection_service,
@@ -65,8 +65,8 @@ async def test_use_releases_sends_direct_when_staging_disabled(
     with pytest.MonkeyPatch.context() as monkeypatch:
         monkeypatch.setattr(
             release_selection_service,
-            "get_effective_settings",
-            AsyncMock(return_value=settings),
+            "get_settings",
+            MagicMock(return_value=settings),
         )
         monkeypatch.setattr(
             release_selection_service,
@@ -214,8 +214,8 @@ async def test_use_releases_tv_single_episode_selection_only_replaces_same_episo
     with pytest.MonkeyPatch.context() as monkeypatch:
         monkeypatch.setattr(
             release_selection_service,
-            "get_effective_settings",
-            AsyncMock(return_value=settings),
+            "get_settings",
+            MagicMock(return_value=settings),
         )
         monkeypatch.setattr(
             release_selection_service,

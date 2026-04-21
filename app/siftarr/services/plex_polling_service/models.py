@@ -10,10 +10,8 @@ ProgressCallback = Callable[[dict[str, object]], Awaitable[None] | None]
 
 # All non-terminal statuses
 NON_TERMINAL_STATUSES = [
-    RequestStatus.RECEIVED,
     RequestStatus.SEARCHING,
     RequestStatus.PENDING,
-    RequestStatus.PARTIALLY_AVAILABLE,
     RequestStatus.UNRELEASED,
     RequestStatus.STAGED,
     RequestStatus.DOWNLOADING,
@@ -21,13 +19,11 @@ NON_TERMINAL_STATUSES = [
 
 FULL_RECONCILE_STATUSES = [
     *NON_TERMINAL_STATUSES,
-    RequestStatus.AVAILABLE,
     RequestStatus.COMPLETED,
 ]
 
 NEGATIVE_RECONCILE_STATUSES = {
-    RequestStatus.AVAILABLE,
-    RequestStatus.PARTIALLY_AVAILABLE,
+    RequestStatus.PENDING,
     RequestStatus.COMPLETED,
 }
 
@@ -63,8 +59,7 @@ class TargetedReconcileResult:
     def available(self) -> bool:
         """Return whether Plex now authoritatively satisfies any/all requested media."""
         return self.status_after in {
-            RequestStatus.AVAILABLE,
-            RequestStatus.PARTIALLY_AVAILABLE,
+            RequestStatus.PENDING,
             RequestStatus.COMPLETED,
         }
 

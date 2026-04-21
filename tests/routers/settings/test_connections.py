@@ -1,5 +1,7 @@
 """Settings connection route and API tests."""
 
+import os
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, call
 
 import pytest
@@ -63,12 +65,54 @@ async def test_save_connections_skips_timezone_when_not_provided(monkeypatch, mo
 
 @pytest.mark.asyncio
 async def test_reset_connections_redirects_back_to_settings():
-    """Reset route should preserve the existing redirect behavior."""
+    """Reset route should clear runtime overrides and preserve redirect behavior."""
+
+    settings.get_settings.cache_clear()
+    os.environ["OVERSEERR_URL"] = "https://overseerr"
+    os.environ["PLEX_TOKEN"] = "plex-token"
+    os.environ["TZ"] = "America/New_York"
 
     response = await settings.reset_connections(MagicMock())
 
+    assert "OVERSEERR_URL" not in os.environ
+    assert "PLEX_TOKEN" not in os.environ
+    assert "TZ" not in os.environ
     assert response.status_code == 303
     assert response.headers["location"] == "/settings?reset=true"
+    settings.get_settings.cache_clear()
+
+
+@pytest.mark.asyncio
+async def test_set_db_setting_updates_runtime_env_and_clears_cache(monkeypatch):
+    """Compatibility settings writes should update runtime env-backed settings."""
+
+    cache_clear = MagicMock()
+    monkeypatch.setattr(settings.get_settings, "cache_clear", cache_clear)
+    monkeypatch.delenv("OVERSEERR_URL", raising=False)
+
+    await settings._set_db_setting(MagicMock(), "overseerr_url", "https://overseerr")
+
+    assert os.environ["OVERSEERR_URL"] == "https://overseerr"
+    cache_clear.assert_called_once_with()
+
+
+@pytest.mark.asyncio
+async def test_toggle_staging_mode_flips_runtime_setting(monkeypatch, mock_db):
+    """Staging mode toggle should write the inverted runtime setting value."""
+
+    set_db_setting = AsyncMock()
+    monkeypatch.setattr(settings, "_set_db_setting", set_db_setting)
+    monkeypatch.setattr(
+        settings._jobs,
+        "get_settings",
+        lambda: SimpleNamespace(staging_mode_enabled=True),
+    )
+
+    response = await settings.toggle_staging_mode(db=mock_db)
+
+    set_db_setting.assert_awaited_once_with(None, "staging_mode_enabled", "false")
+    assert response.status_code == 303
+    assert response.headers["location"] == "/settings"
 
 
 @pytest.mark.asyncio

@@ -7,6 +7,7 @@ from typing import Any
 
 from sqlalchemy import select
 
+from app.siftarr.config import get_settings
 from app.siftarr.models.request import MediaType, RequestStatus
 from app.siftarr.models.request import Request as RequestModel
 
@@ -21,8 +22,6 @@ class PreparedOverseerrImport:
     tvdb_id: int | None
     title: str
     year: int | None
-    requested_seasons: Any
-    requested_episodes: Any
     requester_username: str | None
     requester_email: str | None
     overseerr_request_id: int | None
@@ -63,8 +62,6 @@ async def prepare_overseerr_import(
 
     external_id = str(tmdb_id) if tmdb_id is not None else str(tvdb_id)
     media_type = MediaType.MOVIE if media.get("mediaType", "") == "movie" else MediaType.TV
-    requested_seasons = media.get("requestedSeasons")
-    requested_episodes = media.get("requestedEpisodes")
 
     requested_by = ov_req.get("requestedBy") or {}
     username = (
@@ -104,8 +101,6 @@ async def prepare_overseerr_import(
         tvdb_id=tvdb_id,
         title=title,
         year=year,
-        requested_seasons=requested_seasons,
-        requested_episodes=requested_episodes,
         requester_username=username,
         requester_email=email,
         overseerr_request_id=overseerr_request_id,
@@ -199,12 +194,6 @@ async def import_overseerr_requests(
                     tvdb_id=prepared.tvdb_id,
                     title=prepared.title,
                     year=prepared.year,
-                    requested_seasons=str(prepared.requested_seasons)
-                    if prepared.requested_seasons
-                    else None,
-                    requested_episodes=str(prepared.requested_episodes)
-                    if prepared.requested_episodes
-                    else None,
                     requester_username=prepared.requester_username,
                     requester_email=prepared.requester_email,
                     status=RequestStatus.PENDING,
@@ -260,7 +249,6 @@ async def sync_overseerr_generator(
     *,
     async_session_maker,
     build_effective_settings_func,
-    get_effective_settings_func,
     import_overseerr_requests_func,
     build_sse_progress_func,
     logger,
@@ -282,7 +270,7 @@ async def sync_overseerr_generator(
                 )
                 return
 
-            runtime_settings = await get_effective_settings_func(db)
+            runtime_settings = get_settings()
             yield serialize_sse(
                 build_sse_progress_func(
                     "fetching",

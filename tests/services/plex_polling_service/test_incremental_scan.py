@@ -1,6 +1,5 @@
 import asyncio
-from datetime import UTC, datetime, timedelta
-from types import SimpleNamespace
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -19,10 +18,6 @@ from .helpers import make_episode, make_request, make_season, set_request_status
 async def test_incremental_recent_scan_applies_completion_updates_after_probe_phase(
     service, mock_db, mock_plex
 ):
-    service.scan_state.recover_stale_lock = AsyncMock()
-    service.scan_state.acquire_lock = AsyncMock(return_value=SimpleNamespace(checkpoint_at=None))
-    service.scan_state.release_lock = AsyncMock()
-
     req1 = make_request(
         id=1,
         media_type=MediaType.TV,
@@ -46,7 +41,7 @@ async def test_incremental_recent_scan_applies_completion_updates_after_probe_ph
         if media_type == "show":
             yield {
                 "type": "show",
-                "rating_key": "show",
+                "rating_key": "show-1",
                 "title": "Show 1",
                 "added_at": int(datetime(2026, 4, 19, 12, 0, tzinfo=UTC).timestamp()),
                 "guids": ("tmdb://901",),
@@ -54,7 +49,7 @@ async def test_incremental_recent_scan_applies_completion_updates_after_probe_ph
             }
             yield {
                 "type": "show",
-                "rating_key": "show",
+                "rating_key": "show-2",
                 "title": "Show 2",
                 "added_at": int(datetime(2026, 4, 19, 12, 1, tzinfo=UTC).timestamp()),
                 "guids": ("tmdb://902",),
@@ -73,7 +68,6 @@ async def test_incremental_recent_scan_applies_completion_updates_after_probe_ph
     release_probes = asyncio.Event()
     first_write_started = asyncio.Event()
     second_write_started = asyncio.Event()
-    first_transition_started = asyncio.Event()
     release_writes = asyncio.Event()
     state_lock = asyncio.Lock()
 
@@ -129,7 +123,6 @@ async def test_incremental_recent_scan_applies_completion_updates_after_probe_ph
         await asyncio.wait_for(first_write_started.wait(), timeout=1)
 
         assert second_write_started.is_set() is False
-        assert first_transition_started.is_set() is False
 
         release_writes.set()
         result = await scan_task
@@ -140,7 +133,6 @@ async def test_incremental_recent_scan_applies_completion_updates_after_probe_ph
     assert result.metrics.deduped_items == 0
     assert result.metrics.skipped_on_error_items == 0
     assert max_active_writes == 1
-    assert first_transition_started.is_set() is False
     assert mock_reconcile.await_count == 2
     assert mock_transition.await_count == 0
 
@@ -149,10 +141,6 @@ async def test_incremental_recent_scan_applies_completion_updates_after_probe_ph
 async def test_incremental_recent_scan_collapses_duplicate_media_ids_within_cycle(
     service, mock_db, mock_plex
 ):
-    service.scan_state.recover_stale_lock = AsyncMock()
-    service.scan_state.acquire_lock = AsyncMock(return_value=SimpleNamespace(checkpoint_at=None))
-    service.scan_state.release_lock = AsyncMock()
-
     req1 = make_request(id=1, tmdb_id=111, title="Movie A")
     req2 = make_request(id=2, tmdb_id=111, title="Movie A Duplicate")
     req3 = make_request(id=3, tmdb_id=222, title="Movie B")
@@ -202,7 +190,7 @@ async def test_incremental_recent_scan_collapses_duplicate_media_ids_within_cycl
 
 
 @pytest.mark.asyncio
-async def test_incremental_recent_scan_uses_checkpoint_buffer_and_recent_matches_only(
+async def test_incremental_recent_scan_processes_recent_matches_and_skips_unmatched_items(
     service, mock_db, mock_plex
 ):
     req1 = make_request(id=1, tmdb_id=111, title="Movie A")
@@ -218,30 +206,22 @@ async def test_incremental_recent_scan_uses_checkpoint_buffer_and_recent_matches
     mock_result.scalars.return_value.all.return_value = [req1, req2, req3]
     mock_db.execute.return_value = mock_result
 
-    previous_checkpoint = datetime(2026, 4, 19, 12, 0, tzinfo=UTC)
-    run_started = datetime(2026, 4, 19, 12, 30, tzinfo=UTC)
-
-    state = SimpleNamespace(checkpoint_at=previous_checkpoint)
-    service.scan_state.recover_stale_lock = AsyncMock()
-    service.scan_state.acquire_lock = AsyncMock(return_value=state)
-    service.scan_state.release_lock = AsyncMock()
-
     async def iter_recently_added_items(media_type: str):
         if media_type == "movie":
             yield {
                 "type": "movie",
                 "rating_key": "movie-111",
                 "title": "Movie A",
-                "added_at": int((previous_checkpoint - timedelta(minutes=5)).timestamp()),
+                "added_at": int(datetime(2026, 4, 19, 11, 55, tzinfo=UTC).timestamp()),
                 "guids": ("tmdb://111",),
                 "Media": [{"id": 1}],
             }
             yield {
                 "type": "movie",
                 "rating_key": "movie-old",
-                "title": "Too Old",
-                "added_at": int((previous_checkpoint - timedelta(minutes=11)).timestamp()),
-                "guids": ("tmdb://999",),
+                "title": "Unmatched",
+                "added_at": int(datetime(2026, 4, 19, 11, 49, tzinfo=UTC).timestamp()),
+                "guids": ("tmdb://555",),
                 "Media": [{"id": 1}],
             }
             return
@@ -249,7 +229,7 @@ async def test_incremental_recent_scan_uses_checkpoint_buffer_and_recent_matches
             "type": "show",
             "rating_key": "show-222",
             "title": "Show B",
-            "added_at": int((previous_checkpoint + timedelta(minutes=1)).timestamp()),
+            "added_at": int(datetime(2026, 4, 19, 12, 1, tzinfo=UTC).timestamp()),
             "guids": ("tmdb://222",),
             "Media": [{"id": 1}],
         }
@@ -262,11 +242,10 @@ async def test_incremental_recent_scan_uses_checkpoint_buffer_and_recent_matches
         )
     )
 
-    async def reconcile_to_available(request, seasons, availability):
-        return await set_request_status(request, RequestStatus.AVAILABLE, seasons, availability)
+    async def reconcile_to_completed(request, seasons, availability):
+        return await set_request_status(request, RequestStatus.COMPLETED, seasons, availability)
 
     with (
-        patch.object(service, "_current_time", side_effect=[run_started, run_started, run_started]),
         patch.object(
             service.episode_sync,
             "reconcile_existing_seasons_from_plex",
@@ -274,28 +253,17 @@ async def test_incremental_recent_scan_uses_checkpoint_buffer_and_recent_matches
         ) as mock_reconcile,
         patch.object(service.lifecycle, "transition", new_callable=AsyncMock) as mock_transition,
     ):
-        mock_reconcile.side_effect = reconcile_to_available
+        mock_reconcile.side_effect = reconcile_to_completed
         result = await service.incremental_recent_scan()
 
     assert result.completed_requests == 2
-    assert result.metrics.scanned_items == 2
+    assert result.metrics.scanned_items == 3
     assert result.metrics.matched_requests == 2
     assert result.metrics.skipped_on_error_items == 0
-    assert result.metrics.checkpoint.previous_checkpoint_at == previous_checkpoint
-    assert result.metrics.checkpoint.current_checkpoint_at == run_started
-    assert result.metrics.checkpoint.advanced is True
     mock_plex.check_movie_available.assert_not_called()
     mock_plex.get_episode_availability_result.assert_awaited_once_with("show-222")
     mock_transition.assert_awaited_once_with(1, RequestStatus.COMPLETED, reason="Found on Plex")
     mock_reconcile.assert_awaited_once_with(req2, req2.seasons, {(1, 1): True})
-    service.scan_state.release_lock.assert_awaited_once()
-    release_call = service.scan_state.release_lock.await_args
-    assert release_call is not None
-    release_kwargs = release_call.kwargs
-    assert release_kwargs["success"] is True
-    assert release_kwargs["checkpoint_at"] == run_started
-    assert release_kwargs["last_error"] is None
-    assert release_kwargs["metrics_payload"]["checkpoint"]["advanced"] is True
 
 
 @pytest.mark.asyncio
@@ -314,10 +282,6 @@ async def test_incremental_recent_scan_reuses_recent_item_data_before_targeted_f
     mock_result = MagicMock()
     mock_result.scalars.return_value.all.return_value = [movie_req, tv_req, movie_fallback_req]
     mock_db.execute.return_value = mock_result
-
-    service.scan_state.recover_stale_lock = AsyncMock()
-    service.scan_state.acquire_lock = AsyncMock(return_value=SimpleNamespace(checkpoint_at=None))
-    service.scan_state.release_lock = AsyncMock()
 
     async def iter_recently_added_items(media_type: str):
         if media_type == "movie":
@@ -361,8 +325,8 @@ async def test_incremental_recent_scan_reuses_recent_item_data_before_targeted_f
         )
     )
 
-    async def reconcile_to_available(request, seasons, availability):
-        return await set_request_status(request, RequestStatus.AVAILABLE, seasons, availability)
+    async def reconcile_to_completed(request, seasons, availability):
+        return await set_request_status(request, RequestStatus.COMPLETED, seasons, availability)
 
     with (
         patch.object(
@@ -372,7 +336,7 @@ async def test_incremental_recent_scan_reuses_recent_item_data_before_targeted_f
         ) as mock_reconcile,
         patch.object(service.lifecycle, "transition", new_callable=AsyncMock) as mock_transition,
     ):
-        mock_reconcile.side_effect = reconcile_to_available
+        mock_reconcile.side_effect = reconcile_to_completed
         result = await service.incremental_recent_scan()
 
     assert result.completed_requests == 3
@@ -387,37 +351,11 @@ async def test_incremental_recent_scan_reuses_recent_item_data_before_targeted_f
 
 
 @pytest.mark.asyncio
-async def test_incremental_recent_scan_skips_when_lock_is_held(service, mock_db, mock_plex):
-    service.scan_state.recover_stale_lock = AsyncMock()
-    service.scan_state.acquire_lock = AsyncMock(return_value=None)
-    service.scan_state.release_lock = AsyncMock()
-
-    result = await service.incremental_recent_scan()
-
-    assert result.completed_requests == 0
-    assert result.metrics.scanned_items == 0
-    assert result.metrics.matched_requests == 0
-    assert result.metrics.deduped_items == 0
-    assert result.metrics.skipped_on_error_items == 0
-    mock_db.execute.assert_not_called()
-    service.scan_state.release_lock.assert_not_awaited()
-
-
-@pytest.mark.asyncio
-async def test_incremental_recent_scan_retains_checkpoint_on_transient_recent_scan_failure(
-    service, mock_db, mock_plex
-):
+async def test_incremental_recent_scan_reports_recent_scan_failure(service, mock_db, mock_plex):
     req = make_request(id=1, tmdb_id=111, title="Movie A")
     mock_result = MagicMock()
     mock_result.scalars.return_value.all.return_value = [req]
     mock_db.execute.return_value = mock_result
-
-    previous_checkpoint = datetime(2026, 4, 19, 12, 0, tzinfo=UTC)
-    service.scan_state.recover_stale_lock = AsyncMock()
-    service.scan_state.acquire_lock = AsyncMock(
-        return_value=SimpleNamespace(checkpoint_at=previous_checkpoint)
-    )
-    service.scan_state.release_lock = AsyncMock()
 
     async def iter_recently_added_items(media_type: str):
         if media_type == "movie":
@@ -432,36 +370,16 @@ async def test_incremental_recent_scan_retains_checkpoint_on_transient_recent_sc
     assert result.completed_requests == 0
     assert result.metrics.scanned_items == 0
     assert result.metrics.skipped_on_error_items == 1
-    assert result.metrics.checkpoint.previous_checkpoint_at == previous_checkpoint
-    assert result.metrics.checkpoint.current_checkpoint_at == previous_checkpoint
-    assert result.metrics.checkpoint.advanced is False
     assert result.clean_run is False
     assert result.last_error == "recently added unavailable"
-    service.scan_state.release_lock.assert_awaited_once()
-    release_call = service.scan_state.release_lock.await_args
-    assert release_call is not None
-    release_kwargs = release_call.kwargs
-    assert release_kwargs["success"] is False
-    assert release_kwargs["checkpoint_at"] == previous_checkpoint
-    assert release_kwargs["last_error"] == "recently added unavailable"
-    assert release_kwargs["metrics_payload"]["checkpoint"]["advanced"] is False
 
 
 @pytest.mark.asyncio
-async def test_incremental_recent_scan_retains_checkpoint_on_request_probe_error(
-    service, mock_db, mock_plex
-):
+async def test_incremental_recent_scan_reports_request_probe_error(service, mock_db, mock_plex):
     req = make_request(id=1, tmdb_id=111, title="Movie A")
     mock_result = MagicMock()
     mock_result.scalars.return_value.all.return_value = [req]
     mock_db.execute.return_value = mock_result
-
-    previous_checkpoint = datetime(2026, 4, 19, 12, 0, tzinfo=UTC)
-    service.scan_state.recover_stale_lock = AsyncMock()
-    service.scan_state.acquire_lock = AsyncMock(
-        return_value=SimpleNamespace(checkpoint_at=previous_checkpoint)
-    )
-    service.scan_state.release_lock = AsyncMock()
 
     async def iter_recently_added_items(_: str):
         yield {
@@ -482,39 +400,20 @@ async def test_incremental_recent_scan_retains_checkpoint_on_request_probe_error
     assert result.metrics.scanned_items == 1
     assert result.metrics.matched_requests == 0
     assert result.metrics.skipped_on_error_items == 1
-    assert result.metrics.checkpoint.previous_checkpoint_at == previous_checkpoint
-    assert result.metrics.checkpoint.current_checkpoint_at == previous_checkpoint
-    assert result.metrics.checkpoint.advanced is False
     assert result.clean_run is False
     assert result.last_error == (
         "Incremental recent Plex scan had transient request probe errors; checkpoint retained"
     )
-    release_call = service.scan_state.release_lock.await_args
-    assert release_call is not None
-    release_kwargs = release_call.kwargs
-    assert release_kwargs["success"] is False
-    assert release_kwargs["checkpoint_at"] == previous_checkpoint
-    assert release_kwargs["last_error"] == (
-        "Incremental recent Plex scan had transient request probe errors; checkpoint retained"
-    )
-    assert release_kwargs["metrics_payload"]["skipped_on_error_items"] == 1
 
 
 @pytest.mark.asyncio
-async def test_incremental_recent_scan_retains_checkpoint_on_non_authoritative_movie_fallback(
+async def test_incremental_recent_scan_reports_non_authoritative_movie_fallback(
     service, mock_db, mock_plex
 ):
     req = make_request(id=1, tmdb_id=111, title="Movie A")
     mock_result = MagicMock()
     mock_result.scalars.return_value.all.return_value = [req]
     mock_db.execute.return_value = mock_result
-
-    previous_checkpoint = datetime(2026, 4, 19, 12, 0, tzinfo=UTC)
-    service.scan_state.recover_stale_lock = AsyncMock()
-    service.scan_state.acquire_lock = AsyncMock(
-        return_value=SimpleNamespace(checkpoint_at=previous_checkpoint)
-    )
-    service.scan_state.release_lock = AsyncMock()
 
     async def iter_recently_added_items(_: str):
         yield {
@@ -538,22 +437,14 @@ async def test_incremental_recent_scan_retains_checkpoint_on_non_authoritative_m
     assert result.metrics.scanned_items == 1
     assert result.metrics.matched_requests == 0
     assert result.metrics.skipped_on_error_items == 1
-    assert result.metrics.checkpoint.previous_checkpoint_at == previous_checkpoint
-    assert result.metrics.checkpoint.current_checkpoint_at == previous_checkpoint
-    assert result.metrics.checkpoint.advanced is False
+    assert result.clean_run is False
     mock_plex.lookup_movie_by_tmdb.assert_awaited_once_with(111)
     mock_plex.check_movie_available.assert_not_called()
     mock_transition.assert_not_awaited()
-    release_call = service.scan_state.release_lock.await_args
-    assert release_call is not None
-    release_kwargs = release_call.kwargs
-    assert release_kwargs["success"] is False
-    assert release_kwargs["checkpoint_at"] == previous_checkpoint
-    assert release_kwargs["metrics_payload"]["skipped_on_error_items"] == 1
 
 
 @pytest.mark.asyncio
-async def test_incremental_recent_scan_retains_checkpoint_on_non_authoritative_tv_fallback(
+async def test_incremental_recent_scan_reports_non_authoritative_tv_fallback(
     service, mock_db, mock_plex
 ):
     req = make_request(
@@ -566,13 +457,6 @@ async def test_incremental_recent_scan_retains_checkpoint_on_non_authoritative_t
     mock_result = MagicMock()
     mock_result.scalars.return_value.all.return_value = [req]
     mock_db.execute.return_value = mock_result
-
-    previous_checkpoint = datetime(2026, 4, 19, 12, 0, tzinfo=UTC)
-    service.scan_state.recover_stale_lock = AsyncMock()
-    service.scan_state.acquire_lock = AsyncMock(
-        return_value=SimpleNamespace(checkpoint_at=previous_checkpoint)
-    )
-    service.scan_state.release_lock = AsyncMock()
 
     async def iter_recently_added_items(_: str):
         yield {
@@ -601,18 +485,10 @@ async def test_incremental_recent_scan_retains_checkpoint_on_non_authoritative_t
     assert result.metrics.scanned_items == 1
     assert result.metrics.matched_requests == 0
     assert result.metrics.skipped_on_error_items == 1
-    assert result.metrics.checkpoint.previous_checkpoint_at == previous_checkpoint
-    assert result.metrics.checkpoint.current_checkpoint_at == previous_checkpoint
-    assert result.metrics.checkpoint.advanced is False
+    assert result.clean_run is False
     mock_plex.lookup_show_by_tmdb.assert_awaited_once_with(222)
     mock_plex.get_show_by_tmdb.assert_not_called()
     mock_plex.get_show_by_tvdb.assert_not_called()
     mock_plex.get_episode_availability_result.assert_awaited_once_with("show-222")
     mock_plex.get_episode_availability.assert_not_called()
     mock_transition.assert_not_awaited()
-    release_call = service.scan_state.release_lock.await_args
-    assert release_call is not None
-    release_kwargs = release_call.kwargs
-    assert release_kwargs["success"] is False
-    assert release_kwargs["checkpoint_at"] == previous_checkpoint
-    assert release_kwargs["metrics_payload"]["skipped_on_error_items"] == 1

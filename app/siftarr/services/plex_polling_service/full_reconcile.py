@@ -227,7 +227,7 @@ class FullReconcileMixin:
     ) -> tuple[int, int, int, int]:
         matched_item = self._find_matching_presence_item(req, movie_presence)
         if matched_item is not None:
-            if req.status not in {RequestStatus.AVAILABLE, RequestStatus.COMPLETED}:
+            if req.status != RequestStatus.COMPLETED:
                 await self._run_serialized_write(
                     self.lifecycle.transition(
                         req.id,

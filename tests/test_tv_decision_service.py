@@ -32,8 +32,22 @@ def _make_request(**overrides):
     request.title = overrides.get("title", "Test Show")
     request.year = overrides.get("year", 2024)
     request.status = overrides.get("status", RequestStatus.PENDING)
-    request.requested_seasons = overrides.get("requested_seasons", "[1]")
-    request.requested_episodes = overrides.get("requested_episodes")
+
+    seasons_data = overrides.get("seasons", [1])
+    episodes_data = overrides.get("episodes", {})
+
+    seasons = []
+    for season_num in seasons_data:
+        season = MagicMock()
+        season.season_number = season_num
+        eps = []
+        for ep_num in episodes_data.get(season_num, []):
+            ep = MagicMock()
+            ep.episode_number = ep_num
+            eps.append(ep)
+        season.episodes = eps
+        seasons.append(season)
+    request.seasons = seasons
     return request
 
 
@@ -55,71 +69,6 @@ def _failing_eval(release):
         matches=[],
         rejection_reason="Excluded",
     )
-
-
-class TestGetRequestedEpisodes:
-    @pytest.fixture
-    def service(self):
-        db = AsyncMock()
-        prowlarr = AsyncMock()
-        qbittorrent = AsyncMock()
-        return TVDecisionService(db, prowlarr, qbittorrent)
-
-    def test_get_requested_episodes_handles_list_format(self, service):
-        request = MagicMock(spec=Request)
-        request.requested_episodes = "[14, 15]"
-        request.requested_seasons = "[8]"
-
-        assert service._get_requested_episodes(request) == {8: [14, 15]}
-
-    def test_get_requested_episodes_handles_dict_format(self, service):
-        request = MagicMock(spec=Request)
-        request.requested_episodes = '{"1": [1, 2, 3], "2": [1]}'
-
-        result = service._get_requested_episodes(request)
-        assert result == {1: [1, 2, 3], 2: [1]}
-
-    def test_get_requested_episodes_handles_none(self, service):
-        request = MagicMock(spec=Request)
-        request.requested_episodes = None
-
-        assert service._get_requested_episodes(request) == {}
-
-    def test_get_requested_episodes_handles_empty_string(self, service):
-        request = MagicMock(spec=Request)
-        request.requested_episodes = ""
-
-        assert service._get_requested_episodes(request) == {}
-
-    def test_get_requested_episodes_handles_invalid_json(self, service):
-        request = MagicMock(spec=Request)
-        request.requested_episodes = "not json"
-
-        assert service._get_requested_episodes(request) == {}
-
-
-class TestGetRequestedSeasons:
-    @pytest.fixture
-    def service(self):
-        db = AsyncMock()
-        prowlarr = AsyncMock()
-        qbittorrent = AsyncMock()
-        return TVDecisionService(db, prowlarr, qbittorrent)
-
-    def test_parses_json_list(self, service):
-        request = MagicMock(spec=Request)
-        request.requested_seasons = "[1, 2, 3]"
-        assert service._get_requested_seasons(request) == [1, 2, 3]
-
-    def test_returns_empty_for_none(self, service):
-        request = MagicMock(spec=Request)
-        request.requested_seasons = None
-        assert service._get_requested_seasons(request) == []
-
-    def test_returns_empty_for_invalid_json(self, service):
-        request = MagicMock(spec=Request)
-        request.requested_seasons = "invalid"
-        assert service._get_requested_seasons(request) == []
 
 
 class TestProcessRequest:
@@ -147,7 +96,7 @@ class TestProcessRequest:
 
     @pytest.mark.asyncio
     async def test_no_seasons_specified_returns_error(self, service, mock_db):
-        request = _make_request(requested_seasons="[]")
+        request = _make_request(seasons=[])
         mock_db.execute.return_value = MagicMock(scalar_one_or_none=MagicMock(return_value=request))
         mock_db.commit = AsyncMock()
 
@@ -180,8 +129,8 @@ class TestProcessRequest:
     @pytest.mark.asyncio
     async def test_parallel_search_returns_both_packs_and_episodes(self, service, mock_db):
         request = _make_request(
-            requested_seasons="[1]",
-            requested_episodes='{"1": [1, 2]}',
+            seasons=[1],
+            episodes={1: [1, 2]},
         )
         mock_db.execute.return_value = MagicMock(scalar_one_or_none=MagicMock(return_value=request))
         mock_db.commit = AsyncMock()
@@ -224,8 +173,8 @@ class TestProcessRequest:
     @pytest.mark.asyncio
     async def test_multi_season_requests_include_broad_pack_search(self, service, mock_db):
         request = _make_request(
-            requested_seasons="[1, 2]",
-            requested_episodes='{"1": [1], "2": [1]}',
+            seasons=[1, 2],
+            episodes={1: [1], 2: [1]},
         )
         mock_db.execute.return_value = MagicMock(scalar_one_or_none=MagicMock(return_value=request))
         mock_db.commit = AsyncMock()
@@ -278,8 +227,8 @@ class TestProcessRequest:
     @pytest.mark.asyncio
     async def test_season_packs_preferred_over_episodes(self, service, mock_db):
         request = _make_request(
-            requested_seasons="[1]",
-            requested_episodes='{"1": [1]}',
+            seasons=[1],
+            episodes={1: [1]},
         )
         mock_db.execute.return_value = MagicMock(scalar_one_or_none=MagicMock(return_value=request))
         mock_db.commit = AsyncMock()
@@ -321,8 +270,8 @@ class TestProcessRequest:
         self, service, mock_db
     ):
         request = _make_request(
-            requested_seasons="[1]",
-            requested_episodes='{"1": [1]}',
+            seasons=[1],
+            episodes={1: [1]},
         )
         mock_db.execute.return_value = MagicMock(scalar_one_or_none=MagicMock(return_value=request))
         mock_db.commit = AsyncMock()
@@ -367,8 +316,8 @@ class TestProcessRequest:
         self, service, mock_db
     ):
         request = _make_request(
-            requested_seasons="[1, 2]",
-            requested_episodes='{"1": [1], "2": [1]}',
+            seasons=[1, 2],
+            episodes={1: [1], 2: [1]},
         )
         mock_db.execute.return_value = MagicMock(scalar_one_or_none=MagicMock(return_value=request))
         mock_db.commit = AsyncMock()
@@ -420,8 +369,8 @@ class TestProcessRequest:
         self, service, mock_db
     ):
         request = _make_request(
-            requested_seasons="[1, 2]",
-            requested_episodes='{"1": [1], "2": [1]}',
+            seasons=[1, 2],
+            episodes={1: [1], 2: [1]},
         )
         mock_db.execute.return_value = MagicMock(scalar_one_or_none=MagicMock(return_value=request))
         mock_db.commit = AsyncMock()
@@ -473,8 +422,8 @@ class TestProcessRequest:
         self, service, mock_db
     ):
         request = _make_request(
-            requested_seasons="[1]",
-            requested_episodes='{"1": [1]}',
+            seasons=[1],
+            episodes={1: [1]},
         )
         mock_db.execute.return_value = MagicMock(scalar_one_or_none=MagicMock(return_value=request))
         mock_db.commit = AsyncMock()
@@ -518,10 +467,7 @@ class TestProcessRequest:
 
     @pytest.mark.asyncio
     async def test_episode_discovery_range_respected(self, service, mock_db):
-        request = _make_request(
-            requested_seasons="[1]",
-            requested_episodes=None,
-        )
+        request = _make_request(seasons=[1])
         mock_db.execute.return_value = MagicMock(scalar_one_or_none=MagicMock(return_value=request))
         mock_db.commit = AsyncMock()
         mock_db.flush = AsyncMock()
@@ -551,8 +497,8 @@ class TestProcessRequest:
     @pytest.mark.asyncio
     async def test_no_passing_releases_goes_to_pending(self, service, mock_db):
         request = _make_request(
-            requested_seasons="[1]",
-            requested_episodes='{"1": [1]}',
+            seasons=[1],
+            episodes={1: [1]},
         )
         mock_db.execute.return_value = MagicMock(scalar_one_or_none=MagicMock(return_value=request))
         mock_db.commit = AsyncMock()
@@ -586,8 +532,8 @@ class TestProcessRequest:
     @pytest.mark.asyncio
     async def test_search_errors_are_collected(self, service, mock_db):
         request = _make_request(
-            requested_seasons="[1]",
-            requested_episodes='{"1": [1]}',
+            seasons=[1],
+            episodes={1: [1]},
         )
         mock_db.execute.return_value = MagicMock(scalar_one_or_none=MagicMock(return_value=request))
         mock_db.commit = AsyncMock()

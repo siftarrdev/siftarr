@@ -7,6 +7,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.siftarr.config import get_settings
 from app.siftarr.database import async_session_maker, get_db
 from app.siftarr.models import MediaType, Request, RequestStatus
 from app.siftarr.services.episode_sync_service import EpisodeSyncService
@@ -16,7 +17,6 @@ from app.siftarr.services.overseerr_service import OverseerrService
 from app.siftarr.services.plex_service import PlexService
 from app.siftarr.services.prowlarr_service import ProwlarrService
 from app.siftarr.services.qbittorrent_service import QbittorrentService
-from app.siftarr.services.runtime_settings import get_effective_settings
 from app.siftarr.services.tv_decision_service import TVDecisionService
 from app.siftarr.services.unreleased_service import UnreleasedEvaluator
 
@@ -112,7 +112,7 @@ async def receive_overseerr_webhook(
     year = None
     media_external_id = payload.media.tmdbid or payload.media.tvdbid
     if media_external_id:
-        settings = await get_effective_settings(db)
+        settings = get_settings()
         overseerr_service = OverseerrService(settings=settings)
         try:
             media_type_for_api = "movie" if media_type == MediaType.MOVIE else "tv"
@@ -130,12 +130,6 @@ async def receive_overseerr_webhook(
         tvdb_id=payload.media.tvdbid,
         title=title,
         year=year,
-        requested_seasons=str(payload.media.requested_seasons)
-        if payload.media.requested_seasons
-        else None,
-        requested_episodes=str(payload.media.requested_episodes)
-        if payload.media.requested_episodes
-        else None,
         requester_username=payload.requestedBy.username if payload.requestedBy else None,
         requester_email=payload.requestedBy.email if payload.requestedBy else None,
         status=RequestStatus.PENDING,
@@ -174,7 +168,7 @@ async def process_request_background(request_id: int) -> None:
             )
 
             if request.media_type == MediaType.TV:
-                settings = await get_effective_settings(db)
+                settings = get_settings()
                 plex_service = PlexService(settings=settings)
                 episode_sync = EpisodeSyncService(db, plex=plex_service)
                 try:
@@ -184,7 +178,7 @@ async def process_request_background(request_id: int) -> None:
                 finally:
                     await plex_service.close()
 
-            settings = await get_effective_settings(db)
+            settings = get_settings()
             overseerr = OverseerrService(settings=settings)
             try:
                 evaluator = UnreleasedEvaluator(db, overseerr)
@@ -200,7 +194,7 @@ async def process_request_background(request_id: int) -> None:
             finally:
                 await overseerr.close()
 
-            settings = await get_effective_settings(db)
+            settings = get_settings()
             prowlarr = ProwlarrService(settings=settings)
             qbittorrent = QbittorrentService(settings=settings)
 

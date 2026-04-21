@@ -9,6 +9,7 @@ from fastapi.responses import JSONResponse, RedirectResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.siftarr.config import get_settings
 from app.siftarr.database import get_db
 from app.siftarr.models import EventType
 from app.siftarr.models.episode import Episode
@@ -33,7 +34,6 @@ from app.siftarr.services.request_service import (
     selection_redirect_url,
 )
 from app.siftarr.services.rule_engine import ReleaseEvaluation, RuleEngine
-from app.siftarr.services.runtime_settings import get_effective_settings
 
 logger = logging.getLogger(__name__)
 
@@ -87,7 +87,7 @@ async def _process_request_search(
         details={"title": request.title, "media_type": request.media_type.value},
     )
 
-    runtime_settings = await get_effective_settings(db)
+    runtime_settings = get_settings()
 
     # Backfill year if missing (e.g. Overseerr was unreachable at creation time)
     if request.year is None and (request.tmdb_id or request.tvdb_id):
@@ -144,7 +144,7 @@ async def _deny_request_record(
     reason: str | None = None,
 ) -> None:
     """Decline a request in Overseerr and mark it denied locally."""
-    effective_settings = await get_effective_settings(db)
+    effective_settings = get_settings()
     overseerr_service = OverseerrService(settings=effective_settings)
     lifecycle_service = LifecycleService(db)
     queue_service = PendingQueueService(db)
@@ -154,7 +154,7 @@ async def _deny_request_record(
             await overseerr_service.decline_request(request.overseerr_request_id, reason=reason)
 
         await queue_service.remove_from_queue(request.id)
-        await lifecycle_service.mark_as_denied(request.id, reason=reason)
+        await lifecycle_service.transition(request.id, RequestStatus.DENIED, reason=reason)
     finally:
         await overseerr_service.close()
 
@@ -319,10 +319,10 @@ def _recalculate_season_status(season: Season) -> RequestStatus:
     if not season.episodes:
         return season.status
     statuses = {ep.status for ep in season.episodes}
-    if statuses <= {RequestStatus.AVAILABLE, RequestStatus.COMPLETED}:
-        return RequestStatus.AVAILABLE
-    if statuses & {RequestStatus.AVAILABLE, RequestStatus.COMPLETED}:
-        return RequestStatus.PARTIALLY_AVAILABLE
+    if statuses <= {RequestStatus.COMPLETED}:
+        return RequestStatus.COMPLETED
+    if statuses & {RequestStatus.COMPLETED}:
+        return RequestStatus.PENDING
     return season.status
 
 
@@ -331,10 +331,10 @@ def _recalculate_request_status(request: RequestModel) -> RequestStatus:
     if not request.seasons:
         return request.status
     season_statuses = {s.status for s in request.seasons}
-    if season_statuses <= {RequestStatus.AVAILABLE, RequestStatus.COMPLETED}:
-        return RequestStatus.AVAILABLE
-    if season_statuses & {RequestStatus.AVAILABLE, RequestStatus.PARTIALLY_AVAILABLE}:
-        return RequestStatus.PARTIALLY_AVAILABLE
+    if season_statuses <= {RequestStatus.COMPLETED}:
+        return RequestStatus.COMPLETED
+    if season_statuses & {RequestStatus.COMPLETED, RequestStatus.PENDING}:
+        return RequestStatus.PENDING
     return request.status
 
 
@@ -356,10 +356,10 @@ async def mark_episode_available(
     if not season or season.request_id != request_id:
         raise HTTPException(status_code=404, detail="Episode does not belong to this request")
 
-    if episode.status in (RequestStatus.AVAILABLE, RequestStatus.COMPLETED):
-        raise HTTPException(status_code=400, detail="Episode is already available or completed")
+    if episode.status == RequestStatus.COMPLETED:
+        raise HTTPException(status_code=400, detail="Episode is already completed")
 
-    episode.status = RequestStatus.AVAILABLE
+    episode.status = RequestStatus.COMPLETED
 
     # Eagerly load all episodes for recalculation
     await db.refresh(season, ["episodes"])
@@ -402,8 +402,8 @@ async def mark_season_all_available(
 
     activity_log = ActivityLogService(db)
     for ep in season.episodes:
-        if ep.status not in (RequestStatus.AVAILABLE, RequestStatus.COMPLETED):
-            ep.status = RequestStatus.AVAILABLE
+        if ep.status != RequestStatus.COMPLETED:
+            ep.status = RequestStatus.COMPLETED
             await activity_log.log(
                 EventType.EPISODE_MARKED_AVAILABLE,
                 request_id=request_id,

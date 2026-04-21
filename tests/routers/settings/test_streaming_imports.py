@@ -24,9 +24,6 @@ async def test_rescan_plex_sse_reports_movies_and_tv_in_active_items(monkeypatch
     polling.get_active_requests = AsyncMock(return_value=[movie_request, tv_request])
     polling.poll = AsyncMock(return_value=7)
     monkeypatch.setattr(settings, "PlexPollingService", lambda db, plex: polling)
-    monkeypatch.setattr(
-        settings, "get_effective_settings", AsyncMock(return_value=runtime_settings)
-    )
     monkeypatch.setattr(settings, "PlexService", lambda settings: plex_service)
 
     monkeypatch.setattr(settings, "async_session_maker", lambda: AsyncMock())
@@ -69,9 +66,9 @@ async def test_rescan_plex_uses_bounded_parallel_workers_and_reports_counts(
     )
     runtime_settings = MagicMock(plex_sync_concurrency=2)
     monkeypatch.setattr(
-        settings,
-        "get_effective_settings",
-        AsyncMock(return_value=runtime_settings),
+        settings._jobs,
+        "get_settings",
+        lambda: runtime_settings,
     )
 
     plex_service = AsyncMock()
@@ -232,9 +229,7 @@ async def test_sync_overseerr_prefetches_with_bounded_parallelism(monkeypatch, b
         AsyncMock(return_value=context),
     )
     runtime_settings = MagicMock(overseerr_sync_concurrency=2)
-    monkeypatch.setattr(
-        settings, "get_effective_settings", AsyncMock(return_value=runtime_settings)
-    )
+    monkeypatch.setattr(settings._imports, "get_settings", lambda: runtime_settings)
 
     started = 0
     in_flight = 0
@@ -383,9 +378,7 @@ async def test_sync_overseerr_keeps_duplicate_skipping_behavior(monkeypatch, bas
         AsyncMock(return_value=context),
     )
     runtime_settings = MagicMock(overseerr_sync_concurrency=2)
-    monkeypatch.setattr(
-        settings, "get_effective_settings", AsyncMock(return_value=runtime_settings)
-    )
+    monkeypatch.setattr(settings._imports, "get_settings", lambda: runtime_settings)
 
     overseerr_requests = [
         {

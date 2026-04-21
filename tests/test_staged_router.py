@@ -46,7 +46,7 @@ class TestStagedRouter:
         lifecycle_service = AsyncMock()
         log_decision = MagicMock()
 
-        monkeypatch.setattr(staged, "get_effective_settings", AsyncMock(return_value=MagicMock()))
+        monkeypatch.setattr(staged, "get_settings", lambda: MagicMock())
         monkeypatch.setattr(staged, "QbittorrentService", MagicMock(return_value=qbittorrent))
         monkeypatch.setattr(staged, "LifecycleService", MagicMock(return_value=lifecycle_service))
         monkeypatch.setattr(staged, "log_staging_decision", log_decision)
@@ -58,7 +58,7 @@ class TestStagedRouter:
 
         assert response.status_code == 303
         assert torrent.status == "approved"
-        lifecycle_service.mark_as_downloading.assert_awaited_once_with(request.id)
+        lifecycle_service.transition.assert_awaited_once_with(request.id, RequestStatus.DOWNLOADING)
         log_decision.assert_called_once_with(
             request=request,
             approved_torrent=torrent,
@@ -99,7 +99,7 @@ class TestStagedRouter:
         lifecycle_service = AsyncMock()
         log_decision = MagicMock()
 
-        monkeypatch.setattr(staged, "get_effective_settings", AsyncMock(return_value=MagicMock()))
+        monkeypatch.setattr(staged, "get_settings", lambda: MagicMock())
         monkeypatch.setattr(staged, "QbittorrentService", MagicMock(return_value=qbittorrent))
         monkeypatch.setattr(staged, "LifecycleService", MagicMock(return_value=lifecycle_service))
         monkeypatch.setattr(staged, "log_staging_decision", log_decision)
@@ -144,7 +144,7 @@ class TestStagedRouter:
         qbittorrent = AsyncMock()
         qbittorrent.add_torrent.side_effect = ["hash1", "hash2"]
         lifecycle_service = AsyncMock()
-        monkeypatch.setattr(staged, "get_effective_settings", AsyncMock(return_value=MagicMock()))
+        monkeypatch.setattr(staged, "get_settings", lambda: MagicMock())
         monkeypatch.setattr(staged, "QbittorrentService", MagicMock(return_value=qbittorrent))
         monkeypatch.setattr(staged, "LifecycleService", MagicMock(return_value=lifecycle_service))
         monkeypatch.setattr(staged, "log_staging_decision", MagicMock())
@@ -160,7 +160,7 @@ class TestStagedRouter:
         assert response.status_code == 200
         assert torrent_one.status == "approved"
         assert torrent_two.status == "approved"
-        assert lifecycle_service.mark_as_downloading.await_count == 2
+        assert lifecycle_service.transition.await_count == 2
 
     @pytest.mark.asyncio
     async def test_bulk_staged_action_discards_selected(self, mock_db, monkeypatch):
@@ -226,7 +226,7 @@ class TestStagedRouter:
 
         qbittorrent = AsyncMock()
         qbittorrent.add_torrent.return_value = "hash456"
-        monkeypatch.setattr(staged, "get_effective_settings", AsyncMock(return_value=MagicMock()))
+        monkeypatch.setattr(staged, "get_settings", lambda: MagicMock())
         monkeypatch.setattr(staged, "QbittorrentService", MagicMock(return_value=qbittorrent))
         monkeypatch.setattr(staged, "log_replacement_decision", MagicMock())
         monkeypatch.setattr(staged.os.path, "exists", MagicMock(return_value=False))
@@ -293,9 +293,7 @@ class TestDownloadStatusEndpoint:
 
         qbit = AsyncMock()
         qbit.get_torrent_info = AsyncMock(return_value={"progress": 0.6, "state": "downloading"})
-        monkeypatch.setattr(
-            staged_module, "get_effective_settings", AsyncMock(return_value=MagicMock())
-        )
+        monkeypatch.setattr(staged, "get_settings", lambda: MagicMock())
         monkeypatch.setattr(staged_module, "QbittorrentService", MagicMock(return_value=qbit))
 
         response = await get_download_status(db=mock_db)
@@ -347,17 +345,15 @@ class TestDownloadStatusEndpoint:
         request_status_result = MagicMock()
         request_status_result.all.return_value = [
             (99, RequestStatus.DOWNLOADING),
-            (100, RequestStatus.AVAILABLE),
-            (101, RequestStatus.PARTIALLY_AVAILABLE),
+            (100, RequestStatus.COMPLETED),
+            (101, RequestStatus.COMPLETED),
         ]
 
         mock_db.execute.side_effect = [torrent_result, request_status_result]
 
         qbit = AsyncMock()
         qbit.get_torrent_info = AsyncMock(return_value={"progress": 0.6, "state": "downloading"})
-        monkeypatch.setattr(
-            staged_module, "get_effective_settings", AsyncMock(return_value=MagicMock())
-        )
+        monkeypatch.setattr(staged, "get_settings", lambda: MagicMock())
         monkeypatch.setattr(staged_module, "QbittorrentService", MagicMock(return_value=qbit))
 
         response = await get_download_status(db=mock_db)
@@ -392,9 +388,7 @@ class TestDownloadStatusEndpoint:
         qbit = AsyncMock()
         qbit.get_torrent_info = AsyncMock(return_value={"progress": 1.0, "state": "uploading"})
 
-        monkeypatch.setattr(
-            staged_module, "get_effective_settings", AsyncMock(return_value=MagicMock())
-        )
+        monkeypatch.setattr(staged, "get_settings", lambda: MagicMock())
         monkeypatch.setattr(staged_module, "QbittorrentService", MagicMock(return_value=qbit))
 
         response = await get_download_status(db=mock_db)
@@ -461,9 +455,7 @@ class TestCheckNowEndpoint:
         qbit.get_torrent_info = AsyncMock(return_value={"progress": 0.2, "state": "downloading"})
         plex_polling = AsyncMock()
 
-        monkeypatch.setattr(
-            staged_module, "get_effective_settings", AsyncMock(return_value=MagicMock())
-        )
+        monkeypatch.setattr(staged, "get_settings", lambda: MagicMock())
         monkeypatch.setattr(staged_module, "QbittorrentService", MagicMock(return_value=qbit))
         monkeypatch.setattr(staged_module, "PlexService", MagicMock(return_value=AsyncMock()))
         monkeypatch.setattr(

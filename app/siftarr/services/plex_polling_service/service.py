@@ -4,7 +4,7 @@ import asyncio
 import contextlib
 import logging
 from collections.abc import Awaitable
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 from typing import TypeVar
 
 from sqlalchemy import select
@@ -17,7 +17,6 @@ from app.siftarr.models.season import Season
 from app.siftarr.services.async_utils import gather_limited
 from app.siftarr.services.episode_sync_service import EpisodeSyncService
 from app.siftarr.services.lifecycle_service import LifecycleService
-from app.siftarr.services.plex_scan_state_service import PlexScanStateService
 from app.siftarr.services.plex_service import PlexService
 
 from .full_reconcile import FullReconcileMixin
@@ -54,7 +53,6 @@ class PlexPollingService(
         self.plex = plex
         self.lifecycle = LifecycleService(db)
         self.episode_sync = EpisodeSyncService(db, plex=plex)
-        self.scan_state = PlexScanStateService(db)
         self._write_lock = asyncio.Lock()
 
     async def get_active_requests(self) -> list[Request]:
@@ -99,20 +97,6 @@ class PlexPollingService(
         if isinstance(configured, int) and configured > 0:
             return configured
         return max(1, get_settings().plex_sync_concurrency)
-
-    def _get_incremental_checkpoint_buffer(self) -> timedelta:
-        settings = getattr(self.plex, "settings", None)
-        configured = getattr(settings, "plex_checkpoint_buffer_minutes", None)
-        if isinstance(configured, int) and configured >= 0:
-            return timedelta(minutes=configured)
-        return timedelta(minutes=max(0, get_settings().plex_checkpoint_buffer_minutes))
-
-    def _get_incremental_lock_lease_duration(self) -> timedelta:
-        settings = getattr(self.plex, "settings", None)
-        configured = getattr(settings, "plex_recent_scan_interval_minutes", None)
-        if isinstance(configured, int) and configured > 0:
-            return timedelta(minutes=max(5, configured * 2))
-        return timedelta(minutes=max(5, get_settings().plex_recent_scan_interval_minutes * 2))
 
     def _current_time(self) -> datetime:
         return datetime.now(UTC)

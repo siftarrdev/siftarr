@@ -4,9 +4,7 @@ import asyncio
 import contextlib
 import logging
 from collections.abc import Awaitable
-from datetime import UTC, datetime
 from typing import TYPE_CHECKING, TypeVar
-from uuid import uuid4
 
 from app.siftarr.models.request import MediaType, Request
 from app.siftarr.services.async_utils import gather_limited
@@ -17,14 +15,12 @@ from .models import (
     PollDecision,
     ProgressCallback,
     RecentScanMatch,
-    ScanCheckpointAdvance,
     ScanMetrics,
     ScanProbeResult,
     ScanRunResult,
 )
 
 if TYPE_CHECKING:
-    from app.siftarr.services.plex_scan_state_service import PlexScanStateService
     from app.siftarr.services.plex_service import PlexService
 
 T = TypeVar("T")
@@ -34,21 +30,8 @@ logger = logging.getLogger(__name__)
 
 class IncrementalScanMixin:
     plex: "PlexService"
-    scan_state: "PlexScanStateService"
 
     async def get_active_requests(self) -> list[Request]:
-        raise NotImplementedError
-
-    def _get_incremental_lock_lease_duration(self):
-        raise NotImplementedError
-
-    def _get_incremental_checkpoint_buffer(self):
-        raise NotImplementedError
-
-    def _current_time(self) -> datetime:
-        raise NotImplementedError
-
-    def _coerce_datetime(self, value: datetime | None) -> datetime | None:
         raise NotImplementedError
 
     def _index_requests_by_media_identity(
@@ -107,122 +90,42 @@ class IncrementalScanMixin:
         on_progress: ProgressCallback | None = None,
         *,
         acquire_lock: bool = True,
-        previous_checkpoint_at: datetime | None = None,
+        previous_checkpoint_at: object = None,
     ) -> ScanRunResult:
-        """Run the fast recently-added scan with optional persisted lock ownership."""
-        mode = "incremental_recent_scan"
-        job_name = "plex_recent_scan"
-        metrics = ScanMetrics()
-        lock_owner: str | None = None
-
-        if acquire_lock:
-            lock_owner = f"{job_name}:{uuid4()}"
-            await self.scan_state.recover_stale_lock(job_name)
-            state = await self.scan_state.acquire_lock(
-                job_name,
-                lock_owner,
-                self._get_incremental_lock_lease_duration(),
-                now=self._current_time(),
-            )
-            if state is None:
-                logger.info("PlexPollingService: incremental run skipped due to lock contention")
-                return ScanRunResult(mode=mode, metrics=metrics)
-
-            previous_checkpoint_at = self._coerce_datetime(getattr(state, "checkpoint_at", None))
-        else:
-            previous_checkpoint_at = self._coerce_datetime(previous_checkpoint_at)
-
-        run_started_at = self._current_time()
-        metrics.checkpoint = ScanCheckpointAdvance(
-            previous_checkpoint_at=previous_checkpoint_at,
-            current_checkpoint_at=previous_checkpoint_at,
-            advanced=False,
+        """Run the fast recently-added scan."""
+        result, last_error, clean_run = await self._run_incremental_recent_scan(
+            on_progress=on_progress,
         )
-
-        last_error: str | None = None
-        clean_run = False
-
-        try:
-            result, last_error, clean_run = await self._run_incremental_recent_scan(
-                previous_checkpoint_at=previous_checkpoint_at,
-                on_progress=on_progress,
+        if clean_run:
+            logger.info(
+                "PlexPollingService: incremental run completed cleanly; "
+                "completed=%d scanned=%d matched=%d deduped=%d",
+                result.completed_requests,
+                result.metrics.scanned_items,
+                result.metrics.matched_requests,
+                result.metrics.deduped_items,
             )
-            metrics = result.metrics
-            if clean_run:
-                metrics.checkpoint = ScanCheckpointAdvance(
-                    previous_checkpoint_at=previous_checkpoint_at,
-                    current_checkpoint_at=run_started_at,
-                    advanced=True,
-                )
-            else:
-                metrics.checkpoint = ScanCheckpointAdvance(
-                    previous_checkpoint_at=previous_checkpoint_at,
-                    current_checkpoint_at=previous_checkpoint_at,
-                    advanced=False,
-                )
-
-            if acquire_lock and lock_owner is not None:
-                await self.scan_state.release_lock(
-                    job_name,
-                    lock_owner,
-                    success=clean_run,
-                    finished_at=self._current_time(),
-                    checkpoint_at=run_started_at if clean_run else previous_checkpoint_at,
-                    metrics_payload=metrics.as_dict(),
-                    last_error=last_error,
-                )
-            if clean_run:
-                logger.info(
-                    "PlexPollingService: incremental run completed cleanly; "
-                    "completed=%d scanned=%d matched=%d deduped=%d checkpoint_advanced=%s",
-                    result.completed_requests,
-                    metrics.scanned_items,
-                    metrics.matched_requests,
-                    metrics.deduped_items,
-                    metrics.checkpoint.advanced,
-                )
-            else:
-                logger.info(
-                    "PlexPollingService: incremental run completed partially; "
-                    "completed=%d scanned=%d matched=%d deduped=%d skipped_on_error=%d "
-                    "checkpoint_retained=%s",
-                    result.completed_requests,
-                    metrics.scanned_items,
-                    metrics.matched_requests,
-                    metrics.deduped_items,
-                    metrics.skipped_on_error_items,
-                    not metrics.checkpoint.advanced,
-                )
-            return ScanRunResult(
-                mode=mode,
-                completed_requests=result.completed_requests,
-                metrics=metrics,
-                clean_run=clean_run,
-                last_error=last_error,
+        else:
+            logger.info(
+                "PlexPollingService: incremental run completed partially; "
+                "completed=%d scanned=%d matched=%d deduped=%d skipped_on_error=%d",
+                result.completed_requests,
+                result.metrics.scanned_items,
+                result.metrics.matched_requests,
+                result.metrics.deduped_items,
+                result.metrics.skipped_on_error_items,
             )
-        except Exception as exc:
-            last_error = str(exc)
-            metrics.checkpoint = ScanCheckpointAdvance(
-                previous_checkpoint_at=previous_checkpoint_at,
-                current_checkpoint_at=previous_checkpoint_at,
-                advanced=False,
-            )
-            if acquire_lock and lock_owner is not None:
-                await self.scan_state.release_lock(
-                    job_name,
-                    lock_owner,
-                    success=False,
-                    finished_at=self._current_time(),
-                    checkpoint_at=previous_checkpoint_at,
-                    metrics_payload=metrics.as_dict(),
-                    last_error=last_error,
-                )
-            raise
+        return ScanRunResult(
+            mode="incremental_recent_scan",
+            completed_requests=result.completed_requests,
+            metrics=result.metrics,
+            clean_run=clean_run,
+            last_error=last_error,
+        )
 
     async def _run_incremental_recent_scan(
         self,
         *,
-        previous_checkpoint_at: datetime | None,
         on_progress: ProgressCallback | None,
     ) -> tuple[ScanRunResult, str | None, bool]:
         requests = await self.get_active_requests()
@@ -232,13 +135,11 @@ class IncrementalScanMixin:
             logger.debug("PlexPollingService: no active requests for incremental_recent_scan")
             return ScanRunResult(mode="incremental_recent_scan", metrics=metrics), None, True
 
-        checkpoint_cutoff = self._get_incremental_cutoff(previous_checkpoint_at)
         request_identity_index = self._index_requests_by_media_identity(requests)
 
         async with self.plex.scan_cycle():
             recent_matches, recent_error_messages = await self._collect_recent_matches(
                 request_identity_index=request_identity_index,
-                checkpoint_cutoff=checkpoint_cutoff,
             )
 
             metrics.scanned_items = len(recent_matches)
@@ -275,40 +176,10 @@ class IncrementalScanMixin:
             clean_run,
         )
 
-    def _get_incremental_cutoff(self, checkpoint_at: datetime | None) -> datetime | None:
-        checkpoint = self._coerce_datetime(checkpoint_at)
-        if checkpoint is None:
-            return None
-        return checkpoint - self._get_incremental_checkpoint_buffer()
-
-    def _parse_plex_datetime(self, value: object) -> datetime | None:
-        if isinstance(value, datetime):
-            return self._coerce_datetime(value)
-        if isinstance(value, int | float):
-            return datetime.fromtimestamp(value, tz=UTC)
-        if isinstance(value, str):
-            stripped = value.strip()
-            if stripped.isdigit():
-                return datetime.fromtimestamp(int(stripped), tz=UTC)
-            with contextlib.suppress(ValueError):
-                return self._coerce_datetime(datetime.fromisoformat(stripped))
-        return None
-
-    def _is_recent_item_in_window(
-        self, item: dict[str, object], checkpoint_cutoff: datetime | None
-    ) -> bool:
-        if checkpoint_cutoff is None:
-            return True
-        added_at = self._parse_plex_datetime(item.get("added_at"))
-        if added_at is None:
-            return True
-        return added_at > checkpoint_cutoff
-
     async def _collect_recent_matches(
         self,
         *,
         request_identity_index: dict[MediaIdentity, tuple[Request, ...]],
-        checkpoint_cutoff: datetime | None,
     ) -> tuple[list[RecentScanMatch], list[str]]:
         collected: dict[MediaIdentity, RecentScanMatch] = {}
         errors: list[str] = []
@@ -317,9 +188,6 @@ class IncrementalScanMixin:
             try:
                 async for item in self.plex.iter_recently_added_items(plex_media_type):
                     normalized_item = dict(item)
-                    if not self._is_recent_item_in_window(normalized_item, checkpoint_cutoff):
-                        continue
-
                     media_identity = self._get_recent_item_canonical_identity(normalized_item)
                     if media_identity is None:
                         continue

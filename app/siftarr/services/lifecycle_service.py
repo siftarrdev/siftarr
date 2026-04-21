@@ -18,7 +18,6 @@ class LifecycleService:
     Service for managing request lifecycle and status transitions.
 
     Status States:
-    - received: From Overseerr webhook
     - searching: Currently querying Prowlarr
     - pending: No suitable releases found, queued for retry
     - staged: In staging awaiting approval
@@ -27,88 +26,8 @@ class LifecycleService:
     - failed: Max retries exceeded or error
     """
 
-    VALID_TRANSITIONS: dict[RequestStatus, list[RequestStatus]] = {
-        RequestStatus.RECEIVED: [
-            RequestStatus.SEARCHING,
-            RequestStatus.UNRELEASED,
-            RequestStatus.FAILED,
-            RequestStatus.DENIED,
-            RequestStatus.PARTIALLY_AVAILABLE,
-            RequestStatus.AVAILABLE,
-        ],
-        RequestStatus.SEARCHING: [
-            RequestStatus.PENDING,
-            RequestStatus.STAGED,
-            RequestStatus.DOWNLOADING,
-            RequestStatus.COMPLETED,
-            RequestStatus.UNRELEASED,
-            RequestStatus.FAILED,
-            RequestStatus.DENIED,
-            RequestStatus.PARTIALLY_AVAILABLE,
-            RequestStatus.AVAILABLE,
-        ],
-        RequestStatus.PENDING: [
-            RequestStatus.SEARCHING,
-            RequestStatus.STAGED,
-            RequestStatus.DOWNLOADING,
-            RequestStatus.COMPLETED,
-            RequestStatus.UNRELEASED,
-            RequestStatus.FAILED,
-            RequestStatus.DENIED,
-            RequestStatus.PARTIALLY_AVAILABLE,
-            RequestStatus.AVAILABLE,
-        ],
-        RequestStatus.PARTIALLY_AVAILABLE: [
-            RequestStatus.COMPLETED,
-            RequestStatus.UNRELEASED,
-            RequestStatus.PENDING,
-            RequestStatus.AVAILABLE,
-            RequestStatus.SEARCHING,
-        ],
-        RequestStatus.UNRELEASED: [
-            RequestStatus.PENDING,
-            RequestStatus.SEARCHING,
-            RequestStatus.FAILED,
-            RequestStatus.DENIED,
-        ],
-        RequestStatus.STAGED: [
-            RequestStatus.DOWNLOADING,
-            RequestStatus.PENDING,
-            RequestStatus.COMPLETED,
-            RequestStatus.FAILED,
-            RequestStatus.DENIED,
-            RequestStatus.PARTIALLY_AVAILABLE,
-            RequestStatus.AVAILABLE,
-        ],
-        RequestStatus.DOWNLOADING: [
-            RequestStatus.DOWNLOADING,
-            RequestStatus.STAGED,
-            RequestStatus.PENDING,
-            RequestStatus.COMPLETED,
-            RequestStatus.FAILED,
-            RequestStatus.DENIED,
-            RequestStatus.PARTIALLY_AVAILABLE,
-            RequestStatus.AVAILABLE,
-        ],
-        RequestStatus.COMPLETED: [
-            RequestStatus.UNRELEASED,
-            RequestStatus.PENDING,
-        ],  # Re-classifiable for ongoing TV series
-        RequestStatus.AVAILABLE: [
-            RequestStatus.COMPLETED,
-            RequestStatus.UNRELEASED,
-            RequestStatus.PENDING,
-        ],
-        RequestStatus.FAILED: [],  # Terminal state
-        RequestStatus.DENIED: [],  # Terminal state
-    }
-
     def __init__(self, db: AsyncSession):
         self.db = db
-
-    def can_transition(self, current: RequestStatus, new: RequestStatus) -> bool:
-        """Check if a status transition is valid."""
-        return new in self.VALID_TRANSITIONS.get(current, [])
 
     async def transition(
         self,
@@ -125,7 +44,7 @@ class LifecycleService:
             reason: Optional reason for the transition
 
         Returns:
-            Updated Request or None if transition invalid
+            Updated Request or None if not found
         """
         result = await self.db.execute(select(Request).where(Request.id == request_id))
         request = result.scalar_one_or_none()
@@ -134,9 +53,6 @@ class LifecycleService:
             return None
 
         old_status = request.status
-        if not self.can_transition(old_status, new_status):
-            raise ValueError(f"Invalid transition from {old_status} to {new_status}")
-
         request.status = new_status
         if reason is not None:
             request.rejection_reason = reason
@@ -181,10 +97,8 @@ class LifecycleService:
             .where(
                 Request.status.in_(
                     [
-                        RequestStatus.RECEIVED,
                         RequestStatus.SEARCHING,
                         RequestStatus.PENDING,
-                        RequestStatus.PARTIALLY_AVAILABLE,
                         RequestStatus.UNRELEASED,
                         RequestStatus.STAGED,
                         RequestStatus.DOWNLOADING,
@@ -252,49 +166,7 @@ class LifecycleService:
 
         return request
 
-    async def mark_as_staged(self, request_id: int) -> Request | None:
-        """Convenience method to mark a request as staged."""
-        return await self.transition(request_id, RequestStatus.STAGED)
-
-    async def mark_as_downloading(self, request_id: int) -> Request | None:
-        """Convenience method to mark a request as downloading."""
-        return await self.transition(request_id, RequestStatus.DOWNLOADING)
-
-    async def mark_as_completed(self, request_id: int) -> Request | None:
-        """Convenience method to mark a request as completed."""
-        return await self.transition(request_id, RequestStatus.COMPLETED)
-
-    async def mark_as_failed(
-        self,
-        request_id: int,
-        reason: str | None = None,
-    ) -> Request | None:
-        """Convenience method to mark a request as failed."""
-        return await self.transition(request_id, RequestStatus.FAILED, reason)
-
-    async def mark_as_pending(self, request_id: int) -> Request | None:
-        """Convenience method to mark a request as pending."""
-        return await self.transition(request_id, RequestStatus.PENDING)
-
-    async def mark_as_unreleased(
-        self,
-        request_id: int,
-        reason: str | None = None,
-    ) -> Request | None:
-        """Convenience method to mark a request as unreleased."""
-        return await self.transition(request_id, RequestStatus.UNRELEASED, reason)
-
     async def get_unreleased_requests(self, limit: int = 500) -> list[Request]:
-        """Get all requests currently in the UNRELEASED status."""
-        result = await self.db.execute(
-            select(Request)
-            .where(Request.status == RequestStatus.UNRELEASED)
-            .order_by(Request.updated_at.desc())
-            .limit(limit)
-        )
-        return list(result.scalars().all())
-
-    async def get_unreleased_and_partial_requests(self, limit: int = 500) -> list[Request]:
         """Get requests that may need the Unreleased tab treatment."""
         result = await self.db.execute(
             select(Request)
@@ -302,8 +174,6 @@ class LifecycleService:
                 Request.status.in_(
                     [
                         RequestStatus.UNRELEASED,
-                        RequestStatus.PARTIALLY_AVAILABLE,
-                        RequestStatus.AVAILABLE,
                         RequestStatus.COMPLETED,
                     ]
                 )
@@ -324,8 +194,6 @@ class LifecycleService:
                         Request.media_type == MediaType.TV,
                         Request.status.in_(
                             [
-                                RequestStatus.PARTIALLY_AVAILABLE,
-                                RequestStatus.AVAILABLE,
                                 RequestStatus.COMPLETED,
                             ]
                         ),
@@ -337,38 +205,10 @@ class LifecycleService:
         )
         return list(result.scalars().all())
 
-    async def mark_as_denied(
-        self,
-        request_id: int,
-        reason: str | None = None,
-    ) -> Request | None:
-        """Convenience method to mark a request as denied."""
-        return await self.transition(request_id, RequestStatus.DENIED, reason)
-
-    async def mark_as_replacing(
-        self,
-        request_id: int,
-        reason: str | None = None,
-    ) -> Request | None:
-        """
-        Convenience method to mark a request as replacing.
-
-        Transitions from DOWNLOADING to STAGED, allowing the user
-        to re-stage a different torrent.
-
-        Args:
-            request_id: The request ID
-            reason: Optional reason for replacing
-
-        Returns:
-            Updated Request or None if transition invalid
-        """
-        return await self.transition(request_id, RequestStatus.STAGED, reason)
-
 
 _RELEASE_TYPES_AVAILABLE = {3, 4, 5}
 _TV_UNAIRED_STATUSES = {"Planned", "In Production", "Pilot"}
-_AVAILABLE_EPISODE_STATUSES = {RequestStatus.AVAILABLE, RequestStatus.COMPLETED}
+_AVAILABLE_EPISODE_STATUSES = {RequestStatus.COMPLETED}
 
 
 class EpisodeLike(Protocol):

@@ -35,7 +35,6 @@ async def test_run_incremental_plex_sync_reports_success(monkeypatch, mock_db, b
                     "deduped_items": 0,
                     "downgraded_requests": 0,
                     "skipped_on_error_items": 0,
-                    "checkpoint": {"advanced": True},
                 },
             },
         )
@@ -83,7 +82,6 @@ async def test_run_incremental_plex_sync_reports_partial_completion(
                     "deduped_items": 0,
                     "downgraded_requests": 0,
                     "skipped_on_error_items": 1,
-                    "checkpoint": {"advanced": False},
                 },
             },
         )
@@ -99,7 +97,7 @@ async def test_run_incremental_plex_sync_reports_partial_completion(
     assert context["message_type"] == "success"
     assert context["message"] == (
         "Incremental Plex sync completed partially. Transitioned 1 request(s). "
-        "Checkpoint retained after 1 transient/inconclusive item(s)."
+        "1 transient/inconclusive item(s) remained."
     )
 
 
@@ -131,7 +129,6 @@ async def test_run_full_plex_reconcile_reports_guarded_negative_reconciliation(
                     "deduped_items": 1,
                     "downgraded_requests": 2,
                     "skipped_on_error_items": 0,
-                    "checkpoint": {"advanced": False},
                 },
             },
         )
@@ -164,7 +161,13 @@ async def test_run_full_plex_reconcile_reports_lock_contention(monkeypatch, mock
 
     scheduler = MagicMock()
     scheduler.trigger_full_plex_reconcile_now = AsyncMock(
-        return_value=MagicMock(status="locked", completed_requests=0, error=None)
+        return_value=MagicMock(
+            status="locked",
+            completed_requests=0,
+            error=None,
+            lock_owner="worker-1",
+            metrics_payload=None,
+        )
     )
 
     import app.siftarr.main as main_module
@@ -189,9 +192,9 @@ async def test_rescan_plex_route_reports_success(monkeypatch, mock_db, base_cont
         AsyncMock(return_value=base_context()),
     )
     monkeypatch.setattr(
-        settings,
-        "get_effective_settings",
-        AsyncMock(return_value=MagicMock()),
+        settings._jobs,
+        "get_settings",
+        lambda: MagicMock(),
     )
     plex_service = AsyncMock()
     monkeypatch.setattr(settings, "PlexService", lambda settings: plex_service)

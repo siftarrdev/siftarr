@@ -1,11 +1,11 @@
 import asyncio
-import json
 import logging
 from collections.abc import Iterable
 from dataclasses import dataclass
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from app.siftarr.config import get_settings
 from app.siftarr.models.episode import Episode
@@ -64,29 +64,14 @@ class TVDecisionService:
         return RuleEngine.from_db_rules(rules=rules, media_type=MediaType.TV.value)
 
     def _get_requested_seasons(self, request: Request) -> list[int]:
-        if not request.requested_seasons:
-            return []
-        try:
-            return json.loads(request.requested_seasons)
-        except (json.JSONDecodeError, TypeError):
-            return []
+        return sorted([s.season_number for s in request.seasons])
 
     def _get_requested_episodes(self, request: Request) -> dict[int, list[int]]:
-        if not request.requested_episodes:
-            return {}
-        try:
-            data = json.loads(request.requested_episodes)
-            if isinstance(data, dict):
-                return {int(k): [int(episode) for episode in v] for k, v in data.items()}
-            if isinstance(data, list):
-                episodes = [int(episode) for episode in data if isinstance(episode, int | str)]
-                if not episodes:
-                    return {}
-                seasons = self._get_requested_seasons(request)
-                return dict.fromkeys(seasons, episodes)
-            return {}
-        except (json.JSONDecodeError, TypeError, ValueError):
-            return {}
+        return {
+            s.season_number: [e.episode_number for e in s.episodes]
+            for s in request.seasons
+            if s.episodes
+        }
 
     async def _limited_search(self, coro):
         async with self._search_semaphore:
@@ -212,7 +197,11 @@ class TVDecisionService:
             await self.db.flush()
 
     async def process_request(self, request_id: int) -> dict:
-        result = await self.db.execute(select(Request).where(Request.id == request_id))
+        result = await self.db.execute(
+            select(Request)
+            .where(Request.id == request_id)
+            .options(selectinload(Request.seasons).selectinload(Season.episodes))
+        )
         request = result.scalar_one_or_none()
 
         if not request:
@@ -224,13 +213,16 @@ class TVDecisionService:
         request.status = RequestStatus.SEARCHING
         await self.db.commit()
 
+        requested_seasons = self._get_requested_seasons(request)
+        requested_episodes = self._get_requested_episodes(request)
+
         logger.info(
             "TV search started: request_id=%s title=%s tvdb_id=%s seasons=%s episodes=%s",
             request.id,
             request.title,
             request.tvdb_id,
-            request.requested_seasons,
-            request.requested_episodes,
+            requested_seasons,
+            requested_episodes,
         )
 
         rule_engine = await self._get_rule_engine()
@@ -239,9 +231,6 @@ class TVDecisionService:
             request.status = RequestStatus.FAILED
             await self.db.commit()
             return {"status": "error", "message": "No TVDB ID available for TV show"}
-
-        requested_seasons = self._get_requested_seasons(request)
-        requested_episodes = self._get_requested_episodes(request)
 
         logger.info(
             "TV search parsed request: request_id=%s seasons=%s episodes_by_season=%s",

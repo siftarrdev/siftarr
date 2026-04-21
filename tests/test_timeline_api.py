@@ -53,7 +53,7 @@ class TestTimelineInDetails:
     """Test timeline array in the request_details endpoint response."""
 
     @pytest.mark.asyncio
-    @patch("app.siftarr.routers.dashboard_api.get_effective_settings", new_callable=AsyncMock)
+    @patch("app.siftarr.config.get_settings")
     @patch("app.siftarr.routers.dashboard_api.load_request_or_404", new_callable=AsyncMock)
     async def test_details_returns_timeline_array(self, mock_load, mock_settings, mock_db):
         """The details endpoint includes a timeline array in its response."""
@@ -100,7 +100,7 @@ class TestTimelineInDetails:
         assert len(body["timeline"]) == 2
 
     @pytest.mark.asyncio
-    @patch("app.siftarr.routers.dashboard_api.get_effective_settings", new_callable=AsyncMock)
+    @patch("app.siftarr.config.get_settings")
     @patch("app.siftarr.routers.dashboard_api.load_request_or_404", new_callable=AsyncMock)
     async def test_timeline_ordered_chronologically(self, mock_load, mock_settings, mock_db):
         """Timeline entries are returned oldest-first (chronological order)."""
@@ -141,7 +141,7 @@ class TestTimelineInDetails:
         assert timeline[1]["id"] == 2  # late entry second
 
     @pytest.mark.asyncio
-    @patch("app.siftarr.routers.dashboard_api.get_effective_settings", new_callable=AsyncMock)
+    @patch("app.siftarr.config.get_settings")
     @patch("app.siftarr.routers.dashboard_api.load_request_or_404", new_callable=AsyncMock)
     async def test_timeline_empty_when_no_logs(self, mock_load, mock_settings, mock_db):
         """Timeline is an empty array when no activity logs exist for the request."""

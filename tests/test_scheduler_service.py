@@ -2,20 +2,20 @@
 
 from __future__ import annotations
 
-from contextlib import asynccontextmanager
-from datetime import UTC, datetime
+import asyncio
+from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
-from app.siftarr.models.request import MediaType, RequestStatus
+from app.siftarr.models._base import Base
+from app.siftarr.models.request import MediaType, Request, RequestStatus
 from app.siftarr.services import scheduler_service
-from app.siftarr.services.plex_polling_service import PlexPollingService
 from app.siftarr.services.scheduler_service import (
     PLEX_FULL_RECONCILE_JOB_NAME,
     PLEX_INCREMENTAL_SYNC_JOB_NAME,
-    PlexJobRunResult,
     SchedulerService,
 )
 
@@ -84,404 +84,12 @@ async def test_start_registers_split_plex_jobs(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_incremental_job_runs_under_persisted_lock_and_records_metrics(monkeypatch):
-    """Incremental sync should acquire the persisted lock and store scan metrics."""
-    db = AsyncMock()
-    runtime_settings = SimpleNamespace(plex_recent_scan_interval_minutes=5)
-    run_result = SimpleNamespace(
-        mode="incremental_recent_scan",
-        completed_requests=2,
-        metrics=SimpleNamespace(
-            as_dict=lambda: {
-                "scanned_items": 4,
-                "matched_requests": 2,
-                "deduped_items": 1,
-                "downgraded_requests": 0,
-                "skipped_on_error_items": 0,
-                "checkpoint": {
-                    "previous_checkpoint_at": None,
-                    "current_checkpoint_at": "2026-04-19T12:00:00",
-                    "advanced": True,
-                },
-            }
-        ),
-    )
-
-    monkeypatch.setattr(
-        scheduler_service, "get_effective_settings", AsyncMock(return_value=runtime_settings)
-    )
-
-    state_service = MagicMock()
-    state_service.recover_stale_lock = AsyncMock()
-    state_service.acquire_lock = AsyncMock(return_value=SimpleNamespace(lock_owner="owner-a"))
-    state_service.get_state = AsyncMock()
-    state_service.release_lock = AsyncMock()
-    monkeypatch.setattr(scheduler_service, "PlexScanStateService", lambda db_session: state_service)
-
-    plex_instance = AsyncMock()
-    monkeypatch.setattr(scheduler_service, "PlexService", lambda settings: plex_instance)
-
-    polling_service = MagicMock()
-    polling_service.incremental_recent_scan = AsyncMock(return_value=run_result)
-    monkeypatch.setattr(
-        scheduler_service, "PlexPollingService", lambda db_session, plex: polling_service
-    )
-
-    service = SchedulerService(lambda: _FakeSessionContext(db), logger=MagicMock())
-    result = await service.trigger_incremental_plex_sync_now()
-
-    assert result == PlexJobRunResult(
-        job_name=PLEX_INCREMENTAL_SYNC_JOB_NAME,
-        status="completed",
-        completed_requests=2,
-        metrics_payload={
-            "mode": "incremental_recent_scan",
-            "completed_requests": 2,
-            "scan": {
-                "scanned_items": 4,
-                "matched_requests": 2,
-                "deduped_items": 1,
-                "downgraded_requests": 0,
-                "skipped_on_error_items": 0,
-                "checkpoint": {
-                    "previous_checkpoint_at": None,
-                    "current_checkpoint_at": "2026-04-19T12:00:00",
-                    "advanced": True,
-                },
-            },
-        },
-    )
-    state_service.recover_stale_lock.assert_awaited_once_with(PLEX_INCREMENTAL_SYNC_JOB_NAME)
-    state_service.acquire_lock.assert_awaited_once()
-    state_service.release_lock.assert_awaited_once()
-    release_call = state_service.release_lock.await_args
-    assert release_call is not None
-    release_kwargs = release_call.kwargs
-    assert release_kwargs["success"] is True
-    assert release_kwargs["checkpoint_at"] == datetime.fromisoformat("2026-04-19T12:00:00")
-    assert release_kwargs["metrics_payload"]["mode"] == "incremental_recent_scan"
-    polling_service.incremental_recent_scan.assert_awaited_once_with(
-        acquire_lock=False,
-        previous_checkpoint_at=None,
-    )
-    plex_instance.close.assert_awaited_once()
-
-
-@pytest.mark.asyncio
-async def test_incremental_job_recovers_stale_lock_before_running(monkeypatch):
-    """Incremental scheduler runs should attempt stale-lock recovery before acquiring."""
-    db = AsyncMock()
-    runtime_settings = SimpleNamespace(plex_recent_scan_interval_minutes=5)
-    run_result = SimpleNamespace(
-        mode="incremental_recent_scan",
-        completed_requests=0,
-        metrics=SimpleNamespace(
-            as_dict=lambda: {
-                "scanned_items": 0,
-                "matched_requests": 0,
-                "deduped_items": 0,
-                "downgraded_requests": 0,
-                "skipped_on_error_items": 0,
-                "checkpoint": {
-                    "previous_checkpoint_at": None,
-                    "current_checkpoint_at": "2026-04-19T12:00:00",
-                    "advanced": True,
-                },
-            }
-        ),
-    )
-
-    monkeypatch.setattr(
-        scheduler_service, "get_effective_settings", AsyncMock(return_value=runtime_settings)
-    )
-
-    state_service = MagicMock()
-    state_service.recover_stale_lock = AsyncMock(
-        return_value=SimpleNamespace(lock_owner=None, checkpoint_at=None)
-    )
-    state_service.acquire_lock = AsyncMock(return_value=SimpleNamespace(lock_owner="owner-a"))
-    state_service.get_state = AsyncMock()
-    state_service.release_lock = AsyncMock()
-    monkeypatch.setattr(scheduler_service, "PlexScanStateService", lambda db_session: state_service)
-
-    plex_instance = AsyncMock()
-    monkeypatch.setattr(scheduler_service, "PlexService", lambda settings: plex_instance)
-
-    polling_service = MagicMock()
-    polling_service.incremental_recent_scan = AsyncMock(return_value=run_result)
-    monkeypatch.setattr(
-        scheduler_service, "PlexPollingService", lambda db_session, plex: polling_service
-    )
-
-    service = SchedulerService(lambda: _FakeSessionContext(db), logger=MagicMock())
-    result = await service.trigger_incremental_plex_sync_now()
-
-    assert result.status == "completed"
-    state_service.recover_stale_lock.assert_awaited_once_with(PLEX_INCREMENTAL_SYNC_JOB_NAME)
-    state_service.acquire_lock.assert_awaited_once()
-
-
-@pytest.mark.asyncio
-async def test_incremental_job_persists_partial_outcome_without_marking_success(monkeypatch):
-    """Scheduler-managed incremental partial runs should retain error state and checkpoint."""
-    db = AsyncMock()
-    runtime_settings = SimpleNamespace(plex_recent_scan_interval_minutes=5)
-    previous_checkpoint = datetime.fromisoformat("2026-04-19T12:00:00+00:00")
-    run_result = SimpleNamespace(
-        mode="incremental_recent_scan",
-        completed_requests=1,
-        clean_run=False,
-        last_error="Incremental recent Plex scan had transient request probe errors; checkpoint retained",
-        metrics=SimpleNamespace(
-            as_dict=lambda: {
-                "scanned_items": 2,
-                "matched_requests": 1,
-                "deduped_items": 0,
-                "downgraded_requests": 0,
-                "skipped_on_error_items": 1,
-                "checkpoint": {
-                    "previous_checkpoint_at": "2026-04-19T12:00:00+00:00",
-                    "current_checkpoint_at": "2026-04-19T12:00:00+00:00",
-                    "advanced": False,
-                },
-            }
-        ),
-    )
-
-    monkeypatch.setattr(
-        scheduler_service, "get_effective_settings", AsyncMock(return_value=runtime_settings)
-    )
-
-    state_service = MagicMock()
-    state_service.recover_stale_lock = AsyncMock()
-    state_service.acquire_lock = AsyncMock(
-        return_value=SimpleNamespace(lock_owner="owner-a", checkpoint_at=previous_checkpoint)
-    )
-    state_service.get_state = AsyncMock()
-    state_service.release_lock = AsyncMock()
-    monkeypatch.setattr(scheduler_service, "PlexScanStateService", lambda db_session: state_service)
-
-    plex_instance = AsyncMock()
-    monkeypatch.setattr(scheduler_service, "PlexService", lambda settings: plex_instance)
-
-    polling_service = MagicMock()
-    polling_service.incremental_recent_scan = AsyncMock(return_value=run_result)
-    monkeypatch.setattr(
-        scheduler_service, "PlexPollingService", lambda db_session, plex: polling_service
-    )
-
-    service = SchedulerService(lambda: _FakeSessionContext(db), logger=MagicMock())
-    result = await service.trigger_incremental_plex_sync_now()
-
-    assert result == PlexJobRunResult(
-        job_name=PLEX_INCREMENTAL_SYNC_JOB_NAME,
-        status="completed",
-        completed_requests=1,
-        metrics_payload={
-            "mode": "incremental_recent_scan",
-            "completed_requests": 1,
-            "scan": {
-                "scanned_items": 2,
-                "matched_requests": 1,
-                "deduped_items": 0,
-                "downgraded_requests": 0,
-                "skipped_on_error_items": 1,
-                "checkpoint": {
-                    "previous_checkpoint_at": "2026-04-19T12:00:00+00:00",
-                    "current_checkpoint_at": "2026-04-19T12:00:00+00:00",
-                    "advanced": False,
-                },
-            },
-        },
-    )
-    release_call = state_service.release_lock.await_args
-    assert release_call is not None
-    release_kwargs = release_call.kwargs
-    assert release_kwargs["success"] is False
-    assert release_kwargs["checkpoint_at"] == previous_checkpoint
-    assert release_kwargs["last_error"] == run_result.last_error
-    polling_service.incremental_recent_scan.assert_awaited_once_with(
-        acquire_lock=False,
-        previous_checkpoint_at=previous_checkpoint,
-    )
-    plex_instance.close.assert_awaited_once()
-
-
-@pytest.mark.asyncio
-async def test_incremental_job_uses_non_locking_inner_scan_path(monkeypatch):
-    """Scheduler-managed incremental runs should not re-acquire the same persisted lock."""
-    db = AsyncMock()
-    req = MagicMock()
-    req.id = 1
-    req.media_type = scheduler_service.MediaType.MOVIE
-    req.status = scheduler_service.RequestStatus.SEARCHING
-    req.tmdb_id = 111
-    req.tvdb_id = None
-    req.title = "Movie A"
-    req.seasons = []
-    req.requested_episodes = None
-    req.plex_rating_key = None
-
-    mock_result = MagicMock()
-    mock_result.scalars.return_value.all.return_value = [req]
-    db.execute.return_value = mock_result
-
-    runtime_settings = SimpleNamespace(
-        plex_recent_scan_interval_minutes=5,
-        plex_sync_concurrency=4,
-        plex_checkpoint_buffer_minutes=10,
-    )
-    monkeypatch.setattr(
-        scheduler_service, "get_effective_settings", AsyncMock(return_value=runtime_settings)
-    )
-
-    previous_checkpoint = datetime.fromisoformat("2026-04-19T12:00:00+00:00")
-    state_service = MagicMock()
-    state_service.recover_stale_lock = AsyncMock()
-    state_service.acquire_lock = AsyncMock(
-        return_value=SimpleNamespace(lock_owner="owner-a", checkpoint_at=previous_checkpoint)
-    )
-    state_service.get_state = AsyncMock()
-    state_service.release_lock = AsyncMock()
-    monkeypatch.setattr(scheduler_service, "PlexScanStateService", lambda db_session: state_service)
-
-    plex_instance = AsyncMock()
-
-    async def iter_recently_added_items(media_type: str):
-        if media_type == "movie":
-            yield {
-                "type": "movie",
-                "rating_key": "movie-111",
-                "title": "Movie A",
-                "added_at": int(datetime(2026, 4, 19, 12, 1, tzinfo=UTC).timestamp()),
-                "guids": ("tmdb://111",),
-                "Media": [{"id": 1}],
-            }
-        if False:
-            yield {}
-
-    @asynccontextmanager
-    async def scan_cycle():
-        yield plex_instance
-
-    plex_instance.settings = runtime_settings
-    plex_instance.scan_cycle = scan_cycle
-    plex_instance.iter_recently_added_items = iter_recently_added_items
-    monkeypatch.setattr(scheduler_service, "PlexService", lambda settings: plex_instance)
-
-    polling_instances: list[PlexPollingService] = []
-    inner_acquire_lock_mock = AsyncMock(side_effect=AssertionError("inner lock used"))
-    inner_release_lock_mock = AsyncMock(side_effect=AssertionError("inner release used"))
-    transition_mock = AsyncMock(return_value=req)
-
-    def build_polling_service(db_session, plex):
-        service = PlexPollingService(db_session, plex)
-        monkeypatch.setattr(service.scan_state, "acquire_lock", inner_acquire_lock_mock)
-        monkeypatch.setattr(service.scan_state, "release_lock", inner_release_lock_mock)
-        monkeypatch.setattr(service.lifecycle, "transition", transition_mock)
-        polling_instances.append(service)
-        return service
-
-    monkeypatch.setattr(scheduler_service, "PlexPollingService", build_polling_service)
-
-    service = SchedulerService(lambda: _FakeSessionContext(db), logger=MagicMock())
-    result = await service.trigger_incremental_plex_sync_now()
-
-    assert result.status == "completed"
-    assert result.completed_requests == 1
-    assert result.metrics_payload is not None
-    assert result.metrics_payload["mode"] == "incremental_recent_scan"
-    assert result.metrics_payload["completed_requests"] == 1
-    assert len(polling_instances) == 1
-    transition_mock.assert_awaited_once_with(
-        1,
-        scheduler_service.RequestStatus.COMPLETED,
-        reason="Found on Plex",
-    )
-
-
-@pytest.mark.asyncio
-async def test_full_reconcile_job_skips_when_lock_is_held(monkeypatch):
-    """Full reconcile should report lock contention without running Plex work."""
-    db = AsyncMock()
-    runtime_settings = SimpleNamespace(plex_full_reconcile_interval_minutes=360)
-    monkeypatch.setattr(
-        scheduler_service, "get_effective_settings", AsyncMock(return_value=runtime_settings)
-    )
-
-    state_service = MagicMock()
-    state_service.recover_stale_lock = AsyncMock()
-    state_service.acquire_lock = AsyncMock(return_value=None)
-    state_service.get_state = AsyncMock(return_value=SimpleNamespace(lock_owner="worker-b"))
-    state_service.release_lock = AsyncMock()
-    monkeypatch.setattr(scheduler_service, "PlexScanStateService", lambda db_session: state_service)
-
-    plex_factory = MagicMock()
-    monkeypatch.setattr(scheduler_service, "PlexService", plex_factory)
-
-    service = SchedulerService(lambda: _FakeSessionContext(db), logger=MagicMock())
-    result = await service.trigger_full_plex_reconcile_now()
-
-    assert result == PlexJobRunResult(
-        job_name=PLEX_FULL_RECONCILE_JOB_NAME,
-        status="locked",
-        lock_owner="worker-b",
-    )
-    plex_factory.assert_not_called()
-    state_service.release_lock.assert_not_awaited()
-
-
-@pytest.mark.asyncio
-async def test_full_reconcile_job_records_failures_and_releases_lock(monkeypatch):
-    """Failed full reconcile runs should persist the error and release the lock."""
-    db = AsyncMock()
-    runtime_settings = SimpleNamespace(plex_full_reconcile_interval_minutes=360)
-    monkeypatch.setattr(
-        scheduler_service, "get_effective_settings", AsyncMock(return_value=runtime_settings)
-    )
-
-    state_service = MagicMock()
-    state_service.recover_stale_lock = AsyncMock()
-    state_service.acquire_lock = AsyncMock(return_value=SimpleNamespace(lock_owner="owner-b"))
-    state_service.get_state = AsyncMock()
-    state_service.release_lock = AsyncMock()
-    monkeypatch.setattr(scheduler_service, "PlexScanStateService", lambda db_session: state_service)
-
-    plex_instance = AsyncMock()
-    monkeypatch.setattr(scheduler_service, "PlexService", lambda settings: plex_instance)
-
-    polling_service = MagicMock()
-    polling_service.full_reconcile_scan = AsyncMock(side_effect=RuntimeError("plex boom"))
-    monkeypatch.setattr(
-        scheduler_service, "PlexPollingService", lambda db_session, plex: polling_service
-    )
-
-    service = SchedulerService(lambda: _FakeSessionContext(db), logger=MagicMock())
-    result = await service.trigger_full_plex_reconcile_now()
-
-    assert result == PlexJobRunResult(
-        job_name=PLEX_FULL_RECONCILE_JOB_NAME,
-        status="failed",
-        error="plex boom",
-    )
-    state_service.release_lock.assert_awaited_once()
-    release_call = state_service.release_lock.await_args
-    assert release_call is not None
-    release_kwargs = release_call.kwargs
-    assert release_kwargs["success"] is False
-    assert release_kwargs["last_error"] == "plex boom"
-    plex_instance.close.assert_awaited_once()
-
-
-@pytest.mark.asyncio
 async def test_poll_overseerr_uses_settings_service_import_helper(monkeypatch):
     """Overseerr polling should call the extracted settings import helper directly."""
 
     db = AsyncMock()
     runtime_settings = SimpleNamespace(overseerr_url="https://overseerr", overseerr_api_key="key")
-    monkeypatch.setattr(
-        scheduler_service, "get_effective_settings", AsyncMock(return_value=runtime_settings)
-    )
+    monkeypatch.setattr(scheduler_service, "get_settings", lambda: runtime_settings)
 
     import_requests = AsyncMock(return_value=(2, 1))
     monkeypatch.setattr(
@@ -516,9 +124,7 @@ async def test_download_completion_check_closes_plex_service_on_error(monkeypatc
     """Download completion polling should always close PlexService."""
     db = AsyncMock()
     runtime_settings = SimpleNamespace()
-    monkeypatch.setattr(
-        scheduler_service, "get_effective_settings", AsyncMock(return_value=runtime_settings)
-    )
+    monkeypatch.setattr(scheduler_service, "get_settings", lambda: runtime_settings)
 
     plex_instance = AsyncMock()
     qbittorrent_instance = AsyncMock()
@@ -559,16 +165,14 @@ async def test_recheck_unreleased_revisits_finished_and_available_tv_requests(mo
     """Scheduler recheck should revisit ongoing TV rows beyond current unreleased ones."""
     db = AsyncMock()
     completed_tv = SimpleNamespace(id=1, media_type=MediaType.TV, status=RequestStatus.COMPLETED)
-    available_tv = SimpleNamespace(id=2, media_type=MediaType.TV, status=RequestStatus.AVAILABLE)
+    available_tv = SimpleNamespace(id=2, media_type=MediaType.TV, status=RequestStatus.COMPLETED)
 
     lifecycle_service = AsyncMock()
     lifecycle_service.get_release_recheck_requests.return_value = [completed_tv, available_tv]
     monkeypatch.setattr(scheduler_service, "LifecycleService", lambda db_session: lifecycle_service)
 
     runtime_settings = SimpleNamespace()
-    monkeypatch.setattr(
-        scheduler_service, "get_effective_settings", AsyncMock(return_value=runtime_settings)
-    )
+    monkeypatch.setattr(scheduler_service, "get_settings", lambda: runtime_settings)
 
     overseerr_instance = AsyncMock()
     monkeypatch.setattr(scheduler_service, "OverseerrService", lambda settings: overseerr_instance)
@@ -591,3 +195,222 @@ async def test_recheck_unreleased_revisits_finished_and_available_tv_requests(mo
     assert evaluator.evaluate_and_apply.await_count == 2
     queue_service.add_to_queue.assert_awaited_once_with(2)
     overseerr_instance.close.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_incremental_plex_sync_returns_locked_when_job_already_running(monkeypatch):
+    """Concurrent incremental triggers should report lock contention."""
+
+    db = AsyncMock()
+    runtime_settings = SimpleNamespace()
+    monkeypatch.setattr(scheduler_service, "get_settings", lambda: runtime_settings)
+
+    release_scan = asyncio.Event()
+
+    class FakePlexService:
+        def __init__(self, settings):
+            self.settings = settings
+            self.close = AsyncMock()
+
+    class FakePollingService:
+        def __init__(self, db_session, plex):
+            self.db_session = db_session
+            self.plex = plex
+
+        async def incremental_recent_scan(self):
+            await release_scan.wait()
+            return SimpleNamespace(
+                mode="incremental_recent_scan",
+                completed_requests=2,
+                metrics=SimpleNamespace(
+                    as_dict=lambda: {
+                        "scanned_items": 2,
+                        "matched_requests": 2,
+                        "deduped_items": 0,
+                        "downgraded_requests": 0,
+                        "skipped_on_error_items": 0,
+                    }
+                ),
+                last_error=None,
+            )
+
+    monkeypatch.setattr(scheduler_service, "PlexService", FakePlexService)
+    monkeypatch.setattr(scheduler_service, "PlexPollingService", FakePollingService)
+
+    service = SchedulerService(lambda: _FakeSessionContext(db), logger=MagicMock())
+
+    first_run = asyncio.create_task(service.trigger_incremental_plex_sync_now())
+    await asyncio.sleep(0)
+
+    locked_result = await service.trigger_incremental_plex_sync_now()
+    assert locked_result.status == "locked"
+    assert locked_result.job_name == PLEX_INCREMENTAL_SYNC_JOB_NAME
+    assert locked_result.lock_owner is not None
+
+    release_scan.set()
+    completed_result = await first_run
+    assert completed_result.status == "completed"
+    assert completed_result.metrics_payload == {
+        "mode": "incremental_recent_scan",
+        "completed_requests": 2,
+        "scan": {
+            "scanned_items": 2,
+            "matched_requests": 2,
+            "deduped_items": 0,
+            "downgraded_requests": 0,
+            "skipped_on_error_items": 0,
+        },
+    }
+
+    snapshot = await service.get_plex_job_state_snapshot()
+    incremental_state = snapshot[PLEX_INCREMENTAL_SYNC_JOB_NAME]
+    assert incremental_state["locked"] is False
+    assert incremental_state["last_success"] is not None
+    assert incremental_state["last_run"] is not None
+    assert incremental_state["last_started"] is not None
+    assert incremental_state["last_error"] is None
+    assert incremental_state["metrics_payload"] == completed_result.metrics_payload
+
+
+@pytest.mark.asyncio
+async def test_full_plex_reconcile_records_failed_run_state(monkeypatch):
+    """Failed full reconcile runs should persist in-memory error state."""
+
+    db = AsyncMock()
+    runtime_settings = SimpleNamespace()
+    monkeypatch.setattr(scheduler_service, "get_settings", lambda: runtime_settings)
+
+    plex_instance = AsyncMock()
+    monkeypatch.setattr(scheduler_service, "PlexService", lambda settings: plex_instance)
+
+    polling_service = MagicMock()
+    polling_service.full_reconcile_scan = AsyncMock(side_effect=RuntimeError("plex timeout"))
+    monkeypatch.setattr(
+        scheduler_service,
+        "PlexPollingService",
+        lambda db_session, plex: polling_service,
+    )
+
+    service = SchedulerService(lambda: _FakeSessionContext(db), logger=MagicMock())
+
+    result = await service.trigger_full_plex_reconcile_now()
+
+    assert result.status == "failed"
+    assert result.job_name == PLEX_FULL_RECONCILE_JOB_NAME
+    assert result.error == "plex timeout"
+    assert result.metrics_payload is None
+    plex_instance.close.assert_awaited_once()
+
+    snapshot = await service.get_plex_job_state_snapshot()
+    full_state = snapshot[PLEX_FULL_RECONCILE_JOB_NAME]
+    assert full_state["locked"] is False
+    assert full_state["last_started"] is not None
+    assert full_state["last_run"] is not None
+    assert full_state["last_success"] is None
+    assert full_state["last_error"] == "plex timeout"
+    assert full_state["metrics_payload"] is None
+
+
+@pytest.mark.asyncio
+async def test_process_pending_item_marks_request_failed_after_max_retry_result(monkeypatch):
+    """Non-completed retry results should consume the last retry and fail the request."""
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+    session_maker = async_sessionmaker(engine, expire_on_commit=False)
+
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+
+    async with session_maker() as session:
+        request = Request(
+            external_id="retry-final-result",
+            media_type=MediaType.MOVIE,
+            title="Retry Movie",
+            status=RequestStatus.PENDING,
+            next_retry_at=datetime.now(UTC).replace(tzinfo=None) - timedelta(minutes=1),
+            retry_count=1,
+        )
+        session.add(request)
+        await session.commit()
+        await session.refresh(request)
+
+        monkeypatch.setattr(
+            scheduler_service,
+            "get_settings",
+            lambda: SimpleNamespace(retry_interval_hours=24, max_retry_duration_days=2),
+        )
+        monkeypatch.setattr(scheduler_service, "ProwlarrService", lambda settings: MagicMock())
+        monkeypatch.setattr(scheduler_service, "QbittorrentService", lambda settings: MagicMock())
+
+        class FakeMovieDecisionService:
+            def __init__(self, db, prowlarr, qbittorrent):
+                self.process_request = AsyncMock(
+                    return_value={"status": "pending", "message": "still blocked"}
+                )
+
+        monkeypatch.setattr(scheduler_service, "MovieDecisionService", FakeMovieDecisionService)
+
+        service = SchedulerService(session_maker, logger=MagicMock())
+        await service._process_pending_item(request)
+
+    async with session_maker() as session:
+        refreshed = await session.get(Request, request.id)
+        assert refreshed is not None
+        assert refreshed.status == RequestStatus.FAILED
+        assert refreshed.next_retry_at is None
+        assert refreshed.retry_count == 0
+        assert refreshed.rejection_reason == "still blocked"
+
+    await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_process_pending_item_reschedules_retry_after_exception(monkeypatch):
+    """Retry exceptions should preserve the error and reschedule when retries remain."""
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+    session_maker = async_sessionmaker(engine, expire_on_commit=False)
+
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+
+    scheduled_before = datetime.now(UTC).replace(tzinfo=None)
+
+    async with session_maker() as session:
+        request = Request(
+            external_id="retry-exception",
+            media_type=MediaType.MOVIE,
+            title="Retry Movie",
+            status=RequestStatus.PENDING,
+            next_retry_at=scheduled_before - timedelta(minutes=1),
+            retry_count=0,
+        )
+        session.add(request)
+        await session.commit()
+        await session.refresh(request)
+
+        monkeypatch.setattr(
+            scheduler_service,
+            "get_settings",
+            lambda: SimpleNamespace(retry_interval_hours=24, max_retry_duration_days=3),
+        )
+        monkeypatch.setattr(scheduler_service, "ProwlarrService", lambda settings: MagicMock())
+        monkeypatch.setattr(scheduler_service, "QbittorrentService", lambda settings: MagicMock())
+
+        class FakeMovieDecisionService:
+            def __init__(self, db, prowlarr, qbittorrent):
+                self.process_request = AsyncMock(side_effect=RuntimeError("decision boom"))
+
+        monkeypatch.setattr(scheduler_service, "MovieDecisionService", FakeMovieDecisionService)
+
+        service = SchedulerService(session_maker, logger=MagicMock())
+        await service._process_pending_item(request)
+
+    async with session_maker() as session:
+        refreshed = await session.get(Request, request.id)
+        assert refreshed is not None
+        assert refreshed.status == RequestStatus.PENDING
+        assert refreshed.retry_count == 1
+        assert refreshed.rejection_reason == "decision boom"
+        assert refreshed.next_retry_at is not None
+        assert refreshed.next_retry_at >= scheduled_before + timedelta(hours=23, minutes=59)
+
+    await engine.dispose()
