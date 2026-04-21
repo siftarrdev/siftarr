@@ -2,10 +2,10 @@
 // ======================================================
 
 function toggleShowUnreleased() {
-    showUnreleasedActive = !showUnreleasedActive;
+    window.showUnreleasedActive = !window.showUnreleasedActive;
     const btn = document.getElementById('show-unreleased-toggle');
     if (btn) {
-        if (showUnreleasedActive) {
+        if (window.showUnreleasedActive) {
             btn.classList.remove('border-gray-700/60', 'text-gray-500');
             btn.classList.add('border-brand-500', 'text-brand-400', 'bg-brand-500/10');
         } else {
@@ -17,12 +17,12 @@ function toggleShowUnreleased() {
 }
 
 function toggleMediaFilter(tabName, mediaType) {
-    if (!mediaFilterState[tabName]) mediaFilterState[tabName] = null;
+    if (!window.mediaFilterState[tabName]) window.mediaFilterState[tabName] = null;
 
-    if (mediaFilterState[tabName] === mediaType) {
-        mediaFilterState[tabName] = null;
+    if (window.mediaFilterState[tabName] === mediaType) {
+        window.mediaFilterState[tabName] = null;
     } else {
-        mediaFilterState[tabName] = mediaType;
+        window.mediaFilterState[tabName] = mediaType;
     }
 
     const tvBtn = document.getElementById('media-filter-' + tabName + '-tv');
@@ -34,7 +34,7 @@ function toggleMediaFilter(tabName, mediaType) {
         btn.classList.add('border-gray-700/60', 'text-gray-500');
     });
 
-    const activeBtn = mediaFilterState[tabName] === 'tv' ? tvBtn : mediaFilterState[tabName] === 'movie' ? movieBtn : null;
+    const activeBtn = window.mediaFilterState[tabName] === 'tv' ? tvBtn : window.mediaFilterState[tabName] === 'movie' ? movieBtn : null;
     if (activeBtn) {
         activeBtn.classList.remove('border-gray-700/60', 'text-gray-500');
         activeBtn.classList.add('border-brand-500', 'text-brand-400', 'bg-brand-500/10');
@@ -58,13 +58,13 @@ function filterTable() {
     const filterEl = document.getElementById('filter-input');
     if (!filterEl) return;
     const filter = filterEl.value.toLowerCase();
-    const mediaType = mediaFilterState['active'] || null;
+    const mediaType = window.mediaFilterState['active'] || null;
     document.querySelectorAll('#active-requests-body tr').forEach(row => {
         const textContent = `${row.dataset.title} ${row.dataset.type} ${row.dataset.statusLow} ${row.dataset.requestedby}`;
         const textMatch = !filter || textContent.includes(filter);
         const mediaMatch = !mediaType || row.dataset.type === mediaType;
         const status = row.dataset.status || '';
-        const unreleasedMatch = showUnreleasedActive || (status !== 'unreleased' && status !== 'partially_available');
+        const unreleasedMatch = window.showUnreleasedActive || (status !== 'unreleased' && status !== 'partially_available');
         row.style.display = (textMatch && mediaMatch && unreleasedMatch) ? '' : 'none';
     });
 }
@@ -73,7 +73,7 @@ function filterPendingTable() {
     const filterEl = document.getElementById('pending-filter-input');
     if (!filterEl) return;
     const filter = filterEl.value.toLowerCase();
-    const mediaType = mediaFilterState['pending'] || null;
+    const mediaType = window.mediaFilterState['pending'] || null;
     document.querySelectorAll('#pending-requests-body tr').forEach(row => {
         const textContent = `${row.dataset.title} ${row.dataset.type} ${row.dataset.requestedby} ${row.dataset.lasterror}`;
         const textMatch = !filter || textContent.includes(filter);
@@ -99,7 +99,7 @@ function filterFinishedTable() {
     const filterEl = document.getElementById('finished-filter-input');
     if (!filterEl) return;
     const filter = filterEl.value.toLowerCase();
-    const mediaType = mediaFilterState['finished'] || null;
+    const mediaType = window.mediaFilterState['finished'] || null;
     document.querySelectorAll('#finished-requests-body tr').forEach(row => {
         const textContent = `${row.dataset.title} ${row.dataset.type} ${row.dataset.requestedby}`;
         const textMatch = !filter || textContent.includes(filter);
@@ -112,7 +112,7 @@ function filterRejectedTable() {
     const filterEl = document.getElementById('rejected-filter-input');
     if (!filterEl) return;
     const filter = filterEl.value.toLowerCase();
-    const mediaType = mediaFilterState['rejected'] || null;
+    const mediaType = window.mediaFilterState['rejected'] || null;
     document.querySelectorAll('#rejected-requests-body tr').forEach(row => {
         const textContent = `${row.dataset.title} ${row.dataset.type} ${row.dataset.requestedby} ${row.dataset.reason}`;
         const textMatch = !filter || textContent.includes(filter);
@@ -125,7 +125,7 @@ function filterUnreleasedTable() {
     const filterEl = document.getElementById('unreleased-filter-input');
     if (!filterEl) return;
     const filter = filterEl.value.toLowerCase();
-    const mediaType = mediaFilterState['unreleased'] || null;
+    const mediaType = window.mediaFilterState['unreleased'] || null;
     document.querySelectorAll('#unreleased-requests-body tr').forEach(row => {
         const textContent = `${row.dataset.title} ${row.dataset.type} ${row.dataset.requestedby} ${row.dataset.expected}`.toLowerCase();
         const textMatch = !filter || textContent.includes(filter);
@@ -139,9 +139,9 @@ function filterReleaseCards() {
     const releasesContainer = document.getElementById('request-details-releases');
     if (!filterEl || !releasesContainer) return;
     const filter = filterEl.value.toLowerCase();
-    releasesContainer.innerHTML = currentReleases
+    releasesContainer.innerHTML = window.currentReleases
         .filter(r => !filter || r.title.toLowerCase().includes(filter))
-        .map(release => renderReleaseCard(release, currentRequestId))
+        .map(release => window.renderReleaseCard(release, window.currentRequestId))
         .join('');
 }
 
@@ -163,7 +163,7 @@ function sortTable(tableName, sortKey) {
         rejected: 'rejected-requests-body',
     };
     const numericKeys = new Set(['ovrank', 'retrycount', 'size', 'score']);
-    const state = tableSortState[tableName];
+    const state = window.tableSortState[tableName];
     const tbody = document.getElementById(bodyIdMap[tableName]);
     const table = document.getElementById(tableIdMap[tableName]);
     if (!tbody || !table || !state) return;

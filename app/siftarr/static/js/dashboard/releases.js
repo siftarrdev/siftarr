@@ -3,7 +3,7 @@
 
 function renderAnnotation(value, toneClass = 'text-gray-400', dataAttr = '') {
     if (!value) return '';
-    return `<span class="${toneClass}" ${dataAttr}>${escapeHtml(value)}</span>`;
+    return `<span class="${toneClass}" ${dataAttr}>${window.escapeHtml(value)}</span>`;
 }
 
 function releaseAnnotationTone(release, field) {
@@ -66,8 +66,7 @@ function renderReleaseCard(release, requestId) {
     ].filter(Boolean).join(' \u00B7 ');
     const availability = `Seeders ${release.seeders ?? 0} \u00B7 Leechers ${release.leechers ?? 0}`;
     const downloaded = release.downloaded ? '<span class="badge badge-blue">Already sent</span>' : '';
-    const currentTab = new URLSearchParams(window.location.search).get('tab') || 'active';
-    const activeStagedTorrent = release.active_staged_torrent || (isScopedEpisodeRelease ? null : currentActiveStagedTorrent);
+    const activeStagedTorrent = release.active_staged_torrent || (isScopedEpisodeRelease ? null : window.currentActiveStagedTorrent);
     const hasActiveStagedSelection = window.siftarrStagingModeEnabled && !!activeStagedTorrent;
     const isActiveSelection = !!release.is_active_selection || !!(
         !isScopedEpisodeRelease && hasActiveStagedSelection && activeStagedTorrent && release.title === activeStagedTorrent.title
@@ -76,7 +75,7 @@ function renderReleaseCard(release, requestId) {
     const activeSelectionBadge = activeSelectionMode
         ? `<span class="badge ${
             (release.active_selection_status || activeStagedTorrent?.status) === 'approved' ? 'badge-blue' : 'badge-yellow'
-        }">${escapeHtml((release.active_selection_source || activeStagedTorrent?.selection_source) === 'rule' ? 'Auto-selected and staged' : 'Currently staged')}</span>`
+        }">${window.escapeHtml((release.active_selection_source || activeStagedTorrent?.selection_source) === 'rule' ? 'Auto-selected and staged' : 'Currently staged')}</span>`
         : '';
     const actionVerb = window.siftarrStagingModeEnabled
         ? (isActiveSelection ? 'Already staged' : hasActiveStagedSelection ? 'Replace staged' : 'Stage release')
@@ -87,7 +86,7 @@ function renderReleaseCard(release, requestId) {
         ? `/requests/${requestId}/releases/${storedReleaseId}/use`
         : `/requests/${requestId}/manual-release/use`;
     const disableAction = !(release.download_url || release.magnet_url);
-    const manualDataJson = storedReleaseId ? '{}' : escapeHtml(JSON.stringify({
+    const manualDataJson = storedReleaseId ? '{}' : window.escapeHtml(JSON.stringify({
         title: release.title || '',
         size: release.size_bytes ?? 0,
         seeders: release.seeders ?? 0,
@@ -108,26 +107,26 @@ function renderReleaseCard(release, requestId) {
                 ? 'Replace the active staged torrent with this selection.'
                 : 'Stage this torrent for review and approval.')
         : 'Send this torrent to qBittorrent.';
-    const actionHtml = `<button type="button" class="btn-primary btn-sm" ${disableAction || activeSelectionMode ? 'disabled' : ''} title="${escapeHtml(disableAction ? 'No download source available' : actionTitle)}" data-stage-url="${escapeHtml(formAction)}" data-stage-fields="${manualDataJson}" onclick="stageRelease(this)">${useLabel}</button>`;
+    const actionHtml = `<button type="button" class="btn-primary btn-sm" ${disableAction || activeSelectionMode ? 'disabled' : ''} title="${window.escapeHtml(disableAction ? 'No download source available' : actionTitle)}" data-stage-url="${window.escapeHtml(formAction)}" data-stage-fields="${manualDataJson}" onclick="stageRelease(this)">${useLabel}</button>`;
     const publishAge = formatRelativePublishAge(release.publish_date);
     const coverageHtml = (Array.isArray(release.covered_seasons) || release.is_complete_series)
         ? renderCoverageBadge(release)
         : '';
     const rejectionIsSize = typeof release.rejection_reason === 'string' && release.rejection_reason.toLowerCase().startsWith('size ');
     const rejectionHtml = !release.passed && release.rejection_reason && !rejectionIsSize
-        ? `<div class="mt-2 max-w-xs text-right text-xs text-red-300" data-release-rejection-reason="true">${escapeHtml(release.rejection_reason)}</div>`
+        ? `<div class="mt-2 max-w-xs text-right text-xs text-red-300" data-release-rejection-reason="true">${window.escapeHtml(release.rejection_reason)}</div>`
         : '';
 
     return `
         <div class="rounded-xl border border-gray-700/60 bg-surface-800 p-2">
             <div class="flex flex-col gap-2 lg:flex-row lg:items-start lg:justify-between">
                 <div class="min-w-0">
-                    <div class="font-medium text-white text-sm break-words">${escapeHtml(release.title)}</div>
-                    <div class="mt-1 text-xs text-gray-400">Score <span class="font-semibold text-emerald-400">${release.score}</span> &middot; ${secondaryMeta || '<span class="text-gray-400">No release metadata</span>'} &middot; ${escapeHtml(availability)}${publishAge ? ` &middot; <span data-release-upload-age="true">${escapeHtml(publishAge)}</span>` : ''}${release.files != null ? ` &middot; <span class="text-gray-400">${release.files} file${release.files !== 1 ? 's' : ''}</span>` : ''}</div>
+                    <div class="font-medium text-white text-sm break-words">${window.escapeHtml(release.title)}</div>
+                    <div class="mt-1 text-xs text-gray-400">Score <span class="font-semibold text-emerald-400">${release.score}</span> &middot; ${secondaryMeta || '<span class="text-gray-400">No release metadata</span>'} &middot; ${window.escapeHtml(availability)}${publishAge ? ` &middot; <span data-release-upload-age="true">${window.escapeHtml(publishAge)}</span>` : ''}${release.files != null ? ` &middot; <span class="text-gray-400">${release.files} file${release.files !== 1 ? 's' : ''}</span>` : ''}</div>
                     ${coverageHtml}
                 </div>
                 <div class="flex shrink-0 flex-col items-end gap-2 text-right" data-release-status-column="true">
-                    <span class="badge ${statusClass}">${escapeHtml(release.status_label || (release.passed ? 'Passed' : 'Rejected'))}</span>
+                    <span class="badge ${statusClass}">${window.escapeHtml(release.status_label || (release.passed ? 'Passed' : 'Rejected'))}</span>
                     ${downloaded}
                     ${activeSelectionBadge}
                     ${actionHtml}
@@ -151,12 +150,12 @@ function renderCoverageBadge(release) {
         ? '<span class="badge badge-green">Complete series</span>'
         : '';
     const sizePerSeason = release.size_per_season
-        ? '<span data-release-size-per-season="true" class="' + (release.size_per_season_passed === false ? 'text-red-400' : 'text-emerald-400') + '">' + escapeHtml(release.size_per_season) + '/season</span>'
+        ? '<span data-release-size-per-season="true" class="' + (release.size_per_season_passed === false ? 'text-red-400' : 'text-emerald-400') + '">' + window.escapeHtml(release.size_per_season) + '/season</span>'
         : '';
 
     return '<div class="mt-1 flex flex-wrap items-center gap-2 text-xs text-gray-400">' +
-        '<span class="badge badge-blue">' + escapeHtml(countText) + '</span>' +
-        '<span>' + escapeHtml(coverageText) + '</span>' +
+        '<span class="badge badge-blue">' + window.escapeHtml(countText) + '</span>' +
+        '<span>' + window.escapeHtml(coverageText) + '</span>' +
         sizePerSeason +
         seriesBadge +
     '</div>';
@@ -187,7 +186,7 @@ function renderSeasonAccordion(data) {
         const emptyState = syncState.refresh_in_progress
             ? 'No cached season information yet. Background refresh in progress...'
             : 'No season information available.';
-        return '<div class="text-gray-500 text-sm">' + escapeHtml(emptyState) + '</div>';
+        return '<div class="text-gray-500 text-sm">' + window.escapeHtml(emptyState) + '</div>';
     }
 
     const syncBanner = syncState.stale || syncState.refresh_in_progress || syncState.needs_plex_enrichment
@@ -230,11 +229,11 @@ function renderSeasonAccordion(data) {
                     '<div class="flex items-center gap-3 min-w-0 flex-1">' +
                         '<svg class="accordion-chevron w-4 h-4 text-gray-500 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>' +
                         '<span class="text-gray-500 text-xs font-mono shrink-0">E' + String(ep.episode_number).padStart(2, '0') + '</span>' +
-                        '<span class="text-white text-sm truncate">' + escapeHtml(ep.title || 'Untitled') + '</span>' +
-                        (ep.air_date ? '<span class="text-gray-600 text-xs shrink-0">' + escapeHtml(ep.air_date) + '</span>' : '') +
+                        '<span class="text-white text-sm truncate">' + window.escapeHtml(ep.title || 'Untitled') + '</span>' +
+                        (ep.air_date ? '<span class="text-gray-600 text-xs shrink-0">' + window.escapeHtml(ep.air_date) + '</span>' : '') +
                     '</div>' +
                     '<div class="flex items-center gap-2 shrink-0">' +
-                        '<span class="badge ' + badgeClass + '">' + escapeHtml(ep.status || 'unknown') + '</span>' +
+                        '<span class="badge ' + badgeClass + '">' + window.escapeHtml(ep.status || 'unknown') + '</span>' +
                         (ep.status !== 'available' && ep.status !== 'completed'
                             ? '<button onclick="markEpisodeAvailable(' + requestId + ', ' + ep.id + '); event.stopPropagation();" class="bg-brand-500 hover:bg-brand-400 text-white text-xs px-2 py-0.5 rounded">Mark Available</button>'
                             : '') +
@@ -260,7 +259,7 @@ function renderSeasonAccordion(data) {
                     '<span class="text-gray-500 text-xs">' + availableText + '</span>' +
                 '</div>' +
                 '<div class="flex items-center gap-2 shrink-0">' +
-                    '<span class="badge ' + seasonBadgeClass + '">' + escapeHtml(season.status || 'unknown') + '</span>' +
+                    '<span class="badge ' + seasonBadgeClass + '">' + window.escapeHtml(season.status || 'unknown') + '</span>' +
                     (hasMarkable
                         ? '<button onclick="markSeasonAvailable(' + requestId + ', ' + season.id + '); event.stopPropagation();" class="bg-brand-500 hover:bg-brand-400 text-white text-xs px-2 py-0.5 rounded">Mark All Available</button>'
                         : '') +
@@ -279,7 +278,7 @@ async function markEpisodeAvailable(requestId, episodeId) {
     try {
         var response = await fetch('/requests/' + requestId + '/episodes/' + episodeId + '/mark-available', { method: 'POST' });
         if (!response.ok) throw new Error('Server error: ' + response.status);
-        openRequestDetails(requestId);
+        window.openRequestDetails(requestId);
     } catch (e) {
         console.error('Failed to mark episode available:', e);
     }
@@ -289,7 +288,7 @@ async function markSeasonAvailable(requestId, seasonId) {
     try {
         var response = await fetch('/requests/' + requestId + '/seasons/' + seasonId + '/mark-all-available', { method: 'POST' });
         if (!response.ok) throw new Error('Server error: ' + response.status);
-        openRequestDetails(requestId);
+        window.openRequestDetails(requestId);
     } catch (e) {
         console.error('Failed to mark season available:', e);
     }
@@ -313,18 +312,18 @@ async function searchSeasonPacks(requestId, seasonNumber) {
             container.innerHTML = '<div class="text-gray-500 text-sm py-2">No season pack results found.</div>';
         }
     } catch (err) {
-        container.innerHTML = '<div class="text-red-400 text-sm py-2">Error: ' + escapeHtml(err.message) + '</div>';
+        container.innerHTML = '<div class="text-red-400 text-sm py-2">Error: ' + window.escapeHtml(err.message) + '</div>';
     }
 }
 
 function renderSearchAllResults(releases) {
     return releases.map(function(release) {
-        return renderReleaseCard(release, currentRequestId);
+        return renderReleaseCard(release, window.currentRequestId);
     }).join('');
 }
 
 async function searchAllSeasonPacks(requestId = null) {
-    var targetRequestId = requestId || currentRequestId;
+    var targetRequestId = requestId || window.currentRequestId;
     if (!targetRequestId) return;
 
     var container = document.getElementById('season-packs-all-' + targetRequestId);
@@ -348,7 +347,7 @@ async function searchAllSeasonPacks(requestId = null) {
             container.innerHTML = '<div class="text-gray-500 text-sm py-2">No multi season or complete-series results found.</div>';
         }
     } catch (err) {
-        container.innerHTML = '<div class="text-red-400 text-sm py-2">Error: ' + escapeHtml(err.message) + '</div>';
+        container.innerHTML = '<div class="text-red-400 text-sm py-2">Error: ' + window.escapeHtml(err.message) + '</div>';
     }
 }
 
@@ -372,7 +371,7 @@ async function searchEpisode(requestId, seasonNumber, episodeNumber) {
             container.innerHTML = '<div class="text-gray-500 text-sm py-2">No results found for this episode.</div>';
         }
     } catch (err) {
-        container.innerHTML = '<div class="text-red-400 text-sm py-2">Error: ' + escapeHtml(err.message) + '</div>';
+        container.innerHTML = '<div class="text-red-400 text-sm py-2">Error: ' + window.escapeHtml(err.message) + '</div>';
     }
 }
 
@@ -391,19 +390,19 @@ function closeTvSearchDropdown() {
 function populateTvSearchDropdown() {
     const container = document.getElementById('tv-search-dropdown-seasons');
     if (!container) return;
-    container.innerHTML = currentTvSeasons.map(function(season) {
-        return '<button onclick="searchSeasonPacks(currentRequestId, ' + season.season_number + '); closeTvSearchDropdown();" ' +
+    container.innerHTML = window.currentTvSeasons.map(function(season) {
+        return '<button onclick="searchSeasonPacks(window.currentRequestId, ' + season.season_number + '); closeTvSearchDropdown();" ' +
             'class="w-full text-left px-4 py-2 text-sm text-gray-300 hover:bg-surface-850 cursor-pointer transition-colors">' +
             'Search Season ' + season.season_number + ' Packs</button>';
     }).join('');
 }
 
 async function searchAllEpisodes() {
-    if (!currentRequestId || !currentTvSeasons.length) return;
+    if (!window.currentRequestId || !window.currentTvSeasons.length) return;
     closeTvSearchDropdown();
 
     const allEpisodes = [];
-    for (const season of currentTvSeasons) {
+    for (const season of window.currentTvSeasons) {
         for (const ep of (season.episodes || [])) {
             if (ep.status === 'completed' || ep.status === 'available') continue;
             allEpisodes.push({ season: season.season_number, episode: ep.episode_number });
@@ -411,17 +410,17 @@ async function searchAllEpisodes() {
     }
 
     if (allEpisodes.length === 0) {
-        showToast('No pending episodes to search.');
+        window.showToast('No pending episodes to search.');
         return;
     }
 
     for (let i = 0; i < allEpisodes.length; i++) {
         const ep = allEpisodes[i];
-        showToast('Searching S' + String(ep.season).padStart(2, '0') + 'E' + String(ep.episode).padStart(2, '0') + '... (' + (i + 1) + '/' + allEpisodes.length + ')');
-        await searchEpisode(currentRequestId, ep.season, ep.episode);
+        window.showToast('Searching S' + String(ep.season).padStart(2, '0') + 'E' + String(ep.episode).padStart(2, '0') + '... (' + (i + 1) + '/' + allEpisodes.length + ')');
+        await searchEpisode(window.currentRequestId, ep.season, ep.episode);
     }
 
-    showToast('Finished searching all episodes (' + allEpisodes.length + ' total).');
+    window.showToast('Finished searching all episodes (' + allEpisodes.length + ' total).');
 }
 
 async function stageRelease(btn) {
@@ -448,15 +447,15 @@ async function stageRelease(btn) {
         btn.textContent = window.siftarrStagingModeEnabled ? 'Active ✓' : 'Sent ✓';
         btn.classList.remove('btn-primary');
         btn.classList.add('btn-disabled');
-        showToast(payload.message || (window.siftarrStagingModeEnabled ? 'Active staged selection updated' : 'Torrent sent successfully'));
-        refreshStagedTabData();
-        if (window.siftarrStagingModeEnabled && currentRequestId) {
-            await openRequestDetails(currentRequestId, currentDetailsIndex);
+        window.showToast(payload.message || (window.siftarrStagingModeEnabled ? 'Active staged selection updated' : 'Torrent sent successfully'));
+        window.refreshStagedTabData();
+        if (window.siftarrStagingModeEnabled && window.currentRequestId) {
+            await window.openRequestDetails(window.currentRequestId, window.currentDetailsIndex);
         }
     } catch (err) {
         btn.disabled = false;
         btn.textContent = originalText;
-        showToast('Error: ' + err.message);
+        window.showToast('Error: ' + err.message);
     }
 }
 
@@ -464,7 +463,7 @@ function updateActiveStageBanner(data) {
     const banner = document.getElementById('request-details-active-stage-banner');
     if (!banner) return;
     const active = data.active_staged_torrent;
-    currentActiveStagedTorrent = active || null;
+    window.currentActiveStagedTorrent = active || null;
     if (!window.siftarrStagingModeEnabled || !active) {
         banner.classList.add('hidden');
         banner.textContent = '';

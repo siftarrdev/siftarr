@@ -110,7 +110,7 @@ def test_dashboard_js_scopes_episode_stage_buttons_to_target_scope():
     assert "const releaseScope = release.target_scope || {};" in js
     assert "const isScopedEpisodeRelease = releaseScope.type === 'single_episode';" in js
     assert (
-        "const activeStagedTorrent = release.active_staged_torrent || (isScopedEpisodeRelease ? null : currentActiveStagedTorrent);"
+        "const activeStagedTorrent = release.active_staged_torrent || (isScopedEpisodeRelease ? null : window.currentActiveStagedTorrent);"
         in js
     )
     assert (

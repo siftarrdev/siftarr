@@ -15,15 +15,15 @@ async function openRequestDetails(requestId, explicitIndex = null) {
 
     // Build navigation context from currently visible rows
     if (explicitIndex !== null) {
-        currentDetailsIndex = explicitIndex;
+        window.currentDetailsIndex = explicitIndex;
     } else {
-        visibleRequests = getVisibleRequests();
-        currentDetailsIndex = visibleRequests.findIndex(r => r.id === requestId);
-        if (currentDetailsIndex === -1) {
-            currentDetailsIndex = 0;
+        window.visibleRequests = window.getVisibleRequests();
+        window.currentDetailsIndex = window.visibleRequests.findIndex(r => r.id === requestId);
+        if (window.currentDetailsIndex === -1) {
+            window.currentDetailsIndex = 0;
         }
     }
-    updateNavigationButtons();
+    window.updateNavigationButtons();
 
     title.textContent = 'Loading...';
     meta.textContent = '';
@@ -40,11 +40,11 @@ async function openRequestDetails(requestId, explicitIndex = null) {
     }
     if (tvSearchBtn) {
         tvSearchBtn.classList.add('hidden');
-        closeTvSearchDropdown();
+        window.closeTvSearchDropdown();
     }
-    currentTvSeasons = [];
-    updateActiveStageBanner({ active_staged_torrent: null });
-    setPoster(null, 'Loading poster');
+    window.currentTvSeasons = [];
+    window.updateActiveStageBanner({ active_staged_torrent: null });
+    window.setPoster(null, 'Loading poster');
     document.getElementById('release-results-header').classList.remove('hidden');
     document.getElementById('release-filter-input').classList.remove('hidden');
     releases.innerHTML = '<div class="text-gray-500 text-sm">Loading search results...</div>';
@@ -66,12 +66,12 @@ async function openRequestDetails(requestId, explicitIndex = null) {
         const metaRow = document.getElementById('request-details-meta-row');
         if (metaRow) {
             const items = [];
-            if (data.request.year) items.push(`<span class="badge badge-gray">Year ${escapeHtml(String(data.request.year))}</span>`);
-            if (data.request.media_type) items.push(`<span class="badge badge-gray">${escapeHtml(String(data.request.media_type).toUpperCase())}</span>`);
-            if (data.request.status) items.push(`<span class="badge badge-gray">${escapeHtml(String(data.request.status).replace(/_/g, ' '))}</span>`);
+            if (data.request.year) items.push(`<span class="badge badge-gray">Year ${window.escapeHtml(String(data.request.year))}</span>`);
+            if (data.request.media_type) items.push(`<span class="badge badge-gray">${window.escapeHtml(String(data.request.media_type).toUpperCase())}</span>`);
+            if (data.request.status) items.push(`<span class="badge badge-gray">${window.escapeHtml(String(data.request.status).replace(/_/g, ' '))}</span>`);
             metaRow.innerHTML = items.join('');
         }
-        setPoster(data.overseerr?.poster, data.request.title);
+        window.setPoster(data.overseerr?.poster, data.request.title);
         if (overseerrLink && data.overseerr?.url) {
             overseerrLink.href = data.overseerr.url;
             overseerrLink.classList.remove('hidden');
@@ -89,25 +89,25 @@ async function openRequestDetails(requestId, explicitIndex = null) {
             tvSearchBtn.classList.remove('hidden');
         }
 
-        currentReleases = data.releases || [];
-        currentRequestId = data.request.id;
-        updateActiveStageBanner(data);
+        window.currentReleases = data.releases || [];
+        window.currentRequestId = data.request.id;
+        window.updateActiveStageBanner(data);
 
         const cacheIndicator = document.getElementById('release-cache-indicator');
         const cacheIndicatorText = document.getElementById('release-cache-indicator-text');
 
         if (data.request.media_type === 'tv' && data.tv_info) {
-            currentTvSeasons = data.tv_info.seasons || [];
-            populateTvSearchDropdown();
+            window.currentTvSeasons = data.tv_info.seasons || [];
+            window.populateTvSearchDropdown();
             document.getElementById('release-results-header').classList.add('hidden');
             document.getElementById('release-filter-input').classList.add('hidden');
             if (cacheIndicator) cacheIndicator.classList.add('hidden');
-            releases.innerHTML = renderSeasonAccordion(data);
+            releases.innerHTML = window.renderSeasonAccordion(data);
         } else {
             document.getElementById('release-results-header').classList.remove('hidden');
             document.getElementById('release-filter-input').classList.remove('hidden');
-            if (currentReleases.length > 0) {
-                releases.innerHTML = currentReleases.map(release => renderReleaseCard(release, currentRequestId)).join('');
+            if (window.currentReleases.length > 0) {
+                releases.innerHTML = window.currentReleases.map(release => window.renderReleaseCard(release, window.currentRequestId)).join('');
                 if (cacheIndicator && cacheIndicatorText) {
                     cacheIndicatorText.textContent = 'Showing cached results';
                     cacheIndicator.classList.remove('hidden');
@@ -119,31 +119,31 @@ async function openRequestDetails(requestId, explicitIndex = null) {
             }
         }
 
-        currentRequestTimeline = data.timeline || [];
-        renderTimeline(currentRequestTimeline);
+        window.currentRequestTimeline = data.timeline || [];
+        renderTimeline(window.currentRequestTimeline);
     } catch (err) {
         title.textContent = 'Error loading details';
         meta.textContent = err.message || 'Unknown error';
         overview.textContent = '';
-        updateActiveStageBanner({ active_staged_torrent: null });
-        setPoster(null, 'Poster unavailable');
+        window.updateActiveStageBanner({ active_staged_torrent: null });
+        window.setPoster(null, 'Poster unavailable');
         releases.innerHTML = '<div class="text-red-400 text-sm">Failed to load request details. Check that Overseerr is reachable.</div>';
     }
 }
 
 async function refreshPlexAndReload() {
-    if (!currentRequestId) return;
+    if (!window.currentRequestId) return;
     const btn = document.getElementById('request-details-refresh-plex');
     if (btn) {
         btn.disabled = true;
         btn.textContent = 'Refreshing...';
     }
     try {
-        const response = await fetch('/requests/' + currentRequestId + '/refresh-plex', { method: 'POST' });
+        const response = await fetch('/requests/' + window.currentRequestId + '/refresh-plex', { method: 'POST' });
         if (!response.ok) {
             throw new Error('Server error: ' + response.status);
         }
-        await openRequestDetails(currentRequestId, currentDetailsIndex);
+        await openRequestDetails(window.currentRequestId, window.currentDetailsIndex);
     } catch (err) {
         console.error('Plex refresh failed:', err);
         if (btn) {
@@ -154,7 +154,7 @@ async function refreshPlexAndReload() {
 }
 
 async function searchRequestFromDetails() {
-    if (!currentRequestId) return;
+    if (!window.currentRequestId) return;
     const btn = document.getElementById('request-details-search-btn');
     const originalText = btn ? btn.innerHTML : '';
     if (btn) {
@@ -163,28 +163,28 @@ async function searchRequestFromDetails() {
     }
     const releasesContainer = document.getElementById('request-details-releases');
     try {
-        const response = await fetch('/requests/' + currentRequestId + '/search', { method: 'POST' });
+        const response = await fetch('/requests/' + window.currentRequestId + '/search', { method: 'POST' });
         if (!response.ok) {
             const errorData = await response.json().catch(() => null);
             throw new Error(errorData?.error || 'Server error: ' + response.status);
         }
         const data = await response.json();
-        currentReleases = data.releases || [];
+        window.currentReleases = data.releases || [];
         if (releasesContainer) {
-            releasesContainer.innerHTML = currentReleases.map(release => renderReleaseCard(release, currentRequestId)).join('') || '<div class="text-gray-500 text-sm">No search results found for this request.</div>';
+            releasesContainer.innerHTML = window.currentReleases.map(release => window.renderReleaseCard(release, window.currentRequestId)).join('') || '<div class="text-gray-500 text-sm">No search results found for this request.</div>';
         }
         const cacheInd = document.getElementById('release-cache-indicator');
         const cacheIndText = document.getElementById('release-cache-indicator-text');
-        if (cacheInd && cacheIndText && currentReleases.length > 0) {
+        if (cacheInd && cacheIndText && window.currentReleases.length > 0) {
             cacheIndText.textContent = 'Fresh results';
             cacheInd.classList.remove('hidden');
         } else if (cacheInd) {
             cacheInd.classList.add('hidden');
         }
-        renderTimeline(currentRequestTimeline);
+        renderTimeline(window.currentRequestTimeline);
     } catch (err) {
         if (releasesContainer) {
-            releasesContainer.innerHTML = '<div class="text-red-400 text-sm">Search failed: ' + escapeHtml(err.message) + '</div>';
+            releasesContainer.innerHTML = '<div class="text-red-400 text-sm">Search failed: ' + window.escapeHtml(err.message) + '</div>';
         }
     } finally {
         if (btn) {
@@ -257,9 +257,9 @@ function renderTimeline(timelineData) {
             }
         }
         const ts = entry.created_at ? new Date(entry.created_at).toLocaleString() : '';
-        const safeLabel = escapeHtml(label);
-        const safeTs = escapeHtml(ts);
-        const safeDetail = detail ? escapeHtml(String(detail)) : '';
+        const safeLabel = window.escapeHtml(label);
+        const safeTs = window.escapeHtml(ts);
+        const safeDetail = detail ? window.escapeHtml(String(detail)) : '';
         return `<div class="relative flex items-start gap-3 -ml-[1.15rem]">
             <div class="w-2.5 h-2.5 rounded-full ${dot} mt-1.5 shrink-0 ring-2 ring-surface-900"></div>
             <div class="min-w-0 flex-1">

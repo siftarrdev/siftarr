@@ -1,8 +1,8 @@
 // Dashboard Core Module - Tab navigation, utilities, and global state
 // ====================================================================
 
-// Global state
-const tableSortState = {
+// Global state attached to window so all modules can reference it
+window.tableSortState = {
     active: { column: null, direction: 'asc' },
     pending: { column: null, direction: 'asc' },
     unreleased: { column: null, direction: 'asc' },
@@ -11,18 +11,18 @@ const tableSortState = {
     rejected: { column: null, direction: 'asc' },
 };
 
-const mediaFilterState = {};
-let showUnreleasedActive = false;
+window.mediaFilterState = {};
+window.showUnreleasedActive = false;
 
 // Navigation state for prev/next in details modal
-let visibleRequests = [];
-let currentDetailsIndex = -1;
+window.visibleRequests = [];
+window.currentDetailsIndex = -1;
 
-let currentReleases = [];
-let currentRequestId = null;
-let currentTvSeasons = [];
-let currentActiveStagedTorrent = null;
-let currentRequestTimeline = [];
+window.currentReleases = [];
+window.currentRequestId = null;
+window.currentTvSeasons = [];
+window.currentActiveStagedTorrent = null;
+window.currentRequestTimeline = [];
 
 // Utility functions
 function escapeHtml(value) {
@@ -53,10 +53,10 @@ function showTab(tabName) {
     tab.classList.add('border-brand-500', 'text-brand-400');
     setActiveTab(tabName);
     if (tabName === 'staged') {
-        refreshStagedTabData();
-        _startStagedStatusPoll();
+        if (window.refreshStagedTabData) window.refreshStagedTabData();
+        if (window._startStagedStatusPoll) window._startStagedStatusPoll();
     } else {
-        _stopStagedStatusPoll();
+        if (window._stopStagedStatusPoll) window._stopStagedStatusPoll();
     }
 }
 
@@ -104,7 +104,7 @@ function updateNavigationButtons() {
     const position = document.getElementById('details-position');
     if (!prevBtn || !nextBtn || !position) return;
 
-    const total = visibleRequests.length;
+    const total = window.visibleRequests.length;
     if (total === 0) {
         position.textContent = '- of -';
         prevBtn.disabled = true;
@@ -114,25 +114,25 @@ function updateNavigationButtons() {
         return;
     }
 
-    position.textContent = `${currentDetailsIndex + 1} of ${total}`;
+    position.textContent = `${window.currentDetailsIndex + 1} of ${total}`;
 
-    const prevIndex = (currentDetailsIndex - 1 + total) % total;
-    const nextIndex = (currentDetailsIndex + 1) % total;
+    const prevIndex = (window.currentDetailsIndex - 1 + total) % total;
+    const nextIndex = (window.currentDetailsIndex + 1) % total;
 
     prevBtn.disabled = false;
     nextBtn.disabled = false;
-    prevBtn.title = `← ${visibleRequests[prevIndex].title} (wraps around)`;
-    nextBtn.title = `${visibleRequests[nextIndex].title} → (wraps around)`;
+    prevBtn.title = `← ${window.visibleRequests[prevIndex].title} (wraps around)`;
+    nextBtn.title = `${window.visibleRequests[nextIndex].title} → (wraps around)`;
 }
 
 function navigateDetails(direction) {
-    const total = visibleRequests.length;
+    const total = window.visibleRequests.length;
     if (total === 0) return;
 
-    currentDetailsIndex = (currentDetailsIndex + direction + total) % total;
-    const targetRequest = visibleRequests[currentDetailsIndex];
+    window.currentDetailsIndex = (window.currentDetailsIndex + direction + total) % total;
+    const targetRequest = window.visibleRequests[window.currentDetailsIndex];
     if (targetRequest) {
-        openRequestDetails(targetRequest.id, currentDetailsIndex);
+        openRequestDetails(targetRequest.id, window.currentDetailsIndex);
     }
 }
 
@@ -145,3 +145,7 @@ window.showTab = showTab;
 window.closeRequestDetails = closeRequestDetails;
 window.navigateDetails = navigateDetails;
 window.escapeHtml = escapeHtml;
+window.setActiveTab = setActiveTab;
+window.setPoster = setPoster;
+window.getVisibleRequests = getVisibleRequests;
+window.updateNavigationButtons = updateNavigationButtons;

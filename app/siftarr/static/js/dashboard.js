@@ -2,12 +2,12 @@
 // ==========================
 // This file imports all dashboard modules and initializes the application.
 
-import './core.js';
-import './releases.js';
-import './filters.js';
-import './details.js';
-import './staged.js';
-import './modals.js';
+import './dashboard/core.js';
+import './dashboard/releases.js';
+import './dashboard/filters.js';
+import './dashboard/details.js';
+import './dashboard/staged.js';
+import './dashboard/modals.js';
 
 // Column Resizer Class - Must be defined here as it's used across modules
 class ColumnResizer {

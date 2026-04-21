@@ -105,7 +105,7 @@ async function refreshStagedTabData() {
         const stagedStatusFilter = document.getElementById('staged-status-filter');
         if (stagedFilterInput) stagedFilterInput.value = priorFilter;
         if (stagedStatusFilter) stagedStatusFilter.value = priorStatus;
-        filterStagedTable();
+        window.filterStagedTable();
         bindStagedSelectionHandlers();
     } catch (err) {
         console.error('Failed to refresh staged tab:', err);
@@ -132,10 +132,10 @@ async function checkNow(torrentId) {
         if (data.qbit_complete) msg += ' Download done.';
         else if (data.qbit_progress !== null) msg += ' Download ' + Math.round(data.qbit_progress * 100) + '%.';
         if (data.plex_available) msg += ' Available on Plex!';
-        showToast(msg);
+        window.showToast(msg);
         await refreshStagedTabData();
     } catch (err) {
-        showToast('Error: ' + err.message);
+        window.showToast('Error: ' + err.message);
     }
 }
 
@@ -153,9 +153,9 @@ async function postStagedAction(actionUrl, redirectTo = '/?tab=staged') {
             throw new Error(errorData?.detail || errorData?.message || `Server error: ${response.status}`);
         }
         await refreshStagedTabData();
-        showToast('Staged torrent updated');
+        window.showToast('Staged torrent updated');
     } catch (err) {
-        showToast('Error: ' + err.message);
+        window.showToast('Error: ' + err.message);
     }
 }
 
@@ -168,7 +168,7 @@ function getSelectedStagedTorrentIds() {
 async function bulkStagedAction(action) {
     const selectedIds = getSelectedStagedTorrentIds();
     if (selectedIds.length === 0) {
-        showToast('Select one or more staged torrents first.');
+        window.showToast('Select one or more staged torrents first.');
         return;
     }
 
@@ -191,9 +191,9 @@ async function bulkStagedAction(action) {
             checkbox.checked = false;
         });
         await refreshStagedTabData();
-        showToast(action === 'approve' ? 'Selected torrents approved' : 'Selected torrents discarded');
+        window.showToast(action === 'approve' ? 'Selected torrents approved' : 'Selected torrents discarded');
     } catch (err) {
-        showToast('Error: ' + err.message);
+        window.showToast('Error: ' + err.message);
     }
 }
 
@@ -203,3 +203,5 @@ window.postStagedAction = postStagedAction;
 window.bulkStagedAction = bulkStagedAction;
 window.refreshStagedTabData = refreshStagedTabData;
 window.bindStagedSelectionHandlers = bindStagedSelectionHandlers;
+window._startStagedStatusPoll = _startStagedStatusPoll;
+window._stopStagedStatusPoll = _stopStagedStatusPoll;
