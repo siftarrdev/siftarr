@@ -50,7 +50,7 @@ async def test_rescan_plex_sse_reports_movies_and_tv_in_active_items(monkeypatch
     )
     assert any(event.get("phase") == "processing" and event.get("active") for event in events)
     assert tv_rescan.await_count == 1
-    tv_rescan.assert_awaited_once_with(2, plex_service, runtime_settings, force_plex_refresh=True)
+    tv_rescan.assert_awaited_once_with(2, plex_service, runtime_settings)
 
 
 @pytest.mark.asyncio
@@ -130,9 +130,8 @@ async def test_rescan_plex_uses_bounded_parallel_workers_and_reports_counts(
             assert db is not mock_db
             assert plex is plex_service
 
-        async def sync_episodes(self, request_id, force_plex_refresh=False):
+        async def sync_request(self, request_id):
             nonlocal started, in_flight, max_in_flight, finished
-            assert force_plex_refresh is True
             request_to_db[request_id] = self.db
             started += 1
             in_flight += 1
@@ -319,8 +318,8 @@ async def test_sync_overseerr_prefetches_with_bounded_parallelism(monkeypatch, b
             self.overseerr = overseerr
             self.plex = plex
 
-        async def sync_episodes(self, request_id, force_plex_refresh=False):
-            synced_episode_ids.append((request_id, force_plex_refresh))
+        async def sync_request(self, request_id):
+            synced_episode_ids.append(request_id)
 
     import app.siftarr.services.episode_sync_service as episode_sync_module
 
@@ -332,8 +331,7 @@ async def test_sync_overseerr_prefetches_with_bounded_parallelism(monkeypatch, b
     assert response_context["message_type"] == "success"
     assert response_context["message"] == "Synced 3 new request(s) from Overseerr"
     assert max_in_flight == 2
-    assert [call[0] for call in synced_episode_ids] == [2, 3]
-    assert all(force_plex_refresh is False for _, force_plex_refresh in synced_episode_ids)
+    assert synced_episode_ids == [2, 3]
     assert [call["title"] for call in evaluate_calls] == ["Movie One", "Show One", "Show Two"]
     assert all(call["prefetched_media_details"] is not None for call in evaluate_calls)
     assert all(call["local_episodes"] == () for call in evaluate_calls)

@@ -3,17 +3,15 @@
 import contextlib
 import logging
 from datetime import UTC, date, datetime
-from types import SimpleNamespace
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.siftarr.config import get_settings
 from app.siftarr.models.episode import Episode
-from app.siftarr.models.request import MediaType, Request, RequestStatus
+from app.siftarr.models.request import Request, RequestStatus
 from app.siftarr.models.season import Season
 from app.siftarr.services.async_utils import gather_limited
-from app.siftarr.services.lifecycle_service import is_unreleased
 from app.siftarr.services.overseerr_service import OverseerrService
 from app.siftarr.services.plex_service import PlexService
 
@@ -21,30 +19,9 @@ logger = logging.getLogger(__name__)
 
 
 def _episodes_are_unreleased(episodes: list[Episode]) -> bool:
-    """Return whether a TV aggregate should be treated as unreleased."""
-    if not episodes:
-        return False
-
+    """Return whether any episode has a future air date."""
     today = datetime.now(UTC).date()
-    dated_episodes = [episode.air_date for episode in episodes if isinstance(episode.air_date, date)]
-    if not dated_episodes:
-        return False
-    future_dates = [air_date for air_date in dated_episodes if air_date > today]
-    media_details = {
-        "status": "Returning Series",
-        "firstAirDate": min(dated_episodes).isoformat() if dated_episodes else None,
-        "nextEpisodeToAir": (
-            {"airDate": min(future_dates).isoformat()} if future_dates else None
-        ),
-    }
-
-    request = SimpleNamespace(media_type=MediaType.TV, tmdb_id=1)
-    return is_unreleased(
-        request,
-        media_details=media_details,
-        local_episodes=episodes,
-        today=today,
-    )
+    return any(episode.air_date is not None and episode.air_date > today for episode in episodes)
 
 
 def _derive_episode_status(*, is_on_plex: bool, air_date: date | None) -> RequestStatus:
@@ -52,8 +29,7 @@ def _derive_episode_status(*, is_on_plex: bool, air_date: date | None) -> Reques
     if is_on_plex:
         return RequestStatus.COMPLETED
 
-    episode = SimpleNamespace(air_date=air_date, status=RequestStatus.PENDING)
-    if _episodes_are_unreleased([episode]):
+    if air_date is not None and air_date > datetime.now(UTC).date():
         return RequestStatus.UNRELEASED
     return RequestStatus.PENDING
 
@@ -96,7 +72,9 @@ def _derive_request_status_from_episodes(episodes: list[Episode]) -> RequestStat
 
 def _derive_request_status_from_seasons(seasons: list[Season]) -> RequestStatus:
     """Compatibility wrapper that derives request status from season episodes."""
-    episodes = [episode for season in seasons for episode in list(getattr(season, "episodes", []) or [])]
+    episodes = [
+        episode for season in seasons for episode in list(getattr(season, "episodes", []) or [])
+    ]
     if episodes:
         return _derive_request_status_from_episodes(episodes)
 
@@ -263,53 +241,49 @@ class EpisodeSyncService:
             await self.db.flush()
         else:
             season.synced_at = datetime.now(UTC).replace(tzinfo=None)
-            season.status = RequestStatus.PENDING
+        season.status = RequestStatus.PENDING
 
-        # Disable autoflush while iterating episodes — previously dirty objects
-        # (like the season row above) must not be flushed mid-query because
-        # concurrent SQLite writers can cause "database is locked" errors.
         season_episodes: list[Episode] = []
 
-        with self.db.no_autoflush:
-            for episode_info in episodes_data:
-                episode_number = episode_info.get("episodeNumber")
-                if episode_number is None:
-                    continue
+        for episode_info in episodes_data:
+            episode_number = episode_info.get("episodeNumber")
+            if episode_number is None:
+                continue
 
-                ep_result = await self.db.execute(
-                    select(Episode).where(
-                        Episode.season_id == season.id,
-                        Episode.episode_number == episode_number,
-                    )
+            ep_result = await self.db.execute(
+                select(Episode).where(
+                    Episode.season_id == season.id,
+                    Episode.episode_number == episode_number,
                 )
-                episode = ep_result.scalar_one_or_none()
+            )
+            episode = ep_result.scalar_one_or_none()
 
-                title = episode_info.get("title") or episode_info.get("name")
-                air_date_str = episode_info.get("airDate") or episode_info.get("airDateUtc")
-                air_date = None
-                if air_date_str:
-                    with contextlib.suppress(ValueError, TypeError):
-                        air_date = date.fromisoformat(air_date_str[:10])
+            title = episode_info.get("title") or episode_info.get("name")
+            air_date_str = episode_info.get("airDate") or episode_info.get("airDateUtc")
+            air_date = None
+            if air_date_str:
+                with contextlib.suppress(ValueError, TypeError):
+                    air_date = date.fromisoformat(air_date_str[:10])
 
-                episode_status = _derive_episode_status(is_on_plex=False, air_date=air_date)
+            episode_status = _derive_episode_status(is_on_plex=False, air_date=air_date)
 
-                if episode is None:
-                    episode = Episode(
-                        season_id=season.id,
-                        episode_number=episode_number,
-                        title=title,
-                        air_date=air_date,
-                        status=episode_status,
-                    )
-                    self.db.add(episode)
-                else:
-                    if title:
-                        episode.title = title
-                    if air_date:
-                        episode.air_date = air_date
-                    episode.status = episode_status
+            if episode is None:
+                episode = Episode(
+                    season_id=season.id,
+                    episode_number=episode_number,
+                    title=title,
+                    air_date=air_date,
+                    status=episode_status,
+                )
+                self.db.add(episode)
+            else:
+                if title:
+                    episode.title = title
+                if air_date:
+                    episode.air_date = air_date
+                episode.status = episode_status
 
-                season_episodes.append(episode)
+            season_episodes.append(episode)
 
         season.status = _derive_season_status(season_episodes)
 
@@ -470,12 +444,6 @@ class EpisodeSyncService:
         )
 
         return seasons
-
-    async def sync_episodes(
-        self, request_id: int, force_plex_refresh: bool = False
-    ) -> list[Season]:
-        """Compatibility wrapper for the simplified TV sync flow."""
-        return await self.sync_request(request_id)
 
     async def sync_request(self, request_id: int) -> list[Season]:
         """Sync TV metadata from Overseerr, then apply Plex episode availability."""

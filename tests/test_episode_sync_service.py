@@ -104,7 +104,7 @@ class TestEpisodeSyncService:
         mock_overseerr.get_media_details.return_value = TV_DETAILS_NO_EPISODES
         mock_overseerr.get_season_details.return_value = SEASON_1_DETAILS
 
-        seasons = await service.sync_episodes(1)
+        seasons = await service.sync_request(1)
 
         assert len(seasons) == 1
         assert mock_db.add.call_count == 3
@@ -133,7 +133,7 @@ class TestEpisodeSyncService:
             ],
         }
 
-        seasons = await service.sync_episodes(1)
+        seasons = await service.sync_request(1)
 
         assert len(seasons) == 1
         mock_db.add.assert_not_called()
@@ -159,7 +159,7 @@ class TestEpisodeSyncService:
         mock_overseerr.get_media_details.return_value = TV_DETAILS_NO_EPISODES
         mock_overseerr.get_season_details.return_value = SEASON_1_DETAILS
 
-        seasons = await service.sync_episodes(1)
+        seasons = await service.sync_request(1)
 
         assert len(seasons) == 1
         assert seasons[0].season_number == 1
@@ -168,28 +168,28 @@ class TestEpisodeSyncService:
     @pytest.mark.asyncio
     async def test_sync_returns_empty_for_missing_request(self, service, mock_db):
         mock_db.execute.return_value = MagicMock(scalar_one_or_none=MagicMock(return_value=None))
-        seasons = await service.sync_episodes(999)
+        seasons = await service.sync_request(999)
         assert seasons == []
 
     @pytest.mark.asyncio
     async def test_sync_returns_empty_for_non_tv_request(self, service, mock_db):
         request = _make_request(id=1, media_type=MediaType.MOVIE)
         mock_db.execute.return_value = MagicMock(scalar_one_or_none=MagicMock(return_value=request))
-        seasons = await service.sync_episodes(1)
+        seasons = await service.sync_request(1)
         assert seasons == []
 
     @pytest.mark.asyncio
     async def test_sync_returns_empty_for_no_external_id(self, service, mock_db):
         request = _make_request(id=1, tvdb_id=None, tmdb_id=None)
         mock_db.execute.return_value = MagicMock(scalar_one_or_none=MagicMock(return_value=request))
-        seasons = await service.sync_episodes(1)
+        seasons = await service.sync_request(1)
         assert seasons == []
 
     @pytest.mark.asyncio
     async def test_sync_returns_empty_for_tvdb_id_only(self, service, mock_db):
         request = _make_request(id=1, tvdb_id=12345, tmdb_id=None)
         mock_db.execute.return_value = MagicMock(scalar_one_or_none=MagicMock(return_value=request))
-        seasons = await service.sync_episodes(1)
+        seasons = await service.sync_request(1)
         assert seasons == []
 
     @pytest.mark.asyncio
@@ -215,7 +215,7 @@ class TestEpisodeSyncService:
         }
         mock_overseerr.get_season_details.return_value = SEASON_1_DETAILS
 
-        seasons = await service.sync_episodes(1)
+        seasons = await service.sync_request(1)
 
         mock_overseerr.get_season_details.assert_awaited_once_with(71527, 1)
         assert len(seasons) == 1
@@ -237,7 +237,7 @@ class TestEpisodeSyncService:
         mock_overseerr.get_media_details.return_value = TV_DETAILS_NO_EPISODES
         mock_overseerr.get_season_details.return_value = None
 
-        seasons = await service.sync_episodes(1)
+        seasons = await service.sync_request(1)
 
         assert len(seasons) == 1
         mock_db.commit.assert_awaited_once()
@@ -251,6 +251,12 @@ class TestEpisodeSyncService:
 
         mock_db.execute.side_effect = [
             MagicMock(scalar_one_or_none=MagicMock(return_value=request)),
+            MagicMock(scalar_one_or_none=MagicMock(return_value=None)),
+            MagicMock(scalar_one_or_none=MagicMock(return_value=None)),
+            MagicMock(scalar_one_or_none=MagicMock(return_value=None)),
+            MagicMock(scalar_one_or_none=MagicMock(return_value=None)),
+            MagicMock(scalar_one_or_none=MagicMock(return_value=None)),
+            MagicMock(scalar_one_or_none=MagicMock(return_value=None)),
             MagicMock(scalar_one_or_none=MagicMock(return_value=None)),
             MagicMock(scalar_one_or_none=MagicMock(return_value=None)),
             MagicMock(scalar_one_or_none=MagicMock(return_value=None)),
@@ -319,11 +325,10 @@ class TestEpisodeSyncService:
 
         with patch("app.siftarr.services.episode_sync_service.get_settings") as mock_get_settings:
             mock_get_settings.return_value = MagicMock(
-                episode_sync_stale_hours=24,
                 overseerr_sync_concurrency=2,
             )
 
-            sync_task = asyncio.create_task(service.sync_episodes(1))
+            sync_task = asyncio.create_task(service.sync_request(1))
             await first_batch_started.wait()
 
             assert started_calls == [1, 2]
@@ -389,7 +394,7 @@ class TestEpisodeSyncService:
 
         mock_db.add = MagicMock(side_effect=capture_add)
 
-        await service.sync_episodes(1)
+        await service.sync_request(1)
 
         added_episodes = [row for row in added_rows if isinstance(row, Episode)]
         assert [episode.status for episode in added_episodes] == [
@@ -437,7 +442,7 @@ class TestEpisodeSyncService:
 
         mock_db.add = MagicMock(side_effect=capture_add)
 
-        await service.sync_episodes(1)
+        await service.sync_request(1)
 
         added_episodes = [row for row in added_rows if isinstance(row, Episode)]
         assert [episode.status for episode in added_episodes] == [

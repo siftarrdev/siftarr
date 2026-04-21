@@ -8,9 +8,7 @@ from .helpers import make_episode, make_request, make_season
 
 
 @pytest.mark.asyncio
-async def test_check_request_movie_completes_match(
-    service, mock_db, mock_plex
-):
+async def test_check_request_movie_completes_match(service, mock_db, mock_plex):
     req = make_request(id=1, tmdb_id=111, title="Movie A")
     db_result = MagicMock()
     db_result.scalar_one_or_none.return_value = req
@@ -66,9 +64,7 @@ async def test_check_request_tv_loads_request_and_reuses_episode_sync_path(
 
 
 @pytest.mark.asyncio
-async def test_check_request_tv_full_availability(
-    service, mock_db, mock_plex
-):
+async def test_check_request_tv_full_availability(service, mock_db, mock_plex):
     req = make_request(
         id=79,
         media_type=MediaType.TV,

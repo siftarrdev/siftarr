@@ -28,8 +28,8 @@ from app.siftarr.services.settings import overseerr_import as overseerr_import_s
 from app.siftarr.services.tv_decision_service import TVDecisionService
 from app.siftarr.services.unreleased_service import UnreleasedEvaluator, evaluate_imported_request
 
-PLEX_INCREMENTAL_SYNC_JOB_NAME = "plex_recent_scan"
-PLEX_FULL_RECONCILE_JOB_NAME = "plex_full_reconcile"
+PLEX_RECENT_SCAN_JOB_NAME = "plex_recent_scan"
+PLEX_POLL_JOB_NAME = "plex_poll"
 
 
 @dataclass(frozen=True)
@@ -80,8 +80,8 @@ class SchedulerService:
         self._download_completion_lock = asyncio.Lock()
         self._plex_job_state_guard = asyncio.Lock()
         self._plex_job_state: dict[str, PlexJobState] = {
-            PLEX_INCREMENTAL_SYNC_JOB_NAME: PlexJobState(),
-            PLEX_FULL_RECONCILE_JOB_NAME: PlexJobState(),
+            PLEX_RECENT_SCAN_JOB_NAME: PlexJobState(),
+            PLEX_POLL_JOB_NAME: PlexJobState(),
         }
 
     def _current_time(self) -> datetime:
@@ -326,7 +326,7 @@ class SchedulerService:
                 except Exception as e:
                     logger.error("Error processing pending item %s: %s", item.id, e)
 
-    async def _run_incremental_plex_sync_job(self, *, trigger_source: str) -> PlexJobRunResult:
+    async def _run_recent_plex_scan_job(self, *, trigger_source: str) -> PlexJobRunResult:
         """Run the recent Plex scan job."""
 
         async def run_scan():
@@ -340,13 +340,13 @@ class SchedulerService:
                     await plex.close()
 
         return await self._run_guarded_plex_scan_job(
-            job_name=PLEX_INCREMENTAL_SYNC_JOB_NAME,
+            job_name=PLEX_RECENT_SCAN_JOB_NAME,
             trigger_source=trigger_source,
             job_log_label="Recent Plex scan",
             runner=run_scan,
         )
 
-    async def _run_full_plex_reconcile_job(self, *, trigger_source: str) -> PlexJobRunResult:
+    async def _run_plex_poll_job(self, *, trigger_source: str) -> PlexJobRunResult:
         """Run the full Plex poll job."""
 
         async def run_scan():
@@ -360,7 +360,7 @@ class SchedulerService:
                     await plex.close()
 
         return await self._run_guarded_plex_scan_job(
-            job_name=PLEX_FULL_RECONCILE_JOB_NAME,
+            job_name=PLEX_POLL_JOB_NAME,
             trigger_source=trigger_source,
             job_log_label="Plex poll",
             runner=run_scan,
@@ -487,19 +487,19 @@ class SchedulerService:
 
         settings = get_settings()
         self.scheduler.add_job(
-            self._run_incremental_plex_sync_job,
+            self._run_recent_plex_scan_job,
             trigger=IntervalTrigger(minutes=settings.plex_recent_scan_interval_minutes),
             kwargs={"trigger_source": "scheduler"},
-            id="plex_incremental_sync",
+            id="plex_recent_scan",
             name="Run recent Plex scan",
             replace_existing=True,
         )
 
         self.scheduler.add_job(
-            self._run_full_plex_reconcile_job,
-            trigger=IntervalTrigger(minutes=settings.plex_full_reconcile_interval_minutes),
+            self._run_plex_poll_job,
+            trigger=IntervalTrigger(minutes=getattr(settings, "plex_poll_interval_minutes", 360)),
             kwargs={"trigger_source": "scheduler"},
-            id="plex_full_reconcile",
+            id="plex_poll",
             name="Run Plex poll",
             replace_existing=True,
         )
@@ -548,10 +548,10 @@ class SchedulerService:
 
             return len(pending_items)
 
-    async def trigger_incremental_plex_sync_now(self) -> PlexJobRunResult:
+    async def trigger_recent_plex_scan_now(self) -> PlexJobRunResult:
         """Manually trigger the recent Plex scan job."""
-        return await self._run_incremental_plex_sync_job(trigger_source="manual")
+        return await self._run_recent_plex_scan_job(trigger_source="manual")
 
-    async def trigger_full_plex_reconcile_now(self) -> PlexJobRunResult:
+    async def trigger_plex_poll_now(self) -> PlexJobRunResult:
         """Manually trigger the Plex poll job."""
-        return await self._run_full_plex_reconcile_job(trigger_source="manual")
+        return await self._run_plex_poll_job(trigger_source="manual")

@@ -14,8 +14,8 @@ from app.siftarr.models._base import Base
 from app.siftarr.models.request import MediaType, Request, RequestStatus
 from app.siftarr.services import scheduler_service
 from app.siftarr.services.scheduler_service import (
-    PLEX_FULL_RECONCILE_JOB_NAME,
-    PLEX_INCREMENTAL_SYNC_JOB_NAME,
+    PLEX_POLL_JOB_NAME,
+    PLEX_RECENT_SCAN_JOB_NAME,
     SchedulerService,
 )
 
@@ -49,7 +49,7 @@ class _FakeScheduler:
 
 
 @pytest.mark.asyncio
-async def test_start_registers_split_plex_jobs(monkeypatch):
+async def test_start_registers_recent_scan_and_poll_jobs(monkeypatch):
     """Scheduler startup should register separate recent-scan and poll jobs."""
     created = {}
 
@@ -61,8 +61,8 @@ async def test_start_registers_split_plex_jobs(monkeypatch):
     monkeypatch.setattr(
         "app.siftarr.config.get_settings",
         lambda: SimpleNamespace(
+            plex_poll_interval_minutes=360,
             plex_recent_scan_interval_minutes=5,
-            plex_full_reconcile_interval_minutes=360,
         ),
     )
 
@@ -71,14 +71,14 @@ async def test_start_registers_split_plex_jobs(monkeypatch):
 
     fake = created["scheduler"]
     job_ids = {job["id"] for job in fake.jobs}
-    assert "plex_incremental_sync" in job_ids
-    assert "plex_full_reconcile" in job_ids
+    assert "plex_recent_scan" in job_ids
+    assert "plex_poll" in job_ids
     assert "check_download_completion" in job_ids
     assert "poll_plex_availability" not in job_ids
 
     job_kwargs = {job["id"]: job for job in fake.jobs}
-    assert job_kwargs["plex_incremental_sync"]["kwargs"] == {"trigger_source": "scheduler"}
-    assert job_kwargs["plex_full_reconcile"]["kwargs"] == {"trigger_source": "scheduler"}
+    assert job_kwargs["plex_recent_scan"]["kwargs"] == {"trigger_source": "scheduler"}
+    assert job_kwargs["plex_poll"]["kwargs"] == {"trigger_source": "scheduler"}
     assert job_kwargs["check_download_completion"]["trigger"].interval.total_seconds() == 30
     assert fake.started is True
 
@@ -198,8 +198,8 @@ async def test_recheck_unreleased_revisits_finished_and_available_tv_requests(mo
 
 
 @pytest.mark.asyncio
-async def test_incremental_plex_sync_returns_locked_when_job_already_running(monkeypatch):
-    """Concurrent incremental triggers should report lock contention."""
+async def test_recent_plex_scan_returns_locked_when_job_already_running(monkeypatch):
+    """Concurrent recent scan triggers should report lock contention."""
 
     db = AsyncMock()
     runtime_settings = SimpleNamespace()
@@ -236,12 +236,12 @@ async def test_incremental_plex_sync_returns_locked_when_job_already_running(mon
 
     service = SchedulerService(lambda: _FakeSessionContext(db), logger=MagicMock())
 
-    first_run = asyncio.create_task(service.trigger_incremental_plex_sync_now())
+    first_run = asyncio.create_task(service.trigger_recent_plex_scan_now())
     await asyncio.sleep(0)
 
-    locked_result = await service.trigger_incremental_plex_sync_now()
+    locked_result = await service.trigger_recent_plex_scan_now()
     assert locked_result.status == "locked"
-    assert locked_result.job_name == PLEX_INCREMENTAL_SYNC_JOB_NAME
+    assert locked_result.job_name == PLEX_RECENT_SCAN_JOB_NAME
     assert locked_result.lock_owner is not None
 
     release_scan.set()
@@ -255,17 +255,17 @@ async def test_incremental_plex_sync_returns_locked_when_job_already_running(mon
     }
 
     snapshot = await service.get_plex_job_state_snapshot()
-    incremental_state = snapshot[PLEX_INCREMENTAL_SYNC_JOB_NAME]
-    assert incremental_state["locked"] is False
-    assert incremental_state["last_success"] is not None
-    assert incremental_state["last_run"] is not None
-    assert incremental_state["last_started"] is not None
-    assert incremental_state["last_error"] is None
-    assert incremental_state["metrics_payload"] == completed_result.metrics_payload
+    recent_scan_state = snapshot[PLEX_RECENT_SCAN_JOB_NAME]
+    assert recent_scan_state["locked"] is False
+    assert recent_scan_state["last_success"] is not None
+    assert recent_scan_state["last_run"] is not None
+    assert recent_scan_state["last_started"] is not None
+    assert recent_scan_state["last_error"] is None
+    assert recent_scan_state["metrics_payload"] == completed_result.metrics_payload
 
 
 @pytest.mark.asyncio
-async def test_full_plex_reconcile_records_failed_run_state(monkeypatch):
+async def test_plex_poll_records_failed_run_state(monkeypatch):
     """Failed poll runs should persist in-memory error state."""
 
     db = AsyncMock()
@@ -285,22 +285,22 @@ async def test_full_plex_reconcile_records_failed_run_state(monkeypatch):
 
     service = SchedulerService(lambda: _FakeSessionContext(db), logger=MagicMock())
 
-    result = await service.trigger_full_plex_reconcile_now()
+    result = await service.trigger_plex_poll_now()
 
     assert result.status == "failed"
-    assert result.job_name == PLEX_FULL_RECONCILE_JOB_NAME
+    assert result.job_name == PLEX_POLL_JOB_NAME
     assert result.error == "plex timeout"
     assert result.metrics_payload is None
     plex_instance.close.assert_awaited_once()
 
     snapshot = await service.get_plex_job_state_snapshot()
-    full_state = snapshot[PLEX_FULL_RECONCILE_JOB_NAME]
-    assert full_state["locked"] is False
-    assert full_state["last_started"] is not None
-    assert full_state["last_run"] is not None
-    assert full_state["last_success"] is None
-    assert full_state["last_error"] == "plex timeout"
-    assert full_state["metrics_payload"] is None
+    poll_state = snapshot[PLEX_POLL_JOB_NAME]
+    assert poll_state["locked"] is False
+    assert poll_state["last_started"] is not None
+    assert poll_state["last_run"] is not None
+    assert poll_state["last_success"] is None
+    assert poll_state["last_error"] == "plex timeout"
+    assert poll_state["metrics_payload"] is None
 
 
 @pytest.mark.asyncio

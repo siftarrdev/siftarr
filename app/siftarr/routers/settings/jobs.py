@@ -78,8 +78,8 @@ async def retry_pending(
     return templates.TemplateResponse(request, "settings.html", context)
 
 
-@router.post("/run-incremental-plex-sync")
-async def run_incremental_plex_sync(
+@router.post("/run-recent-plex-scan")
+async def run_recent_plex_scan(
     request: Request,
     db: AsyncSession = Depends(get_db),
 ) -> HTMLResponse:
@@ -92,7 +92,7 @@ async def run_incremental_plex_sync(
         context["message_type"] = "error"
         return templates.TemplateResponse(request, "settings.html", context)
 
-    result = await scheduler_service.trigger_incremental_plex_sync_now()
+    result = await scheduler_service.trigger_recent_plex_scan_now()
     context["message"], context["message_type"] = settings_router._build_manual_plex_job_message(
         "Recent Plex scan",
         result,
@@ -101,8 +101,8 @@ async def run_incremental_plex_sync(
     return templates.TemplateResponse(request, "settings.html", context)
 
 
-@router.post("/run-full-plex-reconcile")
-async def run_full_plex_reconcile(
+@router.post("/run-plex-poll")
+async def run_plex_poll(
     request: Request,
     db: AsyncSession = Depends(get_db),
 ) -> HTMLResponse:
@@ -115,7 +115,7 @@ async def run_full_plex_reconcile(
         context["message_type"] = "error"
         return templates.TemplateResponse(request, "settings.html", context)
 
-    result = await scheduler_service.trigger_full_plex_reconcile_now()
+    result = await scheduler_service.trigger_plex_poll_now()
     context["message"], context["message_type"] = settings_router._build_manual_plex_job_message(
         "Plex poll",
         result,

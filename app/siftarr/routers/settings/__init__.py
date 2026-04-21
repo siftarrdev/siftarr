@@ -16,8 +16,8 @@ from app.siftarr.services.plex_service import PlexService
 from app.siftarr.services.release_selection_service import clear_release_search_cache
 from app.siftarr.services.rule_service import RuleService
 from app.siftarr.services.scheduler_service import (
-    PLEX_FULL_RECONCILE_JOB_NAME,
-    PLEX_INCREMENTAL_SYNC_JOB_NAME,
+    PLEX_POLL_JOB_NAME,
+    PLEX_RECENT_SCAN_JOB_NAME,
 )
 from app.siftarr.services.settings import overseerr_import as overseerr_import_service
 from app.siftarr.services.settings import page_context as page_context_service
@@ -74,8 +74,8 @@ def _build_manual_plex_job_message(job_label: str, result: Any) -> tuple[str, st
 async def _build_plex_job_statuses(db) -> list[dict[str, Any]]:
     return await plex_jobs_service.build_plex_job_statuses(
         db,
-        incremental_job_name=PLEX_INCREMENTAL_SYNC_JOB_NAME,
-        full_job_name=PLEX_FULL_RECONCILE_JOB_NAME,
+        recent_scan_job_name=PLEX_RECENT_SCAN_JOB_NAME,
+        poll_job_name=PLEX_POLL_JOB_NAME,
     )
 
 
@@ -181,7 +181,6 @@ async def _rescan_plex_tv_request(
     request_id: int,
     plex,
     runtime_settings,
-    force_plex_refresh: bool = True,
 ) -> bool:
     return await plex_rescan_service.rescan_plex_tv_request(
         request_id,
@@ -189,7 +188,6 @@ async def _rescan_plex_tv_request(
         runtime_settings,
         session_maker=async_session_maker,
         logger=logger,
-        force_plex_refresh=force_plex_refresh,
     )
 
 
@@ -258,8 +256,8 @@ sync_overseerr_stream = _imports.sync_overseerr_stream
 
 rescan_plex = _jobs.rescan_plex
 retry_pending = _jobs.retry_pending
-run_full_plex_reconcile = _jobs.run_full_plex_reconcile
-run_incremental_plex_sync = _jobs.run_incremental_plex_sync
+run_plex_poll = _jobs.run_plex_poll
+run_recent_plex_scan = _jobs.run_recent_plex_scan
 toggle_staging_mode = _jobs.toggle_staging_mode
 
 clear_cache = _maintenance.clear_cache
@@ -289,8 +287,8 @@ __all__ = [
     "reset_connections",
     "retry_pending",
     "router",
-    "run_full_plex_reconcile",
-    "run_incremental_plex_sync",
+    "run_plex_poll",
+    "run_recent_plex_scan",
     "save_connections",
     "sync_overseerr",
     "sync_overseerr_stream",

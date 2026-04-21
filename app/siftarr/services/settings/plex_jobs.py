@@ -97,16 +97,16 @@ def build_manual_plex_job_message(job_label: str, result: Any) -> tuple[str, str
 async def build_plex_job_statuses(
     db: AsyncSession,
     *,
-    incremental_job_name: str,
-    full_job_name: str,
+    recent_scan_job_name: str,
+    poll_job_name: str,
 ) -> list[dict[str, Any]]:
     """Load in-memory scheduler status for Plex scan jobs."""
     del db
     from app.siftarr.main import scheduler_service
 
     job_rows = [
-        (incremental_job_name, "Recent Plex Scan", "Recent-additions scan for active requests"),
-        (full_job_name, "Plex Poll", "Full active-request availability poll"),
+        (recent_scan_job_name, "Recent Plex Scan", "Recent-additions scan for active requests"),
+        (poll_job_name, "Plex Poll", "Active-request availability poll"),
     ]
     job_state = (
         await scheduler_service.get_plex_job_state_snapshot()

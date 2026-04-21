@@ -172,7 +172,7 @@ async def process_request_background(request_id: int) -> None:
                 plex_service = PlexService(settings=settings)
                 episode_sync = EpisodeSyncService(db, plex=plex_service)
                 try:
-                    await episode_sync.sync_episodes(request.id)
+                    await episode_sync.sync_request(request.id)
                 except Exception:
                     logger.exception("Episode sync failed for request_id=%s", request_id)
                 finally:

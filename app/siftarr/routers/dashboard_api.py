@@ -698,7 +698,7 @@ async def refresh_plex(
     request_id: int,
     db: AsyncSession = Depends(get_db),
 ) -> JSONResponse:
-    """Force a Plex re-sync for a TV request regardless of staleness."""
+    """Run the simplified TV sync flow for one request."""
     from app.siftarr.services.episode_sync_service import EpisodeSyncService
 
     request = await load_request_or_404(db, request_id)
@@ -711,7 +711,7 @@ async def refresh_plex(
 
     try:
         episode_sync = EpisodeSyncService(db, plex=plex_service)
-        await episode_sync.sync_episodes(request_id, force_plex_refresh=True)
+        await episode_sync.sync_request(request_id)
         return JSONResponse({"status": "success", "message": "Plex sync completed"})
     except Exception:
         logger.exception("Plex refresh failed for request_id=%s", request_id)

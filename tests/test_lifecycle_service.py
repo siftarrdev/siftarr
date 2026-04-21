@@ -186,7 +186,9 @@ def test_is_unreleased_tv_all_aired_downloaded_with_future_remaining():
         SimpleNamespace(air_date=date(2026, 4, 8), status=RequestStatus.COMPLETED),
         SimpleNamespace(air_date=date(2026, 5, 1), status=RequestStatus.UNRELEASED),
     ]
-    assert is_unreleased(request, media_details=details, local_episodes=episodes, today=TODAY) is True
+    assert (
+        is_unreleased(request, media_details=details, local_episodes=episodes, today=TODAY) is True
+    )
 
 
 def test_is_unreleased_tv_all_aired_downloaded_with_empty_season():
@@ -247,7 +249,9 @@ def test_is_unreleased_tv_completed_episodes_with_future_next_episode_signal():
         SimpleNamespace(air_date=date(2026, 4, 8), status=RequestStatus.COMPLETED),
     ]
 
-    assert is_unreleased(request, media_details=details, local_episodes=episodes, today=TODAY) is True
+    assert (
+        is_unreleased(request, media_details=details, local_episodes=episodes, today=TODAY) is True
+    )
 
 
 def test_is_unreleased_false_without_tmdb_id():

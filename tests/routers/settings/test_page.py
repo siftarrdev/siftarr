@@ -159,7 +159,7 @@ async def test_settings_page_includes_plex_job_status_and_manual_job_actions(
                     },
                     {
                         "label": "Plex Poll",
-                        "description": "Full active-request availability poll",
+                        "description": "Active-request availability poll",
                         "last_success": None,
                         "last_run": None,
                         "last_started": None,

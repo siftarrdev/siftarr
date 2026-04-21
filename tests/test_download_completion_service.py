@@ -359,7 +359,7 @@ class TestDownloadCompletionService:
                 matched=True,
                 available=True,
                 status_before=RequestStatus.DOWNLOADING,
-                status_after=RequestStatus.PENDING,
+                status_after=RequestStatus.COMPLETED,
                 reason="Episode found on Plex",
             )
         )

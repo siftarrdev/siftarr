@@ -7,7 +7,7 @@ import contextlib
 import logging
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
-from typing import Any, TypeVar
+from typing import TypeVar
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -44,9 +44,6 @@ class CheckRequestResult:
     status_before: RequestStatus | None = None
     status_after: RequestStatus | None = None
     reason: str | None = None
-
-
-TargetedReconcileResult = CheckRequestResult
 
 
 @dataclass(slots=True)
@@ -310,7 +307,9 @@ class PlexPollingService:
 
         decisions: list[_PollDecision] = []
         skipped_on_error = 0
-        matched_requests = [req for req in requests if self._find_recent_item_for_request(req, recent_items)]
+        matched_requests = [
+            req for req in requests if self._find_recent_item_for_request(req, recent_items)
+        ]
 
         for index, req in enumerate(matched_requests, start=1):
             await emit(
@@ -438,9 +437,9 @@ class PlexPollingService:
             return True
         if req.media_type == MediaType.TV and req.tvdb_id is not None and req.tvdb_id == tvdb_id:
             return True
-        if getattr(req, "plex_rating_key", None) and str(rating_key) == str(req.plex_rating_key):
-            return True
-        return False
+        return bool(
+            getattr(req, "plex_rating_key", None) and str(rating_key) == str(req.plex_rating_key)
+        )
 
     async def _find_show(self, req: Request) -> dict[str, object] | None:
         if req.tmdb_id:
@@ -516,7 +515,9 @@ class PlexPollingService:
             return MediaType.TV
         return None
 
-    async def _apply_decisions(self, requests: list[Request], decisions: list[_PollDecision]) -> int:
+    async def _apply_decisions(
+        self, requests: list[Request], decisions: list[_PollDecision]
+    ) -> int:
         requests_by_id = {req.id: req for req in requests}
         completed = 0
         for decision in decisions:
@@ -550,5 +551,4 @@ __all__ = [
     "ProgressCallback",
     "ScanMetrics",
     "ScanRecentResult",
-    "TargetedReconcileResult",
 ]

@@ -14,9 +14,7 @@ from .helpers import make_episode, make_request, make_season, set_request_status
 
 
 @pytest.mark.asyncio
-async def test_scan_recent_applies_completion_updates(
-    service, mock_db, mock_plex
-):
+async def test_scan_recent_applies_completion_updates(service, mock_db, mock_plex):
     req1 = make_request(
         id=1,
         media_type=MediaType.TV,
@@ -91,9 +89,7 @@ async def test_scan_recent_applies_completion_updates(
 
 
 @pytest.mark.asyncio
-async def test_scan_recent_processes_matching_items_without_deduping(
-    service, mock_db, mock_plex
-):
+async def test_scan_recent_processes_matching_items_without_deduping(service, mock_db, mock_plex):
     req1 = make_request(id=1, tmdb_id=111, title="Movie A")
     req2 = make_request(id=2, tmdb_id=111, title="Movie A Duplicate")
     req3 = make_request(id=3, tmdb_id=222, title="Movie B")
@@ -358,9 +354,7 @@ async def test_scan_recent_reports_request_probe_error(service, mock_db, mock_pl
 
 
 @pytest.mark.asyncio
-async def test_scan_recent_reports_non_authoritative_movie_fallback(
-    service, mock_db, mock_plex
-):
+async def test_scan_recent_reports_non_authoritative_movie_fallback(service, mock_db, mock_plex):
     req = make_request(id=1, tmdb_id=111, title="Movie A")
     mock_result = MagicMock()
     mock_result.scalars.return_value.all.return_value = [req]
@@ -396,9 +390,7 @@ async def test_scan_recent_reports_non_authoritative_movie_fallback(
 
 
 @pytest.mark.asyncio
-async def test_scan_recent_reports_non_authoritative_tv_fallback(
-    service, mock_db, mock_plex
-):
+async def test_scan_recent_reports_non_authoritative_tv_fallback(service, mock_db, mock_plex):
     req = make_request(
         id=2,
         media_type=MediaType.TV,

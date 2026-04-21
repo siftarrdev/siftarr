@@ -231,7 +231,7 @@ async def import_overseerr_requests(
                 )
                 for req in new_tv_requests:
                     try:
-                        await episode_sync.sync_episodes(req.id)
+                        await episode_sync.sync_request(req.id)
                     except Exception:
                         logger.exception(
                             "Episode sync failed for request_id=%s during import",

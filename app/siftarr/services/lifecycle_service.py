@@ -271,9 +271,7 @@ def _is_unreleased_movie(
                 if has_past_avail_release:
                     break
 
-    if status_not_released and release_date_missing_or_future and not has_past_avail_release:
-        return True
-    return False
+    return status_not_released and release_date_missing_or_future and not has_past_avail_release
 
 
 def _is_unreleased_tv_request(
@@ -313,9 +311,7 @@ def _is_unreleased_tv_request(
         has_future_or_unknown = has_future_signal or any(
             e.air_date is None or e.air_date > today for e in episodes
         )
-        if all_aired_downloaded and has_future_or_unknown:
-            return True
-        return False
+        return all_aired_downloaded and has_future_or_unknown
 
     return False
 

@@ -10,7 +10,7 @@ from app.siftarr.routers import settings
 
 
 @pytest.mark.asyncio
-async def test_run_incremental_plex_sync_reports_success(monkeypatch, mock_db, base_context):
+async def test_run_recent_plex_scan_reports_success(monkeypatch, mock_db, base_context):
     """Manual recent Plex scan should report scheduler success."""
 
     monkeypatch.setattr(
@@ -21,7 +21,7 @@ async def test_run_incremental_plex_sync_reports_success(monkeypatch, mock_db, b
     monkeypatch.setattr(settings, "_build_plex_job_statuses", AsyncMock(return_value=[]))
 
     scheduler = MagicMock()
-    scheduler.trigger_incremental_plex_sync_now = AsyncMock(
+    scheduler.trigger_recent_plex_scan_now = AsyncMock(
         return_value=MagicMock(
             status="completed",
             completed_requests=3,
@@ -39,7 +39,7 @@ async def test_run_incremental_plex_sync_reports_success(monkeypatch, mock_db, b
 
     monkeypatch.setattr(main_module, "scheduler_service", scheduler)
 
-    response = await settings.run_incremental_plex_sync(MagicMock(), db=mock_db)
+    response = await settings.run_recent_plex_scan(MagicMock(), db=mock_db)
     context = cast(dict, getattr(response, "context", None))
 
     assert context["message_type"] == "success"
@@ -47,13 +47,11 @@ async def test_run_incremental_plex_sync_reports_success(monkeypatch, mock_db, b
         "Recent Plex scan completed. Transitioned 3 request(s). "
         "Recent scan completed; completed 3, matched 3, scanned 3."
     )
-    scheduler.trigger_incremental_plex_sync_now.assert_awaited_once()
+    scheduler.trigger_recent_plex_scan_now.assert_awaited_once()
 
 
 @pytest.mark.asyncio
-async def test_run_incremental_plex_sync_reports_partial_completion(
-    monkeypatch, mock_db, base_context
-):
+async def test_run_recent_plex_scan_reports_partial_completion(monkeypatch, mock_db, base_context):
     """Manual recent Plex scan should describe partial completion."""
 
     monkeypatch.setattr(
@@ -64,7 +62,7 @@ async def test_run_incremental_plex_sync_reports_partial_completion(
     monkeypatch.setattr(settings, "_build_plex_job_statuses", AsyncMock(return_value=[]))
 
     scheduler = MagicMock()
-    scheduler.trigger_incremental_plex_sync_now = AsyncMock(
+    scheduler.trigger_recent_plex_scan_now = AsyncMock(
         return_value=MagicMock(
             status="completed",
             completed_requests=1,
@@ -82,7 +80,7 @@ async def test_run_incremental_plex_sync_reports_partial_completion(
 
     monkeypatch.setattr(main_module, "scheduler_service", scheduler)
 
-    response = await settings.run_incremental_plex_sync(MagicMock(), db=mock_db)
+    response = await settings.run_recent_plex_scan(MagicMock(), db=mock_db)
     context = cast(dict, getattr(response, "context", None))
 
     assert context["message_type"] == "success"
@@ -93,9 +91,7 @@ async def test_run_incremental_plex_sync_reports_partial_completion(
 
 
 @pytest.mark.asyncio
-async def test_run_full_plex_reconcile_reports_guarded_negative_reconciliation(
-    monkeypatch, mock_db, base_context
-):
+async def test_run_plex_poll_reports_completion(monkeypatch, mock_db, base_context):
     """Manual Plex poll should report poll completion."""
 
     monkeypatch.setattr(
@@ -106,7 +102,7 @@ async def test_run_full_plex_reconcile_reports_guarded_negative_reconciliation(
     monkeypatch.setattr(settings, "_build_plex_job_statuses", AsyncMock(return_value=[]))
 
     scheduler = MagicMock()
-    scheduler.trigger_full_plex_reconcile_now = AsyncMock(
+    scheduler.trigger_plex_poll_now = AsyncMock(
         return_value=MagicMock(
             status="completed",
             completed_requests=2,
@@ -119,7 +115,7 @@ async def test_run_full_plex_reconcile_reports_guarded_negative_reconciliation(
 
     monkeypatch.setattr(main_module, "scheduler_service", scheduler)
 
-    response = await settings.run_full_plex_reconcile(MagicMock(), db=mock_db)
+    response = await settings.run_plex_poll(MagicMock(), db=mock_db)
     context = cast(dict, getattr(response, "context", None))
 
     assert context["message_type"] == "success"
@@ -127,7 +123,7 @@ async def test_run_full_plex_reconcile_reports_guarded_negative_reconciliation(
 
 
 @pytest.mark.asyncio
-async def test_run_full_plex_reconcile_reports_lock_contention(monkeypatch, mock_db, base_context):
+async def test_run_plex_poll_reports_lock_contention(monkeypatch, mock_db, base_context):
     """Manual Plex poll should surface lock contention cleanly."""
 
     monkeypatch.setattr(
@@ -138,7 +134,7 @@ async def test_run_full_plex_reconcile_reports_lock_contention(monkeypatch, mock
     monkeypatch.setattr(settings, "_build_plex_job_statuses", AsyncMock(return_value=[]))
 
     scheduler = MagicMock()
-    scheduler.trigger_full_plex_reconcile_now = AsyncMock(
+    scheduler.trigger_plex_poll_now = AsyncMock(
         return_value=MagicMock(
             status="locked",
             completed_requests=0,
@@ -152,12 +148,12 @@ async def test_run_full_plex_reconcile_reports_lock_contention(monkeypatch, mock
 
     monkeypatch.setattr(main_module, "scheduler_service", scheduler)
 
-    response = await settings.run_full_plex_reconcile(MagicMock(), db=mock_db)
+    response = await settings.run_plex_poll(MagicMock(), db=mock_db)
     context = cast(dict, getattr(response, "context", None))
 
     assert context["message_type"] == "error"
     assert context["message"] == "Plex poll is already in progress."
-    scheduler.trigger_full_plex_reconcile_now.assert_awaited_once()
+    scheduler.trigger_plex_poll_now.assert_awaited_once()
 
 
 @pytest.mark.asyncio
@@ -205,9 +201,8 @@ async def test_rescan_plex_route_reports_success(monkeypatch, mock_db, base_cont
             created_episode_sync["db"] = db
             created_episode_sync["plex"] = plex
 
-        async def sync_episodes(self, request_id, force_plex_refresh=False):
+        async def sync_request(self, request_id):
             assert request_id == 12
-            assert force_plex_refresh is True
 
     import app.siftarr.services.episode_sync_service as episode_sync_module
 

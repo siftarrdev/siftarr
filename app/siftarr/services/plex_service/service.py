@@ -129,7 +129,9 @@ class PlexService:
         *,
         page_size: int = 200,
     ) -> AsyncIterator[dict[str, Any]]:
-        async for item in self._library_scan.iter_full_library_items(media_type, page_size=page_size):
+        async for item in self._library_scan.iter_full_library_items(
+            media_type, page_size=page_size
+        ):
             yield item
 
     async def iter_recently_added_items(
@@ -138,7 +140,9 @@ class PlexService:
         *,
         page_size: int = 200,
     ) -> AsyncIterator[dict[str, Any]]:
-        async for item in self._library_scan.iter_recently_added_items(media_type, page_size=page_size):
+        async for item in self._library_scan.iter_recently_added_items(
+            media_type, page_size=page_size
+        ):
             yield item
 
     async def scan_library_items(
