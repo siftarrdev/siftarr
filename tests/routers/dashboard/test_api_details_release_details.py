@@ -100,7 +100,7 @@ async def test_request_details_reuses_persisted_multi_season_coverage(
             self.db = db
             self.plex = plex
 
-        async def refresh_if_stale(self, request_id):
+        async def sync_request(self, request_id):
             return None
 
     with pytest.MonkeyPatch.context() as inner_monkeypatch:
@@ -259,7 +259,7 @@ async def test_request_details_orders_stored_releases_by_score_then_size(
             self.db = db
             self.plex = plex
 
-        async def refresh_if_stale(self, request_id):
+        async def sync_request(self, request_id):
             return None
 
     with pytest.MonkeyPatch.context() as inner_monkeypatch:
