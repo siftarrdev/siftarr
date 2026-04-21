@@ -213,7 +213,6 @@ async def request_details(
             {
                 "score": release.score,
                 "passed": release.passed_rules,
-                "downloaded": release.is_downloaded,
                 "rejection_reason": evaluation.rejection_reason,
                 "season_number": release.season_number,
                 "episode_number": release.episode_number,
@@ -331,7 +330,6 @@ async def request_details(
                         "title": ep.title,
                         "air_date": ep.air_date.isoformat() if ep.air_date else None,
                         "status": ep.status.value,
-                        "release_id": ep.release_id,
                     }
                     for ep in season_episodes
                 ],
@@ -451,7 +449,6 @@ async def search_request_releases(
             {
                 "score": release.score,
                 "passed": release.passed_rules,
-                "downloaded": release.is_downloaded,
                 "rejection_reason": evaluation.rejection_reason,
                 "season_number": release.season_number,
                 "episode_number": release.episode_number,
@@ -523,7 +520,6 @@ async def get_request_seasons(
                     "title": ep.title,
                     "air_date": ep.air_date.isoformat() if ep.air_date else None,
                     "status": ep.status.value,
-                    "release_id": ep.release_id,
                 }
                 for ep in season_episodes
             ],
@@ -581,7 +577,7 @@ async def search_season_packs(
             {"releases": finalize_releases(releases, sort_key=season_pack_release_sort_key)}
         )
     finally:
-        pass
+        await prowlarr.close()
 
 
 @router.post("/{request_id}/seasons/search-all")
@@ -644,7 +640,7 @@ async def search_all_season_packs(
             }
         )
     finally:
-        pass
+        await prowlarr.close()
 
 
 @router.post("/{request_id}/seasons/{season_number}/episodes/{episode_number}/search")
@@ -694,7 +690,7 @@ async def search_episode(
 
         return JSONResponse({"releases": finalize_releases(releases)})
     finally:
-        pass
+        await prowlarr.close()
 
 
 @router.post("/{request_id}/refresh-plex")

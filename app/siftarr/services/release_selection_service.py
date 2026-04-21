@@ -3,10 +3,9 @@
 import logging
 from datetime import UTC, datetime
 
-from sqlalchemy import delete, func, or_, select, update
+from sqlalchemy import delete, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.siftarr.models.episode import Episode
 from app.siftarr.models.release import Release
 from app.siftarr.models.request import MediaType, Request, RequestStatus
 from app.siftarr.models.staged_torrent import StagedTorrent
@@ -132,46 +131,29 @@ async def _purge_releases(
     request_id: int | None = None,
     commit: bool = True,
 ) -> dict[str, int]:
-    """Detach episode links and delete stored releases, optionally for one request."""
-    release_ids_query = select(Release.id)
+    """Delete stored releases, optionally for one request."""
+    count_stmt = select(func.count()).select_from(Release)
     release_delete_query = delete(Release)
     if request_id is not None:
-        release_ids_query = release_ids_query.where(Release.request_id == request_id)
+        count_stmt = count_stmt.where(Release.request_id == request_id)
         release_delete_query = release_delete_query.where(Release.request_id == request_id)
 
-    detached_episode_count = (
-        await db.scalar(
-            select(func.count())
-            .select_from(Episode)
-            .where(Episode.release_id.in_(release_ids_query))
-        )
-        or 0
-    )
-
-    if detached_episode_count:
-        await db.execute(
-            update(Episode).where(Episode.release_id.in_(release_ids_query)).values(release_id=None)
-        )
-
-    deleted_release_count = detached_episode_count
+    count_result = await db.scalar(count_stmt)
+    deleted_release_count = count_result or 0
     await db.execute(release_delete_query)
     if commit:
         await db.commit()
 
-    return {
-        "deleted_releases": deleted_release_count,
-        "detached_episode_refs": detached_episode_count,
-    }
+    return {"deleted_releases": deleted_release_count}
 
 
 async def clear_release_search_cache(db: AsyncSession) -> dict[str, int]:
-    """Clear persisted search results and detach stale episode release links."""
+    """Clear persisted release search cache."""
     result = await _purge_releases(db)
 
     logger.info(
-        "Cleared persisted release search cache: deleted_releases=%s detached_episode_refs=%s",
+        "Cleared persisted release search cache: deleted_releases=%s",
         result["deleted_releases"],
-        result["detached_episode_refs"],
     )
     return result
 
@@ -432,12 +414,7 @@ async def use_releases(
 
     qbittorrent = QbittorrentService(settings=runtime_settings)
     added_hashes: list[str] = []
-    already_sent_titles: list[str] = []
     for release in usable_releases:
-        if release.is_downloaded:
-            already_sent_titles.append(release.title)
-            continue
-
         source = release.magnet_url or release.download_url
         if not source:
             raise RuntimeError(f"Release '{release.title}' has no usable download source.")
@@ -449,8 +426,6 @@ async def use_releases(
         if torrent_hash is None:
             raise RuntimeError(f"Failed to send '{release.title}' to qBittorrent.")
 
-        release.is_downloaded = True
-        release.downloaded_at = datetime.now(UTC)
         added_hashes.append(torrent_hash)
         logger.info(
             "Torrent sent to qBittorrent: request_id=%s title=%s hash=%s category=%s",
@@ -461,16 +436,6 @@ async def use_releases(
         )
 
     await db.commit()
-    if not added_hashes and already_sent_titles:
-        await _set_request_status(db, request, RequestStatus.DOWNLOADING)
-        await queue_service.remove_from_queue(request.id)
-        return {
-            "status": "downloading",
-            "message": f"Release already sent: {', '.join(already_sent_titles)}.",
-            "torrent_hashes": [],
-            "already_sent_titles": already_sent_titles,
-        }
-
     await _set_request_status(db, request, RequestStatus.DOWNLOADING)
     await queue_service.remove_from_queue(request.id)
     logger.info(

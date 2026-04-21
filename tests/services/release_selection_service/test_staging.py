@@ -53,11 +53,13 @@ async def test_use_releases_marks_manual_selection_source(
 
 
 @pytest.mark.asyncio
-async def test_use_releases_skips_duplicate_direct_send(mock_db, request_record, selected_release):
+async def test_use_releases_sends_direct_when_staging_disabled(
+    mock_db, request_record, selected_release
+):
     settings = MagicMock(staging_mode_enabled=False)
     queue_service = AsyncMock()
     qbittorrent_service = AsyncMock()
-    selected_release.is_downloaded = True
+    qbittorrent_service.add_torrent.return_value = "abc123"
     mock_db.commit = AsyncMock()
 
     with pytest.MonkeyPatch.context() as monkeypatch:
@@ -85,8 +87,8 @@ async def test_use_releases_skips_duplicate_direct_send(mock_db, request_record,
         )
 
     assert result["status"] == "downloading"
-    assert result["already_sent_titles"] == [selected_release.title]
-    qbittorrent_service.add_torrent.assert_not_awaited()
+    assert result["torrent_hashes"] == ["abc123"]
+    qbittorrent_service.add_torrent.assert_awaited_once()
     queue_service.remove_from_queue.assert_awaited_once_with(request_record.id)
 
 

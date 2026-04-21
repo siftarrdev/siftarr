@@ -80,15 +80,12 @@ async def _process_request_search(
     db: AsyncSession,
 ) -> dict:
     """Run torrent search for a request and clean up queue state on success."""
-    try:
-        activity_log = ActivityLogService(db)
-        await activity_log.log(
-            EventType.SEARCH_STARTED,
-            request_id=request.id,
-            details={"title": request.title, "media_type": request.media_type.value},
-        )
-    except Exception:
-        logger.exception("Failed to log search_started for request_id=%s", request.id)
+    activity_log = ActivityLogService(db)
+    await activity_log.log(
+        EventType.SEARCH_STARTED,
+        request_id=request.id,
+        details={"title": request.title, "media_type": request.media_type.value},
+    )
 
     runtime_settings = await get_effective_settings(db)
 
@@ -125,18 +122,15 @@ async def _process_request_search(
 
     result = await decision_service.process_request(request.id)
 
-    try:
-        activity_log = ActivityLogService(db)
-        await activity_log.log(
-            EventType.SEARCH_COMPLETED,
-            request_id=request.id,
-            details={
-                "status": result.get("status"),
-                "message": result.get("message"),
-            },
-        )
-    except Exception:
-        logger.exception("Failed to log search_completed for request_id=%s", request.id)
+    activity_log = ActivityLogService(db)
+    await activity_log.log(
+        EventType.SEARCH_COMPLETED,
+        request_id=request.id,
+        details={
+            "status": result.get("status"),
+            "message": result.get("message"),
+        },
+    )
 
     if result.get("status") == "completed":
         await queue_service.remove_from_queue(request.id)

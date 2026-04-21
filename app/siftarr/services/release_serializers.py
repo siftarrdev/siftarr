@@ -73,17 +73,14 @@ def apply_release_size_per_season_metadata(
 def _derive_size_passed(evaluation: ReleaseEvaluation | Any) -> bool | None:
     """Derive size_passed from evaluation data alone.
 
-    Returns False if the rejection reason starts with "Size ", True if there are
-    size-limit matches that passed, or None if no size-limit information is available.
+    Returns False if the rejection reason starts with "Size ", True if the
+    evaluation passed and there is no size rejection, or None if the evaluation
+    did not pass and no size-limit information is available.
     """
     rejection_reason = getattr(evaluation, "rejection_reason", None)
     if isinstance(rejection_reason, str) and rejection_reason.startswith("Size "):
         return False
-    # Size-limit rules don't produce entries in evaluation.matches (they set
-    # rejection_reason directly).  If the release didn't fail a size check we
-    # can't tell from matches alone whether any size rule was even evaluated, so
-    # return None to signal "unknown / no size annotation".
-    return None
+    return True if evaluation.passed else None
 
 
 def serialize_evaluated_release(

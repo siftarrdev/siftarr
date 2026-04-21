@@ -139,20 +139,17 @@ class DownloadCompletionService:
                 request.title,
             )
 
-            try:
-                if request_id not in existing_download_completed_logs:
-                    await activity_log.log(
-                        EventType.DOWNLOAD_COMPLETED,
-                        request_id=request_id,
-                        details={
-                            "title": request.title,
-                            "torrent_count": len(torrents),
-                        },
-                    )
-                    existing_download_completed_logs.add(request_id)
-                    await self.db.commit()
-            except Exception:
-                logger.exception("Failed to log download_completed for request_id=%s", request_id)
+            if request_id not in existing_download_completed_logs:
+                await activity_log.log(
+                    EventType.DOWNLOAD_COMPLETED,
+                    request_id=request_id,
+                    details={
+                        "title": request.title,
+                        "torrent_count": len(torrents),
+                    },
+                )
+                existing_download_completed_logs.add(request_id)
+                await self.db.commit()
 
             try:
                 reconcile_result = await self.plex_polling.reconcile_request(request_id)
@@ -160,21 +157,15 @@ class DownloadCompletionService:
                 if reconcile_result.available:
                     completed += 1
 
-                    try:
-                        await activity_log.log(
-                            EventType.PLEX_AVAILABLE,
-                            request_id=request_id,
-                            details={
-                                "title": request.title,
-                                "reason": reconcile_result.reason,
-                            },
-                        )
-                        await self.db.commit()
-                    except Exception:
-                        logger.exception(
-                            "Failed to log plex_available for request_id=%s",
-                            request_id,
-                        )
+                    await activity_log.log(
+                        EventType.PLEX_AVAILABLE,
+                        request_id=request_id,
+                        details={
+                            "title": request.title,
+                            "reason": reconcile_result.reason,
+                        },
+                    )
+                    await self.db.commit()
 
                     logger.info(
                         "DownloadCompletionService: reconciled request_id=%s title=%s via Plex (%s)",

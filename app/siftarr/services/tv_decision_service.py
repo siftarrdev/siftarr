@@ -360,22 +360,19 @@ class TVDecisionService:
             len(all_search_errors),
         )
 
-        try:
-            from app.siftarr.models.activity_log import EventType
+        from app.siftarr.models.activity_log import EventType
 
-            activity_log = ActivityLogService(self.db)
-            await activity_log.log(
-                EventType.RULE_EVALUATION,
-                request_id=request_id,
-                details={
-                    "evaluated": len(all_evaluated_releases),
-                    "passed_packs": len(pack_candidates),
-                    "passed_episodes": len(episode_evaluations),
-                    "search_errors": len(all_search_errors),
-                },
-            )
-        except Exception:
-            logger.exception("Failed to log rule_evaluation for request_id=%s", request_id)
+        activity_log = ActivityLogService(self.db)
+        await activity_log.log(
+            EventType.RULE_EVALUATION,
+            request_id=request_id,
+            details={
+                "evaluated": len(all_evaluated_releases),
+                "passed_packs": len(pack_candidates),
+                "passed_episodes": len(episode_evaluations),
+                "search_errors": len(all_search_errors),
+            },
+        )
 
         all_selected_releases: list[ReleaseEvaluation] = []
 
@@ -431,21 +428,18 @@ class TVDecisionService:
                 selection_source="rule",
             )
 
-            try:
-                from app.siftarr.models.activity_log import EventType
+            from app.siftarr.models.activity_log import EventType
 
-                activity_log = ActivityLogService(self.db)
-                await activity_log.log(
-                    EventType.RELEASE_STAGED,
-                    request_id=request_id,
-                    details={
-                        "release_count": len(all_selected_releases),
-                        "titles": [e.release.title for e in all_selected_releases[:5]],
-                        "action": action_result.get("status"),
-                    },
-                )
-            except Exception:
-                logger.exception("Failed to log release_staged for request_id=%s", request_id)
+            activity_log = ActivityLogService(self.db)
+            await activity_log.log(
+                EventType.RELEASE_STAGED,
+                request_id=request_id,
+                details={
+                    "release_count": len(all_selected_releases),
+                    "titles": [e.release.title for e in all_selected_releases[:5]],
+                    "action": action_result.get("status"),
+                },
+            )
 
             if action_result.get("status") in ("completed", "downloading", "staged"):
                 status_map = {

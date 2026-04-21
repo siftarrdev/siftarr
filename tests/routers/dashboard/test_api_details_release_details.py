@@ -44,7 +44,6 @@ async def test_request_details_reuses_persisted_multi_season_coverage(
         season_coverage="1,2",
         score=95,
         passed_rules=True,
-        is_downloaded=False,
     )
 
     season_one = MagicMock(id=101, season_number=1, status=RequestStatus.PENDING, synced_at=None)
@@ -160,7 +159,6 @@ async def test_request_details_orders_stored_releases_by_score_then_size(
         season_coverage="1,2",
         score=95,
         passed_rules=True,
-        is_downloaded=False,
     )
     lower_score = Release(
         id=9,
@@ -182,7 +180,6 @@ async def test_request_details_orders_stored_releases_by_score_then_size(
         season_coverage="1",
         score=90,
         passed_rules=True,
-        is_downloaded=False,
     )
     smaller_high_score = Release(
         id=10,
@@ -204,7 +201,6 @@ async def test_request_details_orders_stored_releases_by_score_then_size(
         season_coverage="1,2",
         score=95,
         passed_rules=True,
-        is_downloaded=False,
     )
 
     season_one = MagicMock(id=101, season_number=1, status=RequestStatus.PENDING, synced_at=None)
@@ -330,7 +326,6 @@ async def test_request_details_includes_release_status_reason_and_publish_date(
         season_coverage=None,
         score=95,
         passed_rules=False,
-        is_downloaded=False,
     )
 
     request_result = MagicMock()

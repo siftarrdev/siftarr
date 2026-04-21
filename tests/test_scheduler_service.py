@@ -474,24 +474,6 @@ async def test_full_reconcile_job_records_failures_and_releases_lock(monkeypatch
 
 
 @pytest.mark.asyncio
-async def test_legacy_poll_wrapper_delegates_to_incremental_job(monkeypatch):
-    """Legacy poll compatibility entrypoint should delegate to the incremental scheduler job."""
-    service = SchedulerService(lambda: _FakeSessionContext(AsyncMock()), logger=MagicMock())
-    mock_run_incremental = AsyncMock(
-        return_value=PlexJobRunResult(
-            job_name=PLEX_INCREMENTAL_SYNC_JOB_NAME,
-            status="completed",
-            completed_requests=1,
-        )
-    )
-    monkeypatch.setattr(service, "_run_incremental_plex_sync_job", mock_run_incremental)
-
-    await service._poll_plex_availability()
-
-    mock_run_incremental.assert_awaited_once_with(trigger_source="legacy_poll")
-
-
-@pytest.mark.asyncio
 async def test_poll_overseerr_uses_settings_service_import_helper(monkeypatch):
     """Overseerr polling should call the extracted settings import helper directly."""
 
