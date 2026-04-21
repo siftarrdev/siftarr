@@ -134,13 +134,20 @@ class SchedulerService:
         return state
 
     def _build_plex_job_metrics_payload(self, result: Any) -> dict[str, Any]:
-        metrics_payload = getattr(result, "metrics", None)
-        scan_payload = metrics_payload.as_dict() if metrics_payload is not None else None
-        return {
-            "mode": getattr(result, "mode", None),
-            "completed_requests": getattr(result, "completed_requests", 0),
-            "scan": scan_payload,
-        }
+        if isinstance(result, int):
+            return {"completed_requests": result}
+
+        payload = {"completed_requests": int(getattr(result, "completed_requests", 0))}
+        metrics = getattr(result, "metrics", None)
+        if metrics is not None:
+            payload.update(metrics.as_dict())
+        return payload
+
+    @staticmethod
+    def _get_plex_completed_requests(result: Any) -> int:
+        if isinstance(result, int):
+            return result
+        return int(getattr(result, "completed_requests", 0))
 
     async def get_plex_job_state_snapshot(self) -> dict[str, dict[str, Any]]:
         """Return a copy of the in-memory Plex job state."""
@@ -185,7 +192,7 @@ class SchedulerService:
         try:
             result = await runner()
             metrics_payload = self._build_plex_job_metrics_payload(result)
-            completed_requests = int(getattr(result, "completed_requests", 0))
+            completed_requests = self._get_plex_completed_requests(result)
             last_error = getattr(result, "last_error", None)
             finished_at = self._current_time()
 
@@ -320,7 +327,7 @@ class SchedulerService:
                     logger.error("Error processing pending item %s: %s", item.id, e)
 
     async def _run_incremental_plex_sync_job(self, *, trigger_source: str) -> PlexJobRunResult:
-        """Run the fast incremental Plex sync."""
+        """Run the recent Plex scan job."""
 
         async def run_scan():
             async with self.db_session_factory() as db:
@@ -328,19 +335,19 @@ class SchedulerService:
                 plex = PlexService(settings=runtime_settings)
                 try:
                     polling_service = PlexPollingService(db, plex)
-                    return await polling_service.incremental_recent_scan()
+                    return await polling_service.scan_recent()
                 finally:
                     await plex.close()
 
         return await self._run_guarded_plex_scan_job(
             job_name=PLEX_INCREMENTAL_SYNC_JOB_NAME,
             trigger_source=trigger_source,
-            job_log_label="Incremental Plex sync",
+            job_log_label="Recent Plex scan",
             runner=run_scan,
         )
 
     async def _run_full_plex_reconcile_job(self, *, trigger_source: str) -> PlexJobRunResult:
-        """Run the slower full Plex reconcile."""
+        """Run the full Plex poll job."""
 
         async def run_scan():
             async with self.db_session_factory() as db:
@@ -348,14 +355,14 @@ class SchedulerService:
                 plex = PlexService(settings=runtime_settings)
                 try:
                     polling_service = PlexPollingService(db, plex)
-                    return await polling_service.full_reconcile_scan()
+                    return await polling_service.poll()
                 finally:
                     await plex.close()
 
         return await self._run_guarded_plex_scan_job(
             job_name=PLEX_FULL_RECONCILE_JOB_NAME,
             trigger_source=trigger_source,
-            job_log_label="Full Plex reconcile",
+            job_log_label="Plex poll",
             runner=run_scan,
         )
 
@@ -484,7 +491,7 @@ class SchedulerService:
             trigger=IntervalTrigger(minutes=settings.plex_recent_scan_interval_minutes),
             kwargs={"trigger_source": "scheduler"},
             id="plex_incremental_sync",
-            name="Run incremental Plex sync",
+            name="Run recent Plex scan",
             replace_existing=True,
         )
 
@@ -493,7 +500,7 @@ class SchedulerService:
             trigger=IntervalTrigger(minutes=settings.plex_full_reconcile_interval_minutes),
             kwargs={"trigger_source": "scheduler"},
             id="plex_full_reconcile",
-            name="Run full Plex reconcile",
+            name="Run Plex poll",
             replace_existing=True,
         )
 
@@ -542,9 +549,9 @@ class SchedulerService:
             return len(pending_items)
 
     async def trigger_incremental_plex_sync_now(self) -> PlexJobRunResult:
-        """Manually trigger the incremental Plex sync job."""
+        """Manually trigger the recent Plex scan job."""
         return await self._run_incremental_plex_sync_job(trigger_source="manual")
 
     async def trigger_full_plex_reconcile_now(self) -> PlexJobRunResult:
-        """Manually trigger the full Plex reconcile job."""
+        """Manually trigger the Plex poll job."""
         return await self._run_full_plex_reconcile_job(trigger_source="manual")

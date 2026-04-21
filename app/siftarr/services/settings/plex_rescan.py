@@ -54,7 +54,7 @@ async def rescan_plex_requests(
     run_bounded_with_progress_func,
     rescan_plex_tv_request_func,
 ) -> tuple[int, int, int]:
-    """Run the legacy manual Plex reconcile path."""
+    """Run the manual Plex rescan path."""
     polling_service = plex_polling_service_cls(db, plex)
     active_requests = await polling_service.get_active_requests()
     active_requests = [req for req in active_requests if req.status != RequestStatus.COMPLETED]
@@ -187,8 +187,8 @@ async def rescan_plex_generator(
                         failed=failed,
                         completed=completed,
                         active=[],
-                        message=(
-                            "Legacy/manual Plex reconcile completed. "
+                message=(
+                            "Manual Plex rescan completed. "
                             f"Re-synced {resynced} TV request(s), "
                             f"{failed} failed, "
                             f"{completed} transitioned to completed."

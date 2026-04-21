@@ -1,4 +1,4 @@
-"""Tests for split Plex scheduler jobs and manual triggers."""
+"""Tests for Plex scheduler jobs and manual triggers."""
 
 from __future__ import annotations
 
@@ -50,7 +50,7 @@ class _FakeScheduler:
 
 @pytest.mark.asyncio
 async def test_start_registers_split_plex_jobs(monkeypatch):
-    """Scheduler startup should register separate incremental and full Plex jobs."""
+    """Scheduler startup should register separate recent-scan and poll jobs."""
     created = {}
 
     def fake_scheduler(**kwargs):
@@ -217,17 +217,14 @@ async def test_incremental_plex_sync_returns_locked_when_job_already_running(mon
             self.db_session = db_session
             self.plex = plex
 
-        async def incremental_recent_scan(self):
+        async def scan_recent(self):
             await release_scan.wait()
             return SimpleNamespace(
-                mode="incremental_recent_scan",
                 completed_requests=2,
                 metrics=SimpleNamespace(
                     as_dict=lambda: {
                         "scanned_items": 2,
                         "matched_requests": 2,
-                        "deduped_items": 0,
-                        "downgraded_requests": 0,
                         "skipped_on_error_items": 0,
                     }
                 ),
@@ -251,15 +248,10 @@ async def test_incremental_plex_sync_returns_locked_when_job_already_running(mon
     completed_result = await first_run
     assert completed_result.status == "completed"
     assert completed_result.metrics_payload == {
-        "mode": "incremental_recent_scan",
         "completed_requests": 2,
-        "scan": {
-            "scanned_items": 2,
-            "matched_requests": 2,
-            "deduped_items": 0,
-            "downgraded_requests": 0,
-            "skipped_on_error_items": 0,
-        },
+        "scanned_items": 2,
+        "matched_requests": 2,
+        "skipped_on_error_items": 0,
     }
 
     snapshot = await service.get_plex_job_state_snapshot()
@@ -274,7 +266,7 @@ async def test_incremental_plex_sync_returns_locked_when_job_already_running(mon
 
 @pytest.mark.asyncio
 async def test_full_plex_reconcile_records_failed_run_state(monkeypatch):
-    """Failed full reconcile runs should persist in-memory error state."""
+    """Failed poll runs should persist in-memory error state."""
 
     db = AsyncMock()
     runtime_settings = SimpleNamespace()
@@ -284,7 +276,7 @@ async def test_full_plex_reconcile_records_failed_run_state(monkeypatch):
     monkeypatch.setattr(scheduler_service, "PlexService", lambda settings: plex_instance)
 
     polling_service = MagicMock()
-    polling_service.full_reconcile_scan = AsyncMock(side_effect=RuntimeError("plex timeout"))
+    polling_service.poll = AsyncMock(side_effect=RuntimeError("plex timeout"))
     monkeypatch.setattr(
         scheduler_service,
         "PlexPollingService",

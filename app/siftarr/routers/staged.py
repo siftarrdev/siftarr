@@ -23,7 +23,7 @@ from app.siftarr.models.request import (
 from app.siftarr.models.staged_torrent import StagedTorrent
 from app.siftarr.services.activity_log_service import ActivityLogService
 from app.siftarr.services.lifecycle_service import LifecycleService
-from app.siftarr.services.plex_polling_service import PlexPollingService, TargetedReconcileResult
+from app.siftarr.services.plex_polling_service import CheckRequestResult, PlexPollingService
 from app.siftarr.services.plex_service import PlexService
 from app.siftarr.services.qbittorrent_service import MediaCategory, QbittorrentService
 from app.siftarr.services.staging_decision_logger import (
@@ -168,11 +168,11 @@ async def _reconcile_request_via_plex(
     request_id: int,
     title: str,
     runtime_settings,
-) -> TargetedReconcileResult:
+) -> CheckRequestResult:
     plex = PlexService(settings=runtime_settings)
     try:
         plex_polling = PlexPollingService(db, plex)
-        reconcile_result = await plex_polling.reconcile_request(request_id)
+        reconcile_result = await plex_polling.check_request(request_id)
 
         if reconcile_result.available:
             activity_log = ActivityLogService(db)

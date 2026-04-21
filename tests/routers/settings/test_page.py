@@ -146,20 +146,20 @@ async def test_settings_page_includes_plex_job_status_and_manual_job_actions(
                 **base_context(),
                 "plex_jobs": [
                     {
-                        "label": "Incremental Plex Sync",
-                        "description": "Fast recent-added availability scan",
+                        "label": "Recent Plex Scan",
+                        "description": "Recent-additions scan for active requests",
                         "last_success": "2026-04-19 12:00:00",
                         "last_run": "2026-04-19 12:05:00",
                         "last_started": "2026-04-19 12:04:00",
                         "locked": False,
                         "lock_owner": None,
                         "last_error": None,
-                        "run_summary": "Incremental run completed",
+                        "run_summary": "Recent scan completed; completed 2, matched 0, scanned 4",
                         "metrics_snapshot": "completed=2, scanned=4",
                     },
                     {
-                        "label": "Full Plex Reconcile",
-                        "description": "Slower full-library reconciliation run",
+                        "label": "Plex Poll",
+                        "description": "Full active-request availability poll",
                         "last_success": None,
                         "last_run": None,
                         "last_started": None,
@@ -178,11 +178,11 @@ async def test_settings_page_includes_plex_job_status_and_manual_job_actions(
     body = cast(bytes, response.body).decode()
 
     assert "Plex Scheduler Status" in body
-    assert "Incremental Plex Sync" in body
-    assert "Full Plex Reconcile" in body
-    assert "Run Incremental Plex Sync" in body
-    assert "Run Full Plex Reconcile" in body
+    assert "Recent Plex Scan" in body
+    assert "Plex Poll" in body
+    assert "Run Recent Plex Scan" in body
+    assert "Run Plex Poll" in body
     assert "Metrics Snapshot" in body
     assert "Last Outcome" in body
-    assert "Incremental run completed" in body
+    assert "Recent scan completed; completed 2, matched 0, scanned 4" in body
     assert "worker-1" in body

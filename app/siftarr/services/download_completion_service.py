@@ -152,7 +152,7 @@ class DownloadCompletionService:
                 await self.db.commit()
 
             try:
-                reconcile_result = await self.plex_polling.reconcile_request(request_id)
+                reconcile_result = await self.plex_polling.check_request(request_id)
 
                 if reconcile_result.available:
                     completed += 1
@@ -168,7 +168,7 @@ class DownloadCompletionService:
                     await self.db.commit()
 
                     logger.info(
-                        "DownloadCompletionService: reconciled request_id=%s title=%s via Plex (%s)",
+                        "DownloadCompletionService: checked request_id=%s title=%s via Plex (%s)",
                         request_id,
                         request.title,
                         reconcile_result.reason,

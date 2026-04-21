@@ -51,7 +51,6 @@ class TestGetDownloadStatus:
     async def test_response_includes_qbit_complete_and_plex_available_fields(self):
         """The download-status response should have qbit_complete and plex_available keys."""
         from app.siftarr.routers.staged import get_download_status
-        from app.siftarr.services.plex_polling_service import TargetedReconcileResult
 
         mock_db = AsyncMock()
 
@@ -66,17 +65,11 @@ class TestGetDownloadStatus:
         mock_result_2 = MagicMock()
         mock_result_2.all.return_value = [(1, RequestStatus.DOWNLOADING)]
 
-        # Third query: existing log count (for download_completed dedup)
-        mock_scalar_3 = MagicMock()
-        mock_scalar_3.scalar.return_value = 1  # already logged
-
-        mock_db.execute = AsyncMock(side_effect=[mock_result_1, mock_result_2, mock_scalar_3])
+        mock_db.execute = AsyncMock(side_effect=[mock_result_1, mock_result_2])
 
         with (
             patch("app.siftarr.routers.staged.get_settings") as mock_settings,
             patch("app.siftarr.routers.staged.QbittorrentService") as MockQbit,
-            patch("app.siftarr.routers.staged.PlexService") as MockPlex,
-            patch("app.siftarr.routers.staged.PlexPollingService") as MockPlexPolling,
         ):
             mock_settings.return_value = MagicMock()
             mock_qbit_instance = AsyncMock()
@@ -84,20 +77,6 @@ class TestGetDownloadStatus:
                 return_value={"progress": 1.0, "state": "uploading"}
             )
             MockQbit.return_value = mock_qbit_instance
-            mock_plex_instance = MagicMock()
-            mock_plex_instance.close = AsyncMock()
-            MockPlex.return_value = mock_plex_instance
-            mock_plex_polling = AsyncMock()
-            mock_plex_polling.reconcile_request = AsyncMock(
-                return_value=TargetedReconcileResult(
-                    request_id=1,
-                    matched=False,
-                    reconciled=False,
-                    status_before=RequestStatus.DOWNLOADING,
-                    status_after=RequestStatus.DOWNLOADING,
-                )
-            )
-            MockPlexPolling.return_value = mock_plex_polling
 
             response = await get_download_status(db=mock_db)
 
@@ -188,7 +167,7 @@ class TestCheckNow:
     async def test_check_now_complete_triggers_plex(self):
         """check-now with complete download should attempt Plex check."""
         from app.siftarr.routers.staged import check_now
-        from app.siftarr.services.plex_polling_service import TargetedReconcileResult
+        from app.siftarr.services.plex_polling_service import CheckRequestResult
 
         mock_db = AsyncMock()
         torrent = _make_torrent()
@@ -196,10 +175,7 @@ class TestCheckNow:
         torrent_result = MagicMock()
         torrent_result.scalar_one_or_none.return_value = torrent
 
-        log_count_result = MagicMock()
-        log_count_result.scalar.return_value = 0
-
-        mock_db.execute = AsyncMock(side_effect=[torrent_result, log_count_result])
+        mock_db.execute = AsyncMock(return_value=torrent_result)
         mock_db.flush = AsyncMock()
         mock_db.commit = AsyncMock()
         mock_db.add = MagicMock()
@@ -220,11 +196,11 @@ class TestCheckNow:
             mock_plex_instance.close = AsyncMock()
             MockPlex.return_value = mock_plex_instance
             mock_plex_polling = AsyncMock()
-            mock_plex_polling.reconcile_request = AsyncMock(
-                return_value=TargetedReconcileResult(
+            mock_plex_polling.check_request = AsyncMock(
+                return_value=CheckRequestResult(
                     request_id=1,
                     matched=True,
-                    reconciled=True,
+                    available=True,
                     status_before=RequestStatus.DOWNLOADING,
                     status_after=RequestStatus.COMPLETED,
                     reason="Found on Plex",
