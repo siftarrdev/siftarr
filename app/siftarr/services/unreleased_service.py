@@ -15,8 +15,7 @@ from app.siftarr.models.season import Season
 from app.siftarr.services.lifecycle_service import (
     EpisodeLike,
     LifecycleService,
-    classify_movie,
-    classify_tv_request,
+    is_unreleased,
 )
 from app.siftarr.services.overseerr_service import OverseerrService
 
@@ -68,11 +67,15 @@ class UnreleasedEvaluator:
             season_ids_with_episodes = {ep.season_id for ep in db_episodes}
             has_empty_seasons = any(s.id not in season_ids_with_episodes for s in all_seasons)
 
-        return classify_request_release_verdict(
-            request,
-            media_details=media_details,
-            local_episodes=resolved_local_episodes,
-            has_empty_seasons=has_empty_seasons,
+        return (
+            "unreleased"
+            if is_unreleased(
+                request,
+                media_details=media_details,
+                local_episodes=resolved_local_episodes or (),
+                has_empty_seasons=has_empty_seasons,
+            )
+            else "released"
         )
 
     async def apply_verdict(
@@ -119,26 +122,6 @@ class UnreleasedEvaluator:
             local_episodes=local_episodes,
         )
         return await self.apply_verdict(request, verdict)
-
-
-def classify_request_release_verdict(
-    request: Request,
-    *,
-    media_details: dict | None,
-    local_episodes: Iterable[EpisodeLike] | None = None,
-    has_empty_seasons: bool = False,
-) -> Literal["released", "unreleased"]:
-    """Classify release state using already-fetched Overseerr details when available."""
-    if request.tmdb_id is None:
-        return "released"
-
-    if request.media_type == MediaType.MOVIE:
-        return classify_movie(media_details)
-
-    return classify_tv_request(
-        media_details, local_episodes or (), has_empty_seasons=has_empty_seasons
-    )
-
 
 async def evaluate_imported_request(
     db: AsyncSession,
