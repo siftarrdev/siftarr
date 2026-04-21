@@ -97,6 +97,7 @@ class PendingQueueService:
     async def mark_retry_failed(
         self,
         request_id: int,
+        retry_interval_hours: int = 24,
         max_retries: int = 7,
     ) -> tuple[bool, bool]:
         """
@@ -127,7 +128,7 @@ class PendingQueueService:
             await self.db.commit()
             return True, True
 
-        request.next_retry_at = datetime.now(UTC) + timedelta(hours=24)
+        request.next_retry_at = datetime.now(UTC) + timedelta(hours=retry_interval_hours)
         await self.db.commit()
         return True, False
 

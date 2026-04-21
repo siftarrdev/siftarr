@@ -107,6 +107,10 @@ class SchedulerService:
         await queue_service.update_error(request_id, error_message)
         _, max_exceeded = await queue_service.mark_retry_failed(
             request_id,
+            retry_interval_hours=max(
+                int(getattr(runtime_settings, "retry_interval_hours", 24)),
+                1,
+            ),
             max_retries=self._get_max_retry_attempts(runtime_settings),
         )
 
@@ -195,7 +199,8 @@ class SchedulerService:
             async with self._plex_job_state_guard:
                 state = self._get_plex_job_state(job_name)
                 state.last_run = finished_at
-                state.last_success = finished_at
+                if getattr(result, "clean_run", True) and not last_error:
+                    state.last_success = finished_at
                 state.locked = False
                 state.lock_owner = None
                 state.last_error = last_error if isinstance(last_error, str) else None

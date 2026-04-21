@@ -45,37 +45,76 @@ NEW_REQUEST_STATUS = sa.Enum(
 
 
 def _normalize_status_values() -> None:
-    op.execute(sa.text("UPDATE requests SET status = 'PENDING' WHERE status = 'RECEIVED'"))
-    op.execute(
-        sa.text(
-            "UPDATE requests SET status = 'COMPLETED' "
-            "WHERE status IN ('AVAILABLE', 'PARTIALLY_AVAILABLE')"
+    for table_name in ("requests", "seasons", "episodes"):
+        op.execute(sa.text(f"UPDATE {table_name} SET status = 'PENDING' WHERE status = 'RECEIVED'"))
+        op.execute(
+            sa.text(
+                f"UPDATE {table_name} SET status = 'COMPLETED' "
+                "WHERE status IN ('AVAILABLE', 'PARTIALLY_AVAILABLE')"
+            )
         )
-    )
-    op.execute(sa.text("UPDATE seasons SET status = 'PENDING' WHERE status = 'RECEIVED'"))
-    op.execute(
-        sa.text(
-            "UPDATE seasons SET status = 'COMPLETED' "
-            "WHERE status IN ('AVAILABLE', 'PARTIALLY_AVAILABLE')"
-        )
-    )
-    op.execute(sa.text("UPDATE episodes SET status = 'PENDING' WHERE status = 'RECEIVED'"))
-    op.execute(
-        sa.text(
-            "UPDATE episodes SET status = 'COMPLETED' "
-            "WHERE status IN ('AVAILABLE', 'PARTIALLY_AVAILABLE')"
-        )
-    )
 
 
-def upgrade() -> None:
-    _normalize_status_values()
-
+def _drop_obsolete_tables() -> None:
     op.drop_index("ix_pending_queue_next_retry_at", table_name="pending_queue")
     op.drop_table("pending_queue")
     op.drop_table("plex_scan_state")
     op.drop_table("settings")
 
+
+def _upgrade_postgres() -> None:
+    op.execute("ALTER TYPE requeststatus RENAME TO requeststatus_old")
+    op.execute(
+        "CREATE TYPE requeststatus AS ENUM ("
+        "'SEARCHING', 'PENDING', 'UNRELEASED', 'STAGED', 'DOWNLOADING', 'COMPLETED', 'FAILED', 'DENIED'"
+        ")"
+    )
+    for table_name in ("requests", "seasons", "episodes"):
+        op.execute(
+            sa.text(
+                f"ALTER TABLE {table_name} ALTER COLUMN status TYPE requeststatus "
+                "USING (CASE "
+                "WHEN status::text = 'RECEIVED' THEN 'PENDING' "
+                "WHEN status::text IN ('AVAILABLE', 'PARTIALLY_AVAILABLE') THEN 'COMPLETED' "
+                "ELSE status::text END)::requeststatus"
+            )
+        )
+    op.execute("DROP TYPE requeststatus_old")
+
+
+def _downgrade_postgres() -> None:
+    op.execute("ALTER TYPE requeststatus RENAME TO requeststatus_new")
+    op.execute(
+        "CREATE TYPE requeststatus AS ENUM ("
+        "'RECEIVED', 'SEARCHING', 'PENDING', 'UNRELEASED', 'STAGED', 'DOWNLOADING', "
+        "'COMPLETED', 'FAILED', 'AVAILABLE', 'PARTIALLY_AVAILABLE', 'DENIED'"
+        ")"
+    )
+    for table_name in ("requests", "seasons", "episodes"):
+        op.execute(
+            sa.text(
+                f"ALTER TABLE {table_name} ALTER COLUMN status TYPE requeststatus "
+                "USING status::text::requeststatus"
+            )
+        )
+    op.execute("DROP TYPE requeststatus_new")
+
+
+def _upgrade_sqlite() -> None:
+    with op.batch_alter_table("requests", recreate="always") as batch_op:
+        batch_op.alter_column(
+            "status",
+            existing_type=OLD_REQUEST_STATUS,
+            type_=NEW_REQUEST_STATUS,
+            existing_nullable=False,
+        )
+    with op.batch_alter_table("seasons", recreate="always") as batch_op:
+        batch_op.alter_column(
+            "status",
+            existing_type=OLD_REQUEST_STATUS,
+            type_=NEW_REQUEST_STATUS,
+            existing_nullable=False,
+        )
     with op.batch_alter_table("episodes", recreate="always") as batch_op:
         batch_op.alter_column(
             "status",
@@ -84,31 +123,39 @@ def upgrade() -> None:
             existing_nullable=False,
         )
 
+
+def _downgrade_sqlite() -> None:
+    with op.batch_alter_table("requests", recreate="always") as batch_op:
+        batch_op.add_column(sa.Column("requested_seasons", sa.String(length=100), nullable=True))
+        batch_op.add_column(sa.Column("requested_episodes", sa.String(length=255), nullable=True))
+        batch_op.alter_column(
+            "status",
+            existing_type=NEW_REQUEST_STATUS,
+            type_=OLD_REQUEST_STATUS,
+            existing_nullable=False,
+        )
+        batch_op.drop_column("next_retry_at")
+        batch_op.drop_column("retry_count")
+        batch_op.drop_column("last_plex_check_at")
+
     with op.batch_alter_table("seasons", recreate="always") as batch_op:
         batch_op.alter_column(
             "status",
-            existing_type=OLD_REQUEST_STATUS,
-            type_=NEW_REQUEST_STATUS,
+            existing_type=NEW_REQUEST_STATUS,
+            type_=OLD_REQUEST_STATUS,
             existing_nullable=False,
         )
 
-    with op.batch_alter_table("requests", recreate="always") as batch_op:
-        batch_op.add_column(sa.Column("next_retry_at", sa.DateTime(), nullable=True))
-        batch_op.add_column(
-            sa.Column("retry_count", sa.Integer(), nullable=False, server_default=sa.text("0"))
-        )
-        batch_op.add_column(sa.Column("last_plex_check_at", sa.DateTime(), nullable=True))
+    with op.batch_alter_table("episodes", recreate="always") as batch_op:
         batch_op.alter_column(
             "status",
-            existing_type=OLD_REQUEST_STATUS,
-            type_=NEW_REQUEST_STATUS,
+            existing_type=NEW_REQUEST_STATUS,
+            type_=OLD_REQUEST_STATUS,
             existing_nullable=False,
         )
-        batch_op.drop_column("requested_seasons")
-        batch_op.drop_column("requested_episodes")
 
 
-def downgrade() -> None:
+def _create_obsolete_tables() -> None:
     op.create_table(
         "plex_scan_state",
         sa.Column("job_name", sa.String(length=100), nullable=False),
@@ -150,6 +197,10 @@ def downgrade() -> None:
     op.create_index(
         "ix_pending_queue_next_retry_at", "pending_queue", ["next_retry_at"], unique=False
     )
+
+
+def _restore_obsolete_tables() -> None:
+    _create_obsolete_tables()
     op.execute(
         sa.text(
             "INSERT INTO pending_queue "
@@ -159,31 +210,30 @@ def downgrade() -> None:
         )
     )
 
+
+def upgrade() -> None:
+    _normalize_status_values()
+    if op.get_bind().dialect.name == "postgresql":
+        _upgrade_postgres()
+    else:
+        _upgrade_sqlite()
+
+    _drop_obsolete_tables()
+
     with op.batch_alter_table("requests", recreate="always") as batch_op:
-        batch_op.add_column(sa.Column("requested_seasons", sa.String(length=100), nullable=True))
-        batch_op.add_column(sa.Column("requested_episodes", sa.String(length=255), nullable=True))
-        batch_op.alter_column(
-            "status",
-            existing_type=NEW_REQUEST_STATUS,
-            type_=OLD_REQUEST_STATUS,
-            existing_nullable=False,
+        batch_op.add_column(sa.Column("next_retry_at", sa.DateTime(), nullable=True))
+        batch_op.add_column(
+            sa.Column("retry_count", sa.Integer(), nullable=False, server_default=sa.text("0"))
         )
-        batch_op.drop_column("next_retry_at")
-        batch_op.drop_column("retry_count")
-        batch_op.drop_column("last_plex_check_at")
+        batch_op.add_column(sa.Column("last_plex_check_at", sa.DateTime(), nullable=True))
+        batch_op.drop_column("requested_seasons")
+        batch_op.drop_column("requested_episodes")
 
-    with op.batch_alter_table("seasons", recreate="always") as batch_op:
-        batch_op.alter_column(
-            "status",
-            existing_type=NEW_REQUEST_STATUS,
-            type_=OLD_REQUEST_STATUS,
-            existing_nullable=False,
-        )
 
-    with op.batch_alter_table("episodes", recreate="always") as batch_op:
-        batch_op.alter_column(
-            "status",
-            existing_type=NEW_REQUEST_STATUS,
-            type_=OLD_REQUEST_STATUS,
-            existing_nullable=False,
-        )
+def downgrade() -> None:
+    if op.get_bind().dialect.name == "postgresql":
+        _downgrade_postgres()
+    else:
+        _downgrade_sqlite()
+
+    _restore_obsolete_tables()

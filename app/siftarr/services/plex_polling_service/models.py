@@ -58,10 +58,9 @@ class TargetedReconcileResult:
     @property
     def available(self) -> bool:
         """Return whether Plex now authoritatively satisfies any/all requested media."""
-        return self.status_after in {
-            RequestStatus.PENDING,
-            RequestStatus.COMPLETED,
-        }
+        return self.reconciled and bool(
+            self.completed_episodes or self.status_after == RequestStatus.COMPLETED
+        )
 
 
 @dataclass(frozen=True)
