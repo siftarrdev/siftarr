@@ -43,7 +43,6 @@ async def test_request_details_surfaces_active_staged_torrent_metadata(
         season_coverage=None,
         score=95,
         passed_rules=True,
-        is_downloaded=False,
     )
     other_release = Release(
         id=9,
@@ -65,7 +64,6 @@ async def test_request_details_surfaces_active_staged_torrent_metadata(
         season_coverage=None,
         score=90,
         passed_rules=True,
-        is_downloaded=False,
     )
     active_stage = MagicMock()
     active_stage.id = 77
@@ -167,7 +165,6 @@ async def test_request_details_tv_scopes_active_stage_to_matching_episode(
         season_coverage=None,
         score=95,
         passed_rules=True,
-        is_downloaded=False,
     )
     episode_two_release = Release(
         id=9,
@@ -189,7 +186,6 @@ async def test_request_details_tv_scopes_active_stage_to_matching_episode(
         season_coverage=None,
         score=90,
         passed_rules=True,
-        is_downloaded=False,
     )
 
     active_episode_one_stage = MagicMock()
@@ -206,7 +202,6 @@ async def test_request_details_tv_scopes_active_stage_to_matching_episode(
         title="Episode 1",
         air_date=None,
         status=RequestStatus.PENDING,
-        release_id=8,
     )
     episode_two = MagicMock(
         id=202,
@@ -215,7 +210,6 @@ async def test_request_details_tv_scopes_active_stage_to_matching_episode(
         title="Episode 2",
         air_date=None,
         status=RequestStatus.PENDING,
-        release_id=9,
     )
 
     request_result = MagicMock()

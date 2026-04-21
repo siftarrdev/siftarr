@@ -152,21 +152,18 @@ class MovieDecisionService:
             len(passed_results),
         )
 
-        try:
-            from app.siftarr.models.activity_log import EventType
+        from app.siftarr.models.activity_log import EventType
 
-            activity_log = ActivityLogService(self.db)
-            await activity_log.log(
-                EventType.RULE_EVALUATION,
-                request_id=request_id,
-                details={
-                    "evaluated": len(all_evaluated),
-                    "passed": len(passed_results),
-                    "best_score": best.total_score if best else None,
-                },
-            )
-        except Exception:
-            logger.exception("Failed to log rule_evaluation for request_id=%s", request_id)
+        activity_log = ActivityLogService(self.db)
+        await activity_log.log(
+            EventType.RULE_EVALUATION,
+            request_id=request_id,
+            details={
+                "evaluated": len(all_evaluated),
+                "passed": len(passed_results),
+                "best_score": best.total_score if best else None,
+            },
+        )
 
         if best:
             logger.info(
@@ -192,23 +189,20 @@ class MovieDecisionService:
                 selection_source="rule",
             )
 
-            try:
-                from app.siftarr.models.activity_log import EventType
+            from app.siftarr.models.activity_log import EventType
 
-                activity_log = ActivityLogService(self.db)
-                await activity_log.log(
-                    EventType.RELEASE_STAGED,
-                    request_id=request_id,
-                    details={
-                        "title": best.release.title,
-                        "score": best.total_score,
-                        "indexer": best.release.indexer,
-                        "size": best.release.size,
-                        "action": action_result.get("status"),
-                    },
-                )
-            except Exception:
-                logger.exception("Failed to log release_staged for request_id=%s", request_id)
+            activity_log = ActivityLogService(self.db)
+            await activity_log.log(
+                EventType.RELEASE_STAGED,
+                request_id=request_id,
+                details={
+                    "title": best.release.title,
+                    "score": best.total_score,
+                    "indexer": best.release.indexer,
+                    "size": best.release.size,
+                    "action": action_result.get("status"),
+                },
+            )
 
             return {
                 "status": action_result["status"],

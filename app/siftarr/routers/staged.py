@@ -95,20 +95,17 @@ async def _approve_torrent(torrent: StagedTorrent, db: AsyncSession) -> bool:
     if not success:
         return False
 
-    try:
-        activity_log = ActivityLogService(db)
-        await activity_log.log(
-            EventType.RELEASE_APPROVED,
-            request_id=torrent.request_id,
-            details={"torrent_id": torrent.id, "title": torrent.title},
-        )
-        await activity_log.log(
-            EventType.DOWNLOAD_STARTED,
-            request_id=torrent.request_id,
-            details={"torrent_id": torrent.id, "title": torrent.title},
-        )
-    except Exception:
-        logger.exception("Failed to log activity for torrent_id=%s approval", torrent.id)
+    activity_log = ActivityLogService(db)
+    await activity_log.log(
+        EventType.RELEASE_APPROVED,
+        request_id=torrent.request_id,
+        details={"torrent_id": torrent.id, "title": torrent.title},
+    )
+    await activity_log.log(
+        EventType.DOWNLOAD_STARTED,
+        request_id=torrent.request_id,
+        details={"torrent_id": torrent.id, "title": torrent.title},
+    )
 
     log_staging_decision(
         request=request,
@@ -178,16 +175,13 @@ async def _reconcile_request_via_plex(
         reconcile_result = await plex_polling.reconcile_request(request_id)
 
         if reconcile_result.available:
-            try:
-                activity_log = ActivityLogService(db)
-                await activity_log.log(
-                    EventType.PLEX_AVAILABLE,
-                    request_id=request_id,
-                    details={"title": title, "reason": reconcile_result.reason},
-                )
-                await db.commit()
-            except Exception:
-                logger.exception("Failed to log plex_available for request_id=%s", request_id)
+            activity_log = ActivityLogService(db)
+            await activity_log.log(
+                EventType.PLEX_AVAILABLE,
+                request_id=request_id,
+                details={"title": title, "reason": reconcile_result.reason},
+            )
+            await db.commit()
 
         return reconcile_result
     finally:

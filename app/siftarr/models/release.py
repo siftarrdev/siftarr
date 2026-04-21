@@ -55,9 +55,6 @@ class Release(Base):
     score: Mapped[int] = mapped_column(Integer, default=0)
     passed_rules: Mapped[bool] = mapped_column(Boolean, default=False)
 
-    # Status tracking
-    is_downloaded: Mapped[bool] = mapped_column(Boolean, default=False)
-    downloaded_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utc_now)
 
     # Relationships

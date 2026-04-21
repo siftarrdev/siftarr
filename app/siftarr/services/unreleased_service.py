@@ -12,13 +12,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.siftarr.models.episode import Episode
 from app.siftarr.models.request import MediaType, Request, RequestStatus
 from app.siftarr.models.season import Season
-from app.siftarr.services.lifecycle_service import LifecycleService
-from app.siftarr.services.overseerr_service import OverseerrService
-from app.siftarr.services.release_status_service import (
+from app.siftarr.services.lifecycle_service import (
     EpisodeLike,
+    LifecycleService,
     classify_movie,
     classify_tv_request,
 )
+from app.siftarr.services.overseerr_service import OverseerrService
 
 _logger = logging.getLogger(__name__)
 
@@ -138,12 +138,9 @@ def classify_request_release_verdict(
     if request.media_type == MediaType.MOVIE:
         return classify_movie(media_details)
 
-    verdict = classify_tv_request(
+    return classify_tv_request(
         media_details, local_episodes or (), has_empty_seasons=has_empty_seasons
     )
-    if verdict == "partial":
-        return "released"
-    return verdict
 
 
 async def evaluate_imported_request(

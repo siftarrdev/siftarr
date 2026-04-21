@@ -52,6 +52,10 @@ class ProwlarrService:
             api_key = ""
         return {"X-Api-Key": api_key}
 
+    async def close(self) -> None:
+        """Close the service (no-op since using shared client)."""
+        pass
+
     def _parse_release_info(self, release: dict) -> ProwlarrRelease:
         """Parse a release from Prowlarr response."""
         # Parse title for resolution, codec, release group

@@ -161,10 +161,6 @@ class SchedulerService:
                 except Exception as e:
                     logger.error("Error processing pending item %s: %s", item.request_id, e)
 
-    async def _poll_plex_availability(self) -> None:
-        """Compatibility wrapper that reuses the incremental Plex scan job."""
-        await self._run_incremental_plex_sync_job(trigger_source="legacy_poll")
-
     async def _run_incremental_plex_sync_job(self, *, trigger_source: str) -> PlexJobRunResult:
         """Run the fast incremental Plex sync under a persisted job lock."""
         return await self._run_guarded_plex_scan_job(

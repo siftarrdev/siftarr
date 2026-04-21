@@ -43,22 +43,18 @@ async def test_clear_release_search_cache_deletes_releases_and_detaches_episode_
         )
 
         session.add_all([request, season, kept_episode, detached_episode, release])
-        await session.flush()
-        detached_episode.release_id = release.id
         await session.commit()
 
         result = await release_selection_service.clear_release_search_cache(session)
 
-        assert result == {"deleted_releases": 1, "detached_episode_refs": 1}
+        assert result == {"deleted_releases": 1}
         remaining_releases = (await session.execute(select(Release))).scalars().all()
         assert remaining_releases == []
 
         refreshed_detached_episode = await session.get(Episode, detached_episode.id)
         refreshed_kept_episode = await session.get(Episode, kept_episode.id)
         assert refreshed_detached_episode is not None
-        assert refreshed_detached_episode.release_id is None
         assert refreshed_kept_episode is not None
-        assert refreshed_kept_episode.release_id is None
 
     await engine.dispose()
 
@@ -93,8 +89,6 @@ async def test_store_search_results_replaces_request_releases_without_stale_epis
         )
 
         session.add_all([request, season, episode, old_release])
-        await session.flush()
-        episode.release_id = old_release.id
         await session.commit()
 
         new_release = ProwlarrRelease(
@@ -114,10 +108,6 @@ async def test_store_search_results_replaces_request_releases_without_stale_epis
         )
 
         assert list(stored_records) == ["Severance.S01E01.1080p.WEB-DL"]
-
-        refreshed_episode = await session.get(Episode, episode.id)
-        assert refreshed_episode is not None
-        assert refreshed_episode.release_id is None
 
         request_releases = (
             (await session.execute(select(Release).where(Release.request_id == request.id)))

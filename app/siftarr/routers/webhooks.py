@@ -204,19 +204,16 @@ async def process_request_background(request_id: int) -> None:
             prowlarr = ProwlarrService(settings=settings)
             qbittorrent = QbittorrentService(settings=settings)
 
-            try:
-                if request.media_type == MediaType.MOVIE:
-                    decision_service = MovieDecisionService(db, prowlarr, qbittorrent)
-                else:
-                    decision_service = TVDecisionService(db, prowlarr, qbittorrent)
+            if request.media_type == MediaType.MOVIE:
+                decision_service = MovieDecisionService(db, prowlarr, qbittorrent)
+            else:
+                decision_service = TVDecisionService(db, prowlarr, qbittorrent)
 
-                result = await decision_service.process_request(request_id)
-                logger.info(
-                    "Request processing complete: request_id=%s status=%s",
-                    request_id,
-                    result.get("status"),
-                )
-            finally:
-                pass
+            result = await decision_service.process_request(request_id)
+            logger.info(
+                "Request processing complete: request_id=%s status=%s",
+                request_id,
+                result.get("status"),
+            )
         except Exception:
             logger.exception("Error processing request: request_id=%s", request_id)

@@ -1,8 +1,6 @@
 """FastAPI application for Siftarr."""
 
 import logging
-import sqlite3
-import subprocess
 import sys
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -28,8 +26,6 @@ from app.siftarr.services.scheduler_service import SchedulerService
 from app.siftarr.version import __version__
 
 scheduler_service: SchedulerService | None = None
-INITIAL_MIGRATION_REVISION = "bc9c8cfbe08b"
-LATEST_KNOWN_MIGRATION_REVISION = "add_unreleased_status_support"
 
 
 def _configure_logging() -> None:
@@ -61,149 +57,6 @@ def _ensure_db_directory():
         db_path = Path(path)
         db_dir = db_path.parent
         db_dir.mkdir(parents=True, exist_ok=True)
-
-
-def _get_sqlite_db_path() -> Path | None:
-    """Return the SQLite database path when using SQLite."""
-    settings = get_settings()
-    parsed = urlparse(settings.database_url)
-    if not parsed.scheme.startswith("sqlite"):
-        return None
-
-    path = parsed.path
-    if path.startswith("/."):
-        path = path[1:]
-    return Path(path)
-
-
-def _prepare_legacy_sqlite_database_for_migrations() -> None:
-    """Stamp legacy SQLite databases so Alembic can upgrade them safely."""
-    db_path = _get_sqlite_db_path()
-    if db_path is None or not db_path.exists():
-        return
-
-    with sqlite3.connect(db_path) as connection:
-        cursor = connection.execute("SELECT name FROM sqlite_master WHERE type = 'table'")
-        table_names = {row[0] for row in cursor.fetchall()}
-        has_alembic_version_table = "alembic_version" in table_names
-        alembic_versions: list[str] = []
-        if has_alembic_version_table:
-            version_cursor = connection.execute("SELECT version_num FROM alembic_version")
-            alembic_versions = [row[0] for row in version_cursor.fetchall() if row[0]]
-
-    if not table_names:
-        return
-
-    app_tables = {
-        "pending_queue",
-        "releases",
-        "requests",
-        "rules",
-        "settings",
-        "staged_torrents",
-    }
-    if not table_names.intersection(app_tables):
-        return
-
-    if alembic_versions and alembic_versions[0] == INITIAL_MIGRATION_REVISION:
-        return
-
-    if alembic_versions:
-        return
-
-    subprocess.run(
-        ["uv", "run", "alembic", "stamp", INITIAL_MIGRATION_REVISION],
-        check=True,
-    )
-
-
-def _repair_missing_alembic_revision() -> None:
-    """Reset a stale alembic_version entry to the latest known revision."""
-    db_path = _get_sqlite_db_path()
-    if db_path is None or not db_path.exists():
-        return
-
-    with sqlite3.connect(db_path) as connection:
-        cursor = connection.execute("SELECT name FROM sqlite_master WHERE type = 'table'")
-        table_names = {row[0] for row in cursor.fetchall()}
-        if "alembic_version" not in table_names:
-            return
-
-        version_cursor = connection.execute("SELECT version_num FROM alembic_version")
-        versions = [row[0] for row in version_cursor.fetchall() if row[0]]
-        if not versions or versions[0] == LATEST_KNOWN_MIGRATION_REVISION:
-            return
-
-        connection.execute("DELETE FROM alembic_version")
-        connection.execute(
-            "INSERT INTO alembic_version (version_num) VALUES (?)",
-            (LATEST_KNOWN_MIGRATION_REVISION,),
-        )
-        connection.commit()
-
-
-def _ensure_request_rejection_reason_column() -> None:
-    """Add requests.rejection_reason for databases that missed the migration."""
-    db_path = _get_sqlite_db_path()
-    if db_path is None or not db_path.exists():
-        return
-
-    with sqlite3.connect(db_path) as connection:
-        cursor = connection.execute(
-            "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'requests'"
-        )
-        if cursor.fetchone() is None:
-            return
-
-        columns = {row[1] for row in connection.execute("PRAGMA table_info(requests)")}
-        if "rejection_reason" in columns:
-            return
-
-        connection.execute("ALTER TABLE requests ADD COLUMN rejection_reason VARCHAR(500)")
-        connection.commit()
-
-
-def _ensure_staged_torrents_selection_source_column() -> None:
-    """Add staged_torrents.selection_source for databases that missed the migration."""
-    db_path = _get_sqlite_db_path()
-    if db_path is None or not db_path.exists():
-        return
-
-    with sqlite3.connect(db_path) as connection:
-        cursor = connection.execute(
-            "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'staged_torrents'"
-        )
-        if cursor.fetchone() is None:
-            return
-
-        columns = {row[1] for row in connection.execute("PRAGMA table_info(staged_torrents)")}
-        if "selection_source" in columns:
-            return
-
-        connection.execute("ALTER TABLE staged_torrents ADD COLUMN selection_source VARCHAR(20)")
-        connection.execute(
-            "UPDATE staged_torrents SET selection_source = 'rule' WHERE selection_source IS NULL"
-        )
-        connection.commit()
-
-
-def _ensure_sqlite_requeststatus_allows_unreleased() -> None:
-    """Best-effort SQLite compatibility hook for the new unreleased status value."""
-    db_path = _get_sqlite_db_path()
-    if db_path is None or not db_path.exists():
-        return
-
-    with sqlite3.connect(db_path) as connection:
-        cursor = connection.execute(
-            "SELECT sql FROM sqlite_master WHERE type = 'table' AND name IN ('requests', 'seasons', 'episodes')"
-        )
-        table_sql = " ".join(row[0] for row in cursor.fetchall() if row and row[0])
-        if "UNRELEASED" in table_sql or "unreleased" in table_sql:
-            return
-
-        logging.getLogger(__name__).warning(
-            "SQLite schema may not yet advertise the unreleased request status; apply Alembic migrations before using it."
-        )
 
 
 @asynccontextmanager
@@ -250,20 +103,6 @@ async def lifespan(app: FastAPI):
     # Ensure database directory exists
     _ensure_db_directory()
 
-    # Apply migrations before table initialization so the runtime schema stays current
-    _prepare_legacy_sqlite_database_for_migrations()
-    try:
-        subprocess.run(["uv", "run", "alembic", "upgrade", "head"], check=True)
-    except subprocess.CalledProcessError as exc:
-        if exc.returncode != 255:
-            raise
-        _repair_missing_alembic_revision()
-        subprocess.run(["uv", "run", "alembic", "upgrade", "head"], check=True)
-
-    _ensure_request_rejection_reason_column()
-    _ensure_staged_torrents_selection_source_column()
-    _ensure_sqlite_requeststatus_allows_unreleased()
-
     # Initialize database tables
     await init_db()
 
@@ -299,7 +138,7 @@ def create_app() -> FastAPI:
     @app.get("/")
     async def root() -> RedirectResponse:
         """Root endpoint redirecting to dashboard."""
-        return RedirectResponse(url="/")
+        return RedirectResponse(url="/dashboard")
 
     @app.get("/health")
     async def health_check() -> JSONResponse:

@@ -89,3 +89,14 @@ class TestActivityLogService:
 
         mock_db.execute.assert_awaited_once()
         assert logs == []
+
+    @pytest.mark.asyncio
+    async def test_log_swallows_flush_exception(self, mock_db, service, caplog):
+        """log() swallows a flush exception, logs it, and returns None."""
+        mock_db.flush.side_effect = RuntimeError("db down")
+
+        result = await service.log(EventType.SEARCH_STARTED, request_id=99)
+
+        assert result is None
+        mock_db.flush.assert_awaited_once()
+        assert "Failed to log activity for request_id=99" in caplog.text
