@@ -270,15 +270,36 @@ async def test_poll_caps_probe_concurrency(service, mock_db, mock_plex):
 
 
 @pytest.mark.asyncio
-async def test_update_episode_statuses(service, mock_db):
+async def test_check_request_tv_partial_availability(service, mock_db, mock_plex):
     req = make_request(
-        media_type=MediaType.TV, seasons=[make_season(1, [make_episode(1), make_episode(2)])]
+        id=78,
+        media_type=MediaType.TV,
+        status=RequestStatus.PENDING,
+        tmdb_id=999,
+        seasons=[make_season(1, [make_episode(1), make_episode(2)])],
     )
+    db_result = MagicMock()
+    db_result.scalar_one_or_none.return_value = req
+    mock_db.execute.return_value = db_result
 
-    completed_episodes = frozenset({(1, 1), (1, 2)})
-    await service._update_episode_statuses(req, completed_episodes)
+    mock_plex.get_show_by_tmdb.return_value = {"rating_key": "42"}
+    mock_plex.get_episode_availability.return_value = {(1, 1): False, (1, 2): True}
 
-    assert req.seasons[0].episodes[0].status == RequestStatus.COMPLETED
-    assert req.seasons[0].episodes[1].status == RequestStatus.COMPLETED
-    assert req.seasons[0].status == RequestStatus.COMPLETED
-    mock_db.commit.assert_called_once()
+    async def reconcile_to_pending(request, seasons, availability):
+        return await set_request_status(request, RequestStatus.PENDING, seasons, availability)
+
+    with patch.object(
+        service.episode_sync,
+        "reconcile_existing_seasons_from_plex",
+        new_callable=AsyncMock,
+    ) as mock_reconcile:
+        mock_reconcile.side_effect = reconcile_to_pending
+        result = await service.check_request(req)
+
+    assert result.request_id == 78
+    assert result.matched is True
+    assert result.available is True
+    assert result.status_before == RequestStatus.PENDING
+    assert result.status_after == RequestStatus.PENDING
+    assert result.reason == "Some episodes found on Plex"
+    mock_reconcile.assert_awaited_once_with(req, req.seasons, {(1, 1): False, (1, 2): True})
