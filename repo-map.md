@@ -43,7 +43,7 @@ Primary flow:
 - `tests/` — automated regression and unit/integration tests
 - `db/alembic/` — database migration environment and revision history
 - `docker/` — container build and local container workflow
-- `docs/` — longer-form documentation and contribution guidance
+- `docs/` — contributor and project documentation
 - `data/` — locally created runtime data directory for SQLite and staging artifacts; gitignored and not committed
 - `icons/` — branding assets used by docs/UI
 - `README.md` — product overview and quick start
@@ -149,7 +149,7 @@ Static assets.
 ## Database and operations
 
 - `db/alembic/env.py` — Alembic environment wiring
-- `db/alembic/versions/` — schema migration revisions
+- `db/alembic/versions/` — single init migration only while the database is in flux; reset/stamp existing local databases when schema history is collapsed
 - `docker/Dockerfile` — production/container image build
 - `docker/docker-compose.yml` — local container orchestration
 - `docker/rebuild-run-logs.sh` — rebuild, run, and log-tail helper

@@ -60,6 +60,7 @@ class Request(Base):
         Index("ix_requests_status", "status"),
         Index("ix_requests_media_type", "media_type"),
         Index("ix_requests_created_at", "created_at"),
+        Index("ix_requests_next_retry_at", "next_retry_at"),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
