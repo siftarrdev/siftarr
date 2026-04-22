@@ -9,8 +9,7 @@ import pytest
 from app.siftarr.models.request import Request, RequestStatus
 from app.siftarr.services.lifecycle_service import (
     LifecycleService,
-    classify_movie,
-    classify_tv_request,
+    is_unreleased,
 )
 
 
@@ -166,16 +165,18 @@ class TestLifecycleService:
 TODAY = date(2026, 4, 17)
 
 
-def test_classify_movie_future_release_is_unreleased():
+def test_is_unreleased_movie_future_release():
+    request = SimpleNamespace(media_type="movie", tmdb_id=123)
     details = {
         "status": "In Production",
         "releaseDate": "2026-08-01",
         "releases": {"results": []},
     }
-    assert classify_movie(details, today=TODAY) == "unreleased"
+    assert is_unreleased(request, media_details=details, today=TODAY) is True
 
 
-def test_tv_all_aired_downloaded_with_future_remaining_is_unreleased():
+def test_is_unreleased_tv_all_aired_downloaded_with_future_remaining():
+    request = SimpleNamespace(media_type="tv", tmdb_id=456)
     details = {
         "firstAirDate": "2025-01-01",
         "status": "Returning Series",
@@ -185,11 +186,14 @@ def test_tv_all_aired_downloaded_with_future_remaining_is_unreleased():
         SimpleNamespace(air_date=date(2026, 4, 8), status=RequestStatus.COMPLETED),
         SimpleNamespace(air_date=date(2026, 5, 1), status=RequestStatus.UNRELEASED),
     ]
-    assert classify_tv_request(details, episodes, today=TODAY) == "unreleased"
+    assert (
+        is_unreleased(request, media_details=details, local_episodes=episodes, today=TODAY) is True
+    )
 
 
-def test_tv_all_aired_downloaded_with_empty_season_is_unreleased():
+def test_is_unreleased_tv_all_aired_downloaded_with_empty_season():
     """A series with all aired episodes downloaded but an empty future season is unreleased."""
+    request = SimpleNamespace(media_type="tv", tmdb_id=456)
     details = {
         "firstAirDate": "2025-01-01",
         "status": "Returning Series",
@@ -198,14 +202,21 @@ def test_tv_all_aired_downloaded_with_empty_season_is_unreleased():
         SimpleNamespace(air_date=date(2026, 4, 1), status=RequestStatus.COMPLETED),
         SimpleNamespace(air_date=date(2026, 4, 8), status=RequestStatus.COMPLETED),
     ]
-    # has_empty_seasons=True simulates a Season record existing with no episodes
     assert (
-        classify_tv_request(details, episodes, today=TODAY, has_empty_seasons=True) == "unreleased"
+        is_unreleased(
+            request,
+            media_details=details,
+            local_episodes=episodes,
+            today=TODAY,
+            has_empty_seasons=True,
+        )
+        is True
     )
 
 
-def test_tv_all_aired_downloaded_no_empty_seasons_is_released():
+def test_is_unreleased_tv_all_aired_downloaded_no_empty_seasons():
     """A series with all aired episodes downloaded and no empty seasons is released."""
+    request = SimpleNamespace(media_type="tv", tmdb_id=456)
     details = {
         "firstAirDate": "2025-01-01",
         "status": "Returning Series",
@@ -215,11 +226,19 @@ def test_tv_all_aired_downloaded_no_empty_seasons_is_released():
         SimpleNamespace(air_date=date(2026, 4, 8), status=RequestStatus.COMPLETED),
     ]
     assert (
-        classify_tv_request(details, episodes, today=TODAY, has_empty_seasons=False) == "released"
+        is_unreleased(
+            request,
+            media_details=details,
+            local_episodes=episodes,
+            today=TODAY,
+            has_empty_seasons=False,
+        )
+        is False
     )
 
 
-def test_tv_completed_episodes_with_future_next_episode_signal_is_unreleased():
+def test_is_unreleased_tv_completed_episodes_with_future_next_episode_signal():
+    request = SimpleNamespace(media_type="tv", tmdb_id=456)
     details = {
         "firstAirDate": "2025-01-01",
         "status": "Returning Series",
@@ -230,4 +249,17 @@ def test_tv_completed_episodes_with_future_next_episode_signal_is_unreleased():
         SimpleNamespace(air_date=date(2026, 4, 8), status=RequestStatus.COMPLETED),
     ]
 
-    assert classify_tv_request(details, episodes, today=TODAY) == "unreleased"
+    assert (
+        is_unreleased(request, media_details=details, local_episodes=episodes, today=TODAY) is True
+    )
+
+
+def test_is_unreleased_false_without_tmdb_id():
+    request = SimpleNamespace(media_type="movie", tmdb_id=None)
+    details = {
+        "status": "In Production",
+        "releaseDate": "2026-08-01",
+        "releases": {"results": []},
+    }
+
+    assert is_unreleased(request, media_details=details, today=TODAY) is False

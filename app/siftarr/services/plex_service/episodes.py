@@ -5,32 +5,29 @@ import httpx
 
 from app.siftarr.services.async_utils import gather_limited
 
-from .cache import PlexServiceCacheMixin
+from .cache import PlexServiceCache
 from .models import PlexEpisodeAvailabilityResult, PlexTransientScanError
 
 logger = logging.getLogger(__name__)
 
 
-class PlexServiceEpisodesMixin(PlexServiceCacheMixin):
+class PlexServiceEpisodes:
+    def __init__(self, service: Any, cache: PlexServiceCache) -> None:
+        self._service = service
+        self._cache = cache
+
     async def get_show_children(self, rating_key: str) -> list[dict[str, Any]]:
-        """Get all seasons for a show.
-
-        Args:
-            rating_key: The Plex rating key for the show.
-
-        Returns:
-            List of season metadata dicts.
-        """
-        if not self.base_url or not self.token:
+        """Get all seasons for a show."""
+        if not self._service.base_url or not self._service.token:
             return []
 
-        endpoint = f"{self.base_url}/library/metadata/{rating_key}/children"
-        client = await self._get_client()
+        endpoint = f"{self._service.base_url}/library/metadata/{rating_key}/children"
+        client = await self._service._get_client()
 
         try:
             response = await client.get(
                 endpoint,
-                headers=self._get_headers(),
+                headers=self._service._get_headers(),
                 timeout=30.0,
             )
             if response.status_code == 200:
@@ -48,24 +45,17 @@ class PlexServiceEpisodesMixin(PlexServiceCacheMixin):
             return []
 
     async def get_season_children(self, rating_key: str) -> list[dict[str, Any]]:
-        """Get all episodes for a season.
-
-        Args:
-            rating_key: The Plex rating key for the season.
-
-        Returns:
-            List of episode metadata dicts.
-        """
-        if not self.base_url or not self.token:
+        """Get all episodes for a season."""
+        if not self._service.base_url or not self._service.token:
             return []
 
-        endpoint = f"{self.base_url}/library/metadata/{rating_key}/children"
-        client = await self._get_client()
+        endpoint = f"{self._service.base_url}/library/metadata/{rating_key}/children"
+        client = await self._service._get_client()
 
         try:
             response = await client.get(
                 endpoint,
-                headers=self._get_headers(),
+                headers=self._service._get_headers(),
                 timeout=30.0,
             )
             if response.status_code == 200:
@@ -84,16 +74,16 @@ class PlexServiceEpisodesMixin(PlexServiceCacheMixin):
 
     async def _get_metadata_children_strict(self, rating_key: str) -> list[dict[str, Any]]:
         """Get metadata children and raise on transient Plex failures."""
-        if not self.base_url or not self.token:
+        if not self._service.base_url or not self._service.token:
             return []
 
-        endpoint = f"{self.base_url}/library/metadata/{rating_key}/children"
-        client = await self._get_client()
+        endpoint = f"{self._service.base_url}/library/metadata/{rating_key}/children"
+        client = await self._service._get_client()
 
         try:
             response = await client.get(
                 endpoint,
-                headers=self._get_headers(),
+                headers=self._service._get_headers(),
                 timeout=30.0,
             )
             if response.status_code != 200:
@@ -110,18 +100,8 @@ class PlexServiceEpisodesMixin(PlexServiceCacheMixin):
             ) from exc
 
     async def get_episode_availability(self, rating_key: str) -> dict[tuple[int, int], bool]:
-        """Get per-episode availability for a show.
-
-        Queries all seasons and episodes to build a map of which episodes
-        are available on Plex.
-
-        Args:
-            rating_key: The Plex rating key for the show.
-
-        Returns:
-            Dict mapping (season_number, episode_number) -> available (True/False).
-        """
-        seasons = await self.get_show_children(rating_key)
+        """Get per-episode availability for a show."""
+        seasons = await self._service.get_show_children(rating_key)
         logger.info(
             "PlexService: get_episode_availability(rating_key=%s) found %d season(s)",
             rating_key,
@@ -143,8 +123,8 @@ class PlexServiceEpisodesMixin(PlexServiceCacheMixin):
 
         season_episodes = await gather_limited(
             (season_rating_key for _, season_rating_key in season_infos),
-            self.settings.plex_sync_concurrency,
-            self.get_season_children,
+            self._service.settings.plex_sync_concurrency,
+            self._service.get_season_children,
         )
 
         availability: dict[tuple[int, int], bool] = {}
@@ -156,7 +136,7 @@ class PlexServiceEpisodesMixin(PlexServiceCacheMixin):
                 episode_number = episode.get("index")
                 if not isinstance(episode_number, int):
                     continue
-                is_available = self._is_available(episode)
+                is_available = self._cache._is_available(episode)
                 availability[(season_number, episode_number)] = is_available
                 if is_available:
                     available_in_season += 1
@@ -181,7 +161,7 @@ class PlexServiceEpisodesMixin(PlexServiceCacheMixin):
     ) -> PlexEpisodeAvailabilityResult:
         """Get episode availability while preserving transient-failure semantics."""
         try:
-            seasons = await self._get_metadata_children_strict(rating_key)
+            seasons = await self._service._get_metadata_children_strict(rating_key)
         except PlexTransientScanError:
             return PlexEpisodeAvailabilityResult(availability={}, authoritative=False)
 
@@ -198,7 +178,7 @@ class PlexServiceEpisodesMixin(PlexServiceCacheMixin):
         availability: dict[tuple[int, int], bool] = {}
         for season_number, season_rating_key in season_infos:
             try:
-                episodes = await self._get_metadata_children_strict(season_rating_key)
+                episodes = await self._service._get_metadata_children_strict(season_rating_key)
             except PlexTransientScanError:
                 return PlexEpisodeAvailabilityResult(availability={}, authoritative=False)
 
@@ -208,6 +188,6 @@ class PlexServiceEpisodesMixin(PlexServiceCacheMixin):
                 episode_number = episode.get("index")
                 if not isinstance(episode_number, int):
                     continue
-                availability[(season_number, episode_number)] = self._is_available(episode)
+                availability[(season_number, episode_number)] = self._cache._is_available(episode)
 
         return PlexEpisodeAvailabilityResult(availability=availability, authoritative=True)

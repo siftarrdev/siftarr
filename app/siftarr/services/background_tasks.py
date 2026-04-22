@@ -27,7 +27,7 @@ async def run_background_episode_refresh(request_id: int) -> None:
 
                 plex_service = PlexService(settings=effective_settings)
                 episode_sync = EpisodeSyncService(db, plex=plex_service)
-                await episode_sync.refresh_if_stale(request_id)
+                await episode_sync.sync_request(request_id)
             except Exception:
                 logger.exception("Background episode sync failed for request_id=%s", request_id)
             finally:

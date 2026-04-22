@@ -19,7 +19,7 @@ async def rescan_plex(
     request: Request,
     db: AsyncSession = Depends(get_db),
 ) -> HTMLResponse:
-    """Run the legacy manual Plex reconcile path for existing requests."""
+    """Run the manual Plex rescan path for existing requests."""
     context = await settings_router._build_settings_page_context(request, db)
     try:
         runtime_settings = get_settings()
@@ -34,7 +34,7 @@ async def rescan_plex(
             await plex.close()
 
         context["message"] = (
-            "Legacy/manual Plex reconcile completed. "
+            "Manual Plex rescan completed. "
             f"Re-synced {tv_resynced} TV request(s), had {tv_failed} failed TV request(s), "
             f"and transitioned {completed} request(s) to completed."
         )
@@ -78,12 +78,12 @@ async def retry_pending(
     return templates.TemplateResponse(request, "settings.html", context)
 
 
-@router.post("/run-incremental-plex-sync")
-async def run_incremental_plex_sync(
+@router.post("/run-recent-plex-scan")
+async def run_recent_plex_scan(
     request: Request,
     db: AsyncSession = Depends(get_db),
 ) -> HTMLResponse:
-    """Manually trigger the incremental Plex sync scheduler job."""
+    """Manually trigger the recent Plex scan scheduler job."""
     from app.siftarr.main import scheduler_service
 
     context = await settings_router._build_settings_page_context(request, db)
@@ -92,21 +92,21 @@ async def run_incremental_plex_sync(
         context["message_type"] = "error"
         return templates.TemplateResponse(request, "settings.html", context)
 
-    result = await scheduler_service.trigger_incremental_plex_sync_now()
+    result = await scheduler_service.trigger_recent_plex_scan_now()
     context["message"], context["message_type"] = settings_router._build_manual_plex_job_message(
-        "Incremental Plex sync",
+        "Recent Plex scan",
         result,
     )
     context["plex_jobs"] = await settings_router._build_plex_job_statuses(db)
     return templates.TemplateResponse(request, "settings.html", context)
 
 
-@router.post("/run-full-plex-reconcile")
-async def run_full_plex_reconcile(
+@router.post("/run-plex-poll")
+async def run_plex_poll(
     request: Request,
     db: AsyncSession = Depends(get_db),
 ) -> HTMLResponse:
-    """Manually trigger the full Plex reconcile scheduler job."""
+    """Manually trigger the Plex poll scheduler job."""
     from app.siftarr.main import scheduler_service
 
     context = await settings_router._build_settings_page_context(request, db)
@@ -115,9 +115,9 @@ async def run_full_plex_reconcile(
         context["message_type"] = "error"
         return templates.TemplateResponse(request, "settings.html", context)
 
-    result = await scheduler_service.trigger_full_plex_reconcile_now()
+    result = await scheduler_service.trigger_plex_poll_now()
     context["message"], context["message_type"] = settings_router._build_manual_plex_job_message(
-        "Full Plex reconcile",
+        "Plex poll",
         result,
     )
     context["plex_jobs"] = await settings_router._build_plex_job_statuses(db)

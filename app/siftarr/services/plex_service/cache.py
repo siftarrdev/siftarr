@@ -2,27 +2,15 @@ from collections.abc import AsyncIterator, MutableMapping
 from contextlib import asynccontextmanager
 from typing import Any, Self
 
-import httpx
-
-from app.siftarr.config import Settings
-
 from .models import PlexLookupResult
 
 
-class PlexServiceCacheMixin:
-    settings: Settings
-    base_url: str | None
-    token: str | None
-    _scan_cycle_depth: int
-    _scan_cycle_guid_cache: MutableMapping[tuple[str, str], PlexLookupResult]
-    _scan_cycle_rating_key_cache: MutableMapping[str, dict[str, Any]]
-    _scan_cycle_sections_cache: MutableMapping[str, list[dict[str, Any]]]
-
-    async def _get_client(self) -> httpx.AsyncClient:
-        raise NotImplementedError
-
-    def _get_headers(self) -> dict[str, str]:
-        raise NotImplementedError
+class PlexServiceCache:
+    def __init__(self) -> None:
+        self._scan_cycle_depth = 0
+        self._scan_cycle_guid_cache: MutableMapping[tuple[str, str], PlexLookupResult] = {}
+        self._scan_cycle_rating_key_cache: MutableMapping[str, dict[str, Any]] = {}
+        self._scan_cycle_sections_cache: MutableMapping[str, list[dict[str, Any]]] = {}
 
     def _is_available(self, metadata: dict[str, Any]) -> bool:
         """Check if a metadata entry has Media (is available on Plex)."""
@@ -41,6 +29,10 @@ class PlexServiceCacheMixin:
             if self._scan_cycle_depth == 0:
                 self.clear_scan_cycle_caches()
 
+    @property
+    def scan_cycle_depth(self) -> int:
+        return self._scan_cycle_depth
+
     def clear_scan_cycle_caches(self) -> None:
         """Clear any active per-scan caches."""
         self._scan_cycle_guid_cache.clear()
@@ -50,6 +42,14 @@ class PlexServiceCacheMixin:
     def get_cached_item_by_rating_key(self, rating_key: str) -> dict[str, Any] | None:
         """Return a scan-cycle cached Plex item by rating key, if present."""
         return self._scan_cycle_rating_key_cache.get(str(rating_key))
+
+    def get_cached_sections(self, media_type: str) -> list[dict[str, Any]] | None:
+        cached = self._scan_cycle_sections_cache.get(media_type)
+        return list(cached) if cached is not None else None
+
+    def set_cached_sections(self, media_type: str, sections: list[dict[str, Any]]) -> None:
+        if self._scan_cycle_depth > 0:
+            self._scan_cycle_sections_cache[media_type] = list(sections)
 
     @staticmethod
     def _extract_metadata_items(container: dict[str, Any]) -> list[dict[str, Any]]:
@@ -126,7 +126,7 @@ class PlexServiceCacheMixin:
         if not rating_key:
             return None
 
-        normalized = {
+        return {
             "rating_key": str(rating_key),
             "title": item.get("title"),
             "year": item.get("year"),
@@ -137,7 +137,6 @@ class PlexServiceCacheMixin:
             "section_key": section_key or item.get("section_key"),
             "guids": cls._extract_guid_ids(item),
         }
-        return normalized
 
     def _cache_lookup_result(
         self,

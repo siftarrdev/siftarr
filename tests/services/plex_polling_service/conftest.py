@@ -17,8 +17,6 @@ def mock_plex():
     plex = AsyncMock()
     plex.settings = SimpleNamespace(
         plex_sync_concurrency=16,
-        plex_checkpoint_buffer_minutes=10,
-        plex_recent_scan_interval_minutes=5,
     )
 
     @asynccontextmanager

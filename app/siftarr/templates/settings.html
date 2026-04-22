@@ -173,7 +173,7 @@ details[open] summary .accordion-chevron { transform: rotate(90deg); }
             <svg class="accordion-chevron w-4 h-4 text-gray-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
             <div>
                 <h2 class="section-title">Plex Scheduler Status</h2>
-                <p class="section-subtitle">In-memory status for incremental and full Plex jobs</p>
+                <p class="section-subtitle">In-memory status for recent scan and poll Plex jobs</p>
             </div>
         </summary>
         <div class="card-body grid grid-cols-1 xl:grid-cols-2 gap-4">
@@ -301,14 +301,14 @@ details[open] summary .accordion-chevron { transform: rotate(90deg); }
             <div class="flex items-center justify-between gap-4 py-3 first:pt-0 last:pb-0">
                 <div class="min-w-0">
                     <div class="text-sm font-semibold text-white">Re-scan Plex Availability</div>
-                    <div class="text-xs text-gray-500">Run incremental/full Plex jobs, or use the legacy manual reconcile path for a one-off full resync of existing requests</div>
+                    <div class="text-xs text-gray-500">Run recent scan or poll jobs, or use the manual rescan path for a one-off full resync of existing requests</div>
                 </div>
                 <div class="flex items-center gap-2 shrink-0">
-                    <form action="/settings/run-incremental-plex-sync" method="post">
-                        <button type="submit" class="btn-primary btn-sm shrink-0">Run Incremental Plex Sync</button>
+                    <form action="/settings/run-recent-plex-scan" method="post">
+                        <button type="submit" class="btn-primary btn-sm shrink-0">Run Recent Plex Scan</button>
                     </form>
-                    <form action="/settings/run-full-plex-reconcile" method="post">
-                        <button type="submit" class="btn-warning btn-sm shrink-0">Run Full Plex Reconcile</button>
+                    <form action="/settings/run-plex-poll" method="post">
+                        <button type="submit" class="btn-warning btn-sm shrink-0">Run Plex Poll</button>
                     </form>
                     <button type="button" onclick="startPlexRescan(false)" class="btn-primary btn-sm shrink-0">Deep Re-scan</button>
                     <button type="button" onclick="startPlexRescan(true)" class="btn btn-secondary btn-sm shrink-0">Shallow Re-scan</button>

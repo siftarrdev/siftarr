@@ -1,7 +1,7 @@
 import logging
 from collections.abc import Iterable
 from datetime import UTC, date, datetime
-from typing import Literal, Protocol
+from typing import Protocol
 
 from sqlalchemy import and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -216,6 +216,11 @@ class EpisodeLike(Protocol):
     status: RequestStatus
 
 
+class ReleaseCheckRequestLike(Protocol):
+    media_type: MediaType
+    tmdb_id: int | None
+
+
 def _parse_date(value: str | None) -> date | None:
     if not value:
         return None
@@ -229,13 +234,13 @@ def _parse_date(value: str | None) -> date | None:
         return None
 
 
-def classify_movie(
+def _is_unreleased_movie(
     details: dict | None,
     *,
     today: date | None = None,
-) -> Literal["released", "unreleased"]:
+) -> bool:
     if details is None:
-        return "released"
+        return False
 
     today = today or date.today()
     status = details.get("status")
@@ -266,20 +271,18 @@ def classify_movie(
                 if has_past_avail_release:
                     break
 
-    if status_not_released and release_date_missing_or_future and not has_past_avail_release:
-        return "unreleased"
-    return "released"
+    return status_not_released and release_date_missing_or_future and not has_past_avail_release
 
 
-def classify_tv_request(
+def _is_unreleased_tv_request(
     tv_details: dict | None,
     local_episodes: Iterable[EpisodeLike],
     *,
     today: date | None = None,
     has_empty_seasons: bool = False,
-) -> Literal["released", "unreleased"]:
+) -> bool:
     if tv_details is None:
-        return "released"
+        return False
 
     today = today or date.today()
     episodes = list(local_episodes)
@@ -300,7 +303,7 @@ def classify_tv_request(
     series_status_unaired = series_status in _TV_UNAIRED_STATUSES
 
     if (first_air_missing_or_future or series_status_unaired) and not any_aired_locally:
-        return "unreleased"
+        return True
 
     if any_aired_locally:
         aired = [e for e in episodes if e.air_date is not None and e.air_date <= today]
@@ -308,8 +311,28 @@ def classify_tv_request(
         has_future_or_unknown = has_future_signal or any(
             e.air_date is None or e.air_date > today for e in episodes
         )
-        if all_aired_downloaded and has_future_or_unknown:
-            return "unreleased"
-        return "released"
+        return all_aired_downloaded and has_future_or_unknown
 
-    return "released"
+    return False
+
+
+def is_unreleased(
+    request: ReleaseCheckRequestLike,
+    *,
+    media_details: dict | None,
+    local_episodes: Iterable[EpisodeLike] = (),
+    today: date | None = None,
+    has_empty_seasons: bool = False,
+) -> bool:
+    if request.tmdb_id is None:
+        return False
+
+    if request.media_type == MediaType.MOVIE:
+        return _is_unreleased_movie(media_details, today=today)
+
+    return _is_unreleased_tv_request(
+        media_details,
+        local_episodes,
+        today=today,
+        has_empty_seasons=has_empty_seasons,
+    )

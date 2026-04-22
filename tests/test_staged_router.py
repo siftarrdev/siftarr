@@ -364,7 +364,7 @@ class TestDownloadStatusEndpoint:
 
     @pytest.mark.asyncio
     async def test_download_status_does_not_reconcile_on_get(self, mock_db, monkeypatch):
-        """GET download-status should not perform Plex reconciliation side effects."""
+        """GET download-status should not perform Plex check side effects."""
         import json
 
         from app.siftarr.routers import staged as staged_module
@@ -401,13 +401,13 @@ class TestDownloadStatusEndpoint:
 
     @pytest.mark.asyncio
     async def test_reconcile_request_via_plex_closes_service_on_error(self, mock_db, monkeypatch):
-        """Targeted reconciliation should always close PlexService."""
+        """Targeted check should always close PlexService."""
         from app.siftarr.routers.staged import _reconcile_request_via_plex
 
         runtime_settings = MagicMock()
         plex_service = AsyncMock()
         plex_polling = AsyncMock()
-        plex_polling.reconcile_request = AsyncMock(side_effect=RuntimeError("plex boom"))
+        plex_polling.check_request = AsyncMock(side_effect=RuntimeError("plex boom"))
 
         monkeypatch.setattr(staged, "PlexService", MagicMock(return_value=plex_service))
         monkeypatch.setattr(staged, "PlexPollingService", MagicMock(return_value=plex_polling))
@@ -434,7 +434,7 @@ class TestCheckNowEndpoint:
 
     @pytest.mark.asyncio
     async def test_check_now_does_not_reconcile_incomplete_torrent(self, mock_db, monkeypatch):
-        """Incomplete check-now requests should not trigger Plex reconciliation."""
+        """Incomplete check-now requests should not trigger Plex checks."""
         import json
 
         from app.siftarr.routers import staged as staged_module
@@ -467,4 +467,4 @@ class TestCheckNowEndpoint:
         body = json.loads(bytes(response.body))  # type: ignore[arg-type]
         assert body["qbit_complete"] is False
         assert body["plex_available"] is False
-        plex_polling.reconcile_request.assert_not_called()
+        plex_polling.check_request.assert_not_called()

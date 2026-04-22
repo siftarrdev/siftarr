@@ -11,6 +11,7 @@ from app.siftarr.models.activity_log import ActivityLog, EventType
 from app.siftarr.models.request import (
     ACTIVE_STAGING_WORKFLOW_STATUSES,
     Request,
+    RequestStatus,
     is_active_staging_workflow_status,
 )
 from app.siftarr.models.staged_torrent import StagedTorrent
@@ -152,9 +153,12 @@ class DownloadCompletionService:
                 await self.db.commit()
 
             try:
-                reconcile_result = await self.plex_polling.reconcile_request(request_id)
+                reconcile_result = await self.plex_polling.check_request(request_id)
 
-                if reconcile_result.available:
+                if (
+                    reconcile_result.available
+                    and reconcile_result.status_after == RequestStatus.COMPLETED
+                ):
                     completed += 1
 
                     await activity_log.log(
@@ -168,7 +172,7 @@ class DownloadCompletionService:
                     await self.db.commit()
 
                     logger.info(
-                        "DownloadCompletionService: reconciled request_id=%s title=%s via Plex (%s)",
+                        "DownloadCompletionService: checked request_id=%s title=%s via Plex (%s)",
                         request_id,
                         request.title,
                         reconcile_result.reason,

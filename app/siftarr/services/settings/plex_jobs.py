@@ -16,21 +16,15 @@ def build_compact_metrics_snapshot(metrics_payload: dict[str, Any] | None) -> st
     if not isinstance(metrics_payload, dict):
         return None
 
-    scan_payload = metrics_payload.get("scan")
-    if not isinstance(scan_payload, dict):
-        return None
-
     parts: list[str] = []
     if "completed_requests" in metrics_payload:
         parts.append(f"completed={metrics_payload['completed_requests']}")
     for source_key, label in [
         ("scanned_items", "scanned"),
         ("matched_requests", "matched"),
-        ("deduped_items", "deduped"),
-        ("downgraded_requests", "downgraded"),
         ("skipped_on_error_items", "errors"),
     ]:
-        value = scan_payload.get(source_key)
+        value = metrics_payload.get(source_key)
         if value is not None:
             parts.append(f"{label}={value}")
 
@@ -39,13 +33,6 @@ def build_compact_metrics_snapshot(metrics_payload: dict[str, Any] | None) -> st
 
 def _coerce_int(value: Any) -> int:
     return value if isinstance(value, int) else 0
-
-
-def _get_scan_metrics_payload(metrics_payload: dict[str, Any] | None) -> dict[str, Any] | None:
-    if not isinstance(metrics_payload, dict):
-        return None
-    scan_payload = metrics_payload.get("scan")
-    return scan_payload if isinstance(scan_payload, dict) else None
 
 
 def build_plex_run_outcome_summary(
@@ -62,41 +49,20 @@ def build_plex_run_outcome_summary(
     if not isinstance(metrics_payload, dict):
         return "No completed run recorded"
 
-    scan_payload = _get_scan_metrics_payload(metrics_payload)
-    if scan_payload is None:
-        return "No completed run recorded"
+    scanned = metrics_payload.get("scanned_items")
+    matched = metrics_payload.get("matched_requests")
+    skipped = _coerce_int(metrics_payload.get("skipped_on_error_items"))
+    completed = _coerce_int(metrics_payload.get("completed_requests"))
 
-    mode = metrics_payload.get("mode")
-    skipped = _coerce_int(scan_payload.get("skipped_on_error_items"))
-    downgraded = _coerce_int(scan_payload.get("downgraded_requests"))
-
-    if mode == "incremental_recent_scan":
+    if scanned is not None:
         if skipped or last_error:
             return (
-                "Incremental run partial; "
-                f"{max(skipped, 1)} transient/inconclusive item(s) remained"
+                "Recent scan partial; "
+                f"completed {completed}, matched {matched or 0}, scanned {scanned}, errors {max(skipped, 1)}"
             )
-        return "Incremental run completed"
+        return f"Recent scan completed; completed {completed}, matched {matched or 0}, scanned {scanned}"
 
-    if mode == "full_reconcile_scan":
-        if skipped and downgraded:
-            return (
-                "Full run partial with guarded negative reconciliation; downgraded "
-                f"{downgraded} request(s), {skipped} item(s) stayed inconclusive"
-            )
-        if skipped:
-            return (
-                "Full run partial; guarded negative reconciliation withheld for "
-                f"{skipped} inconclusive item(s)"
-            )
-        if downgraded:
-            return (
-                "Full run completed with guarded negative reconciliation; downgraded "
-                f"{downgraded} request(s)"
-            )
-        return "Full run completed cleanly"
-
-    return None
+    return f"Plex poll completed; transitioned {completed} request(s)"
 
 
 def build_manual_plex_job_message(job_label: str, result: Any) -> tuple[str, str]:
@@ -108,32 +74,21 @@ def build_manual_plex_job_message(job_label: str, result: Any) -> tuple[str, str
 
     message = f"{job_label} completed. Transitioned {result.completed_requests} request(s)."
     outcome_summary = build_plex_run_outcome_summary(result.metrics_payload)
-    if outcome_summary == "Incremental run completed":
+    if outcome_summary and outcome_summary.startswith("Recent scan completed;"):
         message = (
-            f"{job_label} completed cleanly. Transitioned {result.completed_requests} request(s)."
+            f"{job_label} completed. Transitioned {result.completed_requests} request(s). "
+            f"{outcome_summary}."
         )
-    elif outcome_summary and outcome_summary.startswith("Incremental run partial"):
-        message = (
-            f"{job_label} completed partially. "
-            f"Transitioned {result.completed_requests} request(s). "
-            f"{outcome_summary.removeprefix('Incremental run partial; ').capitalize()}."
-        )
-    elif outcome_summary and outcome_summary.startswith(
-        "Full run completed with guarded negative reconciliation"
-    ):
-        downgraded = _coerce_int(
-            (_get_scan_metrics_payload(result.metrics_payload) or {}).get("downgraded_requests")
-        )
-        message = (
-            f"{job_label} completed with guarded negative reconciliation. "
-            f"Transitioned {result.completed_requests} request(s) and downgraded "
-            f"{downgraded} request(s)."
-        )
-    elif outcome_summary and outcome_summary.startswith("Full run partial"):
+    elif outcome_summary and outcome_summary.startswith("Recent scan partial;"):
         message = (
             f"{job_label} completed partially. "
             f"Transitioned {result.completed_requests} request(s). "
-            f"{outcome_summary.removeprefix('Full run ').capitalize()}."
+            f"{outcome_summary.removeprefix('Recent scan partial; ').capitalize()}."
+        )
+    elif outcome_summary and outcome_summary.startswith("Plex poll completed;"):
+        message = (
+            f"{job_label} completed. "
+            f"{outcome_summary.removeprefix('Plex poll completed; ').capitalize()}."
         )
 
     return message, "success"
@@ -142,16 +97,16 @@ def build_manual_plex_job_message(job_label: str, result: Any) -> tuple[str, str
 async def build_plex_job_statuses(
     db: AsyncSession,
     *,
-    incremental_job_name: str,
-    full_job_name: str,
+    recent_scan_job_name: str,
+    poll_job_name: str,
 ) -> list[dict[str, Any]]:
     """Load in-memory scheduler status for Plex scan jobs."""
     del db
     from app.siftarr.main import scheduler_service
 
     job_rows = [
-        (incremental_job_name, "Incremental Plex Sync", "Fast recent-added availability scan"),
-        (full_job_name, "Full Plex Reconcile", "Slower full-library reconciliation run"),
+        (recent_scan_job_name, "Recent Plex Scan", "Recent-additions scan for active requests"),
+        (poll_job_name, "Plex Poll", "Active-request availability poll"),
     ]
     job_state = (
         await scheduler_service.get_plex_job_state_snapshot()

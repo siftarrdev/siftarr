@@ -137,5 +137,6 @@ async def test_get_request_seasons_returns_sync_state_without_inline_refresh(
     body = json.loads(cast(bytes, response.body))
     assert body["seasons"][0]["episodes"][0]["status"] == RequestStatus.COMPLETED.value
     assert body["sync_state"]["stale"] is False
+    assert body["sync_state"]["needs_plex_enrichment"] is False
     assert body["sync_state"]["refresh_in_progress"] is False
     assert scheduled == []

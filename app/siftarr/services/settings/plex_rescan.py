@@ -18,7 +18,6 @@ async def rescan_plex_tv_request(
     *,
     session_maker,
     logger,
-    force_plex_refresh: bool = True,
 ) -> bool:
     """Resync one TV request on an isolated DB session."""
     from app.siftarr.services.episode_sync_service import EpisodeSyncService
@@ -28,7 +27,7 @@ async def rescan_plex_tv_request(
         overseerr = OverseerrService(settings=runtime_settings)
         episode_sync = EpisodeSyncService(worker_db, overseerr=overseerr, plex=plex)
         try:
-            await episode_sync.sync_episodes(request_id, force_plex_refresh=force_plex_refresh)
+            await episode_sync.sync_request(request_id)
         except Exception:
             await worker_db.rollback()
             logger.exception(
@@ -54,7 +53,7 @@ async def rescan_plex_requests(
     run_bounded_with_progress_func,
     rescan_plex_tv_request_func,
 ) -> tuple[int, int, int]:
-    """Run the legacy manual Plex reconcile path."""
+    """Run the manual Plex rescan path."""
     polling_service = plex_polling_service_cls(db, plex)
     active_requests = await polling_service.get_active_requests()
     active_requests = [req for req in active_requests if req.status != RequestStatus.COMPLETED]
@@ -98,7 +97,6 @@ async def rescan_plex_requests(
             request.id,
             plex,
             runtime_settings,
-            force_plex_refresh=not shallow,
         )
 
     if tv_requests:
@@ -188,7 +186,7 @@ async def rescan_plex_generator(
                         completed=completed,
                         active=[],
                         message=(
-                            "Legacy/manual Plex reconcile completed. "
+                            "Manual Plex rescan completed. "
                             f"Re-synced {resynced} TV request(s), "
                             f"{failed} failed, "
                             f"{completed} transitioned to completed."

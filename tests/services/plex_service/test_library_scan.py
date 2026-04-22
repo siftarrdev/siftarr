@@ -127,7 +127,8 @@ async def test_scan_cycle_caches_section_listing_and_lookup_results(service, moc
     }
     mock_client.get.side_effect = [empty_search, empty_search, sections_response, section_scan]
 
-    async with service.scan_cycle():
+    async with service.scan_cycle() as active_service:
+        assert active_service is service
         first = await service.lookup_movie_by_tmdb(444)
         second = await service.lookup_movie_by_tmdb(444)
         cached_item = service.get_cached_item_by_rating_key("900")
