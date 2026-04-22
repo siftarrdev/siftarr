@@ -58,6 +58,12 @@ uv run pytest
 Always use subagents where possible and practical.
 Always use feature branches and PRs — never push directly to `main`. All 4 quality gates must pass before merge.
 
+## Database guidance
+
+- The database schema is currently in flux.
+- Keep only a single init Alembic migration until the schema stabilizes.
+- Avoid reintroducing split migration chains unless the database design has settled.
+
 ## Repo Map Maintenance
 
 - `repo-map.md` is the committed, living repository map for contributors and agents.
