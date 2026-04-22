@@ -1,6 +1,5 @@
 import re
 from collections.abc import Sequence
-from contextlib import suppress
 from dataclasses import dataclass
 
 from app.siftarr.models.rule import TVTarget
@@ -76,22 +75,28 @@ class RuleEngine:
         self._compiled_scorer: list[tuple[int, str, re.Pattern[str], int]] = []
 
         for rule_id, rule_name, pattern in self.exclusion_patterns:
-            with suppress(re.error):
+            try:
                 self._compiled_exclusion.append(
                     (rule_id, rule_name, re.compile(pattern, re.IGNORECASE))
                 )
+            except re.error:
+                continue
 
         for rule_id, rule_name, pattern in self.requirement_patterns:
-            with suppress(re.error):
+            try:
                 self._compiled_requirement.append(
                     (rule_id, rule_name, re.compile(pattern, re.IGNORECASE))
                 )
+            except re.error:
+                continue
 
         for rule_id, rule_name, pattern, score in self.scorer_patterns:
-            with suppress(re.error):
+            try:
                 self._compiled_scorer.append(
                     (rule_id, rule_name, re.compile(pattern, re.IGNORECASE), score)
                 )
+            except re.error:
+                continue
 
     @staticmethod
     def _scope_matches(rule_scope: str, media_type: str | None) -> bool:
@@ -100,40 +105,17 @@ class RuleEngine:
         return rule_scope == media_type
 
     @staticmethod
-    def _release_matches_tv_target(release: ProwlarrRelease, tv_target: TVTarget | None) -> bool:
-        if tv_target is None:
-            return False
-
-        coverage = parse_release_coverage(release.title)
-        is_episode = coverage.episode_number is not None
-        is_pack = (
-            coverage.is_complete_series or len(coverage.season_numbers) >= 1 and not is_episode
-        )
-
-        if tv_target == TVTarget.EPISODE:
-            return is_episode
-        if tv_target == TVTarget.SEASON_PACK:
-            return is_pack
-        return False
-
-    @classmethod
-    def _size_rule_applies_to_release(cls, rule: SizeLimitRule, release: ProwlarrRelease) -> bool:
+    def _size_rule_applies_to_release(rule: SizeLimitRule, release: ProwlarrRelease) -> bool:
         coverage = parse_release_coverage(release.title)
         is_tv_release = bool(
             coverage.season_numbers
             or coverage.is_complete_series
             or coverage.episode_number is not None
         )
-
-        if rule.media_scope == "movie" and is_tv_release:
-            return False
-        if rule.media_scope == "tv" and not is_tv_release:
-            return False
-
-        if rule.tv_target is not None and is_tv_release:
-            return cls._release_matches_tv_target(release, rule.tv_target)
-
-        return True
+        return not (
+            (rule.media_scope == "movie" and is_tv_release)
+            or (rule.media_scope == "tv" and not is_tv_release)
+        )
 
     @classmethod
     def from_db_rules(
@@ -213,35 +195,6 @@ class RuleEngine:
         """Format bytes using the dashboard's 2-decimal GiB display."""
         gib = size_bytes / 1024 / 1024 / 1024
         return f"{gib:.2f} GB"
-
-    def evaluate_per_season_size(self, size_bytes: int) -> bool | None:
-        """
-        Evaluate a per-season size against SEASON_PACK size-limit rules.
-
-        Applicable rules are those where:
-          - tv_target == TVTarget.SEASON_PACK, OR
-          - tv_target is None AND media_scope == "tv"
-
-        Returns False on first violation, True if all applicable rules pass,
-        None if no applicable rules found.
-        """
-        applicable = [
-            rule
-            for rule in self.size_limit_rules
-            if rule.tv_target == TVTarget.SEASON_PACK
-            or (rule.tv_target is None and rule.media_scope == "tv")
-        ]
-
-        if not applicable:
-            return None
-
-        for rule in applicable:
-            if rule.min_size_bytes is not None and size_bytes < rule.min_size_bytes:
-                return False
-            if rule.max_size_bytes is not None and size_bytes > rule.max_size_bytes:
-                return False
-
-        return True
 
     def evaluate(self, release: ProwlarrRelease) -> ReleaseEvaluation:
         """

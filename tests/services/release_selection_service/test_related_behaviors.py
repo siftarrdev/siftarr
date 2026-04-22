@@ -7,7 +7,7 @@ from app.siftarr.models.episode import Episode
 from app.siftarr.models.release import Release
 from app.siftarr.models.request import MediaType, Request, RequestStatus
 from app.siftarr.models.season import Season
-from app.siftarr.services import release_selection_service
+from app.siftarr.services import release_storage
 from app.siftarr.services.prowlarr_service import ProwlarrRelease
 from app.siftarr.services.rule_engine import ReleaseEvaluation
 
@@ -45,7 +45,7 @@ async def test_clear_release_search_cache_deletes_releases_and_detaches_episode_
         session.add_all([request, season, kept_episode, detached_episode, release])
         await session.commit()
 
-        result = await release_selection_service.clear_release_search_cache(session)
+        result = await release_storage.clear_release_search_cache(session)
 
         assert result == {"deleted_releases": 1}
         remaining_releases = (await session.execute(select(Release))).scalars().all()
@@ -101,7 +101,7 @@ async def test_store_search_results_replaces_request_releases_without_stale_epis
         )
         evaluation = ReleaseEvaluation(release=new_release, passed=True, total_score=15, matches=[])
 
-        stored_records = await release_selection_service.store_search_results(
+        stored_records = await release_storage.store_search_results(
             session,
             request.id,
             [evaluation],

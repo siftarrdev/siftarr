@@ -4,7 +4,7 @@ import json
 
 from app.siftarr.models.request import MediaType, Request
 from app.siftarr.models.staged_torrent import StagedTorrent
-from app.siftarr.services import staging_decision_logger
+from app.siftarr.routers import staged
 
 
 def test_log_staging_decision_records_rule_accept(tmp_path):
@@ -32,16 +32,16 @@ def test_log_staging_decision_records_rule_accept(tmp_path):
     )
     torrent.id = 10
 
-    original_path = staging_decision_logger.STAGING_DECISION_LOG_PATH
-    staging_decision_logger.STAGING_DECISION_LOG_PATH = log_path
+    original_path = staged.STAGING_DECISION_LOG_PATH
+    staged.STAGING_DECISION_LOG_PATH = log_path
     try:
-        staging_decision_logger.log_staging_decision(
+        staged.log_staging_decision(
             request=request,
             approved_torrent=torrent,
             rules_selected_torrent=torrent,
         )
     finally:
-        staging_decision_logger.STAGING_DECISION_LOG_PATH = original_path
+        staged.STAGING_DECISION_LOG_PATH = original_path
 
     payload = json.loads(log_path.read_text(encoding="utf-8").strip())
     assert payload["event_type"] == "rule_accept"
@@ -86,16 +86,16 @@ def test_log_staging_decision_records_manual_override(tmp_path):
     )
     rules_selected_torrent.id = 12
 
-    original_path = staging_decision_logger.STAGING_DECISION_LOG_PATH
-    staging_decision_logger.STAGING_DECISION_LOG_PATH = log_path
+    original_path = staged.STAGING_DECISION_LOG_PATH
+    staged.STAGING_DECISION_LOG_PATH = log_path
     try:
-        staging_decision_logger.log_staging_decision(
+        staged.log_staging_decision(
             request=request,
             approved_torrent=approved_torrent,
             rules_selected_torrent=rules_selected_torrent,
         )
     finally:
-        staging_decision_logger.STAGING_DECISION_LOG_PATH = original_path
+        staged.STAGING_DECISION_LOG_PATH = original_path
 
     payload = json.loads(log_path.read_text(encoding="utf-8").strip())
     assert payload["event_type"] == "manual_override"

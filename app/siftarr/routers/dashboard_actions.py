@@ -24,16 +24,14 @@ from app.siftarr.services.overseerr_service import OverseerrService
 from app.siftarr.services.pending_queue_service import PendingQueueService
 from app.siftarr.services.prowlarr_service import ProwlarrRelease, ProwlarrService
 from app.siftarr.services.qbittorrent_service import QbittorrentService
-from app.siftarr.services.release_selection_service import (
-    persist_manual_release,
-    use_releases,
-)
+from app.siftarr.services.release_storage import persist_manual_release
 from app.siftarr.services.request_service import (
     bulk_redirect_url,
     load_request_or_404,
     selection_redirect_url,
 )
 from app.siftarr.services.rule_engine import ReleaseEvaluation, RuleEngine
+from app.siftarr.services.staging_actions import use_releases
 
 logger = logging.getLogger(__name__)
 

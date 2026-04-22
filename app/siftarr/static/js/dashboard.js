@@ -169,9 +169,9 @@ document.addEventListener('DOMContentLoaded', () => {
         const modal = document.getElementById('request-details-modal');
         if (modal.classList.contains('hidden')) return;
         if (e.key === 'Escape') {
-            const dropdown = document.getElementById('tv-search-dropdown');
+            const dropdown = document.getElementById('tv-search-scope-menu');
             if (dropdown && !dropdown.classList.contains('hidden')) {
-                window.closeTvSearchDropdown();
+                window.closeTvSearchScopeMenu();
                 return;
             }
             window.closeRequestDetails();
@@ -186,10 +186,10 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Close TV search dropdown on outside click
     document.addEventListener('click', (e) => {
-        const dropdown = document.getElementById('tv-search-dropdown');
+        const dropdown = document.getElementById('tv-search-scope-menu');
         const wrapper = document.getElementById('request-details-tv-search-btn');
         if (dropdown && !dropdown.classList.contains('hidden') && wrapper && !wrapper.contains(e.target)) {
-            window.closeTvSearchDropdown();
+            window.closeTvSearchScopeMenu();
         }
     });
 });

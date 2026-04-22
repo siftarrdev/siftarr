@@ -44,16 +44,39 @@ def test_dashboard_css_contains_resize_styles():
     assert ".accordion-chevron" in css
 
 
+def test_dashboard_tv_scope_selector_uses_explicit_actions():
+    """Dashboard TV search UI should expose explicit search scopes."""
+    with open(
+        os.path.join(os.path.dirname(__file__), "../../../app/siftarr/templates/dashboard.html"),
+        encoding="utf-8",
+    ) as handle:
+        template = handle.read()
+
+    assert "Search Scope" in template
+    assert "TV Search Scope" in template
+    assert "Search All Pending Episodes" in template
+    assert "Search Multi-Season Packs" in template
+    assert "toggleTvSearchScopeMenu(event)" in template
+    assert "searchAllPendingEpisodes(); closeTvSearchScopeMenu();" in template
+    assert "searchMultiSeasonPacks(currentRequestId); closeTvSearchScopeMenu();" in template
+
+
 def test_dashboard_js_includes_search_multi_season_ui():
-    """Dashboard JS should expose the Search Multi Season TV UI."""
+    """Dashboard JS should expose the explicit multi-season TV search UI."""
     js = _read_dashboard_js()
 
     assert "Search Multi Season Packs" in js
     assert "Run Search Multi Season Packs to inspect broad multi-season coverage." in js
     assert "Searching multi season packs..." in js
     assert "No multi season or complete-series results found." in js
-    assert "function searchAllSeasonPacks(" in js
-    assert "/requests/' + targetRequestId + '/seasons/search-all" in js
+    assert "function searchMultiSeasonPacks(" in js
+    assert "/requests/' + targetRequestId + '/multi-season-packs/search" in js
+    assert "function searchSeasonPacks(requestId, seasonNumber)" in js
+    assert "/requests/' + requestId + '/seasons/' + seasonNumber + '/season-packs/search" in js
+    assert "function searchAllPendingEpisodes()" in js
+    assert "No pending aired episodes to search." in js
+    assert "Finished searching all pending aired episodes" in js
+    assert "tv-search-all-results" not in js
 
 
 def test_dashboard_js_uses_collapsible_episode_results():
@@ -63,6 +86,10 @@ def test_dashboard_js_uses_collapsible_episode_results():
     assert "episode-details-" in js
     assert '<details id="\' + episodeDetailsId + \'" class="group rounded-lg border' in js
     assert "if (details) details.open = true;" in js
+    assert (
+        "/requests/' + requestId + '/seasons/' + seasonNumber + '/episodes/' + episodeNumber + '/search"
+        in js
+    )
 
 
 def test_dashboard_js_includes_release_status_column_and_upload_age():
@@ -113,6 +140,20 @@ def test_dashboard_js_scopes_episode_stage_buttons_to_target_scope():
         "const activeStagedTorrent = release.active_staged_torrent || (isScopedEpisodeRelease ? null : window.currentActiveStagedTorrent);"
         in js
     )
+
+
+def test_dashboard_js_uses_scope_menu_helpers():
+    """TV scope menu helpers should replace the legacy generic dropdown naming."""
+    js = _read_dashboard_js()
+
+    assert "tv-search-scope-menu" in js
+    assert "tv-search-scope-seasons" in js
+    assert "function toggleTvSearchScopeMenu(event)" in js
+    assert "function closeTvSearchScopeMenu()" in js
+    assert "function populateTvSearchScopeMenu()" in js
+    assert "closeTvSearchScopeMenu();" in js
+    assert "populateTvSearchScopeMenu();" in js
+    assert "tv-search-dropdown" not in js
     assert (
         "!isScopedEpisodeRelease && hasActiveStagedSelection && activeStagedTorrent && release.title === activeStagedTorrent.title"
         in js

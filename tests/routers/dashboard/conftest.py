@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 from fastapi import BackgroundTasks
 
-from app.siftarr.routers import dashboard_api
+from app.siftarr.services import dashboard_service
 from app.siftarr.services.background_tasks import DETAILS_SYNC_TASKS
 
 
@@ -16,7 +16,7 @@ def _mock_activity_log_service(monkeypatch):
     mock_cls = MagicMock()
     mock_instance = mock_cls.return_value
     mock_instance.get_timeline = AsyncMock(return_value=[])
-    monkeypatch.setattr(dashboard_api, "ActivityLogService", mock_cls)
+    monkeypatch.setattr(dashboard_service, "ActivityLogService", mock_cls)
 
 
 @pytest.fixture

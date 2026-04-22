@@ -66,7 +66,7 @@ async def test_rescan_plex_uses_bounded_parallel_workers_and_reports_counts(
     )
     runtime_settings = MagicMock(plex_sync_concurrency=2)
     monkeypatch.setattr(
-        settings._jobs,
+        settings,
         "get_settings",
         lambda: runtime_settings,
     )
@@ -228,7 +228,7 @@ async def test_sync_overseerr_prefetches_with_bounded_parallelism(monkeypatch, b
         AsyncMock(return_value=context),
     )
     runtime_settings = MagicMock(overseerr_sync_concurrency=2)
-    monkeypatch.setattr(settings._imports, "get_settings", lambda: runtime_settings)
+    monkeypatch.setattr(settings, "get_settings", lambda: runtime_settings)
 
     started = 0
     in_flight = 0
@@ -376,7 +376,7 @@ async def test_sync_overseerr_keeps_duplicate_skipping_behavior(monkeypatch, bas
         AsyncMock(return_value=context),
     )
     runtime_settings = MagicMock(overseerr_sync_concurrency=2)
-    monkeypatch.setattr(settings._imports, "get_settings", lambda: runtime_settings)
+    monkeypatch.setattr(settings, "get_settings", lambda: runtime_settings)
 
     overseerr_requests = [
         {

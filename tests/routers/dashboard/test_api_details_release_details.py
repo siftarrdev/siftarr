@@ -10,6 +10,7 @@ import pytest
 from app.siftarr.models.release import Release
 from app.siftarr.models.request import MediaType, RequestStatus
 from app.siftarr.routers import dashboard_api
+from app.siftarr.services import dashboard_service
 
 
 @pytest.mark.asyncio
@@ -79,38 +80,19 @@ async def test_request_details_reuses_persisted_multi_season_coverage(
         async def close(self):
             return None
 
-    class FakePlexService:
-        async def close(self):
-            return None
-
     fake_engine = MagicMock()
     fake_engine.evaluate.return_value = MagicMock(rejection_reason=None, matches=[])
-    fake_engine.evaluate_per_season_size.return_value = True
 
-    monkeypatch.setattr(dashboard_api, "OverseerrService", FakeOverseerrService)
-    monkeypatch.setattr(dashboard_api, "PlexService", lambda settings: FakePlexService())
+    monkeypatch.setattr(dashboard_service, "OverseerrService", FakeOverseerrService)
     monkeypatch.setattr(
-        dashboard_api.RuleEngine,
+        dashboard_service.RuleEngine,
         "from_db_rules",
         MagicMock(return_value=fake_engine),
     )
 
-    class FakeEpisodeSyncService:
-        def __init__(self, db, plex):
-            self.db = db
-            self.plex = plex
-
-        async def sync_request(self, request_id):
-            return None
-
-    with pytest.MonkeyPatch.context() as inner_monkeypatch:
-        inner_monkeypatch.setattr(
-            "app.siftarr.services.episode_sync_service.EpisodeSyncService",
-            FakeEpisodeSyncService,
-        )
-        response = await dashboard_api.request_details(
-            request_id=21, background_tasks=background_tasks, db=mock_db
-        )
+    response = await dashboard_api.request_details(
+        request_id=21, background_tasks=background_tasks, db=mock_db
+    )
 
     body = json.loads(cast(bytes, response.body))
     assert body["releases"][0]["covered_seasons"] == [1, 2]
@@ -238,38 +220,19 @@ async def test_request_details_orders_stored_releases_by_score_then_size(
         async def close(self):
             return None
 
-    class FakePlexService:
-        async def close(self):
-            return None
-
     fake_engine = MagicMock()
     fake_engine.evaluate.return_value = MagicMock(rejection_reason=None, matches=[])
-    fake_engine.evaluate_per_season_size.return_value = True
 
-    monkeypatch.setattr(dashboard_api, "OverseerrService", FakeOverseerrService)
-    monkeypatch.setattr(dashboard_api, "PlexService", lambda settings: FakePlexService())
+    monkeypatch.setattr(dashboard_service, "OverseerrService", FakeOverseerrService)
     monkeypatch.setattr(
-        dashboard_api.RuleEngine,
+        dashboard_service.RuleEngine,
         "from_db_rules",
         MagicMock(return_value=fake_engine),
     )
 
-    class FakeEpisodeSyncService:
-        def __init__(self, db, plex):
-            self.db = db
-            self.plex = plex
-
-        async def sync_request(self, request_id):
-            return None
-
-    with pytest.MonkeyPatch.context() as inner_monkeypatch:
-        inner_monkeypatch.setattr(
-            "app.siftarr.services.episode_sync_service.EpisodeSyncService",
-            FakeEpisodeSyncService,
-        )
-        response = await dashboard_api.request_details(
-            request_id=21, background_tasks=background_tasks, db=mock_db
-        )
+    response = await dashboard_api.request_details(
+        request_id=21, background_tasks=background_tasks, db=mock_db
+    )
 
     body = json.loads(cast(bytes, response.body))
     assert [release["title"] for release in body["releases"]] == [
@@ -349,9 +312,9 @@ async def test_request_details_includes_release_status_reason_and_publish_date(
         passed=False,
     )
 
-    monkeypatch.setattr(dashboard_api, "OverseerrService", FakeOverseerrService)
+    monkeypatch.setattr(dashboard_service, "OverseerrService", FakeOverseerrService)
     monkeypatch.setattr(
-        dashboard_api.RuleEngine,
+        dashboard_service.RuleEngine,
         "from_db_rules",
         MagicMock(return_value=fake_engine),
     )

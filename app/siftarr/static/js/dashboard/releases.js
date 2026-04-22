@@ -205,7 +205,7 @@ function renderSeasonAccordion(data) {
                 '<div class="text-white font-medium">Search Multi Season Packs</div>' +
                 '<div class="text-xs text-gray-500">Broad search for multi-season ranges and complete-series packs without downloading.</div>' +
             '</div>' +
-            '<button onclick="searchAllSeasonPacks(' + requestId + '); event.stopPropagation();" class="btn-primary btn-sm">Search Multi Season Packs</button>' +
+            '<button onclick="searchMultiSeasonPacks(' + requestId + '); event.stopPropagation();" class="btn-primary btn-sm">Search Multi Season Packs</button>' +
         '</div>' +
         '<div id="season-packs-all-' + requestId + '" class="space-y-1"><div class="text-gray-500 text-sm">Run Search Multi Season Packs to inspect broad multi-season coverage.</div></div>' +
     '</div>';
@@ -302,7 +302,7 @@ async function searchSeasonPacks(requestId, seasonNumber) {
         ' Searching season packs...</div>';
 
     try {
-        var response = await fetch('/requests/' + requestId + '/seasons/' + seasonNumber + '/search', { method: 'POST' });
+        var response = await fetch('/requests/' + requestId + '/seasons/' + seasonNumber + '/season-packs/search', { method: 'POST' });
         if (!response.ok) throw new Error('Server error: ' + response.status);
         var data = await response.json();
 
@@ -322,14 +322,11 @@ function renderSearchAllResults(releases) {
     }).join('');
 }
 
-async function searchAllSeasonPacks(requestId = null) {
+async function searchMultiSeasonPacks(requestId = null) {
     var targetRequestId = requestId || window.currentRequestId;
     if (!targetRequestId) return;
 
     var container = document.getElementById('season-packs-all-' + targetRequestId);
-    if (!container) {
-        container = document.getElementById('tv-search-all-results');
-    }
     if (!container) return;
 
     container.innerHTML = '<div class="flex items-center gap-2 text-gray-400 text-sm py-2">' +
@@ -337,7 +334,7 @@ async function searchAllSeasonPacks(requestId = null) {
         ' Searching multi season packs...</div>';
 
     try {
-        var response = await fetch('/requests/' + targetRequestId + '/seasons/search-all', { method: 'POST' });
+        var response = await fetch('/requests/' + targetRequestId + '/multi-season-packs/search', { method: 'POST' });
         if (!response.ok) throw new Error('Server error: ' + response.status);
         var data = await response.json();
 
@@ -375,42 +372,42 @@ async function searchEpisode(requestId, seasonNumber, episodeNumber) {
     }
 }
 
-function toggleTvSearchDropdown(event) {
+function toggleTvSearchScopeMenu(event) {
     event.stopPropagation();
-    const dropdown = document.getElementById('tv-search-dropdown');
+    const dropdown = document.getElementById('tv-search-scope-menu');
     if (!dropdown) return;
     dropdown.classList.toggle('hidden');
 }
 
-function closeTvSearchDropdown() {
-    const dropdown = document.getElementById('tv-search-dropdown');
+function closeTvSearchScopeMenu() {
+    const dropdown = document.getElementById('tv-search-scope-menu');
     if (dropdown) dropdown.classList.add('hidden');
 }
 
-function populateTvSearchDropdown() {
-    const container = document.getElementById('tv-search-dropdown-seasons');
+function populateTvSearchScopeMenu() {
+    const container = document.getElementById('tv-search-scope-seasons');
     if (!container) return;
     container.innerHTML = window.currentTvSeasons.map(function(season) {
-        return '<button onclick="searchSeasonPacks(window.currentRequestId, ' + season.season_number + '); closeTvSearchDropdown();" ' +
+        return '<button onclick="searchSeasonPacks(window.currentRequestId, ' + season.season_number + '); closeTvSearchScopeMenu();" ' +
             'class="w-full text-left px-4 py-2 text-sm text-gray-300 hover:bg-surface-850 cursor-pointer transition-colors">' +
             'Search Season ' + season.season_number + ' Packs</button>';
     }).join('');
 }
 
-async function searchAllEpisodes() {
+async function searchAllPendingEpisodes() {
     if (!window.currentRequestId || !window.currentTvSeasons.length) return;
-    closeTvSearchDropdown();
+    closeTvSearchScopeMenu();
 
     const allEpisodes = [];
     for (const season of window.currentTvSeasons) {
         for (const ep of (season.episodes || [])) {
-            if (ep.status === 'completed' || ep.status === 'available') continue;
+            if (ep.status === 'completed' || ep.status === 'available' || ep.status === 'unreleased') continue;
             allEpisodes.push({ season: season.season_number, episode: ep.episode_number });
         }
     }
 
     if (allEpisodes.length === 0) {
-        window.showToast('No pending episodes to search.');
+        window.showToast('No pending aired episodes to search.');
         return;
     }
 
@@ -420,7 +417,7 @@ async function searchAllEpisodes() {
         await searchEpisode(window.currentRequestId, ep.season, ep.episode);
     }
 
-    window.showToast('Finished searching all episodes (' + allEpisodes.length + ' total).');
+    window.showToast('Finished searching all pending aired episodes (' + allEpisodes.length + ' total).');
 }
 
 async function stageRelease(btn) {
@@ -482,12 +479,12 @@ window.renderSeasonAccordion = renderSeasonAccordion;
 window.markEpisodeAvailable = markEpisodeAvailable;
 window.markSeasonAvailable = markSeasonAvailable;
 window.searchSeasonPacks = searchSeasonPacks;
-window.searchAllSeasonPacks = searchAllSeasonPacks;
+window.searchMultiSeasonPacks = searchMultiSeasonPacks;
 window.searchEpisode = searchEpisode;
-window.toggleTvSearchDropdown = toggleTvSearchDropdown;
-window.closeTvSearchDropdown = closeTvSearchDropdown;
-window.populateTvSearchDropdown = populateTvSearchDropdown;
-window.searchAllEpisodes = searchAllEpisodes;
+window.toggleTvSearchScopeMenu = toggleTvSearchScopeMenu;
+window.closeTvSearchScopeMenu = closeTvSearchScopeMenu;
+window.populateTvSearchScopeMenu = populateTvSearchScopeMenu;
+window.searchAllPendingEpisodes = searchAllPendingEpisodes;
 window.stageRelease = stageRelease;
 window.updateActiveStageBanner = updateActiveStageBanner;
 window.escapeHtml = escapeHtml;

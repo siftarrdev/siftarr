@@ -20,7 +20,7 @@ async def test_clear_cache_route_reports_success(monkeypatch, mock_db, base_cont
     monkeypatch.setattr(
         settings,
         "clear_release_search_cache",
-        AsyncMock(return_value={"deleted_releases": 4, "detached_episode_refs": 2}),
+        AsyncMock(return_value={"deleted_releases": 4}),
     )
 
     response = await settings.clear_cache(MagicMock(), db=mock_db)
@@ -28,7 +28,6 @@ async def test_clear_cache_route_reports_success(monkeypatch, mock_db, base_cont
 
     assert context["message_type"] == "success"
     assert "removed 4 stored release result(s)" in context["message"]
-    assert "detached 2 episode link(s)" in context["message"]
 
 
 @pytest.mark.asyncio

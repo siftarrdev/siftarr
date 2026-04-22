@@ -547,16 +547,16 @@
                     <a id="request-details-overseerr-link" href="#" target="_blank" rel="noopener noreferrer" class="hidden shrink-0 btn-ghost btn-sm">Open in Overseerr</a>
                     <button id="request-details-search-btn" onclick="searchRequestFromDetails()" class="hidden shrink-0 btn-ghost btn-sm"><svg class="inline w-3.5 h-3.5 mr-1 -mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>Refresh Search</button>
                     <div id="request-details-tv-search-btn" class="hidden shrink-0 relative">
-                        <button onclick="toggleTvSearchDropdown(event)" class="btn-ghost btn-sm flex items-center gap-1">
-                            Search
+                        <button onclick="toggleTvSearchScopeMenu(event)" class="btn-ghost btn-sm flex items-center gap-1">
+                            Search Scope
                             <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
                         </button>
-                        <div id="tv-search-dropdown" class="hidden absolute right-0 top-full mt-1 z-[60] bg-surface-800 border border-gray-700/60 rounded-xl shadow-2xl py-2 min-w-[220px]">
-                            <div class="px-4 py-1.5 text-xs font-medium uppercase tracking-wider text-gray-500">Search Scope</div>
-                            <div id="tv-search-dropdown-seasons"></div>
+                        <div id="tv-search-scope-menu" class="hidden absolute right-0 top-full mt-1 z-[60] bg-surface-800 border border-gray-700/60 rounded-xl shadow-2xl py-2 min-w-[220px]">
+                            <div class="px-4 py-1.5 text-xs font-medium uppercase tracking-wider text-gray-500">TV Search Scope</div>
+                            <div id="tv-search-scope-seasons"></div>
                             <div class="border-t border-gray-700/40 my-1"></div>
-                            <button onclick="searchAllEpisodes(); closeTvSearchDropdown();" class="w-full text-left px-4 py-2 text-sm text-gray-300 hover:bg-surface-850 cursor-pointer transition-colors">Search All Episodes</button>
-                            <button onclick="searchAllSeasonPacks(currentRequestId); closeTvSearchDropdown();" class="w-full text-left px-4 py-2 text-sm text-gray-300 hover:bg-surface-850 cursor-pointer transition-colors">Search Multi-Season Packs</button>
+                            <button onclick="searchAllPendingEpisodes(); closeTvSearchScopeMenu();" class="w-full text-left px-4 py-2 text-sm text-gray-300 hover:bg-surface-850 cursor-pointer transition-colors">Search All Pending Episodes</button>
+                            <button onclick="searchMultiSeasonPacks(currentRequestId); closeTvSearchScopeMenu();" class="w-full text-left px-4 py-2 text-sm text-gray-300 hover:bg-surface-850 cursor-pointer transition-colors">Search Multi-Season Packs</button>
                         </div>
                     </div>
                     <button id="request-details-refresh-plex" onclick="refreshPlexAndReload()" class="hidden shrink-0 btn-ghost btn-sm">Refresh Plex</button>

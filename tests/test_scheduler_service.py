@@ -93,7 +93,7 @@ async def test_poll_overseerr_uses_settings_service_import_helper(monkeypatch):
 
     import_requests = AsyncMock(return_value=(2, 1))
     monkeypatch.setattr(
-        scheduler_service.overseerr_import_service,
+        scheduler_service.settings_service,
         "import_overseerr_requests",
         import_requests,
     )
@@ -109,7 +109,7 @@ async def test_poll_overseerr_uses_settings_service_import_helper(monkeypatch):
         overseerr_service_cls=scheduler_service.OverseerrService,
         plex_service_cls=scheduler_service.PlexService,
         evaluate_imported_request_func=scheduler_service.evaluate_imported_request,
-        prepare_overseerr_import_func=scheduler_service.overseerr_import_service.prepare_overseerr_import,
+        prepare_overseerr_import_func=scheduler_service.settings_service.prepare_overseerr_import,
         logger=logger,
     )
     logger.info.assert_called_once_with(
