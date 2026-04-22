@@ -194,11 +194,14 @@ async def use_releases(
                     if current.id != preserved_stage_id
                 ]
                 if superseded:
-                    deleted_superseded = await _delete_superseded_staged_torrents(
-                        db,
-                        staging_service,
-                        superseded,
-                    ) or deleted_superseded
+                    deleted_superseded = (
+                        await _delete_superseded_staged_torrents(
+                            db,
+                            staging_service,
+                            superseded,
+                        )
+                        or deleted_superseded
+                    )
                     replaced_active_selection = True
 
         if deleted_superseded:

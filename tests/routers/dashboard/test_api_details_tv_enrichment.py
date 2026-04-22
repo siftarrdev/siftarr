@@ -9,7 +9,7 @@ import pytest
 
 from app.siftarr.models.request import MediaType, RequestStatus
 from app.siftarr.routers import dashboard_api
-from app.siftarr.services import tv_details_service
+from app.siftarr.services import dashboard_service, tv_details_service
 
 
 @pytest.mark.asyncio
@@ -79,9 +79,9 @@ async def test_request_details_serializes_unreleased_and_pending_tv_counts(
 
     fake_engine = MagicMock()
     fake_engine.evaluate.return_value = MagicMock(rejection_reason=None, matches=[])
-    monkeypatch.setattr(dashboard_api, "OverseerrService", FakeOverseerrService)
+    monkeypatch.setattr(dashboard_service, "OverseerrService", FakeOverseerrService)
     monkeypatch.setattr(
-        dashboard_api.RuleEngine,
+        dashboard_service.RuleEngine,
         "from_db_rules",
         MagicMock(return_value=fake_engine),
     )
@@ -170,9 +170,9 @@ async def test_request_details_flags_fresh_pending_tv_data_for_plex_enrichment(
     fake_engine = MagicMock()
     fake_engine.evaluate.return_value = MagicMock(rejection_reason=None, matches=[])
     scheduled = []
-    monkeypatch.setattr(dashboard_api, "OverseerrService", FakeOverseerrService)
+    monkeypatch.setattr(dashboard_service, "OverseerrService", FakeOverseerrService)
     monkeypatch.setattr(
-        dashboard_api.RuleEngine,
+        dashboard_service.RuleEngine,
         "from_db_rules",
         MagicMock(return_value=fake_engine),
     )
@@ -266,9 +266,9 @@ async def test_request_details_flags_pending_unreleased_tv_data_for_plex_enrichm
 
     fake_engine = MagicMock()
     fake_engine.evaluate.return_value = MagicMock(rejection_reason=None, matches=[])
-    monkeypatch.setattr(dashboard_api, "OverseerrService", FakeOverseerrService)
+    monkeypatch.setattr(dashboard_service, "OverseerrService", FakeOverseerrService)
     monkeypatch.setattr(
-        dashboard_api.RuleEngine,
+        dashboard_service.RuleEngine,
         "from_db_rules",
         MagicMock(return_value=fake_engine),
     )
@@ -362,9 +362,9 @@ async def test_request_details_surfaces_request_level_tv_aggregate_counts(
 
     fake_engine = MagicMock()
     fake_engine.evaluate.return_value = MagicMock(rejection_reason=None, matches=[])
-    monkeypatch.setattr(dashboard_api, "OverseerrService", FakeOverseerrService)
+    monkeypatch.setattr(dashboard_service, "OverseerrService", FakeOverseerrService)
     monkeypatch.setattr(
-        dashboard_api.RuleEngine,
+        dashboard_service.RuleEngine,
         "from_db_rules",
         MagicMock(return_value=fake_engine),
     )

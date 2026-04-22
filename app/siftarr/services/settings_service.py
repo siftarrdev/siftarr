@@ -408,7 +408,9 @@ async def rescan_plex_requests(
     tv_failed = len(resync_results) - tv_resynced
 
     if on_event is not None:
-        await on_event(build_sse_progress_func("polling", title="Running Plex availability poll..."))
+        await on_event(
+            build_sse_progress_func("polling", title="Running Plex availability poll...")
+        )
 
     completed = await polling_service.poll(on_progress=on_event)
     return tv_resynced, tv_failed, completed
@@ -604,7 +606,9 @@ async def import_overseerr_requests(
         if not overseerr_requests:
             return 0, 0
 
-        result = await db.execute(select(RequestModel.external_id, RequestModel.overseerr_request_id))
+        result = await db.execute(
+            select(RequestModel.external_id, RequestModel.overseerr_request_id)
+        )
         existing_rows = result.fetchall()
         existing_external_ids = {row[0] for row in existing_rows}
         existing_request_ids = {row[1] for row in existing_rows if row[1] is not None}
@@ -703,7 +707,9 @@ async def import_overseerr_requests(
 
             plex_service = plex_service_cls(settings=runtime_settings)
             try:
-                episode_sync = EpisodeSyncService(db, overseerr=overseerr_service, plex=plex_service)
+                episode_sync = EpisodeSyncService(
+                    db, overseerr=overseerr_service, plex=plex_service
+                )
                 for req in new_tv_requests:
                     try:
                         await episode_sync.sync_request(req.id)
@@ -777,4 +783,6 @@ async def sync_overseerr_generator(
             )
     except Exception as exc:
         logger.exception("Overseerr SSE sync failed")
-        yield serialize_sse(build_sse_progress_func("error", active=[], message=f"Sync error: {exc}"))
+        yield serialize_sse(
+            build_sse_progress_func("error", active=[], message=f"Sync error: {exc}")
+        )

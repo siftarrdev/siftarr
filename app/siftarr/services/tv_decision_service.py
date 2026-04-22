@@ -1,5 +1,6 @@
 import asyncio
 import logging
+from collections.abc import Sequence
 from datetime import date
 
 from sqlalchemy import select
@@ -21,8 +22,8 @@ from app.siftarr.services.release_parser import (
     parse_release_coverage,
 )
 from app.siftarr.services.release_storage import store_search_results
-from app.siftarr.services.staging_actions import use_releases
 from app.siftarr.services.rule_engine import ReleaseEvaluation, RuleEngine
+from app.siftarr.services.staging_actions import use_releases
 
 logger = logging.getLogger(__name__)
 
@@ -101,7 +102,9 @@ class TVDecisionService:
             episode_number,
         )
 
-    async def _get_aired_db_episodes_for_season(self, request_id: int, season_number: int) -> list[int]:
+    async def _get_aired_db_episodes_for_season(
+        self, request_id: int, season_number: int
+    ) -> list[int]:
         result = await self.db.execute(
             select(Episode.episode_number)
             .join(Season, Episode.season_id == Season.id)
@@ -132,10 +135,13 @@ class TVDecisionService:
         self,
         request: Request,
         rule_engine: RuleEngine,
-        searches: list[tuple[str, int | None, int | None]],
-    ) -> tuple[list[ReleaseEvaluation], list[tuple[int | None, int | None, ReleaseEvaluation]], list[str]]:
+        searches: Sequence[tuple[str, int | None, int | None]],
+    ) -> tuple[
+        list[ReleaseEvaluation], list[tuple[int | None, int | None, ReleaseEvaluation]], list[str]
+    ]:
         if not searches:
             return [], [], []
+        assert request.tvdb_id is not None
 
         search_results = await asyncio.gather(
             *[
@@ -155,7 +161,9 @@ class TVDecisionService:
         passing_releases: list[tuple[int | None, int | None, ReleaseEvaluation]] = []
         errors: list[str] = []
 
-        for (search_type, season, episode), search_result in zip(searches, search_results, strict=False):
+        for (search_type, season, episode), search_result in zip(
+            searches, search_results, strict=False
+        ):
             if isinstance(search_result, Exception):
                 logger.warning(
                     "TV search failed: request_id=%s type=%s season=%s episode=%s error=%s",
@@ -313,7 +321,9 @@ class TVDecisionService:
                 covered_seasons.update(best_multi_season_pack[1])
                 all_selected_releases.append(best_multi_season_pack[0])
 
-        uncovered_seasons = [season for season in requested_seasons if season not in covered_seasons]
+        uncovered_seasons = [
+            season for season in requested_seasons if season not in covered_seasons
+        ]
         season_pack_searches = [("season_pack", season, None) for season in uncovered_seasons]
         season_evaluations, season_candidates, season_errors = await self._search_and_evaluate(
             request,
@@ -345,10 +355,16 @@ class TVDecisionService:
         for season in requested_seasons:
             if season in covered_seasons:
                 continue
-            for episode in await self._get_episode_search_targets(request, season, requested_episodes):
+            for episode in await self._get_episode_search_targets(
+                request, season, requested_episodes
+            ):
                 episode_searches.append(("episode", season, episode))
 
-        episode_stage_evaluations, episode_candidates, episode_errors = await self._search_and_evaluate(
+        (
+            episode_stage_evaluations,
+            episode_candidates,
+            episode_errors,
+        ) = await self._search_and_evaluate(
             request,
             rule_engine,
             episode_searches,
@@ -368,7 +384,7 @@ class TVDecisionService:
             if existing is None or evaluation.total_score > existing.total_score:
                 best_episodes_by_key[key] = evaluation
 
-        for (season, episode), evaluation in best_episodes_by_key.items():
+        for (_season, _episode), evaluation in best_episodes_by_key.items():
             all_selected_releases.append(evaluation)
 
         logger.info(

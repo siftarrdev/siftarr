@@ -1,9 +1,9 @@
 """Staged torrent management router."""
 
+import json
 import logging
 import os
 import re
-import json
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -29,6 +29,7 @@ from app.siftarr.services.lifecycle_service import LifecycleService
 from app.siftarr.services.plex_polling_service import CheckRequestResult, PlexPollingService
 from app.siftarr.services.plex_service import PlexService
 from app.siftarr.services.qbittorrent_service import MediaCategory, QbittorrentService
+
 logger = logging.getLogger(__name__)
 
 _BTIH_RE = re.compile(r"urn:btih:([0-9a-fA-F]{40}|[2-7A-Za-z]{32})", re.IGNORECASE)

@@ -21,7 +21,7 @@ from app.siftarr.services.overseerr_service import (
     build_overseerr_media_url,
     build_poster_url,
 )
-from app.siftarr.services.prowlarr_service import ProwlarrRelease, ProwlarrService
+from app.siftarr.services.prowlarr_service import ProwlarrService
 from app.siftarr.services.release_parser import (
     is_exact_single_episode_release,
     parse_release_coverage,
@@ -119,13 +119,17 @@ class DashboardService:
         request_id: int,
         background_tasks: BackgroundTasks,
     ) -> RequestDetailsData:
-        releases = await self._load_serialized_stored_releases(request_id, media_type=request.media_type)
+        releases = await self._load_serialized_stored_releases(
+            request_id, media_type=request.media_type
+        )
         active_staged_torrents = await self._load_active_staged_payloads(
             request_id,
             media_type=request.media_type,
             request_status=request.status,
         )
-        apply_active_selection_metadata(releases, active_staged_torrents, media_type=request.media_type)
+        apply_active_selection_metadata(
+            releases, active_staged_torrents, media_type=request.media_type
+        )
 
         tv_info = None
         if request.media_type == MediaType.TV:
@@ -150,7 +154,9 @@ class DashboardService:
             timeline=await self._load_timeline(request_id),
         )
 
-    async def load_movie_search_results(self, request: Any, *, request_id: int) -> RequestSearchData:
+    async def load_movie_search_results(
+        self, request: Any, *, request_id: int
+    ) -> RequestSearchData:
         return RequestSearchData(
             request=DashboardRequestSummary(
                 id=request.id,
@@ -158,7 +164,9 @@ class DashboardService:
                 status=request.status.value,
                 media_type=request.media_type.value,
             ),
-            releases=await self._load_serialized_stored_releases(request_id, media_type=request.media_type),
+            releases=await self._load_serialized_stored_releases(
+                request_id, media_type=request.media_type
+            ),
         )
 
     async def search_season_packs(self, request: Any, *, season_number: int) -> TVSearchData:
@@ -268,7 +276,9 @@ class DashboardService:
 
         overseerr_service = OverseerrService(settings=self.settings)
         try:
-            ov_task = asyncio.create_task(overseerr_service.get_request(request.overseerr_request_id))
+            ov_task = asyncio.create_task(
+                overseerr_service.get_request(request.overseerr_request_id)
+            )
             media_details_task = None
             if request.media_type.value == "movie" and request.tmdb_id:
                 media_details_task = asyncio.create_task(
@@ -288,9 +298,12 @@ class DashboardService:
 
             media_details = await media_details_task if media_details_task else None
             merged_media = {**media, **(media_details or {})}
+            overview_value = merged_media.get("overview") or merged_media.get("summary")
             return DashboardOverseerrDetails(
-                overview=merged_media.get("overview") or merged_media.get("summary") or "",
-                poster=build_poster_url(merged_media.get("posterPath") or merged_media.get("poster")),
+                overview=str(overview_value) if overview_value else "",
+                poster=build_poster_url(
+                    merged_media.get("posterPath") or merged_media.get("poster")
+                ),
                 status=request_status,
                 url=build_overseerr_media_url(
                     self.settings.overseerr_url,
@@ -368,7 +381,9 @@ class DashboardService:
         for episode in episodes:
             episodes_by_season.setdefault(episode.season_id, []).append(episode)
 
-        sync_state = compute_sync_metadata(seasons, episodes_by_season, request_id, background_tasks)
+        sync_state = compute_sync_metadata(
+            seasons, episodes_by_season, request_id, background_tasks
+        )
         seasons_data = []
         known_season_numbers: list[int] = []
         for season in seasons:
@@ -401,7 +416,9 @@ class DashboardService:
             )
 
         self._apply_known_tv_release_metadata(releases, known_season_numbers)
-        releases_by_season, releases_by_episode = self._group_tv_releases(releases, known_season_numbers)
+        releases_by_season, releases_by_episode = self._group_tv_releases(
+            releases, known_season_numbers
+        )
         return DashboardTVDetails(
             seasons=seasons_data,
             releases_by_season={str(k): v for k, v in releases_by_season.items()},

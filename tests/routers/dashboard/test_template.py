@@ -86,7 +86,10 @@ def test_dashboard_js_uses_collapsible_episode_results():
     assert "episode-details-" in js
     assert '<details id="\' + episodeDetailsId + \'" class="group rounded-lg border' in js
     assert "if (details) details.open = true;" in js
-    assert "/requests/' + requestId + '/seasons/' + seasonNumber + '/episodes/' + episodeNumber + '/search" in js
+    assert (
+        "/requests/' + requestId + '/seasons/' + seasonNumber + '/episodes/' + episodeNumber + '/search"
+        in js
+    )
 
 
 def test_dashboard_js_includes_release_status_column_and_upload_age():

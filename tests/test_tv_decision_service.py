@@ -174,7 +174,9 @@ class TestProcessRequest:
         )
 
         with (
-            patch.object(service, "_get_rule_engine", new_callable=AsyncMock, return_value=MagicMock()),
+            patch.object(
+                service, "_get_rule_engine", new_callable=AsyncMock, return_value=MagicMock()
+            ),
             patch.object(
                 service,
                 "_get_aired_db_episodes_for_season",
@@ -200,7 +202,9 @@ class TestProcessRequest:
         assert searched_episodes == [1, 2]
 
     @pytest.mark.asyncio
-    async def test_no_aired_or_explicit_episode_targets_skips_episode_fallback(self, service, mock_db):
+    async def test_no_aired_or_explicit_episode_targets_skips_episode_fallback(
+        self, service, mock_db
+    ):
         request = _make_request(seasons=[1])
         mock_db.execute.return_value = MagicMock(scalar_one_or_none=MagicMock(return_value=request))
         mock_db.commit = AsyncMock()
@@ -210,7 +214,9 @@ class TestProcessRequest:
         )
 
         with (
-            patch.object(service, "_get_rule_engine", new_callable=AsyncMock, return_value=MagicMock()),
+            patch.object(
+                service, "_get_rule_engine", new_callable=AsyncMock, return_value=MagicMock()
+            ),
             patch.object(
                 service,
                 "_get_aired_db_episodes_for_season",
@@ -555,7 +561,11 @@ class TestProcessRequest:
 
         execute_results = [
             MagicMock(scalar_one_or_none=MagicMock(return_value=request)),
-            MagicMock(scalars=MagicMock(return_value=MagicMock(all=MagicMock(return_value=[stored_release])))),
+            MagicMock(
+                scalars=MagicMock(
+                    return_value=MagicMock(all=MagicMock(return_value=[stored_release]))
+                )
+            ),
         ]
         mock_db.execute = AsyncMock(side_effect=execute_results)
         mock_db.commit = AsyncMock()
@@ -583,16 +593,29 @@ class TestProcessRequest:
             patch(
                 "app.siftarr.services.tv_decision_service.use_releases", new_callable=AsyncMock
             ) as mock_use,
-            patch.object(service, "_update_episode_status", new_callable=AsyncMock) as mock_update_episode,
-            patch.object(service, "_update_season_status", new_callable=AsyncMock) as mock_update_season,
+            patch.object(
+                service, "_update_episode_status", new_callable=AsyncMock
+            ) as mock_update_episode,
+            patch.object(
+                service, "_update_season_status", new_callable=AsyncMock
+            ) as mock_update_season,
         ):
             mock_use.return_value = {"status": "downloading", "message": "ok"}
             await service.process_request(1)
 
-        assert mock_update_episode.await_args_list[0].args == (1, 1, None, RequestStatus.DOWNLOADING)
+        assert mock_update_episode.await_args_list[0].args == (
+            1,
+            1,
+            None,
+            RequestStatus.DOWNLOADING,
+        )
         assert mock_update_season.await_args_list[0].args == (1, 1, RequestStatus.DOWNLOADING)
-        assert all(call.args[-1] != RequestStatus.SEARCHING for call in mock_update_episode.await_args_list)
-        assert all(call.args[-1] != RequestStatus.SEARCHING for call in mock_update_season.await_args_list)
+        assert all(
+            call.args[-1] != RequestStatus.SEARCHING for call in mock_update_episode.await_args_list
+        )
+        assert all(
+            call.args[-1] != RequestStatus.SEARCHING for call in mock_update_season.await_args_list
+        )
 
     @pytest.mark.asyncio
     async def test_no_passing_releases_goes_to_pending(self, service, mock_db):

@@ -15,20 +15,21 @@ from app.siftarr.config import get_settings
 from app.siftarr.database import async_session_maker, get_db
 from app.siftarr.models.request import Request as RequestModel
 from app.siftarr.models.request import RequestStatus
-from app.siftarr.services.connection_tester import ConnectionTestResult, ConnectionTester
+from app.siftarr.services.connection_tester import ConnectionTester, ConnectionTestResult
 from app.siftarr.services.overseerr_service import OverseerrService
 from app.siftarr.services.plex_polling_service import PlexPollingService
 from app.siftarr.services.plex_service import PlexService
 from app.siftarr.services.release_storage import clear_release_search_cache
 from app.siftarr.services.rule_service import RuleService
-from app.siftarr.services.scheduler_service import PLEX_POLL_JOB_NAME, PLEX_RECENT_SCAN_JOB_NAME
+from app.siftarr.services.scheduler_service import (
+    PLEX_POLL_JOB_NAME,
+    PLEX_RECENT_SCAN_JOB_NAME,
+)
 from app.siftarr.services.settings_service import (
-    build_compact_metrics_snapshot,
     build_effective_settings,
     build_effective_settings_obj,
     build_manual_plex_job_message,
     build_plex_job_statuses,
-    build_plex_run_outcome_summary,
     build_settings_page_context,
     build_sse_progress,
     import_overseerr_requests,
@@ -37,7 +38,6 @@ from app.siftarr.services.settings_service import (
     rescan_plex_requests,
     rescan_plex_tv_request,
     run_bounded_with_progress,
-    serialize_datetime,
     sync_overseerr_generator,
 )
 from app.siftarr.services.unreleased_service import evaluate_imported_request
@@ -576,7 +576,9 @@ async def sync_overseerr(
     context = await _build_settings_page_context(request, db)
     effective_settings = context["env"]
 
-    if not effective_settings.get("overseerr_url") or not effective_settings.get("overseerr_api_key"):
+    if not effective_settings.get("overseerr_url") or not effective_settings.get(
+        "overseerr_api_key"
+    ):
         context["message"] = "Overseerr is not configured. Please set URL and API key."
         context["message_type"] = "error"
         return templates.TemplateResponse(request, "settings.html", context)

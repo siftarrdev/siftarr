@@ -84,13 +84,10 @@ class RuleEngine:
             or coverage.is_complete_series
             or coverage.episode_number is not None
         )
-
-        if rule.media_scope == "movie" and is_tv_release:
-            return False
-        if rule.media_scope == "tv" and not is_tv_release:
-            return False
-
-        return True
+        return not (
+            (rule.media_scope == "movie" and is_tv_release)
+            or (rule.media_scope == "tv" and not is_tv_release)
+        )
 
     @staticmethod
     def _pattern_matches(title: str, pattern: str) -> bool:

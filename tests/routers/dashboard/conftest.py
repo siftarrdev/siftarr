@@ -6,7 +6,6 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 from fastapi import BackgroundTasks
 
-from app.siftarr.routers import dashboard_api
 from app.siftarr.services import dashboard_service
 from app.siftarr.services.background_tasks import DETAILS_SYNC_TASKS
 
