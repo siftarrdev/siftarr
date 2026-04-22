@@ -14,8 +14,8 @@ from app.siftarr.services.prowlarr_service import ProwlarrRelease, ProwlarrSearc
 
 
 @pytest.mark.asyncio
-async def test_search_all_season_packs_returns_coverage_metadata(mock_db, monkeypatch):
-    """Search-all endpoint should surface season coverage for broad TV packs."""
+async def test_search_multi_season_packs_returns_coverage_metadata(mock_db, monkeypatch):
+    """Multi-season endpoint should surface season coverage for broad TV packs."""
     request_record = MagicMock()
     request_record.id = 12
     request_record.media_type = MediaType.TV
@@ -101,9 +101,10 @@ async def test_search_all_season_packs_returns_coverage_metadata(mock_db, monkey
         MagicMock(return_value=fake_engine),
     )
 
-    response = await dashboard_api.search_all_season_packs(request_id=12, db=mock_db)
+    response = await dashboard_api.search_multi_season_packs(request_id=12, db=mock_db)
 
     body = json.loads(cast(bytes, response.body))
+    assert body["scope"] == {"type": "multi_season_packs"}
     assert body["known_total_seasons"] == 3
     assert [release["title"] for release in body["releases"]] == [
         "Foundation.S01-03.1080p.WEB-DL",
@@ -219,6 +220,7 @@ async def test_search_season_packs_excludes_multi_season_results(mock_db, monkey
     response = await dashboard_api.search_season_packs(request_id=12, season_number=1, db=mock_db)
 
     body = json.loads(cast(bytes, response.body))
+    assert body["scope"] == {"type": "season_packs", "season_number": 1}
     assert [release["title"] for release in body["releases"]] == [
         "Foundation.Complete.S01.1080p.BluRay",
         "Foundation.S01.2160p.WEB-DL",
@@ -295,6 +297,7 @@ async def test_search_season_packs_orders_by_score_then_size(mock_db, monkeypatc
     response = await dashboard_api.search_season_packs(request_id=12, season_number=1, db=mock_db)
 
     body = json.loads(cast(bytes, response.body))
+    assert body["scope"] == {"type": "season_packs", "season_number": 1}
     assert [release["title"] for release in body["releases"]] == [
         "Foundation.Complete.S01.1080p.BluRay",
         "Foundation.S01.2160p.WEB-DL",
@@ -372,6 +375,7 @@ async def test_search_season_packs_prioritizes_size_limit_passes(mock_db, monkey
     response = await dashboard_api.search_season_packs(request_id=12, season_number=1, db=mock_db)
 
     body = json.loads(cast(bytes, response.body))
+    assert body["scope"] == {"type": "season_packs", "season_number": 1}
     assert [release["title"] for release in body["releases"]] == [
         "Foundation.S01.1080p.WEB-DL.BADTAG",
         "Foundation.S01.2160p.REMUX",
@@ -495,12 +499,13 @@ async def test_search_episode_excludes_packs_and_multi_season_results(mock_db, m
     )
 
     body = json.loads(cast(bytes, response.body))
+    assert body["scope"] == {"type": "single_episode", "season_number": 1, "episode_number": 1}
     assert [release["title"] for release in body["releases"]] == ["Foundation.S01E01.1080p.WEB-DL"]
 
 
 @pytest.mark.asyncio
-async def test_search_all_season_packs_orders_by_score_then_size(mock_db, monkeypatch):
-    """Broad season-pack search should prefer higher score, then smaller size."""
+async def test_search_multi_season_packs_orders_by_score_then_size(mock_db, monkeypatch):
+    """Multi-season search should prefer higher score, then smaller size."""
     request_record = MagicMock()
     request_record.id = 12
     request_record.media_type = MediaType.TV
@@ -572,9 +577,10 @@ async def test_search_all_season_packs_orders_by_score_then_size(mock_db, monkey
         MagicMock(return_value=fake_engine),
     )
 
-    response = await dashboard_api.search_all_season_packs(request_id=12, db=mock_db)
+    response = await dashboard_api.search_multi_season_packs(request_id=12, db=mock_db)
 
     body = json.loads(cast(bytes, response.body))
+    assert body["scope"] == {"type": "multi_season_packs"}
     assert [release["title"] for release in body["releases"]] == [
         "Foundation.S01-02.1080p.WEB-DL",
         "Foundation.S01-S02.2160p.WEB-DL",
@@ -658,6 +664,7 @@ async def test_search_episode_orders_by_score_then_size(mock_db, monkeypatch):
     )
 
     body = json.loads(cast(bytes, response.body))
+    assert body["scope"] == {"type": "single_episode", "season_number": 1, "episode_number": 1}
     assert [release["title"] for release in body["releases"]] == [
         "Foundation.S01E01.1080p.WEB-DL",
         "Foundation.S01E01.2160p.WEB-DL",
@@ -667,8 +674,8 @@ async def test_search_episode_orders_by_score_then_size(mock_db, monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_search_all_season_packs_rejects_non_tv_requests(mock_db):
-    """Search-all endpoint should reject non-TV requests."""
+async def test_search_multi_season_packs_rejects_non_tv_requests(mock_db):
+    """Multi-season endpoint should reject non-TV requests."""
     request_record = MagicMock()
     request_record.media_type = MediaType.MOVIE
 
@@ -677,7 +684,7 @@ async def test_search_all_season_packs_rejects_non_tv_requests(mock_db):
     mock_db.execute.return_value = request_result
 
     with pytest.raises(HTTPException) as exc_info:
-        await dashboard_api.search_all_season_packs(request_id=44, db=mock_db)
+        await dashboard_api.search_multi_season_packs(request_id=44, db=mock_db)
 
     assert exc_info.value.status_code == 400
     assert exc_info.value.detail == "Request is not a TV show"

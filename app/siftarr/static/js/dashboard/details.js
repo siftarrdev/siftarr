@@ -40,7 +40,7 @@ async function openRequestDetails(requestId, explicitIndex = null) {
     }
     if (tvSearchBtn) {
         tvSearchBtn.classList.add('hidden');
-        window.closeTvSearchDropdown();
+        window.closeTvSearchScopeMenu();
     }
     window.currentTvSeasons = [];
     window.updateActiveStageBanner({ active_staged_torrent: null });
@@ -98,7 +98,7 @@ async function openRequestDetails(requestId, explicitIndex = null) {
 
         if (data.request.media_type === 'tv' && data.tv_info) {
             window.currentTvSeasons = data.tv_info.seasons || [];
-            window.populateTvSearchDropdown();
+            window.populateTvSearchScopeMenu();
             document.getElementById('release-results-header').classList.add('hidden');
             document.getElementById('release-filter-input').classList.add('hidden');
             if (cacheIndicator) cacheIndicator.classList.add('hidden');

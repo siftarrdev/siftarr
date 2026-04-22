@@ -101,6 +101,7 @@ class RequestSearchData:
 class TVSearchData:
     releases: list[dict[str, object]]
     known_total_seasons: int | None = None
+    scope: dict[str, object] | None = None
     error: str | None = None
 
 
@@ -163,7 +164,11 @@ class DashboardService:
     async def search_season_packs(self, request: Any, *, season_number: int) -> TVSearchData:
         result = await self._search_tv(request, season=season_number)
         if result.error:
-            return TVSearchData(releases=[], error=result.error)
+            return TVSearchData(
+                releases=[],
+                scope={"type": "season_packs", "season_number": season_number},
+                error=result.error,
+            )
 
         engine = await self._build_rule_engine(media_type="tv")
         releases = []
@@ -179,14 +184,20 @@ class DashboardService:
                 serialize_evaluated_release(release, engine.evaluate(release), coverage=coverage)
             )
         return TVSearchData(
-            releases=finalize_releases(releases, sort_key=season_pack_release_sort_key)
+            releases=finalize_releases(releases, sort_key=season_pack_release_sort_key),
+            scope={"type": "season_packs", "season_number": season_number},
         )
 
-    async def search_all_season_packs(self, request: Any, *, request_id: int) -> TVSearchData:
+    async def search_multi_season_packs(self, request: Any, *, request_id: int) -> TVSearchData:
         known_total_seasons = await self._known_total_seasons(request_id)
         result = await self._search_tv(request)
         if result.error:
-            return TVSearchData(releases=[], known_total_seasons=known_total_seasons, error=result.error)
+            return TVSearchData(
+                releases=[],
+                known_total_seasons=known_total_seasons,
+                scope={"type": "multi_season_packs"},
+                error=result.error,
+            )
 
         engine = await self._build_rule_engine(media_type="tv")
         releases = []
@@ -207,6 +218,7 @@ class DashboardService:
         return TVSearchData(
             releases=finalize_releases(releases, sort_key=season_pack_release_sort_key),
             known_total_seasons=known_total_seasons,
+            scope={"type": "multi_season_packs"},
         )
 
     async def search_episode(
@@ -218,7 +230,15 @@ class DashboardService:
     ) -> TVSearchData:
         result = await self._search_tv(request, season=season_number, episode=episode_number)
         if result.error:
-            return TVSearchData(releases=[], error=result.error)
+            return TVSearchData(
+                releases=[],
+                scope={
+                    "type": "single_episode",
+                    "season_number": season_number,
+                    "episode_number": episode_number,
+                },
+                error=result.error,
+            )
 
         engine = await self._build_rule_engine(media_type="tv")
         releases = []
@@ -233,7 +253,14 @@ class DashboardService:
             if not is_exact_single_episode_release(release.title, season_number, episode_number):
                 continue
             releases.append(serialize_evaluated_release(release, engine.evaluate(release)))
-        return TVSearchData(releases=finalize_releases(releases))
+        return TVSearchData(
+            releases=finalize_releases(releases),
+            scope={
+                "type": "single_episode",
+                "season_number": season_number,
+                "episode_number": episode_number,
+            },
+        )
 
     async def _load_overseerr_details(self, request: Any) -> DashboardOverseerrDetails | None:
         if not request.overseerr_request_id:
@@ -530,6 +557,8 @@ def serialize_request_search_response(data: RequestSearchData) -> dict[str, obje
 def serialize_tv_search_response(data: TVSearchData) -> dict[str, object]:
     """Convert TV-search service DTOs into JSON-ready payloads."""
     payload: dict[str, object] = {"releases": data.releases}
+    if data.scope is not None:
+        payload["scope"] = data.scope
     if data.error is not None:
         payload["error"] = data.error
     if data.known_total_seasons is not None:

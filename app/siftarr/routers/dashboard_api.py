@@ -120,7 +120,7 @@ async def get_request_seasons(
     )
 
 
-@router.post("/{request_id}/seasons/{season_number}/search")
+@router.post("/{request_id}/seasons/{season_number}/season-packs/search")
 async def search_season_packs(
     request_id: int,
     season_number: int,
@@ -136,15 +136,15 @@ async def search_season_packs(
     return JSONResponse(serialize_tv_search_response(search_data))
 
 
-@router.post("/{request_id}/seasons/search-all")
-async def search_all_season_packs(
+@router.post("/{request_id}/multi-season-packs/search")
+async def search_multi_season_packs(
     request_id: int,
     db: AsyncSession = Depends(get_db),
 ) -> JSONResponse:
-    """Search broadly for TV season packs without downloading anything."""
+    """Search broadly for TV multi-season packs without downloading anything."""
     request = await load_request_or_404(db, request_id)
     validate_tv_request(request)
-    search_data = await DashboardService(db, settings=get_settings()).search_all_season_packs(
+    search_data = await DashboardService(db, settings=get_settings()).search_multi_season_packs(
         request,
         request_id=request_id,
     )
