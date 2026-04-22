@@ -10,7 +10,8 @@ from app.siftarr.services.activity_log_service import ActivityLogService
 from app.siftarr.services.pending_queue_service import PendingQueueService
 from app.siftarr.services.prowlarr_service import ProwlarrService
 from app.siftarr.services.qbittorrent_service import QbittorrentService
-from app.siftarr.services.release_selection_service import store_search_results, use_releases
+from app.siftarr.services.release_storage import store_search_results
+from app.siftarr.services.staging_actions import use_releases
 from app.siftarr.services.rule_engine import RuleEngine
 
 logger = logging.getLogger(__name__)

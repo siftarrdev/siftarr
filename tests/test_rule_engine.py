@@ -122,8 +122,8 @@ class TestRuleEngine:
         assert result.rejection_reason is not None
         assert "above maximum" in result.rejection_reason
 
-    def test_evaluate_size_limit_targets_tv_season_packs_only(self):
-        """Season-pack size rules should apply to pack releases only."""
+    def test_evaluate_tv_targeted_season_pack_rule_uses_raw_release_size(self):
+        """Season-pack-targeted size rules should still compare the raw release size."""
         engine = RuleEngine(
             size_limit_rules=[
                 SizeLimitRule(
@@ -150,8 +150,8 @@ class TestRuleEngine:
         assert result.passed is False
         assert result.rejection_reason == "Size 4.00 GB below minimum 5.00 GB"
 
-    def test_evaluate_size_limit_targets_tv_episodes_only(self):
-        """Episode size rules should apply to single-episode releases only."""
+    def test_evaluate_tv_targeted_episode_rule_uses_raw_release_size(self):
+        """Episode-targeted size rules should still compare the raw release size."""
         engine = RuleEngine(
             size_limit_rules=[
                 SizeLimitRule(
@@ -178,8 +178,8 @@ class TestRuleEngine:
         assert result.passed is False
         assert result.rejection_reason == "Size 1.00 GB below minimum 2.00 GB"
 
-    def test_evaluate_episode_target_skips_season_pack(self):
-        """Episode-target rules should not reject season packs."""
+    def test_evaluate_episode_target_rule_does_not_skip_season_pack(self):
+        """Episode-target metadata should not bypass raw size checks for season packs."""
         engine = RuleEngine(
             size_limit_rules=[
                 SizeLimitRule(
@@ -203,10 +203,11 @@ class TestRuleEngine:
 
         result = engine.evaluate(release)
 
-        assert result.passed is True
+        assert result.passed is False
+        assert result.rejection_reason == "Size 4.00 GB below minimum 5.00 GB"
 
-    def test_evaluate_season_pack_target_skips_episode_release(self):
-        """Season-pack-target rules should not reject single episodes."""
+    def test_evaluate_season_pack_target_rule_does_not_skip_episode_release(self):
+        """Season-pack-target metadata should not bypass raw size checks for episodes."""
         engine = RuleEngine(
             size_limit_rules=[
                 SizeLimitRule(
@@ -230,7 +231,8 @@ class TestRuleEngine:
 
         result = engine.evaluate(release)
 
-        assert result.passed is True
+        assert result.passed is False
+        assert result.rejection_reason == "Size 1.00 GB below minimum 2.00 GB"
 
     def test_evaluate_movie_size_rule_without_tv_target(self):
         """Movie size rules should still work without a TV target."""
@@ -338,8 +340,8 @@ class TestRuleEngine:
         assert movie_result.rejection_reason == "Size 4.00 GB below minimum 5.00 GB"
         assert tv_result.passed is False
 
-    def test_evaluate_both_episode_target_still_applies_to_movies(self):
-        """A both-scoped episode-target rule should still apply to movie releases."""
+    def test_evaluate_both_episode_target_rule_also_applies_to_tv_packs(self):
+        """Both-scoped episode-target rules should also size-check TV packs."""
         engine = RuleEngine(
             size_limit_rules=[
                 SizeLimitRule(
@@ -375,10 +377,11 @@ class TestRuleEngine:
 
         assert movie_result.passed is False
         assert movie_result.rejection_reason == "Size 4.00 GB below minimum 5.00 GB"
-        assert tv_pack_result.passed is True
+        assert tv_pack_result.passed is False
+        assert tv_pack_result.rejection_reason == "Size 4.00 GB below minimum 5.00 GB"
 
-    def test_evaluate_both_season_pack_target_still_applies_to_movies(self):
-        """A both-scoped season-pack-target rule should still apply to movie releases."""
+    def test_evaluate_both_season_pack_target_rule_also_applies_to_tv_episodes(self):
+        """Both-scoped season-pack-target rules should also size-check TV episodes."""
         engine = RuleEngine(
             size_limit_rules=[
                 SizeLimitRule(
@@ -414,7 +417,8 @@ class TestRuleEngine:
 
         assert movie_result.passed is False
         assert movie_result.rejection_reason == "Size 4.00 GB below minimum 5.00 GB"
-        assert tv_episode_result.passed is True
+        assert tv_episode_result.passed is False
+        assert tv_episode_result.rejection_reason == "Size 4.00 GB below minimum 5.00 GB"
 
     def test_evaluate_exclusion_rejection(self):
         """Test exclusion pattern rejection."""

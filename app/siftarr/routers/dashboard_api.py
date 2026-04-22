@@ -30,7 +30,7 @@ from app.siftarr.services.release_parser import (
     parse_release_coverage,
     parse_stored_release_coverage,
 )
-from app.siftarr.services.release_selection_service import build_prowlarr_release
+from app.siftarr.services.release_storage import build_prowlarr_release
 from app.siftarr.services.release_serializers import (
     apply_release_size_per_season_metadata,
     finalize_releases,
@@ -349,7 +349,7 @@ async def request_details(
                     release.get("is_complete_series") or len(covered_seasons) >= known_total_seasons
                 )
             )
-            apply_release_size_per_season_metadata(release, rule_engine=engine)
+            apply_release_size_per_season_metadata(release)
 
         releases_by_season: dict[int, list[dict[str, object]]] = {}
         releases_by_episode: dict[tuple[int, int], list[dict[str, object]]] = {}

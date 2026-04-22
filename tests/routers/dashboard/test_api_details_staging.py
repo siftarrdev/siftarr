@@ -102,7 +102,6 @@ async def test_request_details_surfaces_active_staged_torrent_metadata(
         total_score=95,
         passed=True,
     )
-    fake_engine.evaluate_per_season_size.return_value = True
 
     monkeypatch.setattr(dashboard_api, "OverseerrService", FakeOverseerrService)
     monkeypatch.setattr(
@@ -250,7 +249,6 @@ async def test_request_details_tv_scopes_active_stage_to_matching_episode(
         total_score=95,
         passed=True,
     )
-    fake_engine.evaluate_per_season_size.return_value = True
 
     monkeypatch.setattr(dashboard_api, "OverseerrService", FakeOverseerrService)
     monkeypatch.setattr(

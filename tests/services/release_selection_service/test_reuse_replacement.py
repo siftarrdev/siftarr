@@ -121,13 +121,7 @@ async def test_use_releases_replaces_existing_active_stage_for_manual_selection(
     assert result["action"] == "replaced_active_selection"
     assert result["message"] == "Replaced the active staged selection with 1 release(s)."
     assert result["staged_ids"] == [replacement_stage.id]
-    assert existing_stage.status == "replaced"
-    assert existing_stage.replaced_by_id == replacement_stage.id
-    assert existing_stage.replaced_at is not None
-    assert (
-        existing_stage.replacement_reason
-        == "Manually replaced staged selection from request details"
-    )
+    mock_db.delete.assert_awaited_once_with(existing_stage)
     queue_service.remove_from_queue.assert_awaited_once_with(request_record.id)
 
 
@@ -198,8 +192,7 @@ async def test_use_releases_reuses_existing_manual_pick_and_retires_auto_pick(
     assert result["action"] == "replaced_active_selection"
     assert result["message"] == "Replaced the active staged selection with 1 release(s)."
     assert result["staged_ids"] == [manual_stage.id]
-    assert auto_stage.status == "replaced"
-    assert auto_stage.replaced_by_id == manual_stage.id
+    mock_db.delete.assert_awaited_once_with(auto_stage)
     assert manual_stage.status == "staged"
     staging_service.save_release.assert_not_awaited()
 
@@ -293,5 +286,5 @@ async def test_use_releases_tv_single_episode_reuses_same_episode_stage_without_
     assert result["staged_ids"] == [same_episode_stage.id]
     assert same_episode_stage.status == "staged"
     assert sibling_stage.status == "staged"
-    assert sibling_stage.replaced_by_id is None
+    mock_db.delete.assert_not_awaited()
     staging_service.save_release.assert_not_awaited()

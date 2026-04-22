@@ -1,6 +1,5 @@
 import re
 from collections.abc import Sequence
-from contextlib import suppress
 from dataclasses import dataclass
 
 from app.siftarr.models.rule import TVTarget
@@ -71,28 +70,6 @@ class RuleEngine:
         self.requirement_patterns = requirement_patterns or []
         self.scorer_patterns = scorer_patterns or []
 
-        self._compiled_exclusion: list[tuple[int, str, re.Pattern[str]]] = []
-        self._compiled_requirement: list[tuple[int, str, re.Pattern[str]]] = []
-        self._compiled_scorer: list[tuple[int, str, re.Pattern[str], int]] = []
-
-        for rule_id, rule_name, pattern in self.exclusion_patterns:
-            with suppress(re.error):
-                self._compiled_exclusion.append(
-                    (rule_id, rule_name, re.compile(pattern, re.IGNORECASE))
-                )
-
-        for rule_id, rule_name, pattern in self.requirement_patterns:
-            with suppress(re.error):
-                self._compiled_requirement.append(
-                    (rule_id, rule_name, re.compile(pattern, re.IGNORECASE))
-                )
-
-        for rule_id, rule_name, pattern, score in self.scorer_patterns:
-            with suppress(re.error):
-                self._compiled_scorer.append(
-                    (rule_id, rule_name, re.compile(pattern, re.IGNORECASE), score)
-                )
-
     @staticmethod
     def _scope_matches(rule_scope: str, media_type: str | None) -> bool:
         if not rule_scope or rule_scope == "both" or media_type is None:
@@ -100,24 +77,7 @@ class RuleEngine:
         return rule_scope == media_type
 
     @staticmethod
-    def _release_matches_tv_target(release: ProwlarrRelease, tv_target: TVTarget | None) -> bool:
-        if tv_target is None:
-            return False
-
-        coverage = parse_release_coverage(release.title)
-        is_episode = coverage.episode_number is not None
-        is_pack = (
-            coverage.is_complete_series or len(coverage.season_numbers) >= 1 and not is_episode
-        )
-
-        if tv_target == TVTarget.EPISODE:
-            return is_episode
-        if tv_target == TVTarget.SEASON_PACK:
-            return is_pack
-        return False
-
-    @classmethod
-    def _size_rule_applies_to_release(cls, rule: SizeLimitRule, release: ProwlarrRelease) -> bool:
+    def _size_rule_applies_to_release(rule: SizeLimitRule, release: ProwlarrRelease) -> bool:
         coverage = parse_release_coverage(release.title)
         is_tv_release = bool(
             coverage.season_numbers
@@ -130,10 +90,14 @@ class RuleEngine:
         if rule.media_scope == "tv" and not is_tv_release:
             return False
 
-        if rule.tv_target is not None and is_tv_release:
-            return cls._release_matches_tv_target(release, rule.tv_target)
-
         return True
+
+    @staticmethod
+    def _pattern_matches(title: str, pattern: str) -> bool:
+        try:
+            return re.search(pattern, title, re.IGNORECASE) is not None
+        except re.error:
+            return False
 
     @classmethod
     def from_db_rules(
@@ -214,35 +178,6 @@ class RuleEngine:
         gib = size_bytes / 1024 / 1024 / 1024
         return f"{gib:.2f} GB"
 
-    def evaluate_per_season_size(self, size_bytes: int) -> bool | None:
-        """
-        Evaluate a per-season size against SEASON_PACK size-limit rules.
-
-        Applicable rules are those where:
-          - tv_target == TVTarget.SEASON_PACK, OR
-          - tv_target is None AND media_scope == "tv"
-
-        Returns False on first violation, True if all applicable rules pass,
-        None if no applicable rules found.
-        """
-        applicable = [
-            rule
-            for rule in self.size_limit_rules
-            if rule.tv_target == TVTarget.SEASON_PACK
-            or (rule.tv_target is None and rule.media_scope == "tv")
-        ]
-
-        if not applicable:
-            return None
-
-        for rule in applicable:
-            if rule.min_size_bytes is not None and size_bytes < rule.min_size_bytes:
-                return False
-            if rule.max_size_bytes is not None and size_bytes > rule.max_size_bytes:
-                return False
-
-        return True
-
     def evaluate(self, release: ProwlarrRelease) -> ReleaseEvaluation:
         """
         Evaluate a single release against all rules.
@@ -299,8 +234,8 @@ class RuleEngine:
             )
 
         # Check exclusion patterns (reject immediately)
-        for rule_id, rule_name, compiled in self._compiled_exclusion:
-            if compiled.search(release.title):
+        for rule_id, rule_name, pattern in self.exclusion_patterns:
+            if self._pattern_matches(release.title, pattern):
                 passed = False
                 rejection_reason = f"Matched exclusion pattern: {rule_name}"
                 matches.append(
@@ -321,10 +256,10 @@ class RuleEngine:
                 )
 
         # Check requirement patterns (all must match at least one)
-        if passed and self._compiled_requirement:
+        if passed and self.requirement_patterns:
             any_matched = False
-            for rule_id, rule_name, compiled in self._compiled_requirement:
-                if compiled.search(release.title):
+            for rule_id, rule_name, pattern in self.requirement_patterns:
+                if self._pattern_matches(release.title, pattern):
                     any_matched = True
                     matches.append(
                         RuleMatch(
@@ -347,8 +282,8 @@ class RuleEngine:
                 rejection_reason = "No requirement patterns matched"
 
         # Calculate score for scorer patterns
-        for rule_id, rule_name, compiled, score in self._compiled_scorer:
-            if compiled.search(release.title):
+        for rule_id, rule_name, pattern, score in self.scorer_patterns:
+            if self._pattern_matches(release.title, pattern):
                 total_score += score
                 matches.append(
                     RuleMatch(

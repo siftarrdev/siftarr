@@ -252,9 +252,7 @@ async def test_use_releases_tv_single_episode_selection_only_replaces_same_episo
     assert reselection_result["status"] == "staged"
     assert reselection_result["action"] == "replaced_active_selection"
     assert reselection_result["staged_ids"] == [stage_episode_one_replacement.id]
-    assert stage_episode_one.status == "replaced"
-    assert stage_episode_one.replaced_by_id == stage_episode_one_replacement.id
+    mock_db.delete.assert_awaited_once_with(stage_episode_one)
     assert stage_episode_two.status == "staged"
-    assert stage_episode_two.replaced_by_id is None
     assert staging_service.save_release.await_count == 3
     queue_service.remove_from_queue.assert_awaited()
