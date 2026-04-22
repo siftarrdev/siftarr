@@ -618,6 +618,58 @@ class TestProcessRequest:
         )
 
     @pytest.mark.asyncio
+    async def test_selected_tv_releases_use_persisted_dedupe_key_not_title(self, service, mock_db):
+        request = _make_request(seasons=[1], episodes={1: [1, 2]})
+        stored_release = MagicMock()
+        stored_release.id = 500
+        stored_release.title = "Show.S01.1080p"
+        stored_release.info_hash = "selected-hash"
+
+        mock_db.execute.return_value = MagicMock(scalar_one_or_none=MagicMock(return_value=request))
+        mock_db.commit = AsyncMock()
+        mock_db.flush = AsyncMock()
+
+        selected_pack = _make_release(title="Show.S01.1080p", info_hash="selected-hash")
+        duplicate_title_other_hash = _make_release(title="Show.S01.1080p", info_hash="other-hash")
+
+        service.prowlarr.search_by_tvdbid = AsyncMock(
+            side_effect=[
+                ProwlarrSearchResult(
+                    releases=[selected_pack, duplicate_title_other_hash], query_time_ms=100
+                )
+            ]
+        )
+
+        rule_engine = MagicMock()
+        rule_engine.evaluate.side_effect = [
+            _passing_eval(selected_pack, score=80),
+            _passing_eval(duplicate_title_other_hash, score=70),
+        ]
+
+        with (
+            patch.object(
+                service, "_get_rule_engine", new_callable=AsyncMock, return_value=rule_engine
+            ),
+            patch(
+                "app.siftarr.services.tv_decision_service.store_search_results",
+                new_callable=AsyncMock,
+                return_value={
+                    "selected-hash": stored_release,
+                    "other-hash": MagicMock(id=501, title="Show.S01.1080p", info_hash="other-hash"),
+                },
+            ),
+            patch(
+                "app.siftarr.services.tv_decision_service.use_releases", new_callable=AsyncMock
+            ) as mock_use,
+        ):
+            mock_use.return_value = {"status": "downloading", "message": "ok"}
+            await service.process_request(1)
+
+        assert mock_use.await_args is not None
+        selected_releases = mock_use.await_args.args[2]
+        assert selected_releases == [stored_release]
+
+    @pytest.mark.asyncio
     async def test_no_passing_releases_goes_to_pending(self, service, mock_db):
         request = _make_request(
             seasons=[1],

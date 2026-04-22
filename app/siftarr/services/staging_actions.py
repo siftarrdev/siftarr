@@ -26,12 +26,12 @@ async def _get_active_staged_torrents(
     db: AsyncSession,
     request_id: int,
 ) -> list[StagedTorrent]:
-    """Load currently staged torrents for a request."""
+    """Load currently active staging torrents for a request."""
     result = await db.execute(
         select(StagedTorrent)
         .where(
             StagedTorrent.request_id == request_id,
-            StagedTorrent.status == "staged",
+            StagedTorrent.status.in_(("staged", "approved")),
         )
         .order_by(StagedTorrent.created_at.asc(), StagedTorrent.id.asc())
     )

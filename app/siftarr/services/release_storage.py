@@ -2,7 +2,7 @@
 
 import logging
 
-from sqlalchemy import delete, func, or_, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.siftarr.models.release import Release
@@ -16,6 +16,11 @@ from app.siftarr.services.release_parser import (
 from app.siftarr.services.rule_engine import ReleaseEvaluation
 
 logger = logging.getLogger(__name__)
+
+
+def get_release_persistence_key(*, title: str, info_hash: str | None) -> str:
+    """Return the stable key used when deduplicating persisted releases."""
+    return info_hash or title
 
 
 async def _purge_releases(
@@ -77,11 +82,11 @@ async def store_search_results(
     """Replace stored search results for a request with the latest evaluations."""
     await _purge_releases(db, request_id=request_id, commit=False)
 
-    records_by_title: dict[str, Release] = {}
+    records_by_key: dict[str, Release] = {}
     seen_keys: set[str] = set()
     for evaluation in evaluations:
         release = evaluation.release
-        dedupe_key = release.info_hash or release.title
+        dedupe_key = get_release_persistence_key(title=release.title, info_hash=release.info_hash)
         if dedupe_key in seen_keys:
             continue
         seen_keys.add(dedupe_key)
@@ -109,12 +114,12 @@ async def store_search_results(
             passed_rules=evaluation.passed,
         )
         db.add(record)
-        records_by_title[record.title] = record
+        records_by_key[dedupe_key] = record
 
     await db.commit()
-    for record in records_by_title.values():
+    for record in records_by_key.values():
         await db.refresh(record)
-    return records_by_title
+    return records_by_key
 
 
 async def persist_manual_release(
@@ -130,11 +135,13 @@ async def persist_manual_release(
     parsed = parse_season_episode(release.title)
     coverage = parse_release_coverage(release.title)
 
-    filters = [Release.request_id == request.id, Release.title == release.title]
     if release.info_hash:
+        filters = [Release.request_id == request.id, Release.info_hash == release.info_hash]
+    else:
         filters = [
             Release.request_id == request.id,
-            or_(Release.info_hash == release.info_hash, Release.title == release.title),
+            Release.title == release.title,
+            Release.info_hash.is_(None),
         ]
 
     existing_result = await db.execute(select(Release).where(*filters))

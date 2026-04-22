@@ -21,11 +21,13 @@ from app.siftarr.services.release_parser import (
     is_exact_single_episode_release,
     parse_release_coverage,
 )
-from app.siftarr.services.release_storage import store_search_results
+from app.siftarr.services.release_storage import get_release_persistence_key, store_search_results
 from app.siftarr.services.rule_engine import ReleaseEvaluation, RuleEngine
 from app.siftarr.services.staging_actions import use_releases
 
 logger = logging.getLogger(__name__)
+
+MAX_CONCURRENT_SEARCHES = 5
 
 
 class TVDecisionService:
@@ -66,6 +68,31 @@ class TVDecisionService:
             for s in request.seasons
             if s.episodes
         }
+
+    async def _bounded_searches(
+        self, searches: Sequence[tuple[str, int | None, int | None]], request: Request
+    ) -> list[object]:
+        semaphore = asyncio.Semaphore(MAX_CONCURRENT_SEARCHES)
+        assert request.tvdb_id is not None
+        tvdb_id = request.tvdb_id
+
+        async def run_search(search_type: str, season: int | None, episode: int | None) -> object:
+            async with semaphore:
+                return await self.prowlarr.search_by_tvdbid(
+                    tvdbid=tvdb_id,
+                    title=request.title,
+                    season=season,
+                    episode=episode,
+                    year=request.year,
+                )
+
+        return await asyncio.gather(
+            *(
+                run_search(search_type, season, episode)
+                for search_type, season, episode in searches
+            ),
+            return_exceptions=True,
+        )
 
     @staticmethod
     def _get_multi_season_coverage(
@@ -143,19 +170,7 @@ class TVDecisionService:
             return [], [], []
         assert request.tvdb_id is not None
 
-        search_results = await asyncio.gather(
-            *[
-                self.prowlarr.search_by_tvdbid(
-                    tvdbid=request.tvdb_id,
-                    title=request.title,
-                    season=season,
-                    episode=episode,
-                    year=request.year,
-                )
-                for _, season, episode in searches
-            ],
-            return_exceptions=True,
-        )
+        search_results = await self._bounded_searches(searches, request)
 
         evaluated_releases: list[ReleaseEvaluation] = []
         passing_releases: list[tuple[int | None, int | None, ReleaseEvaluation]] = []
@@ -410,18 +425,36 @@ class TVDecisionService:
             },
         )
 
-        await store_search_results(self.db, request.id, all_evaluated_releases)
+        stored_releases_by_key = await store_search_results(
+            self.db,
+            request.id,
+            all_evaluated_releases,
+        )
 
         if all_selected_releases:
             all_selected_releases.sort(key=lambda x: x.total_score, reverse=True)
 
-            selected_titles = {e.release.title for e in all_selected_releases}
-            stored_releases_result = await self.db.execute(
-                select(Release).where(
-                    Release.request_id == request.id, Release.title.in_(selected_titles)
+            stored_releases: list[Release] = []
+            seen_selected_keys: set[str] = set()
+            for evaluation in all_selected_releases:
+                selected_key = get_release_persistence_key(
+                    title=evaluation.release.title,
+                    info_hash=evaluation.release.info_hash,
                 )
-            )
-            stored_releases = list(stored_releases_result.scalars().all())
+                if selected_key in seen_selected_keys:
+                    continue
+                seen_selected_keys.add(selected_key)
+
+                stored_release = stored_releases_by_key.get(selected_key)
+                if stored_release is None:
+                    logger.warning(
+                        "Selected TV release missing after persistence: request_id=%s title=%s info_hash=%s",
+                        request.id,
+                        evaluation.release.title,
+                        evaluation.release.info_hash,
+                    )
+                    continue
+                stored_releases.append(stored_release)
 
             logger.info(
                 "TV selected releases: request_id=%s count=%s releases=%s",

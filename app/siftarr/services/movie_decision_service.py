@@ -3,14 +3,13 @@ import logging
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.siftarr.models.release import Release
 from app.siftarr.models.request import MediaType, Request, RequestStatus
 from app.siftarr.models.rule import Rule
 from app.siftarr.services.activity_log_service import ActivityLogService
 from app.siftarr.services.pending_queue_service import PendingQueueService
 from app.siftarr.services.prowlarr_service import ProwlarrService
 from app.siftarr.services.qbittorrent_service import QbittorrentService
-from app.siftarr.services.release_storage import store_search_results
+from app.siftarr.services.release_storage import get_release_persistence_key, store_search_results
 from app.siftarr.services.rule_engine import RuleEngine
 from app.siftarr.services.staging_actions import use_releases
 
@@ -139,7 +138,7 @@ class MovieDecisionService:
             }
 
         all_evaluated = [rule_engine.evaluate(release) for release in search_result.releases]
-        await store_search_results(self.db, request.id, all_evaluated)
+        stored_releases_by_key = await store_search_results(self.db, request.id, all_evaluated)
 
         passed_results = [evaluation for evaluation in all_evaluated if evaluation.passed]
         if passed_results:
@@ -176,13 +175,12 @@ class MovieDecisionService:
                 best.release.size,
             )
 
-            release_result = await self.db.execute(
-                select(Release).where(
-                    Release.request_id == request.id,
-                    Release.title == best.release.title,
+            stored_release = stored_releases_by_key.get(
+                get_release_persistence_key(
+                    title=best.release.title,
+                    info_hash=best.release.info_hash,
                 )
             )
-            stored_release = release_result.scalar_one_or_none()
             action_result = await use_releases(
                 self.db,
                 request,

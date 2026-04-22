@@ -3,7 +3,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from app.siftarr.models.release import Release
-from app.siftarr.services import release_selection_service
+from app.siftarr.services import release_storage
 from app.siftarr.services.prowlarr_service import ProwlarrRelease
 from app.siftarr.services.rule_engine import ReleaseEvaluation
 
@@ -40,7 +40,7 @@ async def test_persist_manual_release_upserts_existing_release(mock_db, request_
     )
     evaluation = ReleaseEvaluation(release=release, passed=True, total_score=50, matches=[])
 
-    stored = await release_selection_service.persist_manual_release(
+    stored = await release_storage.persist_manual_release(
         mock_db,
         request_record,
         release,
@@ -71,7 +71,7 @@ async def test_persist_manual_release_requires_download_source(mock_db, request_
     evaluation = ReleaseEvaluation(release=release, passed=True, total_score=10, matches=[])
 
     with pytest.raises(RuntimeError, match="no usable download source"):
-        await release_selection_service.persist_manual_release(
+        await release_storage.persist_manual_release(
             mock_db,
             request_record,
             release,
@@ -95,7 +95,7 @@ async def test_store_search_results_persists_multi_season_coverage(mock_db):
     )
     evaluation = ReleaseEvaluation(release=release, passed=True, total_score=95, matches=[])
 
-    await release_selection_service.store_search_results(mock_db, 12, [evaluation])
+    await release_storage.store_search_results(mock_db, 12, [evaluation])
 
     stored_record = mock_db.add.call_args.args[0]
     assert stored_record.request_id == 12
@@ -122,10 +122,61 @@ async def test_store_search_results_persists_complete_series_marker(mock_db):
     )
     evaluation = ReleaseEvaluation(release=release, passed=True, total_score=88, matches=[])
 
-    await release_selection_service.store_search_results(mock_db, 33, [evaluation])
+    await release_storage.store_search_results(mock_db, 33, [evaluation])
 
     stored_record = mock_db.add.call_args.args[0]
     assert stored_record.request_id == 33
     assert stored_record.season_number is None
     assert stored_record.episode_number is None
     assert stored_record.season_coverage == "*"
+
+
+@pytest.mark.asyncio
+async def test_persist_manual_release_does_not_reuse_different_info_hash_record(
+    mock_db, request_record
+):
+    existing_release = Release(
+        id=1,
+        request_id=request_record.id,
+        title="User Pick",
+        size=1,
+        seeders=1,
+        leechers=0,
+        download_url="https://old.example/release.torrent",
+        info_hash="oldhash",
+        indexer="OldIndexer",
+        score=1,
+        passed_rules=False,
+    )
+    query_result = MagicMock()
+    query_result.scalar_one_or_none.return_value = None
+    mock_db.execute.return_value = query_result
+    mock_db.add = MagicMock()
+    mock_db.commit = AsyncMock()
+    mock_db.refresh = AsyncMock()
+
+    release = ProwlarrRelease(
+        title="User Pick",
+        size=10,
+        seeders=25,
+        leechers=3,
+        download_url="https://example.com/user-pick.torrent",
+        magnet_url="magnet:?xt=urn:btih:newhash",
+        info_hash="newhash",
+        indexer="Indexer A",
+    )
+    evaluation = ReleaseEvaluation(release=release, passed=True, total_score=50, matches=[])
+
+    stored = await release_storage.persist_manual_release(
+        mock_db,
+        request_record,
+        release,
+        evaluation,
+    )
+
+    assert stored is mock_db.add.call_args.args[0]
+    assert stored is not existing_release
+    executed_statement = mock_db.execute.await_args.args[0]
+    compiled_sql = str(executed_statement)
+    assert "releases.info_hash =" in compiled_sql
+    assert "releases.title =" not in compiled_sql

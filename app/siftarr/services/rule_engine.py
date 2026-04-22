@@ -70,6 +70,34 @@ class RuleEngine:
         self.requirement_patterns = requirement_patterns or []
         self.scorer_patterns = scorer_patterns or []
 
+        self._compiled_exclusion: list[tuple[int, str, re.Pattern[str]]] = []
+        self._compiled_requirement: list[tuple[int, str, re.Pattern[str]]] = []
+        self._compiled_scorer: list[tuple[int, str, re.Pattern[str], int]] = []
+
+        for rule_id, rule_name, pattern in self.exclusion_patterns:
+            try:
+                self._compiled_exclusion.append(
+                    (rule_id, rule_name, re.compile(pattern, re.IGNORECASE))
+                )
+            except re.error:
+                continue
+
+        for rule_id, rule_name, pattern in self.requirement_patterns:
+            try:
+                self._compiled_requirement.append(
+                    (rule_id, rule_name, re.compile(pattern, re.IGNORECASE))
+                )
+            except re.error:
+                continue
+
+        for rule_id, rule_name, pattern, score in self.scorer_patterns:
+            try:
+                self._compiled_scorer.append(
+                    (rule_id, rule_name, re.compile(pattern, re.IGNORECASE), score)
+                )
+            except re.error:
+                continue
+
     @staticmethod
     def _scope_matches(rule_scope: str, media_type: str | None) -> bool:
         if not rule_scope or rule_scope == "both" or media_type is None:
@@ -88,13 +116,6 @@ class RuleEngine:
             (rule.media_scope == "movie" and is_tv_release)
             or (rule.media_scope == "tv" and not is_tv_release)
         )
-
-    @staticmethod
-    def _pattern_matches(title: str, pattern: str) -> bool:
-        try:
-            return re.search(pattern, title, re.IGNORECASE) is not None
-        except re.error:
-            return False
 
     @classmethod
     def from_db_rules(
@@ -231,8 +252,8 @@ class RuleEngine:
             )
 
         # Check exclusion patterns (reject immediately)
-        for rule_id, rule_name, pattern in self.exclusion_patterns:
-            if self._pattern_matches(release.title, pattern):
+        for rule_id, rule_name, compiled in self._compiled_exclusion:
+            if compiled.search(release.title):
                 passed = False
                 rejection_reason = f"Matched exclusion pattern: {rule_name}"
                 matches.append(
@@ -253,10 +274,10 @@ class RuleEngine:
                 )
 
         # Check requirement patterns (all must match at least one)
-        if passed and self.requirement_patterns:
+        if passed and self._compiled_requirement:
             any_matched = False
-            for rule_id, rule_name, pattern in self.requirement_patterns:
-                if self._pattern_matches(release.title, pattern):
+            for rule_id, rule_name, compiled in self._compiled_requirement:
+                if compiled.search(release.title):
                     any_matched = True
                     matches.append(
                         RuleMatch(
@@ -279,8 +300,8 @@ class RuleEngine:
                 rejection_reason = "No requirement patterns matched"
 
         # Calculate score for scorer patterns
-        for rule_id, rule_name, pattern, score in self.scorer_patterns:
-            if self._pattern_matches(release.title, pattern):
+        for rule_id, rule_name, compiled, score in self._compiled_scorer:
+            if compiled.search(release.title):
                 total_score += score
                 matches.append(
                     RuleMatch(

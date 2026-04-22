@@ -2,8 +2,9 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from app.siftarr.models.request import MediaType, RequestStatus
 from app.siftarr.models.staged_torrent import StagedTorrent
-from app.siftarr.services import release_selection_service
+from app.siftarr.services import staging_actions
 
 
 @pytest.mark.asyncio
@@ -23,22 +24,22 @@ async def test_use_releases_keeps_existing_staged_release(
 
     with pytest.MonkeyPatch.context() as monkeypatch:
         monkeypatch.setattr(
-            release_selection_service,
+            staging_actions,
             "get_settings",
             MagicMock(return_value=settings),
         )
         monkeypatch.setattr(
-            release_selection_service,
+            staging_actions,
             "PendingQueueService",
             MagicMock(return_value=queue_service),
         )
         monkeypatch.setattr(
-            release_selection_service,
+            staging_actions,
             "StagingService",
             MagicMock(return_value=staging_service),
         )
 
-        result = await release_selection_service.use_releases(
+        result = await staging_actions.use_releases(
             mock_db,
             request_record,
             [selected_release],
@@ -95,22 +96,22 @@ async def test_use_releases_replaces_existing_active_stage_for_manual_selection(
 
     with pytest.MonkeyPatch.context() as monkeypatch:
         monkeypatch.setattr(
-            release_selection_service,
+            staging_actions,
             "get_settings",
             MagicMock(return_value=settings),
         )
         monkeypatch.setattr(
-            release_selection_service,
+            staging_actions,
             "PendingQueueService",
             MagicMock(return_value=queue_service),
         )
         monkeypatch.setattr(
-            release_selection_service,
+            staging_actions,
             "StagingService",
             MagicMock(return_value=staging_service),
         )
 
-        result = await release_selection_service.use_releases(
+        result = await staging_actions.use_releases(
             mock_db,
             request_record,
             [selected_release],
@@ -166,22 +167,22 @@ async def test_use_releases_reuses_existing_manual_pick_and_retires_auto_pick(
 
     with pytest.MonkeyPatch.context() as monkeypatch:
         monkeypatch.setattr(
-            release_selection_service,
+            staging_actions,
             "get_settings",
             MagicMock(return_value=settings),
         )
         monkeypatch.setattr(
-            release_selection_service,
+            staging_actions,
             "PendingQueueService",
             MagicMock(return_value=queue_service),
         )
         monkeypatch.setattr(
-            release_selection_service,
+            staging_actions,
             "StagingService",
             MagicMock(return_value=staging_service),
         )
 
-        result = await release_selection_service.use_releases(
+        result = await staging_actions.use_releases(
             mock_db,
             request_record,
             [selected_release],
@@ -207,8 +208,8 @@ async def test_use_releases_tv_single_episode_reuses_same_episode_stage_without_
 
     request_record = MagicMock()
     request_record.id = 10
-    request_record.media_type = release_selection_service.MediaType.TV
-    request_record.status = release_selection_service.RequestStatus.PENDING
+    request_record.media_type = MediaType.TV
+    request_record.status = RequestStatus.PENDING
 
     selected_release = MagicMock()
     selected_release.id = 201
@@ -259,22 +260,22 @@ async def test_use_releases_tv_single_episode_reuses_same_episode_stage_without_
 
     with pytest.MonkeyPatch.context() as monkeypatch:
         monkeypatch.setattr(
-            release_selection_service,
+            staging_actions,
             "get_settings",
             MagicMock(return_value=settings),
         )
         monkeypatch.setattr(
-            release_selection_service,
+            staging_actions,
             "PendingQueueService",
             MagicMock(return_value=queue_service),
         )
         monkeypatch.setattr(
-            release_selection_service,
+            staging_actions,
             "StagingService",
             MagicMock(return_value=staging_service),
         )
 
-        result = await release_selection_service.use_releases(
+        result = await staging_actions.use_releases(
             mock_db,
             request_record,
             [selected_release],
