@@ -2,11 +2,18 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, cast
 
+from app.siftarr.models.request import MediaType
 from app.siftarr.services.prowlarr_service import ProwlarrRelease
-from app.siftarr.services.release_parser import ParsedReleaseCoverage
+from app.siftarr.services.release_parser import (
+    ParsedReleaseCoverage,
+    is_exact_single_episode_release,
+    parse_release_coverage,
+    parse_stored_release_coverage,
+)
 from app.siftarr.services.rule_engine import ReleaseEvaluation
 from app.siftarr.services.type_utils import (
     coerce_int_list,
@@ -14,6 +21,8 @@ from app.siftarr.services.type_utils import (
     normalize_int,
     normalize_optional_text,
 )
+
+SerializedObject = Mapping[str, object]
 
 
 def format_release_size(size_bytes: int) -> str:
@@ -125,6 +134,158 @@ def serialize_evaluated_release(
         )
 
     return apply_release_size_per_season_metadata(payload)
+
+
+def serialize_stored_evaluated_release(
+    release: Any,
+    evaluation: ReleaseEvaluation | Any,
+    *,
+    media_type: MediaType,
+) -> dict[str, object]:
+    """Serialize a persisted release plus extra dashboard metadata."""
+    coverage = None
+    if media_type == MediaType.TV:
+        coverage = parse_stored_release_coverage(
+            release.season_coverage,
+            release.season_number,
+            release.episode_number,
+        )
+
+    payload = serialize_evaluated_release(release, evaluation, coverage=coverage)
+    payload.update(
+        {
+            "score": release.score,
+            "passed": release.passed_rules,
+            "rejection_reason": getattr(evaluation, "rejection_reason", None),
+            "season_number": release.season_number,
+            "episode_number": release.episode_number,
+            "matches": [
+                {
+                    "rule_name": match.rule_name,
+                    "matched": match.matched,
+                    "score_delta": match.score_delta,
+                }
+                for match in getattr(evaluation, "matches", [])
+            ],
+            "target_scope": serialize_target_scope(
+                media_type=media_type,
+                title=release.title,
+                season_number=release.season_number,
+                episode_number=release.episode_number,
+                season_coverage=release.season_coverage,
+            ),
+        }
+    )
+    return payload
+
+
+def serialize_target_scope(
+    *,
+    media_type: MediaType,
+    title: str,
+    season_number: int | None = None,
+    episode_number: int | None = None,
+    season_coverage: str | None = None,
+) -> dict[str, object]:
+    """Serialize lightweight targeting metadata for releases and staged torrents."""
+    if media_type != MediaType.TV:
+        return {"type": "request"}
+
+    coverage = parse_stored_release_coverage(season_coverage, season_number, episode_number)
+    scoped_season_number = coverage.season_number
+    scoped_episode_number = coverage.episode_number
+
+    if (
+        scoped_season_number is not None
+        and scoped_episode_number is not None
+        and is_exact_single_episode_release(title, scoped_season_number, scoped_episode_number)
+    ):
+        return {
+            "type": "single_episode",
+            "season_number": scoped_season_number,
+            "episode_number": scoped_episode_number,
+        }
+
+    return {"type": "broad"}
+
+
+def serialize_active_staged_torrent(
+    staged_torrent: Any,
+    *,
+    media_type: MediaType,
+) -> dict[str, object]:
+    """Serialize staged-torrent metadata for dashboard selection state."""
+    coverage = parse_release_coverage(staged_torrent.title)
+    return {
+        "id": staged_torrent.id,
+        "title": staged_torrent.title,
+        "status": staged_torrent.status,
+        "selection_source": staged_torrent.selection_source,
+        "target_scope": serialize_target_scope(
+            media_type=media_type,
+            title=staged_torrent.title,
+            season_number=coverage.season_number,
+            episode_number=coverage.episode_number,
+        ),
+    }
+
+
+def release_matches_active_stage(
+    release: SerializedObject,
+    active_stage: SerializedObject,
+    *,
+    media_type: MediaType,
+) -> bool:
+    """Return True when a serialized release matches an active staged torrent."""
+    if media_type != MediaType.TV:
+        return release.get("title") == active_stage.get("title")
+
+    release_scope = _as_serialized_object(release.get("target_scope"))
+    active_scope = _as_serialized_object(active_stage.get("target_scope"))
+    if (
+        release_scope is not None
+        and active_scope is not None
+        and release_scope.get("type") == active_scope.get("type") == "single_episode"
+    ):
+        return release_scope.get("season_number") == active_scope.get(
+            "season_number"
+        ) and release_scope.get("episode_number") == active_scope.get("episode_number")
+
+    return release.get("title") == active_stage.get("title")
+
+
+def apply_active_selection_metadata(
+    releases: list[dict[str, object]],
+    active_staged_payloads: list[dict[str, object]],
+    *,
+    media_type: MediaType,
+) -> list[dict[str, object]]:
+    """Attach active-staged selection metadata to serialized releases."""
+    for release in releases:
+        matching_active_stage = next(
+            (
+                active_stage
+                for active_stage in active_staged_payloads
+                if release_matches_active_stage(release, active_stage, media_type=media_type)
+            ),
+            None,
+        )
+        release["is_active_selection"] = matching_active_stage is not None
+        release["active_selection_status"] = (
+            matching_active_stage.get("status") if matching_active_stage else None
+        )
+        release["active_selection_source"] = (
+            matching_active_stage.get("selection_source") if matching_active_stage else None
+        )
+        release["active_staged_torrent"] = matching_active_stage
+    return releases
+
+
+def _as_serialized_object(value: object) -> SerializedObject | None:
+    """Return mapping values with object payloads for typed key access."""
+    if not isinstance(value, Mapping):
+        return None
+    return cast(SerializedObject, value)
 
 
 def dashboard_release_sort_key(release: dict[str, object]) -> tuple[float, float, int, float, str]:

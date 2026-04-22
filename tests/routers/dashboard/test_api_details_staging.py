@@ -9,6 +9,7 @@ import pytest
 from app.siftarr.models.release import Release
 from app.siftarr.models.request import MediaType, RequestStatus
 from app.siftarr.routers import dashboard_api
+from app.siftarr.services import dashboard_service
 
 
 @pytest.mark.asyncio
@@ -103,9 +104,9 @@ async def test_request_details_surfaces_active_staged_torrent_metadata(
         passed=True,
     )
 
-    monkeypatch.setattr(dashboard_api, "OverseerrService", FakeOverseerrService)
+    monkeypatch.setattr(dashboard_service, "OverseerrService", FakeOverseerrService)
     monkeypatch.setattr(
-        dashboard_api.RuleEngine,
+        dashboard_service.RuleEngine,
         "from_db_rules",
         MagicMock(return_value=fake_engine),
     )
@@ -250,9 +251,9 @@ async def test_request_details_tv_scopes_active_stage_to_matching_episode(
         passed=True,
     )
 
-    monkeypatch.setattr(dashboard_api, "OverseerrService", FakeOverseerrService)
+    monkeypatch.setattr(dashboard_service, "OverseerrService", FakeOverseerrService)
     monkeypatch.setattr(
-        dashboard_api.RuleEngine,
+        dashboard_service.RuleEngine,
         "from_db_rules",
         MagicMock(return_value=fake_engine),
     )
