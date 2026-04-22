@@ -55,5 +55,12 @@ uv run pytest
 
 ## General Rules
 
-ALLWAYS use subagents where possible and practical.
-ALLWAYS use feature branches and PRs — never push directly to `main`. All 3 CI quality gates must pass before merge.
+Always use subagents where possible and practical.
+Always use feature branches and PRs — never push directly to `main`. All 4 quality gates must pass before merge.
+
+## Repo Map Maintenance
+
+- `repo-map.md` is the committed, living repository map for contributors and agents.
+- Update `repo-map.md` in the same PR/commit whenever you add, remove, rename, or significantly repurpose repo structure, key modules, core workflows, or important docs/scripts.
+- Keep `repo-map.md` concise and high-signal: summarize responsibilities and boundaries, remove stale entries, and avoid low-value implementation detail.
+- If a task changes application architecture, top-level directories, routers, services, models, tests, or operational workflows, checking and updating `repo-map.md` is required work, not optional cleanup.
