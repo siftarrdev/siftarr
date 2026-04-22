@@ -24,7 +24,7 @@ from app.siftarr.services.plex_polling_service import PlexPollingService
 from app.siftarr.services.plex_service import PlexService
 from app.siftarr.services.prowlarr_service import ProwlarrService
 from app.siftarr.services.qbittorrent_service import QbittorrentService
-from app.siftarr.services.settings import overseerr_import as overseerr_import_service
+from app.siftarr.services import settings_service
 from app.siftarr.services.tv_decision_service import TVDecisionService
 from app.siftarr.services.unreleased_service import UnreleasedEvaluator, evaluate_imported_request
 
@@ -435,13 +435,13 @@ class SchedulerService:
                 if not runtime_settings.overseerr_url or not runtime_settings.overseerr_api_key:
                     logger.debug("Overseerr not configured, skipping poll")
                     return
-                synced, skipped = await overseerr_import_service.import_overseerr_requests(
+                synced, skipped = await settings_service.import_overseerr_requests(
                     db,
                     runtime_settings,
                     overseerr_service_cls=OverseerrService,
                     plex_service_cls=PlexService,
                     evaluate_imported_request_func=evaluate_imported_request,
-                    prepare_overseerr_import_func=overseerr_import_service.prepare_overseerr_import,
+                    prepare_overseerr_import_func=settings_service.prepare_overseerr_import,
                     logger=logger,
                 )
                 if synced:

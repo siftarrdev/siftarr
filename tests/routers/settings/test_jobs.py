@@ -166,7 +166,7 @@ async def test_rescan_plex_route_reports_success(monkeypatch, mock_db, base_cont
         AsyncMock(return_value=base_context()),
     )
     monkeypatch.setattr(
-        settings._jobs,
+        settings,
         "get_settings",
         lambda: MagicMock(),
     )

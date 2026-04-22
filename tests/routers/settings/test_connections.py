@@ -103,7 +103,7 @@ async def test_toggle_staging_mode_flips_runtime_setting(monkeypatch, mock_db):
     set_db_setting = AsyncMock()
     monkeypatch.setattr(settings, "_set_db_setting", set_db_setting)
     monkeypatch.setattr(
-        settings._jobs,
+        settings,
         "get_settings",
         lambda: SimpleNamespace(staging_mode_enabled=True),
     )
