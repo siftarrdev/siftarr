@@ -2,10 +2,126 @@
 
 {% block title %}Rules - Siftarr{% endblock %}
 
+{% macro rule_wizard_modal(modal_id, rule, action, default_type) %}
+{% set current_type = rule.rule_type.value if rule else default_type %}
+{% set is_size_limit = current_type == 'size_limit' %}
+{% set current_tv_target = rule.tv_target.value if rule and rule.tv_target else '' %}
+<div id="{{ modal_id }}" class="rule-modal fixed inset-0 z-50 items-center justify-center bg-black/70 p-3 sm:p-6">
+    <a href="#" class="absolute inset-0" aria-label="Close rule wizard"></a>
+    <div class="relative flex max-h-[92vh] w-full max-w-[75vw] flex-col overflow-hidden rounded-2xl border border-gray-700 bg-surface-900 shadow-2xl max-lg:max-w-[94vw]">
+        <div class="flex items-start justify-between gap-4 border-b border-gray-800 px-5 py-4">
+            <div>
+                <h2 class="section-title">{{ 'Edit' if rule else 'Create' }} {{ current_type.replace('_', ' ')|title }} Rule</h2>
+                <p class="section-subtitle">Configure the rule, test it against samples, then save when ready.</p>
+            </div>
+            <a href="#" class="text-2xl leading-none text-gray-500 hover:text-white" aria-label="Close">&times;</a>
+        </div>
+        <div class="grid min-h-0 flex-1 grid-cols-1 gap-0 overflow-y-auto lg:grid-cols-[minmax(0,1.35fr)_minmax(320px,0.65fr)]">
+            <form action="{{ action }}" method="post" class="space-y-5 p-5" data-rule-wizard-form data-rule-type="{{ current_type }}">
+                <div>
+                    <label class="form-label">Rule Name</label>
+                    <input type="text" name="name" value="{{ rule.name if rule else ('Size Limits' if is_size_limit else '') }}" required class="form-input" placeholder="e.g., Reject Camera/TS, Prefer HEVC, TV Episode Sizes">
+                </div>
+
+                <div>
+                    <label class="form-label">Rule Type</label>
+                    {% if rule %}
+                    <div class="mt-1 rounded-lg border border-gray-700/60 bg-surface-850 px-3.5 py-2 text-sm capitalize text-gray-400">{{ current_type.replace('_', ' ') }}</div>
+                    <p class="mt-1.5 text-xs text-gray-500">Rule type cannot be changed after creation.</p>
+                    {% else %}
+                    <input type="hidden" name="rule_type" value="{{ current_type }}">
+                    <div class="mt-1 rounded-lg border border-gray-700/60 bg-surface-850 px-3.5 py-2 text-sm capitalize text-gray-300">{{ current_type.replace('_', ' ') }}</div>
+                    <p class="mt-1.5 text-xs text-gray-500">Open a different create card to choose another rule type.</p>
+                    {% endif %}
+                </div>
+
+                <div>
+                    <label class="form-label">Applies To</label>
+                    <select name="media_scope" required class="form-select">
+                        <option value="both" {% if (rule and rule.media_scope == 'both') or (not rule) %}selected{% endif %}>Movies and TV</option>
+                        <option value="movie" {% if rule and rule.media_scope == 'movie' %}selected{% endif %}>Movies only</option>
+                        <option value="tv" {% if rule and rule.media_scope == 'tv' %}selected{% endif %}>TV only</option>
+                    </select>
+                </div>
+
+                {% if is_size_limit %}
+                <input type="hidden" name="pattern" value="size_limit">
+                <input type="hidden" name="score" value="0">
+                <div class="grid grid-cols-1 gap-4 md:grid-cols-2">
+                    <div>
+                        <label class="form-label">Minimum Size (GB)</label>
+                        <input type="number" name="min_size_gb" value="{{ rule.min_size_gb if rule and rule.min_size_gb is not none else '' }}" step="0.1" min="0" class="form-input" placeholder="e.g. 1.5">
+                    </div>
+                    <div>
+                        <label class="form-label">Maximum Size (GB)</label>
+                        <input type="number" name="max_size_gb" value="{{ rule.max_size_gb if rule and rule.max_size_gb is not none else '' }}" step="0.1" min="0" class="form-input" placeholder="e.g. 20">
+                    </div>
+                </div>
+                <div>
+                    <label class="form-label">TV Target</label>
+                    <select name="tv_target" class="form-select">
+                        <option value="" {% if not current_tv_target %}selected{% endif %}>Not applicable / movies only</option>
+                        <option value="episode" {% if current_tv_target == 'episode' %}selected{% endif %}>TV episodes</option>
+                        <option value="season_pack" {% if current_tv_target == 'season_pack' %}selected{% endif %}>TV season packs</option>
+                    </select>
+                </div>
+                {% else %}
+                <div>
+                    <label class="form-label">Regex Pattern</label>
+                    <input type="text" name="pattern" value="{{ rule.pattern if rule else '' }}" required placeholder="e.g., CAM|TS|HDCAM" class="form-input font-mono">
+                </div>
+                <div>
+                    <label class="form-label">Score</label>
+                    <input type="number" name="score" value="{{ rule.score if rule else 0 }}" min="0" class="form-input w-32">
+                </div>
+                {% endif %}
+
+                <div>
+                    <label class="form-label">Description (optional)</label>
+                    <textarea name="description" rows="2" placeholder="Explain what this rule does..." class="form-input">{{ rule.description if rule else '' }}</textarea>
+                </div>
+
+                <div class="flex flex-wrap gap-3 pt-2">
+                    <button type="submit" class="btn-primary">{{ 'Update' if rule else 'Create' }} Rule</button>
+                    <a href="#" class="btn-ghost">Cancel</a>
+                    {% if rule %}<a href="/rules/{{ rule.id }}/edit" class="btn-ghost">Open full-page editor</a>{% endif %}
+                </div>
+            </form>
+
+            <div class="border-t border-gray-800 bg-surface-950/50 p-5 lg:border-l lg:border-t-0" data-rule-wizard-test>
+                <h3 class="text-sm font-semibold text-white">Test before saving</h3>
+                <p class="mt-1 text-xs text-gray-500">Checks the currently entered values only. Persisted rules are not changed.</p>
+                <div class="mt-4 space-y-3">
+                    {% for sample_index in range(1, 4) %}
+                    <div class="rounded-xl border border-gray-800 bg-surface-900 p-3">
+                        <input type="text" class="form-input wizard-sample-title" placeholder="Sample release title {{ sample_index }}" aria-label="Wizard sample title {{ sample_index }}">
+                        <div class="mt-2 grid grid-cols-2 gap-2">
+                            <select class="form-input wizard-sample-media" aria-label="Wizard sample media {{ sample_index }}">
+                                <option value="movie">Movie</option>
+                                <option value="tv">TV</option>
+                            </select>
+                            <input type="number" step="0.01" min="0" class="form-input wizard-sample-size" placeholder="Size GB" aria-label="Wizard sample size {{ sample_index }}">
+                        </div>
+                    </div>
+                    {% endfor %}
+                </div>
+                <button type="button" class="btn-primary mt-4" data-rule-wizard-test-button>Test Entered Rule</button>
+                <div class="mt-4 space-y-2 text-sm" data-rule-wizard-results></div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endmacro %}
+
 {% block content %}
+<style>
+    .rule-modal { display: none; }
+    .rule-modal:target { display: flex; }
+</style>
 <div class="space-y-8">
-    <div class="flex justify-between items-center">
+    <div class="flex flex-wrap justify-between items-center gap-3">
         <h1 class="page-title">Rules Configuration</h1>
+        <button type="button" class="btn-secondary" onclick="openRuleImportExportModal()">Import / Export</button>
     </div>
 
     {# ── Unified Rules ── #}
@@ -73,7 +189,7 @@
                             <td class="px-4 py-4">
                                 <div class="flex items-center justify-end gap-2.5">
                                     <form action="/rules/{{ rule.id }}/toggle" method="post"><button type="submit" class="w-8 h-5 rounded-full relative transition-colors {% if rule.is_enabled %}bg-emerald-600{% else %}bg-gray-600{% endif %}" title="{{ 'Disable' if rule.is_enabled else 'Enable' }}"><span class="absolute top-0.5 {% if rule.is_enabled %}right-0.5{% else %}left-0.5{% endif %} w-4 h-4 bg-white rounded-full shadow transition-all"></span></button></form>
-                                    <a href="/rules/{{ rule.id }}/edit" class="text-gray-500 hover:text-brand-400 transition-colors" title="Edit"><svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"></path></svg></a>
+                                    <a href="#rule-wizard-edit-{{ rule.id }}" class="text-gray-500 hover:text-brand-400 transition-colors" title="Edit"><svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"></path></svg></a>
                                     <form action="/rules/{{ rule.id }}/delete" method="post" onsubmit="return confirm('Delete this rule?')"><button type="submit" class="text-gray-500 hover:text-red-400 transition-colors" title="Delete"><svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg></button></form>
                                 </div>
                             </td>
@@ -96,7 +212,7 @@
         </div>
         <div class="card-body">
             <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
-                <a href="/rules/new?type=exclusion" class="group block rounded-xl bg-surface-850 hover:bg-red-900/20 border border-gray-700/40 hover:border-red-700/50 p-5 transition-colors">
+                <a href="#rule-wizard-new-exclusion" class="group block rounded-xl bg-surface-850 hover:bg-red-900/20 border border-gray-700/40 hover:border-red-700/50 p-5 transition-colors">
                     <div class="flex items-center gap-3">
                         <div class="w-10 h-10 rounded-lg bg-red-900/40 flex items-center justify-center shrink-0"><svg class="w-5 h-5 text-red-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636"></path></svg></div>
                         <div>
@@ -105,7 +221,7 @@
                         </div>
                     </div>
                 </a>
-                <a href="/rules/new?type=requirement" class="group block rounded-xl bg-surface-850 hover:bg-amber-900/20 border border-gray-700/40 hover:border-amber-700/50 p-5 transition-colors">
+                <a href="#rule-wizard-new-requirement" class="group block rounded-xl bg-surface-850 hover:bg-amber-900/20 border border-gray-700/40 hover:border-amber-700/50 p-5 transition-colors">
                     <div class="flex items-center gap-3">
                         <div class="w-10 h-10 rounded-lg bg-amber-900/40 flex items-center justify-center shrink-0"><svg class="w-5 h-5 text-amber-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg></div>
                         <div>
@@ -114,7 +230,7 @@
                         </div>
                     </div>
                 </a>
-                <a href="/rules/new?type=scorer" class="group block rounded-xl bg-surface-850 hover:bg-emerald-900/20 border border-gray-700/40 hover:border-emerald-700/50 p-5 transition-colors">
+                <a href="#rule-wizard-new-scorer" class="group block rounded-xl bg-surface-850 hover:bg-emerald-900/20 border border-gray-700/40 hover:border-emerald-700/50 p-5 transition-colors">
                     <div class="flex items-center gap-3">
                         <div class="w-10 h-10 rounded-lg bg-emerald-900/40 flex items-center justify-center shrink-0"><svg class="w-5 h-5 text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6"></path></svg></div>
                         <div>
@@ -123,7 +239,7 @@
                         </div>
                     </div>
                 </a>
-                <a href="/rules/new?type=size_limit" class="group block rounded-xl bg-surface-850 hover:bg-cyan-900/20 border border-gray-700/40 hover:border-cyan-700/50 p-5 transition-colors">
+                <a href="#rule-wizard-new-size_limit" class="group block rounded-xl bg-surface-850 hover:bg-cyan-900/20 border border-gray-700/40 hover:border-cyan-700/50 p-5 transition-colors">
                     <div class="flex items-center gap-3">
                         <div class="w-10 h-10 rounded-lg bg-cyan-900/40 flex items-center justify-center shrink-0"><svg class="w-5 h-5 text-cyan-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-10V6m0 12v-2m9-4a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg></div>
                         <div>
@@ -242,53 +358,70 @@
         </div>
     </div>
 
-    <div class="card">
-        <div class="card-header">
-            <h2 class="section-title">Rule Import / Export</h2>
-            <p class="section-subtitle">Export the current ruleset as JSON, preview replacements safely, then confirm before applying.</p>
-        </div>
-        <div class="card-body grid grid-cols-1 lg:grid-cols-2 gap-6">
-            <div class="space-y-3">
-                <a href="/rules/export" class="btn-primary">Export Rules JSON</a>
-                <p class="text-xs text-gray-500">Export uses a versioned schema that round-trips the full ruleset, including TV episode vs season-pack targeting.</p>
-            </div>
-            <div class="space-y-4">
-                <form action="/rules/import-preview" method="post" enctype="multipart/form-data" class="space-y-3">
-                    <label class="form-label">Import JSON</label>
-                    <textarea name="import_payload" rows="10" class="form-input font-mono" placeholder='{"version":1,"rules":[...]}'>{{ import_payload or '' }}</textarea>
+    {% set show_import_modal = import_preview or import_error %}
+    <div id="rule-import-export-modal" class="fixed inset-0 z-50 {% if not show_import_modal %}hidden{% endif %}" aria-labelledby="rule-import-export-title" role="dialog" aria-modal="true">
+        <div class="absolute inset-0 bg-black/70" onclick="closeRuleImportExportModal()"></div>
+        <div class="relative mx-auto my-6 flex h-[calc(100vh-3rem)] w-[95vw] max-w-6xl items-start justify-center overflow-y-auto lg:w-3/4">
+            <div class="card w-full border border-gray-700/60 shadow-2xl">
+                <div class="card-header flex flex-wrap items-start justify-between gap-4">
                     <div>
-                        <label class="form-label">Or upload JSON file</label>
-                        <input type="file" name="import_file" accept="application/json,.json" class="form-input file:mr-3 file:rounded-md file:border-0 file:bg-surface-800 file:px-3 file:py-1.5 file:text-sm file:text-gray-200">
+                        <h2 id="rule-import-export-title" class="section-title">Rule Import / Export</h2>
+                        <p class="section-subtitle">Export the current ruleset as JSON, preview replacements safely, then confirm before applying.</p>
                     </div>
-                    <button type="submit" class="btn-warning">Preview Import</button>
-                </form>
-
-                {% if import_error %}
-                <div class="rounded-xl border border-red-700/50 bg-red-900/30 p-4 text-sm text-red-200">{{ import_error }}</div>
-                {% endif %}
-
-                {% if import_preview %}
-                <div class="rounded-xl border border-amber-700/50 bg-amber-900/20 p-4 space-y-3">
-                    <div class="text-sm font-semibold text-white">Import Preview</div>
-                    <div class="text-xs text-gray-400">Version {{ import_preview.version }} &middot; replacing {{ import_preview.replace_count }} rule(s)</div>
-                    <ul class="text-sm text-gray-300 space-y-1 max-h-56 overflow-auto">
-                        {% for rule in import_preview.rules %}
-                        <li>
-                            {{ rule.name }} &middot; {{ rule.rule_type.value.replace('_', ' ') }} &middot; {{ rule.media_scope }}{% if rule.tv_target %} / {{ rule.tv_target.value }}{% endif %}
-                        </li>
-                        {% endfor %}
-                    </ul>
-                    <form action="/rules/import-apply" method="post" class="space-y-3">
-                        <input type="hidden" name="import_payload" value="{{ import_payload }}">
-                        <input type="hidden" name="confirm_replace" value="yes">
-                        <button type="submit" class="btn-danger" onclick="return confirm('Replace the current ruleset with this imported preview?')">Confirm Replace Rules</button>
-                    </form>
+                    <button type="button" class="btn-ghost" onclick="closeRuleImportExportModal()" aria-label="Close import export modal">Close</button>
                 </div>
-                {% endif %}
+                <div class="card-body grid grid-cols-1 gap-6 lg:grid-cols-2">
+                    <div class="space-y-3">
+                        <a href="/rules/export" class="btn-primary">Export Rules JSON</a>
+                        <p class="text-xs text-gray-500">Export uses a versioned schema that round-trips the full ruleset, including TV episode vs season-pack targeting.</p>
+                    </div>
+                    <div class="space-y-4">
+                        <form action="/rules/import-preview" method="post" enctype="multipart/form-data" class="space-y-3">
+                            <label class="form-label">Import JSON</label>
+                            <textarea name="import_payload" rows="10" class="form-input font-mono" placeholder='{"version":1,"rules":[...]}'>{{ import_payload or '' }}</textarea>
+                            <div>
+                                <label class="form-label">Or upload JSON file</label>
+                                <input type="file" name="import_file" accept="application/json,.json" class="form-input file:mr-3 file:rounded-md file:border-0 file:bg-surface-800 file:px-3 file:py-1.5 file:text-sm file:text-gray-200">
+                            </div>
+                            <button type="submit" class="btn-warning">Preview Import</button>
+                        </form>
+
+                        {% if import_error %}
+                        <div class="rounded-xl border border-red-700/50 bg-red-900/30 p-4 text-sm text-red-200">{{ import_error }}</div>
+                        {% endif %}
+
+                        {% if import_preview %}
+                        <div class="rounded-xl border border-amber-700/50 bg-amber-900/20 p-4 space-y-3">
+                            <div class="text-sm font-semibold text-white">Import Preview</div>
+                            <div class="text-xs text-gray-400">Version {{ import_preview.version }} &middot; replacing {{ import_preview.replace_count }} rule(s)</div>
+                            <ul class="text-sm text-gray-300 space-y-1 max-h-56 overflow-auto">
+                                {% for rule in import_preview.rules %}
+                                <li>
+                                    {{ rule.name }} &middot; {{ rule.rule_type.value.replace('_', ' ') }} &middot; {{ rule.media_scope }}{% if rule.tv_target %} / {{ rule.tv_target.value }}{% endif %}
+                                </li>
+                                {% endfor %}
+                            </ul>
+                            <form action="/rules/import-apply" method="post" class="space-y-3">
+                                <input type="hidden" name="import_payload" value="{{ import_payload }}">
+                                <input type="hidden" name="confirm_replace" value="yes">
+                                <button type="submit" class="btn-danger" onclick="return confirm('Replace the current ruleset with this imported preview?')">Confirm Replace Rules</button>
+                            </form>
+                        </div>
+                        {% endif %}
+                    </div>
+                </div>
             </div>
         </div>
     </div>
 </div>
+
+{{ rule_wizard_modal('rule-wizard-new-exclusion', none, '/rules', 'exclusion') }}
+{{ rule_wizard_modal('rule-wizard-new-requirement', none, '/rules', 'requirement') }}
+{{ rule_wizard_modal('rule-wizard-new-scorer', none, '/rules', 'scorer') }}
+{{ rule_wizard_modal('rule-wizard-new-size_limit', none, '/rules', 'size_limit') }}
+{% for rule in rules %}
+{{ rule_wizard_modal('rule-wizard-edit-' ~ rule.id, rule, '/rules/' ~ rule.id, rule.rule_type.value) }}
+{% endfor %}
 
 <script>
 function addRuleTestRow() {
@@ -302,6 +435,88 @@ function addRuleTestRow() {
     `;
     tbody.appendChild(row);
     row.querySelector('input[name="title"]').focus();
+}
+
+function wizardMediaApplies(ruleMedia, sampleMedia) {
+    return ruleMedia === 'both' || ruleMedia === sampleMedia;
+}
+
+function runRuleWizardTest(button) {
+    const panel = button.closest('[data-rule-wizard-test]');
+    const container = button.closest('.rule-modal');
+    const form = container.querySelector('[data-rule-wizard-form]');
+    const ruleType = form.dataset.ruleType;
+    const ruleName = form.querySelector('[name="name"]').value || 'Entered rule';
+    const mediaScope = form.querySelector('[name="media_scope"]').value;
+    const results = panel.querySelector('[data-rule-wizard-results]');
+    const titles = panel.querySelectorAll('.wizard-sample-title');
+    const media = panel.querySelectorAll('.wizard-sample-media');
+    const sizes = panel.querySelectorAll('.wizard-sample-size');
+    const rows = [];
+
+    titles.forEach((titleInput, index) => {
+        const title = titleInput.value.trim();
+        if (!title) return;
+        const sampleMedia = media[index].value;
+        const sizeGb = sizes[index].value === '' ? null : Number(sizes[index].value);
+        let status = 'Skipped';
+        let detail = 'Rule media scope does not apply.';
+
+        if (wizardMediaApplies(mediaScope, sampleMedia)) {
+            if (ruleType === 'size_limit') {
+                const minField = form.querySelector('[name="min_size_gb"]');
+                const maxField = form.querySelector('[name="max_size_gb"]');
+                const min = minField.value === '' ? null : Number(minField.value);
+                const max = maxField.value === '' ? null : Number(maxField.value);
+                if (sizeGb === null) {
+                    status = 'Needs size';
+                    detail = 'Enter a sample size to test size-limit rules.';
+                } else if ((min !== null && sizeGb < min) || (max !== null && sizeGb > max)) {
+                    status = 'Reject';
+                    detail = `${sizeGb.toFixed(2)} GB is outside the configured range.`;
+                } else {
+                    status = 'Pass';
+                    detail = `${sizeGb.toFixed(2)} GB is inside the configured range.`;
+                }
+            } else {
+                const pattern = form.querySelector('[name="pattern"]').value;
+                try {
+                    const matched = new RegExp(pattern, 'i').test(title);
+                    if (ruleType === 'exclusion') {
+                        status = matched ? 'Reject' : 'Pass';
+                        detail = matched ? 'Pattern matched and would reject.' : 'Pattern did not match.';
+                    } else if (ruleType === 'requirement') {
+                        status = matched ? 'Pass' : 'Reject';
+                        detail = matched ? 'Required pattern matched.' : 'Required pattern did not match.';
+                    } else {
+                        const score = Number(form.querySelector('[name="score"]').value || 0);
+                        status = 'Pass';
+                        detail = matched ? `Pattern matched: +${score} points.` : 'Pattern did not match: +0 points.';
+                    }
+                } catch (error) {
+                    status = 'Invalid regex';
+                    detail = error.message;
+                }
+            }
+        }
+
+        const tone = status === 'Reject' || status === 'Invalid regex' ? 'text-red-300 border-red-800/50 bg-red-950/20' : status === 'Pass' ? 'text-emerald-300 border-emerald-800/50 bg-emerald-950/20' : 'text-amber-300 border-amber-800/50 bg-amber-950/20';
+        rows.push(`<div class="rounded-lg border px-3 py-2 ${tone}"><div class="font-medium">${ruleName}: ${status}</div><div class="text-xs opacity-90">${title} — ${detail}</div></div>`);
+    });
+
+    results.innerHTML = rows.length ? rows.join('') : '<div class="text-gray-500">Enter at least one sample title to test.</div>';
+}
+
+document.querySelectorAll('[data-rule-wizard-test-button]').forEach((button) => {
+    button.addEventListener('click', () => runRuleWizardTest(button));
+});
+
+function openRuleImportExportModal() {
+    document.getElementById('rule-import-export-modal')?.classList.remove('hidden');
+}
+
+function closeRuleImportExportModal() {
+    document.getElementById('rule-import-export-modal')?.classList.add('hidden');
 }
 </script>
 {% endblock %}

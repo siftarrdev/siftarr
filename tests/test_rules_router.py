@@ -117,11 +117,50 @@ class TestRulesRouter:
         assert "+25 points" in html
         assert "Min 1.0 GB" in html
         assert "action=\"/rules/2/toggle\"" in html
+        assert "href=\"#rule-wizard-edit-2\"" in html
         assert "href=\"/rules/2/edit\"" in html
         assert "action=\"/rules/2/delete\"" in html
         assert "Delete this rule?" in html
         assert "showRuleTab" not in html
         assert "rule-tab" not in html
+
+    def test_rules_template_renders_large_rule_wizard_for_create_and_edit(self):
+        """Create and edit actions should open prefilled modal rule wizards."""
+        scorer = self._rule(
+            2,
+            "Prefer x265",
+            RuleType.SCORER,
+            1,
+            pattern="x265",
+            score=25,
+            description="Prefer efficient encodes",
+        )
+
+        html = rules.templates.get_template("rules.html").render(
+            {
+                "request": SimpleNamespace(url=SimpleNamespace(path="/rules")),
+                "rules": [scorer],
+                "exclusion_rules": [],
+                "requirement_rules": [],
+                "scorer_rules": [scorer],
+                "size_limit_rules": [],
+            }
+        )
+
+        assert 'href="#rule-wizard-new-exclusion"' in html
+        assert 'id="rule-wizard-new-scorer"' in html
+        assert 'action="/rules"' in html
+        assert 'name="rule_type" value="scorer"' in html
+        assert 'href="#rule-wizard-edit-2"' in html
+        assert 'id="rule-wizard-edit-2"' in html
+        assert 'action="/rules/2"' in html
+        assert 'value="Prefer x265"' in html
+        assert 'value="x265"' in html
+        assert "Rule type cannot be changed after creation." in html
+        assert "Test before saving" in html
+        assert "Test Entered Rule" in html
+        assert "data-rule-wizard-test-button" in html
+        assert "max-w-[75vw]" in html
 
     @pytest.mark.asyncio
     async def test_test_rule_accepts_multiple_rows_with_media_type_and_size(self, monkeypatch):
@@ -244,6 +283,59 @@ class TestRulesRouter:
         assert "Size 3.00 GB above maximum 2.00 GB" in html
         assert "Movie Size" in html
         assert "addRuleTestRow" in html
+
+    def test_rules_template_moves_import_export_into_modal(self):
+        """Import/export controls should be hidden in a large modal until opened."""
+        html = rules.templates.get_template("rules.html").render(
+            {
+                "request": SimpleNamespace(url=SimpleNamespace(path="/rules")),
+                "rules": [],
+                "exclusion_rules": [],
+                "requirement_rules": [],
+                "scorer_rules": [],
+                "size_limit_rules": [],
+            }
+        )
+
+        assert "openRuleImportExportModal" in html
+        assert ">Import / Export</button>" in html
+        assert 'id="rule-import-export-modal"' in html
+        assert 'class="fixed inset-0 z-50 hidden"' in html
+        assert 'href="/rules/export"' in html
+        assert 'action="/rules/import-preview"' in html
+
+        preview_html = rules.templates.get_template("rules.html").render(
+            {
+                "request": SimpleNamespace(url=SimpleNamespace(path="/rules")),
+                "rules": [],
+                "exclusion_rules": [],
+                "requirement_rules": [],
+                "scorer_rules": [],
+                "size_limit_rules": [],
+                "import_payload": '{"version":1,"rules":[]}',
+                "import_preview": RuleImportPreview(version=1, replace_count=0, rules=[]),
+            }
+        )
+        assert 'action="/rules/import-apply"' in preview_html
+
+    def test_rules_template_reopens_import_export_modal_for_preview_errors(self):
+        """Import validation feedback should render with the modal visible after POST."""
+        html = rules.templates.get_template("rules.html").render(
+            {
+                "request": SimpleNamespace(url=SimpleNamespace(path="/rules")),
+                "rules": [],
+                "exclusion_rules": [],
+                "requirement_rules": [],
+                "scorer_rules": [],
+                "size_limit_rules": [],
+                "import_payload": "bad",
+                "import_error": "Invalid JSON: bad payload",
+            }
+        )
+
+        assert 'id="rule-import-export-modal" class="fixed inset-0 z-50 "' in html
+        assert "Invalid JSON: bad payload" in html
+        assert ">bad</textarea>" in html
 
     def test_validate_rule_input_rejects_missing_tv_target_for_tv_size_rule(self):
         """TV size rules should require explicit episode-vs-pack targeting."""
