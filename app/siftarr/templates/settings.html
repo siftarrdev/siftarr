@@ -167,55 +167,66 @@ details[open] summary .accordion-chevron { transform: rotate(90deg); }
         </div>
     </details>
 
-    {# ── Plex Scheduler Status ── #}
-    <details open class="card">
+    {# ── Advanced Plex Scheduler ── #}
+    <details class="card">
         <summary class="card-header flex items-center gap-3 cursor-pointer select-none">
             <svg class="accordion-chevron w-4 h-4 text-gray-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
             <div>
-                <h2 class="section-title">Plex Scheduler Status</h2>
-                <p class="section-subtitle">In-memory status for recent scan and poll Plex jobs</p>
+                <h2 class="section-title">Advanced / Scheduler</h2>
+                <p class="section-subtitle">Manual scheduler triggers and in-memory status for recent scan and poll Plex jobs</p>
             </div>
         </summary>
-        <div class="card-body grid grid-cols-1 xl:grid-cols-2 gap-4">
-            {% for job in plex_jobs or [] %}
-            <div class="rounded-xl border border-gray-700/60 bg-surface-850 p-5 space-y-3">
-                <div class="flex items-start justify-between gap-4">
-                    <div>
-                        <h3 class="text-sm font-semibold text-white">{{ job.label }}</h3>
-                        <p class="text-xs text-gray-500 mt-0.5">{{ job.description }}</p>
-                    </div>
-                    <span class="text-xs font-semibold px-2.5 py-1 rounded-full {% if job.locked %}bg-amber-900/40 text-amber-300 border border-amber-700/50{% else %}bg-emerald-900/40 text-emerald-300 border border-emerald-700/50{% endif %}">
-                        {{ 'In Progress' if job.locked else 'Idle' }}
-                    </span>
-                </div>
-                <dl class="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
-                    <div class="rounded-lg bg-surface-900/70 p-3 sm:col-span-2">
-                        <dt class="text-gray-500">Last Outcome</dt>
-                        <dd class="text-gray-200 mt-1">{{ job.run_summary or 'No completed run recorded' }}</dd>
-                    </div>
-                    <div class="rounded-lg bg-surface-900/70 p-3">
-                        <dt class="text-gray-500">Last Success</dt>
-                        <dd class="text-gray-200 mt-1">{{ job.last_success or 'Never' }}</dd>
-                    </div>
-                    <div class="rounded-lg bg-surface-900/70 p-3">
-                        <dt class="text-gray-500">Last Run</dt>
-                        <dd class="text-gray-200 mt-1">{{ job.last_run or job.last_started or 'Never' }}</dd>
-                    </div>
-                    <div class="rounded-lg bg-surface-900/70 p-3">
-                        <dt class="text-gray-500">Lock</dt>
-                        <dd class="text-gray-200 mt-1">{{ job.lock_owner or 'Unlocked' }}</dd>
-                    </div>
-                    <div class="rounded-lg bg-surface-900/70 p-3 sm:col-span-2">
-                        <dt class="text-gray-500">Last Error</dt>
-                        <dd class="text-gray-200 mt-1">{{ job.last_error or 'None' }}</dd>
-                    </div>
-                    <div class="rounded-lg bg-surface-900/70 p-3 sm:col-span-2">
-                        <dt class="text-gray-500">Metrics Snapshot</dt>
-                        <dd class="text-gray-200 mt-1">{{ job.metrics_snapshot or 'No metrics recorded yet' }}</dd>
-                    </div>
-                </dl>
+        <div class="card-body space-y-4">
+            <div class="flex flex-wrap items-center gap-2">
+                <form action="/settings/run-recent-plex-scan" method="post">
+                    <button type="submit" class="btn-primary btn-sm shrink-0">Run Recent Plex Scan</button>
+                </form>
+                <form action="/settings/run-plex-poll" method="post">
+                    <button type="submit" class="btn-warning btn-sm shrink-0">Run Plex Poll</button>
+                </form>
             </div>
-            {% endfor %}
+
+            <div class="grid grid-cols-1 xl:grid-cols-2 gap-4">
+                {% for job in plex_jobs or [] %}
+                <div class="rounded-xl border border-gray-700/60 bg-surface-850 p-5 space-y-3">
+                    <div class="flex items-start justify-between gap-4">
+                        <div>
+                            <h3 class="text-sm font-semibold text-white">{{ job.label }}</h3>
+                            <p class="text-xs text-gray-500 mt-0.5">{{ job.description }}</p>
+                        </div>
+                        <span class="text-xs font-semibold px-2.5 py-1 rounded-full {% if job.locked %}bg-amber-900/40 text-amber-300 border border-amber-700/50{% else %}bg-emerald-900/40 text-emerald-300 border border-emerald-700/50{% endif %}">
+                            {{ 'In Progress' if job.locked else 'Idle' }}
+                        </span>
+                    </div>
+                    <dl class="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+                        <div class="rounded-lg bg-surface-900/70 p-3 sm:col-span-2">
+                            <dt class="text-gray-500">Last Outcome</dt>
+                            <dd class="text-gray-200 mt-1">{{ job.run_summary or 'No completed run recorded' }}</dd>
+                        </div>
+                        <div class="rounded-lg bg-surface-900/70 p-3">
+                            <dt class="text-gray-500">Last Success</dt>
+                            <dd class="text-gray-200 mt-1">{{ job.last_success or 'Never' }}</dd>
+                        </div>
+                        <div class="rounded-lg bg-surface-900/70 p-3">
+                            <dt class="text-gray-500">Last Run</dt>
+                            <dd class="text-gray-200 mt-1">{{ job.last_run or job.last_started or 'Never' }}</dd>
+                        </div>
+                        <div class="rounded-lg bg-surface-900/70 p-3">
+                            <dt class="text-gray-500">Lock</dt>
+                            <dd class="text-gray-200 mt-1">{{ job.lock_owner or 'Unlocked' }}</dd>
+                        </div>
+                        <div class="rounded-lg bg-surface-900/70 p-3 sm:col-span-2">
+                            <dt class="text-gray-500">Last Error</dt>
+                            <dd class="text-gray-200 mt-1">{{ job.last_error or 'None' }}</dd>
+                        </div>
+                        <div class="rounded-lg bg-surface-900/70 p-3 sm:col-span-2">
+                            <dt class="text-gray-500">Metrics Snapshot</dt>
+                            <dd class="text-gray-200 mt-1">{{ job.metrics_snapshot or 'No metrics recorded yet' }}</dd>
+                        </div>
+                    </dl>
+                </div>
+                {% endfor %}
+            </div>
         </div>
     </details>
 
@@ -304,14 +315,8 @@ details[open] summary .accordion-chevron { transform: rotate(90deg); }
                     <div class="text-xs text-gray-500">Partial sync checks new or incomplete TV content; full sync refreshes active non-completed TV metadata and polls Plex availability</div>
                 </div>
                 <div class="flex items-center gap-2 shrink-0">
-                    <form action="/settings/run-recent-plex-scan" method="post">
-                        <button type="submit" class="btn-primary btn-sm shrink-0">Run Recent Plex Scan</button>
-                    </form>
-                    <form action="/settings/run-plex-poll" method="post">
-                        <button type="submit" class="btn-warning btn-sm shrink-0">Run Plex Poll</button>
-                    </form>
+                    <button type="button" onclick="startPlexRescan(true)" class="btn-primary btn-sm shrink-0">Partial Sync</button>
                     <button type="button" onclick="startPlexRescan(false)" class="btn-primary btn-sm shrink-0">Full Sync</button>
-                    <button type="button" onclick="startPlexRescan(true)" class="btn btn-secondary btn-sm shrink-0">Partial Sync</button>
                 </div>
             </div>
 
@@ -334,44 +339,47 @@ details[open] summary .accordion-chevron { transform: rotate(90deg); }
     </details>
 </div>
 
-<!-- Overseerr Sync Modal -->
-<div id="overseerr-sync-modal" class="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm hidden">
-    <div class="bg-surface-800 border border-gray-700/60 rounded-2xl shadow-2xl w-full max-w-md mx-4 p-6">
-        <h3 class="text-lg font-semibold text-white mb-4">Syncing Overseerr</h3>
+<!-- Non-blocking sync progress panels -->
+<div id="sync-toast-region" class="fixed bottom-4 right-4 z-50 w-[min(24rem,calc(100vw-2rem))] space-y-3 pointer-events-none">
+    <section id="overseerr-sync-panel" class="hidden pointer-events-auto rounded-2xl border border-gray-700/70 bg-surface-800/95 shadow-2xl p-4">
+        <div class="flex items-start justify-between gap-3 mb-3">
+            <div class="min-w-0">
+                <h3 class="text-sm font-semibold text-white">Syncing Overseerr</h3>
+                <p id="sync-progress-text" class="text-xs text-gray-500 mt-0.5">Preparing…</p>
+            </div>
+            <button id="sync-close-btn" type="button" onclick="closeOverseerrSync()" disabled class="hidden text-gray-500 hover:text-white transition-colors" aria-label="Dismiss Overseerr sync progress">×</button>
+        </div>
         <div class="mb-3">
             <div class="w-full h-2 rounded-full bg-surface-700 overflow-hidden">
                 <div id="sync-progress-bar" class="h-2 rounded-full bg-brand-500 transition-all duration-300" style="width: 0%"></div>
             </div>
         </div>
-        <p id="sync-status-text" class="text-sm text-gray-400 mb-4">Connecting...</p>
-        <div id="sync-active-wrap" class="hidden mb-4">
-            <div class="text-xs uppercase tracking-wide text-gray-500 mb-2">Active</div>
-            <ul id="sync-active-list" class="space-y-1 text-sm text-gray-300 max-h-48 overflow-y-auto"></ul>
+        <p id="sync-status-text" class="text-sm text-gray-400">Connecting...</p>
+        <div id="sync-active-wrap" class="hidden mt-3">
+            <div class="text-[10px] uppercase tracking-wide text-gray-500 mb-1">Active</div>
+            <ul id="sync-active-list" class="space-y-1 text-gray-300 max-h-28 overflow-y-auto"></ul>
         </div>
-        <div class="flex justify-end">
-            <button id="sync-close-btn" type="button" onclick="closeOverseerrSync()" disabled class="btn-primary btn-sm opacity-50 cursor-not-allowed">Close</button>
-        </div>
-    </div>
-</div>
+    </section>
 
-<!-- Plex Rescan Modal -->
-<div id="plex-sync-modal" class="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm hidden">
-    <div class="bg-surface-800 border border-gray-700/60 rounded-2xl shadow-2xl w-full max-w-md mx-4 p-6">
-        <h3 id="plex-sync-title" class="text-lg font-semibold text-white mb-4">Syncing Plex</h3>
+    <section id="plex-sync-panel" class="hidden pointer-events-auto rounded-2xl border border-gray-700/70 bg-surface-800/95 shadow-2xl p-4">
+        <div class="flex items-start justify-between gap-3 mb-3">
+            <div class="min-w-0">
+                <h3 id="plex-sync-title" class="text-sm font-semibold text-white">Syncing Plex</h3>
+                <p id="plex-sync-progress-text" class="text-xs text-gray-500 mt-0.5">Preparing…</p>
+            </div>
+            <button id="plex-sync-close-btn" type="button" onclick="closePlexRescan()" disabled class="hidden text-gray-500 hover:text-white transition-colors" aria-label="Dismiss Plex sync progress">×</button>
+        </div>
         <div class="mb-3">
             <div class="w-full h-2 rounded-full bg-surface-700 overflow-hidden">
                 <div id="plex-sync-progress-bar" class="h-2 rounded-full bg-brand-500 transition-all duration-300" style="width: 0%"></div>
             </div>
         </div>
-        <p id="plex-sync-status-text" class="text-sm text-gray-400 mb-4">Connecting...</p>
-        <div id="plex-sync-active-wrap" class="hidden mb-4">
-            <div class="text-xs uppercase tracking-wide text-gray-500 mb-2">Active</div>
-            <ul id="plex-sync-active-list" class="space-y-1 text-sm text-gray-300 max-h-48 overflow-y-auto"></ul>
+        <p id="plex-sync-status-text" class="text-sm text-gray-400">Connecting...</p>
+        <div id="plex-sync-active-wrap" class="hidden mt-3">
+            <div class="text-[10px] uppercase tracking-wide text-gray-500 mb-1">Active</div>
+            <ul id="plex-sync-active-list" class="space-y-1 text-gray-300 max-h-28 overflow-y-auto"></ul>
         </div>
-        <div class="flex justify-end">
-            <button id="plex-sync-close-btn" type="button" onclick="closePlexRescan()" disabled class="btn-primary btn-sm opacity-50 cursor-not-allowed">Close</button>
-        </div>
-    </div>
+    </section>
 </div>
 
 <script>
@@ -431,13 +439,44 @@ async function testAllConnections() {
 
 let syncEventSource = null;
 
+function progressNumbers(data) {
+    const current = Number(data.current ?? data.completed);
+    const total = Number(data.total);
+
+    if (!Number.isFinite(total) || total <= 0) {
+        return { percent: null, label: 'Working…' };
+    }
+
+    const safeCurrent = Number.isFinite(current) ? Math.max(0, Math.min(current, total)) : 0;
+    const percent = Math.round((safeCurrent / total) * 100);
+    return { percent: percent, label: `${safeCurrent}/${total}` };
+}
+
+function applyProgress(bar, label, data, options = {}) {
+    const final = options.final === true;
+    const fallbackPercent = options.fallbackPercent ?? 5;
+    const minimumPercent = options.minimumPercent ?? 0;
+    const maximumPercent = final ? 100 : 99;
+    const numbers = progressNumbers(data || {});
+    let percent = numbers.percent;
+
+    if (percent === null) {
+        percent = fallbackPercent;
+    }
+
+    percent = Math.max(minimumPercent, Math.min(percent, maximumPercent));
+    bar.style.width = percent + '%';
+    label.textContent = numbers.label;
+}
+
 function renderActiveItems(listElement, wrapperElement, items) {
     if (!listElement || !wrapperElement) {
         return;
     }
 
     listElement.innerHTML = '';
-    const values = Array.isArray(items) ? items.slice(0, 16) : [];
+    const allValues = Array.isArray(items) ? items : [];
+    const values = allValues.slice(0, 5);
     if (!values.length) {
         wrapperElement.classList.add('hidden');
         return;
@@ -445,8 +484,15 @@ function renderActiveItems(listElement, wrapperElement, items) {
 
     for (const item of values) {
         const li = document.createElement('li');
-        li.className = 'rounded-lg bg-surface-850 px-3 py-1.5 text-xs text-gray-300 truncate';
+        li.className = 'rounded-lg bg-surface-850 px-2.5 py-1 text-xs text-gray-300 truncate';
         li.textContent = item;
+        listElement.appendChild(li);
+    }
+
+    if (allValues.length > values.length) {
+        const li = document.createElement('li');
+        li.className = 'px-2.5 py-0.5 text-[11px] text-gray-500';
+        li.textContent = `+${allValues.length - values.length} more`;
         listElement.appendChild(li);
     }
 
@@ -454,8 +500,9 @@ function renderActiveItems(listElement, wrapperElement, items) {
 }
 
 function startOverseerrSync() {
-    const modal = document.getElementById('overseerr-sync-modal');
+    const panel = document.getElementById('overseerr-sync-panel');
     const bar = document.getElementById('sync-progress-bar');
+    const progressText = document.getElementById('sync-progress-text');
     const status = document.getElementById('sync-status-text');
     const closeBtn = document.getElementById('sync-close-btn');
     const activeWrap = document.getElementById('sync-active-wrap');
@@ -465,13 +512,14 @@ function startOverseerrSync() {
     bar.style.width = '0%';
     bar.classList.remove('bg-red-500');
     bar.classList.add('bg-brand-500');
+    progressText.textContent = 'Preparing…';
     status.textContent = 'Connecting...';
-    status.classList.remove('text-red-400');
+    status.classList.remove('text-red-400', 'text-emerald-400');
     status.classList.add('text-gray-400');
     renderActiveItems(activeList, activeWrap, []);
     closeBtn.disabled = true;
-    closeBtn.classList.add('opacity-50', 'cursor-not-allowed');
-    modal.classList.remove('hidden');
+    closeBtn.classList.add('hidden');
+    panel.classList.remove('hidden');
 
     syncEventSource = new EventSource('/settings/api/sync-overseerr/stream');
 
@@ -481,21 +529,20 @@ function startOverseerrSync() {
         switch (data.phase) {
             case 'connecting':
                 status.textContent = 'Connecting to Overseerr...';
-                bar.style.width = '5%';
+                applyProgress(bar, progressText, data, { fallbackPercent: 5 });
                 break;
             case 'fetching':
                 status.textContent = data.message;
-                bar.style.width = '15%';
+                applyProgress(bar, progressText, data, { fallbackPercent: 15 });
                 renderActiveItems(activeList, activeWrap, data.active || []);
                 break;
             case 'processing':
-                const pct = Math.max(20, Math.round((data.current / data.total) * 100));
-                bar.style.width = pct + '%';
-                status.textContent = `Processing ${data.current}/${data.total}: ${data.title}`;
+                applyProgress(bar, progressText, data, { fallbackPercent: 20, minimumPercent: 20 });
+                status.textContent = data.total ? `Processing ${data.current}/${data.total}: ${data.title}` : (data.message || `Processing ${data.title || 'items'}…`);
                 renderActiveItems(activeList, activeWrap, data.active || (data.title ? [data.title] : []));
                 break;
             case 'complete':
-                bar.style.width = '100%';
+                applyProgress(bar, progressText, data, { final: true, fallbackPercent: 100 });
                 status.textContent = data.message;
                 status.classList.remove('text-gray-400');
                 status.classList.add('text-emerald-400');
@@ -505,7 +552,7 @@ function startOverseerrSync() {
                 syncEventSource = null;
                 break;
             case 'error':
-                bar.style.width = '100%';
+                applyProgress(bar, progressText, data, { final: true, fallbackPercent: 100 });
                 bar.classList.remove('bg-brand-500');
                 bar.classList.add('bg-red-500');
                 status.textContent = data.message;
@@ -520,7 +567,7 @@ function startOverseerrSync() {
     };
 
     syncEventSource.onerror = function() {
-        bar.style.width = '100%';
+        applyProgress(bar, progressText, {}, { final: true, fallbackPercent: 100 });
         bar.classList.remove('bg-brand-500');
         bar.classList.add('bg-red-500');
         status.textContent = 'Connection error. The sync may have completed — check logs.';
@@ -537,12 +584,12 @@ function startOverseerrSync() {
 function enableCloseBtn() {
     const closeBtn = document.getElementById('sync-close-btn');
     closeBtn.disabled = false;
-    closeBtn.classList.remove('opacity-50', 'cursor-not-allowed');
+    closeBtn.classList.remove('hidden');
 }
 
 function closeOverseerrSync() {
-    const modal = document.getElementById('overseerr-sync-modal');
-    modal.classList.add('hidden');
+    const panel = document.getElementById('overseerr-sync-panel');
+    panel.classList.add('hidden');
     if (syncEventSource) {
         syncEventSource.close();
         syncEventSource = null;
@@ -552,9 +599,10 @@ function closeOverseerrSync() {
 let plexEventSource = null;
 
 function startPlexRescan(shallow = false) {
-    const modal = document.getElementById('plex-sync-modal');
+    const panel = document.getElementById('plex-sync-panel');
     const title = document.getElementById('plex-sync-title');
     const bar = document.getElementById('plex-sync-progress-bar');
+    const progressText = document.getElementById('plex-sync-progress-text');
     const status = document.getElementById('plex-sync-status-text');
     const closeBtn = document.getElementById('plex-sync-close-btn');
     const activeWrap = document.getElementById('plex-sync-active-wrap');
@@ -564,6 +612,7 @@ function startPlexRescan(shallow = false) {
     bar.classList.remove('bg-red-500');
     bar.classList.add('bg-brand-500');
     title.textContent = shallow ? 'Partial Plex Sync' : 'Full Plex Sync';
+    progressText.textContent = 'Preparing…';
     status.textContent = shallow
         ? 'Connecting for partial sync (new or incomplete content only)...'
         : 'Connecting for full metadata refresh and availability poll...';
@@ -571,8 +620,8 @@ function startPlexRescan(shallow = false) {
     status.classList.add('text-gray-400');
     renderActiveItems(activeList, activeWrap, []);
     closeBtn.disabled = true;
-    closeBtn.classList.add('opacity-50', 'cursor-not-allowed');
-    modal.classList.remove('hidden');
+    closeBtn.classList.add('hidden');
+    panel.classList.remove('hidden');
 
     const streamUrl = shallow ? '/settings/api/rescan-plex/stream?mode=partial' : '/settings/api/rescan-plex/stream?mode=full';
     plexEventSource = new EventSource(streamUrl);
@@ -585,26 +634,25 @@ function startPlexRescan(shallow = false) {
                 status.textContent = shallow
                     ? 'Connecting to Plex for partial sync...'
                     : 'Connecting to Plex for full sync...';
-                bar.style.width = '5%';
+                applyProgress(bar, progressText, data, { fallbackPercent: 5 });
                 break;
             case 'fetching':
                 status.textContent = data.message;
-                bar.style.width = '10%';
+                applyProgress(bar, progressText, data, { fallbackPercent: 10 });
                 renderActiveItems(activeList, activeWrap, data.active || []);
                 break;
             case 'processing':
-                const pct = 10 + Math.round((data.current / data.total) * 80);
-                bar.style.width = pct + '%';
-                status.textContent = `Re-syncing ${data.current}/${data.total}: ${data.title}`;
+                applyProgress(bar, progressText, data, { fallbackPercent: 20, minimumPercent: 10 });
+                status.textContent = data.total ? `Re-syncing ${data.current}/${data.total}: ${data.title}` : (data.message || `Re-syncing ${data.title || 'items'}…`);
                 renderActiveItems(activeList, activeWrap, data.active || (data.title ? [data.title] : []));
                 break;
             case 'polling':
                 status.textContent = data.message;
-                bar.style.width = '90%';
+                applyProgress(bar, progressText, data, { fallbackPercent: 90, minimumPercent: 90 });
                 renderActiveItems(activeList, activeWrap, data.active || []);
                 break;
             case 'complete':
-                bar.style.width = '100%';
+                applyProgress(bar, progressText, data, { final: true, fallbackPercent: 100 });
                 status.textContent = data.message;
                 status.classList.remove('text-gray-400');
                 status.classList.add('text-emerald-400');
@@ -614,7 +662,7 @@ function startPlexRescan(shallow = false) {
                 plexEventSource = null;
                 break;
             case 'error':
-                bar.style.width = '100%';
+                applyProgress(bar, progressText, data, { final: true, fallbackPercent: 100 });
                 bar.classList.remove('bg-brand-500');
                 bar.classList.add('bg-red-500');
                 status.textContent = data.message;
@@ -629,7 +677,7 @@ function startPlexRescan(shallow = false) {
     };
 
     plexEventSource.onerror = function() {
-        bar.style.width = '100%';
+        applyProgress(bar, progressText, {}, { final: true, fallbackPercent: 100 });
         bar.classList.remove('bg-brand-500');
         bar.classList.add('bg-red-500');
         status.textContent = 'Connection error. The re-scan may have completed — check logs.';
@@ -646,12 +694,12 @@ function startPlexRescan(shallow = false) {
 function enablePlexCloseBtn() {
     const closeBtn = document.getElementById('plex-sync-close-btn');
     closeBtn.disabled = false;
-    closeBtn.classList.remove('opacity-50', 'cursor-not-allowed');
+    closeBtn.classList.remove('hidden');
 }
 
 function closePlexRescan() {
-    const modal = document.getElementById('plex-sync-modal');
-    modal.classList.add('hidden');
+    const panel = document.getElementById('plex-sync-panel');
+    panel.classList.add('hidden');
     if (plexEventSource) {
         plexEventSource.close();
         plexEventSource = null;
