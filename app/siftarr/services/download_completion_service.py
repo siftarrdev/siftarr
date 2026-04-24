@@ -33,6 +33,15 @@ def _extract_hash(magnet_url: str | None) -> str | None:
     return m.group(1).lower() if m else None
 
 
+def _log(level: int, message: str, *args: object) -> None:
+    """Log via the service logger, falling back to root if needed."""
+    if not logger.disabled and logger.isEnabledFor(level) and (logger.handlers or logger.propagate):
+        logger.log(level, message, *args)
+        return
+
+    logging.getLogger().log(level, message, *args)
+
+
 class DownloadCompletionService:
     """Checks finished downloads and reconciles request availability via Plex."""
 
@@ -171,7 +180,8 @@ class DownloadCompletionService:
                     )
                     await self.db.commit()
 
-                    logger.info(
+                    _log(
+                        logging.INFO,
                         "DownloadCompletionService: checked request_id=%s title=%s via Plex (%s)",
                         request_id,
                         request.title,

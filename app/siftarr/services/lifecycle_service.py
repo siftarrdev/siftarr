@@ -309,9 +309,14 @@ def _is_unreleased_tv_request(
         aired = [e for e in episodes if e.air_date is not None and e.air_date <= today]
         all_aired_downloaded = all(e.status in _AVAILABLE_EPISODE_STATUSES for e in aired)
         has_future_or_unknown = has_future_signal or any(
-            e.air_date is None or e.air_date > today for e in episodes
+            e.air_date is not None and e.air_date > today for e in episodes
         )
-        return all_aired_downloaded and has_future_or_unknown
+        has_unreleased_no_date_placeholder = any(
+            e.air_date is None and e.status == RequestStatus.UNRELEASED for e in episodes
+        )
+        return all_aired_downloaded and (
+            has_future_or_unknown or has_unreleased_no_date_placeholder
+        )
 
     return False
 

@@ -45,9 +45,6 @@ async def dashboard(
     # Get active requests
     active_requests = await lifecycle_service.get_active_requests(limit=500)
 
-    # Active tab shows all active requests.
-    filtered_requests = active_requests
-
     async def _tv_has_pending_episodes(request_id: int) -> bool:
         seasons, episodes = await load_tv_seasons_with_episodes(db, request_id)
         if not seasons or not episodes:
@@ -69,20 +66,6 @@ async def dashboard(
 
         statuses = {episode.status for episode in episodes}
         return RequestStatus.UNRELEASED in statuses and RequestStatus.PENDING not in statuses
-
-    # Pending search shows PENDING and SEARCHING requests, plus TV requests that
-    # have pending episodes alongside partial availability.
-    pending_requests = []
-    for req in active_requests:
-        if req.status in (RequestStatus.PENDING, RequestStatus.SEARCHING):
-            pending_requests.append(req)
-            continue
-        if (
-            req.status == RequestStatus.PENDING
-            and req.media_type == MediaType.TV
-            and await _tv_has_pending_episodes(req.id)
-        ):
-            pending_requests.append(req)
 
     # Get selected torrents that are either waiting in staging or already sent to qBittorrent.
     result = await db.execute(
@@ -133,11 +116,29 @@ async def dashboard(
     )
 
     unreleased_candidates = await lifecycle_service.get_unreleased_requests(limit=500)
+    unreleased_candidate_by_id = {
+        req.id: req for req in [*active_requests, *completed_requests, *unreleased_candidates]
+    }
     unreleased_requests = [
-        req for req in unreleased_candidates if await _should_show_in_unreleased(req)
+        req for req in unreleased_candidate_by_id.values() if await _should_show_in_unreleased(req)
     ]
     unreleased_request_ids = {req.id for req in unreleased_requests}
+    filtered_requests = [req for req in active_requests if req.id not in unreleased_request_ids]
     completed_requests = [req for req in completed_requests if req.id not in unreleased_request_ids]
+
+    # Pending search shows PENDING and SEARCHING requests, plus TV requests that
+    # have pending episodes alongside partial availability.
+    pending_requests = []
+    for req in filtered_requests:
+        if req.status in (RequestStatus.PENDING, RequestStatus.SEARCHING):
+            pending_requests.append(req)
+            continue
+        if (
+            req.status == RequestStatus.PENDING
+            and req.media_type == MediaType.TV
+            and await _tv_has_pending_episodes(req.id)
+        ):
+            pending_requests.append(req)
     overseerr_service = OverseerrService(settings=effective_settings)
 
     async def _earliest_future_release(req_obj: RequestModel) -> tuple[int, str | None]:
@@ -228,9 +229,6 @@ async def dashboard(
     )
     denied_requests = list(denied_result.scalars().all())
 
-    # Get stats
-    stats = await lifecycle_service.get_requests_stats()
-
     return templates.TemplateResponse(
         request,
         "dashboard.html",
@@ -249,10 +247,10 @@ async def dashboard(
             "completed_requests": completed_requests,
             "denied_requests": denied_requests,
             "stats": {
-                "active": len(active_requests),
+                "active": len(filtered_requests),
                 "pending": len(pending_requests),
                 "staged": len(staged_torrents),
-                "completed": stats["by_status"].get(RequestStatus.COMPLETED.value, 0),
+                "completed": len(completed_requests),
                 "unreleased": len(unreleased_requests),
                 "denied": len(denied_requests),
             },

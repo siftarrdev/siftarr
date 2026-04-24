@@ -1,5 +1,6 @@
 """Alembic environment configuration."""
 
+import os
 from logging.config import fileConfig
 
 from alembic import context
@@ -11,10 +12,13 @@ from app.siftarr.models import Base
 
 config = context.config
 settings = get_settings()
+default_sqlalchemy_url = "sqlite:///data/db/siftarr.db"
 
-# Override the sqlalchemy.url with the settings value (use sync sqlite for alembic)
-sync_url = settings.database_url.replace("+aiosqlite", "")
-config.set_main_option("sqlalchemy.url", sync_url)
+# Prefer an explicitly configured Alembic URL; otherwise sync with app settings.
+configured_url = config.get_main_option("sqlalchemy.url")
+if configured_url == default_sqlalchemy_url or os.getenv("SIFTARR_DB_PATH"):
+    sync_url = settings.database_url.replace("+aiosqlite", "")
+    config.set_main_option("sqlalchemy.url", sync_url)
 
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)

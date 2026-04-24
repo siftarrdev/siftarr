@@ -12,7 +12,6 @@ window.tableSortState = {
 };
 
 window.mediaFilterState = {};
-window.showUnreleasedActive = false;
 
 // Navigation state for prev/next in details modal
 window.visibleRequests = [];
@@ -92,10 +91,19 @@ function getVisibleRequests() {
     const activeTabContent = document.querySelector('.tab-content:not(.hidden)');
     if (!activeTabContent) return [];
     const rows = activeTabContent.querySelectorAll('tbody tr[data-request-id]');
-    return Array.from(rows).map(row => ({
+    return Array.from(rows).filter(row => row.style.display !== 'none').map(row => ({
         id: parseInt(row.getAttribute('data-request-id')),
         title: row.querySelector('td:nth-child(2)')?.textContent?.trim() || 'Unknown'
     })).filter(r => r.id);
+}
+
+function refreshDetailsNavigationContext() {
+    const modal = document.getElementById('request-details-modal');
+    if (!modal || modal.classList.contains('hidden')) return;
+
+    window.visibleRequests = window.getVisibleRequests();
+    window.currentDetailsIndex = window.visibleRequests.findIndex(r => r.id === window.currentRequestId);
+    window.updateNavigationButtons();
 }
 
 function updateNavigationButtons() {
@@ -114,10 +122,11 @@ function updateNavigationButtons() {
         return;
     }
 
-    position.textContent = `${window.currentDetailsIndex + 1} of ${total}`;
+    const currentIndex = window.currentDetailsIndex >= 0 ? window.currentDetailsIndex : -1;
+    position.textContent = currentIndex >= 0 ? `${currentIndex + 1} of ${total}` : `- of ${total}`;
 
-    const prevIndex = (window.currentDetailsIndex - 1 + total) % total;
-    const nextIndex = (window.currentDetailsIndex + 1) % total;
+    const prevIndex = currentIndex >= 0 ? (currentIndex - 1 + total) % total : total - 1;
+    const nextIndex = currentIndex >= 0 ? (currentIndex + 1) % total : 0;
 
     prevBtn.disabled = false;
     nextBtn.disabled = false;
@@ -129,7 +138,11 @@ function navigateDetails(direction) {
     const total = window.visibleRequests.length;
     if (total === 0) return;
 
-    window.currentDetailsIndex = (window.currentDetailsIndex + direction + total) % total;
+    if (window.currentDetailsIndex < 0) {
+        window.currentDetailsIndex = direction < 0 ? total - 1 : 0;
+    } else {
+        window.currentDetailsIndex = (window.currentDetailsIndex + direction + total) % total;
+    }
     const targetRequest = window.visibleRequests[window.currentDetailsIndex];
     if (targetRequest) {
         openRequestDetails(targetRequest.id, window.currentDetailsIndex);
@@ -148,4 +161,5 @@ window.escapeHtml = escapeHtml;
 window.setActiveTab = setActiveTab;
 window.setPoster = setPoster;
 window.getVisibleRequests = getVisibleRequests;
+window.refreshDetailsNavigationContext = refreshDetailsNavigationContext;
 window.updateNavigationButtons = updateNavigationButtons;

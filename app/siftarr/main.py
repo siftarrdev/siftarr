@@ -103,7 +103,7 @@ async def lifespan(app: FastAPI):
     # Ensure database directory exists
     _ensure_db_directory()
 
-    # Initialize database tables
+    # Verify database readiness before starting background work.
     await init_db()
 
     scheduler_service = SchedulerService(async_session_maker, logger=logger)

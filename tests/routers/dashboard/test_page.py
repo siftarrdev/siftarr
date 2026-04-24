@@ -96,6 +96,9 @@ async def test_dashboard_restores_unreleased_tab_and_requests(mock_db, monkeypat
 
     context = response.context
     assert context["unreleased_requests"] == [unreleased_request]
+    assert unreleased_request not in context["active_requests"]
+    assert unreleased_request not in context["completed_requests"]
+    assert context["stats"]["active"] == 0
     assert context["unreleased_earliest"][42] == "2026-05-01"
     assert context["stats"]["unreleased"] == 1
     rendered = response.body.decode()
@@ -103,6 +106,63 @@ async def test_dashboard_restores_unreleased_tab_and_requests(mock_db, monkeypat
     assert "content-unreleased" in rendered
     assert "The Rookie" in rendered
     assert "No unreleased requests." not in rendered
+
+
+@pytest.mark.asyncio
+async def test_dashboard_places_future_unreleased_tv_in_unreleased_only(mock_db, monkeypatch):
+    """Future/no-date TV seasons persisted as unreleased should not leak to active/finished."""
+    future_request = MagicMock()
+    future_request.id = 43
+    future_request.status = RequestStatus.UNRELEASED
+    future_request.overseerr_request_id = 13
+    future_request.title = "Future Season"
+    future_request.media_type = MediaType.TV
+    future_request.created_at = datetime(2026, 4, 1, 12, 0, tzinfo=UTC)
+    future_request.requester_username = "lucas"
+    future_request.year = 2026
+    future_request.tmdb_id = 789
+    future_request.tvdb_id = 987
+
+    lifecycle_service = AsyncMock()
+    lifecycle_service.get_active_requests.return_value = [future_request]
+    lifecycle_service.get_requests_by_status.return_value = [future_request]
+    lifecycle_service.get_unreleased_requests.return_value = [future_request]
+    lifecycle_service.get_requests_stats.return_value = {
+        "by_status": {RequestStatus.UNRELEASED.value: 1},
+    }
+    monkeypatch.setattr(dashboard, "LifecycleService", lambda db: lifecycle_service)
+
+    monkeypatch.setattr(
+        dashboard,
+        "get_settings",
+        lambda: MagicMock(
+            overseerr_url="http://overseerr.test",
+            staging_mode_enabled=False,
+            qbittorrent_url="http://qb.test",
+        ),
+    )
+
+    fake_overseerr = AsyncMock()
+    fake_overseerr.get_media_details.return_value = {"nextEpisodeToAir": {"airDate": None}}
+    monkeypatch.setattr(dashboard, "OverseerrService", lambda settings: fake_overseerr)
+
+    mock_db.execute.side_effect = [
+        MagicMock(scalars=MagicMock(return_value=MagicMock(all=MagicMock(return_value=[])))),
+        MagicMock(scalars=MagicMock(return_value=MagicMock(all=MagicMock(return_value=[])))),
+        MagicMock(scalars=MagicMock(return_value=MagicMock(all=MagicMock(return_value=[])))),
+    ]
+
+    response = await dashboard.dashboard(MagicMock(), db=mock_db)
+
+    context = response.context
+    assert context["unreleased_requests"] == [future_request]
+    assert future_request not in context["active_requests"]
+    assert future_request not in context["completed_requests"]
+    assert context["stats"]["active"] == 0
+    assert context["stats"]["completed"] == 0
+    assert context["stats"]["unreleased"] == 1
+    rendered = response.body.decode()
+    assert "Future Season" in rendered
 
 
 @pytest.mark.asyncio
@@ -185,9 +245,17 @@ async def test_dashboard_separates_mixed_pending_from_true_unreleased(mock_db, m
     response = await dashboard.dashboard(MagicMock(), db=mock_db)
 
     context = response.context
+    assert mixed_request in context["active_requests"]
+    assert unreleased_request not in context["active_requests"]
     assert mixed_request in context["pending_requests"]
     assert mixed_request not in context["unreleased_requests"]
     assert unreleased_request in context["unreleased_requests"]
+    assert context["stats"]["active"] == 1
+    assert context["stats"]["pending"] == 1
+    assert context["stats"]["unreleased"] == 1
+    rendered = response.body.decode()
+    assert "High Potential" in rendered
+    assert "No pending items." not in rendered
 
 
 @pytest.mark.asyncio
@@ -256,7 +324,10 @@ async def test_dashboard_hides_completed_ongoing_tv_from_finished_when_unrelease
 
     context = response.context
     assert completed_tv in context["unreleased_requests"]
+    assert completed_tv not in context["active_requests"]
     assert completed_tv not in context["completed_requests"]
+    assert context["stats"]["completed"] == 0
+    assert context["stats"]["unreleased"] == 1
 
 
 @pytest.mark.asyncio
