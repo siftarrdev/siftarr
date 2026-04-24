@@ -1,6 +1,7 @@
 """Tests for rules router behavior."""
 
 from io import BytesIO
+from types import SimpleNamespace
 from typing import cast
 from unittest.mock import AsyncMock, MagicMock
 
@@ -29,6 +30,7 @@ class TestRulesRouter:
         max_size_gb: float | None = None,
         is_enabled: bool = True,
         tv_target: TVTarget | None = None,
+        description: str | None = None,
     ) -> MagicMock:
         rule = MagicMock()
         rule.id = rule_id
@@ -42,6 +44,7 @@ class TestRulesRouter:
         rule.max_size_gb = max_size_gb
         rule.is_enabled = is_enabled
         rule.tv_target = tv_target
+        rule.description = description
         return rule
 
     @pytest.mark.asyncio
@@ -82,6 +85,43 @@ class TestRulesRouter:
         assert context["requirement_rules"] == []
         assert context["scorer_rules"] == [scorer]
         assert context["size_limit_rules"] == [size_limit]
+
+    def test_rules_template_renders_unified_table_with_row_actions(self):
+        """Rules template should show one unified list without rule-type tabs."""
+        exclusion = self._rule(1, "Reject CAM", RuleType.EXCLUSION, 2, pattern="CAM")
+        scorer = self._rule(2, "Prefer x265", RuleType.SCORER, 1, pattern="x265", score=25)
+        size_limit = self._rule(
+            3,
+            "Movie Size",
+            RuleType.SIZE_LIMIT,
+            3,
+            min_size_gb=1.0,
+            max_size_gb=5.0,
+            media_scope="movie",
+        )
+
+        html = rules.templates.get_template("rules.html").render(
+            {
+                "request": SimpleNamespace(url=SimpleNamespace(path="/rules")),
+                "rules": [scorer, exclusion, size_limit],
+                "exclusion_rules": [exclusion],
+                "requirement_rules": [],
+                "scorer_rules": [scorer],
+                "size_limit_rules": [size_limit],
+            }
+        )
+
+        assert "All Rules" in html
+        assert "Priority" in html
+        assert "Pattern / size range" in html
+        assert "+25 points" in html
+        assert "Min 1.0 GB" in html
+        assert "action=\"/rules/2/toggle\"" in html
+        assert "href=\"/rules/2/edit\"" in html
+        assert "action=\"/rules/2/delete\"" in html
+        assert "Delete this rule?" in html
+        assert "showRuleTab" not in html
+        assert "rule-tab" not in html
 
     @pytest.mark.asyncio
     async def test_test_rule_accepts_multiple_rows_with_media_type_and_size(self, monkeypatch):
@@ -151,6 +191,59 @@ class TestRulesRouter:
         assert results[1]["passed"] is False
         assert results[1]["rejection_reason"] == "Size 3.00 GB above maximum 2.00 GB"
         assert context["test_result"] == results[0]
+
+    def test_rules_template_renders_multi_title_tester_with_preserved_results(self):
+        """Rules template should preserve submitted rows and compare per-title results."""
+        html = rules.templates.get_template("rules.html").render(
+            {
+                "request": SimpleNamespace(url=SimpleNamespace(path="/rules")),
+                "rules": [],
+                "exclusion_rules": [],
+                "requirement_rules": [],
+                "scorer_rules": [],
+                "size_limit_rules": [],
+                "test_rows": [
+                    {"title": "Movie.2024.1080p.x265", "media_type": "movie", "size_gb": 1.5},
+                    {"title": "Large.Movie.2024.1080p", "media_type": "movie", "size_gb": 3.0},
+                ],
+                "test_results": [
+                    {
+                        "title": "Movie.2024.1080p.x265",
+                        "media_type": "movie",
+                        "size_gb": 1.5,
+                        "passed": True,
+                        "rejection_reason": None,
+                        "total_score": 25,
+                        "matched_rules": [
+                            SimpleNamespace(rule_name="Prefer x265", score_delta=25)
+                        ],
+                        "rejection_rules": [],
+                    },
+                    {
+                        "title": "Large.Movie.2024.1080p",
+                        "media_type": "movie",
+                        "size_gb": 3.0,
+                        "passed": False,
+                        "rejection_reason": "Size 3.00 GB above maximum 2.00 GB",
+                        "total_score": 0,
+                        "matched_rules": [],
+                        "rejection_rules": [SimpleNamespace(rule_name="Movie Size", score_delta=0)],
+                    },
+                ],
+            }
+        )
+
+        assert "Multi-title Rule Tester" in html
+        assert 'aria-label="Release title 1"' in html
+        assert 'aria-label="Release title 2"' in html
+        assert 'value="Movie.2024.1080p.x265"' in html
+        assert 'value="1.5"' in html
+        assert "Rule test results" in html
+        assert "Prefer x265" in html
+        assert "+25" in html
+        assert "Size 3.00 GB above maximum 2.00 GB" in html
+        assert "Movie Size" in html
+        assert "addRuleTestRow" in html
 
     def test_validate_rule_input_rejects_missing_tv_target_for_tv_size_rule(self):
         """TV size rules should require explicit episode-vs-pack targeting."""
