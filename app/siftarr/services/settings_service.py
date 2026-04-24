@@ -416,7 +416,9 @@ async def rescan_plex_requests(
                     if shallow
                     else "Finding active Plex requests for full sync..."
                 ),
-                active=[title_for(req) for req in (tv_requests if shallow else active_requests)[:16]],
+                active=[
+                    title_for(req) for req in (tv_requests if shallow else active_requests)[:16]
+                ],
                 mode=mode,
                 message=(
                     "Partial Plex sync: checking new or incomplete TV content only."

@@ -282,9 +282,7 @@ async def test_rescan_plex_sse_reports_movies_and_tv_in_active_items(monkeypatch
 
 
 @pytest.mark.asyncio
-async def test_rescan_plex_partial_only_resyncs_new_or_incomplete_tv_content(
-    monkeypatch, mock_db
-):
+async def test_rescan_plex_partial_only_resyncs_new_or_incomplete_tv_content(monkeypatch, mock_db):
     """Partial Plex sync should leave already-complete TV metadata out of resync work."""
 
     runtime_settings = MagicMock(plex_sync_concurrency=2)
@@ -344,9 +342,7 @@ async def test_rescan_plex_partial_only_resyncs_new_or_incomplete_tv_content(
 
 
 @pytest.mark.asyncio
-async def test_rescan_plex_full_resyncs_all_active_non_completed_tv_and_polls(
-    monkeypatch, mock_db
-):
+async def test_rescan_plex_full_resyncs_all_active_non_completed_tv_and_polls(monkeypatch, mock_db):
     """Full Plex sync should resync every active non-completed TV request before polling."""
 
     runtime_settings = MagicMock(plex_sync_concurrency=2)
