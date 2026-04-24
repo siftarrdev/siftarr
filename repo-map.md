@@ -43,14 +43,29 @@ Primary flow:
 - `tests/` — automated regression and unit/integration tests
 - `db/alembic/` — database migration environment and revision history
 - `docker/` — container build and local container workflow
-- `docs/` — contributor and project documentation
+- `docs/` — cross-cutting documentation index; detailed component docs live beside code
 - `data/` — locally created runtime data directory for SQLite and staging artifacts; gitignored and not committed
 - `icons/` — branding assets used by docs/UI
 - `README.md` — product overview and quick start
+- `CONTRIBUTING.md` — developer setup, workflow, quality gates, and PR expectations
 - `AGENTS.md` — repository-specific agent/development rules
 - `pyproject.toml` — Python project metadata, dependencies, pytest, and Ruff config
 - `ty.toml` — static type checker configuration
 - `uv.lock` — locked dependency graph for `uv`
+
+## Documentation map
+
+- `README.md` — end-user overview, deployment, first-run setup, integrations, rules, staging, and troubleshooting
+- `CONTRIBUTING.md` — developer prerequisites, local setup, dependency management, migrations, tests, quality gates, and PR workflow
+- `docs/README.md` — documentation index and guidance for where detailed docs should live
+- `app/siftarr/README.md` — application package boundaries, runtime flow, extension points, and package-level testing guidance
+- `app/siftarr/routers/README.md` — route-layer responsibilities, extension points, and router testing guidance
+- `app/siftarr/services/README.md` — service/integration responsibilities, extension points, and service testing guidance
+- `app/siftarr/models/README.md` — ORM ownership, schema extension points, and persistence testing guidance
+- `tests/README.md` — test organization, fixtures, async conventions, and targeted pytest commands
+- `docker/README.md` — image build, Compose usage, volumes, environment variables, and helper script workflow
+
+The old duplicated developer guide and stale product specification under `docs/` have been removed. Keep new detailed docs close to the code or workflow they describe, and keep this map as the concise orientation layer.
 
 ## Application package map
 
