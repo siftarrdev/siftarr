@@ -298,9 +298,10 @@ class TestRulesRouter:
         )
 
         assert "openRuleImportExportModal" in html
-        assert ">Import / Export</button>" in html
+        assert 'data-modal-open="rule-import-export-modal">Import / Export</button>' in html
         assert 'id="rule-import-export-modal"' in html
-        assert 'class="fixed inset-0 z-50 hidden"' in html
+        assert 'class="rule-modal fixed inset-0 z-50 items-center justify-center bg-black/70' in html
+        assert 'role="dialog" aria-modal="true" tabindex="-1"' in html
         assert 'href="/rules/export"' in html
         assert 'action="/rules/import-preview"' in html
 
@@ -333,9 +334,32 @@ class TestRulesRouter:
             }
         )
 
-        assert 'id="rule-import-export-modal" class="fixed inset-0 z-50 "' in html
+        assert 'id="rule-import-export-modal" class="rule-modal fixed inset-0 z-50' in html
+        assert 'is-open' in html
         assert "Invalid JSON: bad payload" in html
         assert ">bad</textarea>" in html
+
+    def test_rules_template_includes_accessible_modal_controls(self):
+        """Rules modals should expose dialog semantics and keyboard/backdrop close hooks."""
+        scorer = self._rule(2, "Prefer x265", RuleType.SCORER, 1, pattern="x265", score=25)
+
+        html = rules.templates.get_template("rules.html").render(
+            {
+                "request": SimpleNamespace(url=SimpleNamespace(path="/rules")),
+                "rules": [scorer],
+                "exclusion_rules": [],
+                "requirement_rules": [],
+                "scorer_rules": [scorer],
+                "size_limit_rules": [],
+            }
+        )
+
+        assert 'role="dialog" aria-modal="true"' in html
+        assert 'aria-labelledby="rule-wizard-edit-2-title"' in html
+        assert 'data-modal-close aria-label="Close rule wizard" tabindex="-1"' in html
+        assert 'data-modal-open="rule-wizard-edit-2"' in html
+        assert "event.key === 'Escape'" in html
+        assert "trapModalFocus" in html
 
     def test_validate_rule_input_rejects_missing_tv_target_for_tv_size_rule(self):
         """TV size rules should require explicit episode-vs-pack targeting."""
