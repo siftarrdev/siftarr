@@ -13,9 +13,18 @@ from app.siftarr.models.request import Request, RequestStatus
 from app.siftarr.models.season import Season
 from app.siftarr.services.async_utils import gather_limited
 from app.siftarr.services.overseerr_service import OverseerrService
-from app.siftarr.services.plex_service import PlexService
+from app.siftarr.services.plex_service import PlexLookupResult, PlexService
 
 logger = logging.getLogger(__name__)
+
+
+def _log(level: int, message: str, *args: object) -> None:
+    """Log via the service logger, falling back to root if needed."""
+    if not logger.disabled and logger.isEnabledFor(level) and (logger.handlers or logger.propagate):
+        logger.log(level, message, *args)
+        return
+
+    logging.getLogger().log(level, message, *args)
 
 
 def _episodes_are_unreleased(episodes: list[Episode]) -> bool:
@@ -340,7 +349,7 @@ class EpisodeSyncService:
 
         return synced_seasons
 
-    async def _resolve_plex_rating_key(self, request: Request) -> str | None:
+    async def _resolve_plex_rating_key(self, request: Request) -> tuple[str | None, bool]:
         """Try to find and persist the Plex rating key for a request.
 
         Looks up the show by TMDB ID, then TVDB ID, then falls back to
@@ -348,17 +357,29 @@ class EpisodeSyncService:
         skip the lookup.
         """
         if self._plex is None:
-            return None
+            return None, True
 
         if request.plex_rating_key:
-            return request.plex_rating_key
+            return request.plex_rating_key, True
 
         rating_key: str | None = None
+        authoritative = True
+
+        def resolve_lookup(result: PlexLookupResult | None) -> str | None:
+            if result is None:
+                return None
+            if result.item is None:
+                return None
+            raw_rating_key = result.item.get("rating_key")
+            return str(raw_rating_key) if raw_rating_key else None
 
         if request.tmdb_id:
-            result = await self._plex.get_show_by_tmdb(request.tmdb_id)
-            if result:
-                rating_key = str(result["rating_key"])
+            result = await self._plex.lookup_show_by_tmdb(request.tmdb_id)
+            rating_key = resolve_lookup(result)
+            authoritative = authoritative and result.authoritative
+            if not result.authoritative and not rating_key:
+                return None, False
+            if rating_key:
                 logger.info(
                     "EpisodeSyncService: resolved Plex rating key via TMDB ID %s: %s",
                     request.tmdb_id,
@@ -366,16 +387,19 @@ class EpisodeSyncService:
                 )
 
         if not rating_key and request.tvdb_id:
-            result = await self._plex.get_show_by_tvdb(request.tvdb_id)
-            if result:
-                rating_key = str(result["rating_key"])
+            result = await self._plex.lookup_show_by_tvdb(request.tvdb_id)
+            rating_key = resolve_lookup(result)
+            authoritative = authoritative and result.authoritative
+            if not result.authoritative and not rating_key:
+                return None, False
+            if rating_key:
                 logger.info(
                     "EpisodeSyncService: resolved Plex rating key via TVDB ID %s: %s",
                     request.tvdb_id,
                     rating_key,
                 )
 
-        if not rating_key and request.title:
+        if not rating_key and authoritative and request.title:
             results = await self._plex.search_show(request.title)
             if results:
                 rating_key = str(results[0]["rating_key"])
@@ -405,7 +429,7 @@ class EpisodeSyncService:
                 request.title,
             )
 
-        return rating_key
+        return rating_key, authoritative
 
     async def _load_season_episodes(self, season: Season) -> list[Episode]:
         """Load episodes for a season via explicit async query (avoids lazy-load in async context)."""
@@ -421,11 +445,21 @@ class EpisodeSyncService:
     async def _apply_plex_availability(
         self, request: Request, seasons: list[Season]
     ) -> list[Season]:
-        """Override episode statuses based on Plex per-episode availability."""
+        """Override episode statuses based on authoritative Plex availability."""
         if self._plex is None or not seasons:
             return seasons
 
-        rating_key = await self._resolve_plex_rating_key(request)
+        rating_key, lookup_authoritative = await self._resolve_plex_rating_key(request)
+        if not lookup_authoritative:
+            _log(
+                logging.WARNING,
+                "EpisodeSyncService: degraded Plex sync for request %s (%s); "
+                "Plex lookup was inconclusive, preserving existing episode/request state",
+                request.id,
+                request.title,
+            )
+            return seasons
+
         if not rating_key:
             logger.info(
                 "EpisodeSyncService: could not resolve Plex rating key for request %s (%s)",
@@ -434,13 +468,23 @@ class EpisodeSyncService:
             )
             return seasons
 
-        availability = await self._plex.get_episode_availability(rating_key)
-        await self._persist_episode_availability(request, seasons, availability)
+        availability_result = await self._plex.get_episode_availability_result(rating_key)
+        if not availability_result.authoritative:
+            _log(
+                logging.WARNING,
+                "EpisodeSyncService: degraded Plex sync for request %s (%s); "
+                "Plex episode availability was inconclusive, preserving existing episode/request state",
+                request.id,
+                request.title,
+            )
+            return seasons
+
+        await self._persist_episode_availability(request, seasons, availability_result.availability)
 
         logger.info(
             "EpisodeSyncService: applied Plex availability for request %s (%d episodes on Plex)",
             request.id,
-            sum(1 for v in availability.values() if v),
+            sum(1 for v in availability_result.availability.values() if v),
         )
 
         return seasons

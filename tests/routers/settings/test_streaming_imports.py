@@ -1,13 +1,19 @@
 """Settings streaming and import flow tests."""
 
 import asyncio
+from datetime import UTC, datetime, timedelta
 from typing import Any, cast
 from unittest.mock import AsyncMock, MagicMock
 
+import httpx
 import pytest
 
-from app.siftarr.models.request import MediaType
+from app.siftarr.models.episode import Episode
+from app.siftarr.models.request import MediaType, RequestStatus
+from app.siftarr.models.request import Request as RequestModel
+from app.siftarr.models.season import Season
 from app.siftarr.routers import settings
+from app.siftarr.services.plex_service import PlexLookupResult, PlexService
 
 
 @pytest.mark.asyncio
@@ -204,7 +210,58 @@ async def test_sync_overseerr_prefetches_with_bounded_parallelism(monkeypatch, b
             self.commit = AsyncMock()
             self.refresh = AsyncMock()
 
-        async def execute(self, _statement):
+        async def execute(self, statement):
+            columns = getattr(statement, "column_descriptions", [])
+            if len(columns) > 1:
+                result = MagicMock()
+                result.fetchall.return_value = []
+                return result
+
+            params = statement.compile().params
+            entity = columns[0].get("entity") if columns else None
+
+            if entity is RequestModel:
+                request_id = next(iter(params.values()))
+                request = next(
+                    (
+                        row
+                        for row in self.added
+                        if isinstance(row, RequestModel) and row.id == request_id
+                    ),
+                    None,
+                )
+                return MagicMock(scalar_one_or_none=MagicMock(return_value=request))
+
+            if entity is Season:
+                request_id = params.get("request_id_1")
+                season_number = params.get("season_number_1")
+                season = next(
+                    (
+                        row
+                        for row in self.added
+                        if isinstance(row, Season)
+                        and row.request_id == request_id
+                        and row.season_number == season_number
+                    ),
+                    None,
+                )
+                return MagicMock(scalar_one_or_none=MagicMock(return_value=season))
+
+            if entity is Episode:
+                season_id = params.get("season_id_1")
+                episode_number = params.get("episode_number_1")
+                episode = next(
+                    (
+                        row
+                        for row in self.added
+                        if isinstance(row, Episode)
+                        and row.season_id == season_id
+                        and row.episode_number == episode_number
+                    ),
+                    None,
+                )
+                return MagicMock(scalar_one_or_none=MagicMock(return_value=episode))
+
             result = MagicMock()
             result.fetchall.return_value = []
             return result
@@ -424,3 +481,425 @@ async def test_sync_overseerr_keeps_duplicate_skipping_behavior(monkeypatch, bas
     assert mock_db.added == []
     mock_db.commit.assert_awaited_once()
     evaluate_mock.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_sync_overseerr_logs_request_level_degraded_tv_sync_once(
+    monkeypatch, base_context, caplog
+):
+    """Overseerr import should surface one request-level degraded sync warning."""
+
+    class FakeDB:
+        def __init__(self):
+            self.added = []
+            self.next_id = 1
+            self.commit = AsyncMock()
+            self.refresh = AsyncMock()
+
+        async def execute(self, statement):
+            columns = getattr(statement, "column_descriptions", [])
+            if len(columns) > 1:
+                result = MagicMock()
+                result.fetchall.return_value = []
+                return result
+
+            params = statement.compile().params
+            entity = columns[0].get("entity") if columns else None
+
+            if entity is RequestModel:
+                request_id = next(iter(params.values()))
+                request = next(
+                    (
+                        row
+                        for row in self.added
+                        if isinstance(row, RequestModel) and row.id == request_id
+                    ),
+                    None,
+                )
+                return MagicMock(scalar_one_or_none=MagicMock(return_value=request))
+
+            if entity is Season:
+                request_id = params.get("request_id_1")
+                season_number = params.get("season_number_1")
+                season = next(
+                    (
+                        row
+                        for row in self.added
+                        if isinstance(row, Season)
+                        and row.request_id == request_id
+                        and row.season_number == season_number
+                    ),
+                    None,
+                )
+                return MagicMock(scalar_one_or_none=MagicMock(return_value=season))
+
+            if entity is Episode:
+                season_id = params.get("season_id_1")
+                episode_number = params.get("episode_number_1")
+                episode = next(
+                    (
+                        row
+                        for row in self.added
+                        if isinstance(row, Episode)
+                        and row.season_id == season_id
+                        and row.episode_number == episode_number
+                    ),
+                    None,
+                )
+                return MagicMock(scalar_one_or_none=MagicMock(return_value=episode))
+
+            result = MagicMock()
+            result.fetchall.return_value = []
+            return result
+
+        def add(self, obj):
+            self.added.append(obj)
+
+        async def flush(self):
+            pending = [obj for obj in self.added if getattr(obj, "id", None) is None]
+            for obj in pending:
+                obj.id = self.next_id
+                self.next_id += 1
+
+    mock_db = FakeDB()
+    context = base_context()
+    context["env"] = {"overseerr_url": "http://ov", "overseerr_api_key": "key"}
+
+    monkeypatch.setattr(
+        settings,
+        "_build_settings_page_context",
+        AsyncMock(return_value=context),
+    )
+    runtime_settings = MagicMock(overseerr_sync_concurrency=2)
+    monkeypatch.setattr(settings, "get_settings", lambda: runtime_settings)
+
+    overseerr_requests = [
+        {
+            "id": 101,
+            "status": "approved",
+            "media": {"tmdbId": 2, "mediaType": "tv"},
+            "requestedBy": {"username": "tv-user-1"},
+        }
+    ]
+
+    class FakeOverseerrService:
+        def __init__(self, settings=None):
+            self.settings = settings
+
+        async def get_all_requests(self, status=None):
+            return overseerr_requests
+
+        def normalize_request_status(self, status):
+            return str(status).lower()
+
+        def normalize_media_status(self, status):
+            return str(status).lower() if status is not None else "unknown"
+
+        async def get_media_details(self, media_type, external_id):
+            assert media_type == "tv"
+            assert external_id == 2
+            return {"name": "Show One", "firstAirDate": "2023-02-03", "status": "Returning Series"}
+
+        async def close(self):
+            return None
+
+    monkeypatch.setattr(settings, "OverseerrService", FakeOverseerrService)
+    monkeypatch.setattr(settings, "evaluate_imported_request", AsyncMock(return_value=None))
+
+    plex_service = AsyncMock()
+    monkeypatch.setattr(settings, "PlexService", lambda settings: plex_service)
+
+    class FakeEpisodeSyncService:
+        def __init__(self, db, overseerr=None, plex=None):
+            self.db = db
+            self.overseerr = overseerr
+            self.plex = plex
+
+        async def sync_request(self, request_id):
+            settings.logger.warning(
+                "EpisodeSyncService: degraded Plex sync for request %s (%s); Plex episode availability was inconclusive, preserving existing episode/request state",
+                request_id,
+                "Show One",
+            )
+
+    import app.siftarr.services.episode_sync_service as episode_sync_module
+
+    monkeypatch.setattr(episode_sync_module, "EpisodeSyncService", FakeEpisodeSyncService)
+
+    response = await settings.sync_overseerr(MagicMock(), db=cast(Any, mock_db))
+    response_context = cast(dict, getattr(response, "context", None))
+
+    assert response_context["message_type"] == "success"
+    assert response_context["message"] == "Synced 1 new request(s) from Overseerr"
+    degraded_logs = [
+        record.message
+        for record in caplog.records
+        if "degraded Plex sync for request" in record.message
+    ]
+    assert degraded_logs == [
+        "EpisodeSyncService: degraded Plex sync for request 1 (Show One); "
+        "Plex episode availability was inconclusive, preserving existing episode/request state"
+    ]
+    mock_db.commit.assert_awaited_once()
+    plex_service.close.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_sync_overseerr_fresh_tv_import_bounds_work_and_preserves_state_on_transient_plex_failure(
+    monkeypatch, base_context, caplog
+):
+    """Fresh TV import should fail fast on Plex ReadError without per-season spam."""
+
+    class FakeDB:
+        def __init__(self):
+            self.added = []
+            self.next_id = 1
+            self.commit = AsyncMock()
+            self.refresh = AsyncMock()
+
+        async def execute(self, statement):
+            columns = getattr(statement, "column_descriptions", [])
+            if len(columns) > 1:
+                result = MagicMock()
+                result.fetchall.return_value = []
+                return result
+
+            params = statement.compile().params
+            entity = columns[0].get("entity") if columns else None
+
+            if entity is RequestModel:
+                request_id = next(iter(params.values()))
+                request = next(
+                    (
+                        row
+                        for row in self.added
+                        if isinstance(row, RequestModel) and row.id == request_id
+                    ),
+                    None,
+                )
+                return MagicMock(scalar_one_or_none=MagicMock(return_value=request))
+
+            if entity is Season:
+                request_id = params.get("request_id_1")
+                season_number = params.get("season_number_1")
+                season = next(
+                    (
+                        row
+                        for row in self.added
+                        if isinstance(row, Season)
+                        and row.request_id == request_id
+                        and row.season_number == season_number
+                    ),
+                    None,
+                )
+                return MagicMock(scalar_one_or_none=MagicMock(return_value=season))
+
+            if entity is Episode:
+                season_id = params.get("season_id_1")
+                episode_number = params.get("episode_number_1")
+                episode = next(
+                    (
+                        row
+                        for row in self.added
+                        if isinstance(row, Episode)
+                        and row.season_id == season_id
+                        and row.episode_number == episode_number
+                    ),
+                    None,
+                )
+                return MagicMock(scalar_one_or_none=MagicMock(return_value=episode))
+
+            result = MagicMock()
+            result.fetchall.return_value = []
+            return result
+
+        def add(self, obj):
+            self.added.append(obj)
+
+        async def flush(self):
+            pending = [obj for obj in self.added if getattr(obj, "id", None) is None]
+            for obj in pending:
+                obj.id = self.next_id
+                self.next_id += 1
+
+    mock_db = FakeDB()
+    context = base_context()
+    context["env"] = {"overseerr_url": "http://ov", "overseerr_api_key": "key"}
+
+    monkeypatch.setattr(
+        settings,
+        "_build_settings_page_context",
+        AsyncMock(return_value=context),
+    )
+    runtime_settings = MagicMock(
+        overseerr_sync_concurrency=2,
+        plex_sync_concurrency=2,
+        plex_url="http://plex:32400",
+        plex_token="token",
+    )
+    monkeypatch.setattr(settings, "get_settings", lambda: runtime_settings)
+
+    future_day = (datetime.now(UTC) + timedelta(days=7)).date().isoformat()
+    overseerr_requests = [
+        {
+            "id": 101,
+            "status": "approved",
+            "media": {"tmdbId": 2, "mediaType": "tv"},
+            "requestedBy": {"username": "tv-user-1"},
+        }
+    ]
+
+    class FakeOverseerrService:
+        def __init__(self, settings=None):
+            self.settings = settings
+            self.season_detail_calls: list[int] = []
+
+        async def get_all_requests(self, status=None):
+            return overseerr_requests
+
+        def normalize_request_status(self, status):
+            return str(status).lower()
+
+        def normalize_media_status(self, status):
+            return str(status).lower() if status is not None else "unknown"
+
+        async def get_media_details(self, media_type, external_id):
+            assert media_type == "tv"
+            assert external_id == 2
+            return {
+                "name": "Show One",
+                "firstAirDate": "2023-02-03",
+                "status": "Returning Series",
+                "seasons": [
+                    {"seasonNumber": 1, "name": "Season 1"},
+                    {"seasonNumber": 2, "name": "Season 2"},
+                    {"seasonNumber": 3, "name": "Season 3"},
+                ],
+            }
+
+        async def get_season_details(self, external_id, season_number):
+            assert external_id == 2
+            self.season_detail_calls.append(season_number)
+            return {
+                "seasonNumber": season_number,
+                "episodes": [
+                    {
+                        "episodeNumber": 1,
+                        "title": f"Episode {season_number}",
+                        "airDate": future_day if season_number == 2 else "2024-01-01",
+                    }
+                ],
+            }
+
+        async def close(self):
+            return None
+
+    fake_overseerr = FakeOverseerrService()
+    monkeypatch.setattr(settings, "OverseerrService", lambda settings=None: fake_overseerr)
+    monkeypatch.setattr(settings, "evaluate_imported_request", AsyncMock(return_value=None))
+
+    plex_service = PlexService(settings=runtime_settings)
+    lookup_show_by_tmdb = AsyncMock(
+        return_value=PlexLookupResult(item={"rating_key": "show-123"}, authoritative=True)
+    )
+    season_1_started = asyncio.Event()
+    season_1_cancelled = asyncio.Event()
+    season_3_started = asyncio.Event()
+    plex_call_keys: list[str] = []
+
+    async def plex_get(url: str, **kwargs):
+        del kwargs
+        rating_key = url.rstrip("/").split("/")[-2]
+        plex_call_keys.append(rating_key)
+
+        if rating_key == "show-123":
+            response = MagicMock()
+            response.status_code = 200
+            response.json.return_value = {
+                "MediaContainer": {
+                    "Metadata": [
+                        {"type": "season", "index": 1, "ratingKey": "season-1"},
+                        {"type": "season", "index": 2, "ratingKey": "season-2"},
+                        {"type": "season", "index": 3, "ratingKey": "season-3"},
+                    ]
+                }
+            }
+            return response
+
+        if rating_key == "season-1":
+            season_1_started.set()
+            try:
+                await asyncio.Future[None]()
+            except asyncio.CancelledError:
+                season_1_cancelled.set()
+                raise
+
+        if rating_key == "season-2":
+            raise httpx.ReadError("boom", request=httpx.Request("GET", url))
+
+        if rating_key == "season-3":
+            season_3_started.set()
+
+        response = MagicMock()
+        response.status_code = 200
+        response.json.return_value = {
+            "MediaContainer": {"Metadata": [{"type": "episode", "index": 1, "Media": [{"id": 1}]}]}
+        }
+        return response
+
+    mock_client = AsyncMock()
+    mock_client.get.side_effect = plex_get
+    close = AsyncMock()
+    monkeypatch.setattr(plex_service, "lookup_show_by_tmdb", lookup_show_by_tmdb)
+    monkeypatch.setattr(plex_service, "_get_client", AsyncMock(return_value=mock_client))
+    monkeypatch.setattr(plex_service, "close", close)
+    monkeypatch.setattr(settings, "PlexService", lambda settings: plex_service)
+
+    response = await settings.sync_overseerr(MagicMock(), db=cast(Any, mock_db))
+    response_context = cast(dict, getattr(response, "context", None))
+
+    assert response_context["message_type"] == "success"
+    assert response_context["message"] == "Synced 1 new request(s) from Overseerr"
+    assert fake_overseerr.season_detail_calls == [1, 2, 3]
+    lookup_show_by_tmdb.assert_awaited_once_with(2)
+    await asyncio.wait_for(season_1_started.wait(), timeout=1)
+    await asyncio.wait_for(season_1_cancelled.wait(), timeout=1)
+    assert plex_call_keys == ["show-123", "season-1", "season-2"]
+    assert season_3_started.is_set() is False
+
+    tv_request = next(
+        row for row in mock_db.added if getattr(row, "media_type", None) == MediaType.TV
+    )
+    seasons = [row for row in mock_db.added if isinstance(row, Season)]
+    episodes = [row for row in mock_db.added if isinstance(row, Episode)]
+    assert len(seasons) == 3
+    assert len(episodes) == 3
+    assert [season.status for season in seasons] == [
+        RequestStatus.PENDING,
+        RequestStatus.UNRELEASED,
+        RequestStatus.PENDING,
+    ]
+    assert [episode.status for episode in episodes] == [
+        RequestStatus.PENDING,
+        RequestStatus.UNRELEASED,
+        RequestStatus.PENDING,
+    ]
+    assert tv_request.status == RequestStatus.PENDING
+
+    degraded_logs = [
+        record.message
+        for record in caplog.records
+        if "Plex episode availability was inconclusive" in record.message
+    ]
+    assert degraded_logs == [
+        "EpisodeSyncService: degraded Plex sync for request 1 (Show One); "
+        "Plex episode availability was inconclusive, preserving existing episode/request state"
+    ]
+    spam_logs = [
+        record.message
+        for record in caplog.records
+        if "get_metadata_children(" in record.message or "get_season_children(" in record.message
+    ]
+    assert spam_logs == []
+    assert mock_db.commit.await_count == 2
+    close.assert_awaited_once()

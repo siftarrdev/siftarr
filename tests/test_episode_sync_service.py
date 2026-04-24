@@ -16,6 +16,7 @@ from app.siftarr.services.episode_sync_service import (
     _derive_request_status_from_seasons,
     _derive_season_status,
 )
+from app.siftarr.services.plex_service import PlexEpisodeAvailabilityResult, PlexLookupResult
 
 
 def _make_request(**overrides):
@@ -522,7 +523,10 @@ class TestEpisodeSyncService:
         future_episode.air_date = date.max
 
         plex = AsyncMock()
-        plex.get_episode_availability.return_value = {(8, 1): True, (8, 2): False, (8, 3): False}
+        plex.get_episode_availability_result.return_value = PlexEpisodeAvailabilityResult(
+            availability={(8, 1): True, (8, 2): False, (8, 3): False},
+            authoritative=True,
+        )
 
         service = EpisodeSyncService(mock_db, overseerr=mock_overseerr, plex=plex)
         mock_db.flush = AsyncMock()
@@ -671,8 +675,8 @@ class TestEpisodeSyncService:
         }
 
         plex = AsyncMock()
-        plex.get_show_by_tmdb.return_value = None
-        plex.get_show_by_tvdb.return_value = None
+        plex.lookup_show_by_tmdb.return_value = PlexLookupResult(item=None, authoritative=True)
+        plex.lookup_show_by_tvdb.return_value = PlexLookupResult(item=None, authoritative=True)
         plex.search_show.return_value = []
         service = EpisodeSyncService(mock_db, overseerr=mock_overseerr, plex=plex)
 
@@ -684,5 +688,167 @@ class TestEpisodeSyncService:
         )
         assert added_episode.status == RequestStatus.UNRELEASED
         assert request.status == RequestStatus.UNRELEASED
-        plex.get_episode_availability.assert_not_awaited()
+        plex.get_episode_availability_result.assert_not_awaited()
         assert mock_db.commit.await_count == 1
+
+    @pytest.mark.asyncio
+    async def test_sync_request_keeps_overseerr_states_when_plex_lookup_inconclusive(
+        self, mock_db, mock_overseerr
+    ):
+        """Inconclusive Plex show lookup should preserve Overseerr-derived state."""
+        request = _make_request(id=1, tmdb_id=71527)
+        request.title = "Foundation"
+        request.plex_rating_key = None
+
+        req_result = MagicMock()
+        req_result.scalar_one_or_none.return_value = request
+        season_result = MagicMock()
+        season_result.scalar_one_or_none.return_value = None
+        episode_result = MagicMock()
+        episode_result.scalar_one_or_none.return_value = None
+        mock_db.execute.side_effect = [req_result, season_result, episode_result]
+        mock_db.flush = AsyncMock()
+        mock_db.commit = AsyncMock()
+
+        mock_overseerr.get_media_details.return_value = {
+            "seasons": [
+                {
+                    "seasonNumber": 1,
+                    "episodes": [
+                        {"episodeNumber": 1, "title": "Pilot", "airDate": date.max.isoformat()}
+                    ],
+                }
+            ]
+        }
+
+        plex = AsyncMock()
+        plex.lookup_show_by_tmdb.return_value = PlexLookupResult(item=None, authoritative=False)
+        service = EpisodeSyncService(mock_db, overseerr=mock_overseerr, plex=plex)
+
+        seasons = await service.sync_request(1)
+
+        assert len(seasons) == 1
+        added_episode = next(
+            call.args[0] for call in mock_db.add.call_args_list if isinstance(call.args[0], Episode)
+        )
+        assert added_episode.status == RequestStatus.UNRELEASED
+        assert request.status == RequestStatus.UNRELEASED
+        plex.lookup_show_by_tvdb.assert_not_awaited()
+        plex.search_show.assert_not_awaited()
+        plex.get_episode_availability_result.assert_not_awaited()
+        assert mock_db.commit.await_count == 1
+
+    @pytest.mark.asyncio
+    async def test_sync_request_keeps_overseerr_states_when_plex_availability_inconclusive(
+        self, mock_db, mock_overseerr
+    ):
+        """Inconclusive Plex episode availability should preserve Overseerr-derived state."""
+        request = _make_request(id=1, tmdb_id=71527)
+        request.title = "Foundation"
+        request.plex_rating_key = "show-123"
+
+        req_result = MagicMock()
+        req_result.scalar_one_or_none.return_value = request
+        season_result = MagicMock()
+        season_result.scalar_one_or_none.return_value = None
+        episode_result = MagicMock()
+        episode_result.scalar_one_or_none.return_value = None
+        mock_db.execute.side_effect = [req_result, season_result, episode_result]
+        mock_db.flush = AsyncMock()
+        mock_db.commit = AsyncMock()
+
+        mock_overseerr.get_media_details.return_value = {
+            "seasons": [
+                {
+                    "seasonNumber": 1,
+                    "episodes": [
+                        {"episodeNumber": 1, "title": "Pilot", "airDate": date.max.isoformat()}
+                    ],
+                }
+            ]
+        }
+
+        plex = AsyncMock()
+        plex.get_episode_availability_result.return_value = PlexEpisodeAvailabilityResult(
+            availability={}, authoritative=False
+        )
+        service = EpisodeSyncService(mock_db, overseerr=mock_overseerr, plex=plex)
+
+        seasons = await service.sync_request(1)
+
+        assert len(seasons) == 1
+        added_episode = next(
+            call.args[0] for call in mock_db.add.call_args_list if isinstance(call.args[0], Episode)
+        )
+        assert added_episode.status == RequestStatus.UNRELEASED
+        assert request.status == RequestStatus.UNRELEASED
+        plex.get_episode_availability_result.assert_awaited_once_with("show-123")
+        assert mock_db.commit.await_count == 1
+
+    @pytest.mark.asyncio
+    async def test_sync_request_fresh_multi_season_import_logs_one_degraded_warning_on_inconclusive_plex(
+        self, mock_db, mock_overseerr, caplog
+    ):
+        """Fresh imports should preserve Overseerr state and emit one request-level warning."""
+        request = _make_request(id=1, tmdb_id=71527)
+        request.title = "Foundation"
+        request.plex_rating_key = "show-123"
+        request.status = RequestStatus.PENDING
+
+        mock_db.execute.side_effect = [
+            MagicMock(scalar_one_or_none=MagicMock(return_value=request)),
+            MagicMock(scalar_one_or_none=MagicMock(return_value=None)),
+            MagicMock(scalar_one_or_none=MagicMock(return_value=None)),
+            MagicMock(scalar_one_or_none=MagicMock(return_value=None)),
+            MagicMock(scalar_one_or_none=MagicMock(return_value=None)),
+        ]
+        mock_db.flush = AsyncMock()
+        mock_db.commit = AsyncMock()
+
+        future_day = (datetime.now(UTC) + timedelta(days=7)).date().isoformat()
+        mock_overseerr.get_media_details.return_value = {
+            "seasons": [
+                {
+                    "seasonNumber": 1,
+                    "episodes": [{"episodeNumber": 1, "title": "Pilot", "airDate": "2024-01-01"}],
+                },
+                {
+                    "seasonNumber": 2,
+                    "episodes": [{"episodeNumber": 1, "title": "Future", "airDate": future_day}],
+                },
+            ]
+        }
+
+        plex = AsyncMock()
+        plex.get_episode_availability_result.return_value = PlexEpisodeAvailabilityResult(
+            availability={}, authoritative=False
+        )
+        service = EpisodeSyncService(mock_db, overseerr=mock_overseerr, plex=plex)
+
+        seasons = await service.sync_request(1)
+
+        assert [season.season_number for season in seasons] == [1, 2]
+        assert [season.status for season in seasons] == [
+            RequestStatus.PENDING,
+            RequestStatus.UNRELEASED,
+        ]
+
+        added_rows = [call.args[0] for call in mock_db.add.call_args_list]
+        added_episodes = [row for row in added_rows if isinstance(row, Episode)]
+        assert [episode.status for episode in added_episodes] == [
+            RequestStatus.PENDING,
+            RequestStatus.UNRELEASED,
+        ]
+        assert request.status == RequestStatus.PENDING
+        plex.get_episode_availability_result.assert_awaited_once_with("show-123")
+        assert mock_db.commit.await_count == 1
+
+        degraded_logs = [
+            record.message
+            for record in caplog.records
+            if "Plex episode availability was inconclusive" in record.message
+        ]
+        assert degraded_logs == [
+            "EpisodeSyncService: degraded Plex sync for request 1 (Foundation); "
+            "Plex episode availability was inconclusive, preserving existing episode/request state"
+        ]
