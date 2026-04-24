@@ -300,8 +300,8 @@ details[open] summary .accordion-chevron { transform: rotate(90deg); }
 
             <div class="flex items-center justify-between gap-4 py-3 first:pt-0 last:pb-0">
                 <div class="min-w-0">
-                    <div class="text-sm font-semibold text-white">Re-scan Plex Availability</div>
-                    <div class="text-xs text-gray-500">Run recent scan or poll jobs, or use the manual rescan path for a one-off full resync of existing requests</div>
+                    <div class="text-sm font-semibold text-white">Plex Sync</div>
+                    <div class="text-xs text-gray-500">Partial sync checks new or incomplete TV content; full sync refreshes active non-completed TV metadata and polls Plex availability</div>
                 </div>
                 <div class="flex items-center gap-2 shrink-0">
                     <form action="/settings/run-recent-plex-scan" method="post">
@@ -310,8 +310,8 @@ details[open] summary .accordion-chevron { transform: rotate(90deg); }
                     <form action="/settings/run-plex-poll" method="post">
                         <button type="submit" class="btn-warning btn-sm shrink-0">Run Plex Poll</button>
                     </form>
-                    <button type="button" onclick="startPlexRescan(false)" class="btn-primary btn-sm shrink-0">Deep Re-scan</button>
-                    <button type="button" onclick="startPlexRescan(true)" class="btn btn-secondary btn-sm shrink-0">Shallow Re-scan</button>
+                    <button type="button" onclick="startPlexRescan(false)" class="btn-primary btn-sm shrink-0">Full Sync</button>
+                    <button type="button" onclick="startPlexRescan(true)" class="btn btn-secondary btn-sm shrink-0">Partial Sync</button>
                 </div>
             </div>
 
@@ -357,7 +357,7 @@ details[open] summary .accordion-chevron { transform: rotate(90deg); }
 <!-- Plex Rescan Modal -->
 <div id="plex-sync-modal" class="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm hidden">
     <div class="bg-surface-800 border border-gray-700/60 rounded-2xl shadow-2xl w-full max-w-md mx-4 p-6">
-        <h3 class="text-lg font-semibold text-white mb-4">Re-scanning Plex</h3>
+        <h3 id="plex-sync-title" class="text-lg font-semibold text-white mb-4">Syncing Plex</h3>
         <div class="mb-3">
             <div class="w-full h-2 rounded-full bg-surface-700 overflow-hidden">
                 <div id="plex-sync-progress-bar" class="h-2 rounded-full bg-brand-500 transition-all duration-300" style="width: 0%"></div>
@@ -553,6 +553,7 @@ let plexEventSource = null;
 
 function startPlexRescan(shallow = false) {
     const modal = document.getElementById('plex-sync-modal');
+    const title = document.getElementById('plex-sync-title');
     const bar = document.getElementById('plex-sync-progress-bar');
     const status = document.getElementById('plex-sync-status-text');
     const closeBtn = document.getElementById('plex-sync-close-btn');
@@ -562,7 +563,10 @@ function startPlexRescan(shallow = false) {
     bar.style.width = '0%';
     bar.classList.remove('bg-red-500');
     bar.classList.add('bg-brand-500');
-    status.textContent = 'Connecting...';
+    title.textContent = shallow ? 'Partial Plex Sync' : 'Full Plex Sync';
+    status.textContent = shallow
+        ? 'Connecting for partial sync (new or incomplete content only)...'
+        : 'Connecting for full metadata refresh and availability poll...';
     status.classList.remove('text-red-400', 'text-emerald-400');
     status.classList.add('text-gray-400');
     renderActiveItems(activeList, activeWrap, []);
@@ -570,7 +574,7 @@ function startPlexRescan(shallow = false) {
     closeBtn.classList.add('opacity-50', 'cursor-not-allowed');
     modal.classList.remove('hidden');
 
-    const streamUrl = shallow ? '/settings/api/rescan-plex/stream?shallow=true' : '/settings/api/rescan-plex/stream';
+    const streamUrl = shallow ? '/settings/api/rescan-plex/stream?mode=partial' : '/settings/api/rescan-plex/stream?mode=full';
     plexEventSource = new EventSource(streamUrl);
 
     plexEventSource.onmessage = function(event) {
@@ -578,7 +582,9 @@ function startPlexRescan(shallow = false) {
 
         switch (data.phase) {
             case 'connecting':
-                status.textContent = 'Connecting to Plex...';
+                status.textContent = shallow
+                    ? 'Connecting to Plex for partial sync...'
+                    : 'Connecting to Plex for full sync...';
                 bar.style.width = '5%';
                 break;
             case 'fetching':

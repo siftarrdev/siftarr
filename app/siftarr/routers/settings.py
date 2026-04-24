@@ -5,7 +5,7 @@ import os
 from collections.abc import AsyncGenerator
 from typing import Any
 
-from fastapi import APIRouter, Depends, Form, Request
+from fastapi import APIRouter, Depends, Form, Query, Request
 from fastapi.responses import HTMLResponse, RedirectResponse, StreamingResponse
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
@@ -541,10 +541,17 @@ async def reseed_rules(
 
 
 @router.get("/api/rescan-plex/stream")
-async def rescan_plex_stream(shallow: bool = False) -> StreamingResponse:
-    """Stream Plex re-scan progress via SSE."""
+async def rescan_plex_stream(
+    shallow: bool = False,
+    mode: str | None = Query(default=None, pattern="^(partial|full)$"),
+) -> StreamingResponse:
+    """Stream Plex sync progress via SSE.
+
+    The legacy shallow=true query remains compatible and maps to partial sync.
+    """
+    partial = shallow or mode == "partial"
     return StreamingResponse(
-        _rescan_plex_generator(shallow=shallow),
+        _rescan_plex_generator(shallow=partial),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",

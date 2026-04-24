@@ -366,9 +366,19 @@ async def rescan_plex_requests(
     rescan_plex_tv_request_func,
 ) -> tuple[int, int, int]:
     """Run the manual Plex rescan path."""
+    mode = "partial" if shallow else "full"
     polling_service = plex_polling_service_cls(db, plex)
     active_requests = await polling_service.get_active_requests()
     active_requests = [req for req in active_requests if req.status != RequestStatus.COMPLETED]
+
+    def is_completed_status(value: Any) -> bool:
+        if value == RequestStatus.COMPLETED:
+            return True
+        return getattr(value, "value", value) == RequestStatus.COMPLETED.value
+
+    def title_for(req: RequestModel) -> str:
+        return req.title or f"Request #{req.id}"
+
     tv_requests = [req for req in active_requests if req.media_type == MediaType.TV]
 
     if shallow:
@@ -382,7 +392,7 @@ async def rescan_plex_requests(
                 if not episodes:
                     return False
                 for episode in episodes:
-                    if episode.status != RequestStatus.COMPLETED:
+                    if not is_completed_status(episode.status):
                         return False
             return True
 
@@ -399,8 +409,20 @@ async def rescan_plex_requests(
         await on_event(
             build_sse_progress_func(
                 "fetching",
-                title="Fetching active Plex requests...",
-                active=[req.title or f"Request #{req.id}" for req in active_requests[:16]],
+                current=0,
+                total=max(1, len(active_requests)),
+                title=(
+                    "Finding new or incomplete Plex content..."
+                    if shallow
+                    else "Finding active Plex requests for full sync..."
+                ),
+                active=[title_for(req) for req in (tv_requests if shallow else active_requests)[:16]],
+                mode=mode,
+                message=(
+                    "Partial Plex sync: checking new or incomplete TV content only."
+                    if shallow
+                    else "Full Plex sync: refreshing active non-completed TV metadata."
+                ),
             )
         )
 
@@ -427,7 +449,23 @@ async def rescan_plex_requests(
 
     if on_event is not None:
         await on_event(
-            build_sse_progress_func("polling", title="Running Plex availability poll...")
+            build_sse_progress_func(
+                "polling",
+                current=0,
+                total=1,
+                title=(
+                    "Polling Plex availability after partial sync..."
+                    if shallow
+                    else "Refreshing metadata and polling Plex availability..."
+                ),
+                active=[],
+                mode=mode,
+                message=(
+                    "Polling Plex availability for active requests after partial sync..."
+                    if shallow
+                    else "Running full Plex metadata refresh and availability poll..."
+                ),
+            )
         )
 
     completed = await polling_service.poll(on_progress=on_event)
@@ -444,8 +482,9 @@ async def rescan_plex_generator(
     logger,
 ):
     """Yield SSE events for Plex re-scan progress."""
+    mode = "partial" if shallow else "full"
     try:
-        yield serialize_sse({"phase": "connecting"})
+        yield serialize_sse({"phase": "connecting", "mode": mode})
 
         async with async_session_maker() as db:
             runtime_settings = get_settings()
@@ -493,13 +532,18 @@ async def rescan_plex_generator(
                 yield serialize_sse(
                     build_sse_progress_func(
                         "complete",
+                        mode=mode,
                         resynced=resynced,
                         failed=failed,
                         completed=completed,
                         active=[],
                         message=(
-                            "Manual Plex rescan completed. "
-                            f"Re-synced {resynced} TV request(s), "
+                            (
+                                "Partial Plex sync completed. "
+                                if shallow
+                                else "Full Plex sync completed. "
+                            )
+                            + f"Re-synced {resynced} TV request(s), "
                             f"{failed} failed, "
                             f"{completed} transitioned to completed."
                         ),

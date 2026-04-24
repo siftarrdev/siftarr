@@ -89,8 +89,8 @@ async def test_settings_page_includes_reseed_default_snapshot_copy(monkeypatch, 
 
 
 @pytest.mark.asyncio
-async def test_settings_page_includes_rescan_plex_action(monkeypatch, mock_db):
-    """Settings page should expose the Plex availability rescan action."""
+async def test_settings_page_includes_plex_sync_action(monkeypatch, mock_db):
+    """Settings page should expose explicit partial and full Plex sync actions."""
 
     rule_service = MagicMock()
     rule_service.ensure_default_rules = AsyncMock()
@@ -124,8 +124,11 @@ async def test_settings_page_includes_rescan_plex_action(monkeypatch, mock_db):
     response = await settings.get_settings_page(MagicMock(), db=mock_db)
     body = cast(bytes, response.body).decode()
 
-    assert "Re-scan Plex Availability" in body
-    assert "Re-scan Plex" in body
+    assert "Plex Sync" in body
+    assert "Partial Sync" in body
+    assert "Full Sync" in body
+    assert "new or incomplete TV content" in body
+    assert "active non-completed TV metadata" in body
 
 
 @pytest.mark.asyncio

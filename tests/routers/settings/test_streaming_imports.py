@@ -282,6 +282,123 @@ async def test_rescan_plex_sse_reports_movies_and_tv_in_active_items(monkeypatch
 
 
 @pytest.mark.asyncio
+async def test_rescan_plex_partial_only_resyncs_new_or_incomplete_tv_content(
+    monkeypatch, mock_db
+):
+    """Partial Plex sync should leave already-complete TV metadata out of resync work."""
+
+    runtime_settings = MagicMock(plex_sync_concurrency=2)
+    plex_service = AsyncMock()
+
+    complete_tv = MagicMock(id=1, title="Complete Show", media_type=MediaType.TV)
+    complete_tv.status = RequestStatus.PENDING
+    complete_season = MagicMock()
+    complete_episode = MagicMock(status="completed")
+    complete_season.episodes = [complete_episode]
+    complete_tv.seasons = [complete_season]
+
+    incomplete_tv = MagicMock(id=2, title="Incomplete Show", media_type=MediaType.TV)
+    incomplete_tv.status = RequestStatus.PENDING
+    incomplete_season = MagicMock()
+    incomplete_episode = MagicMock(status=RequestStatus.PENDING)
+    incomplete_season.episodes = [incomplete_episode]
+    incomplete_tv.seasons = [incomplete_season]
+
+    new_tv = MagicMock(id=3, title="New Show", media_type=MediaType.TV)
+    new_tv.status = RequestStatus.PENDING
+    new_tv.seasons = []
+
+    completed_request = MagicMock(id=4, title="Done", media_type=MediaType.TV)
+    completed_request.status = RequestStatus.COMPLETED
+    completed_request.seasons = []
+
+    polling = AsyncMock()
+    polling.get_active_requests = AsyncMock(
+        return_value=[complete_tv, incomplete_tv, new_tv, completed_request]
+    )
+    polling.poll = AsyncMock(return_value=1)
+    monkeypatch.setattr(settings, "PlexPollingService", lambda db, plex: polling)
+
+    tv_rescan = AsyncMock(return_value=True)
+    monkeypatch.setattr(settings, "_rescan_plex_tv_request", tv_rescan)
+
+    events: list[dict[str, Any]] = []
+
+    async def collect(payload):
+        events.append(payload)
+
+    result = await settings._rescan_plex_requests(
+        mock_db,
+        runtime_settings,
+        plex_service,
+        on_event=collect,
+        shallow=True,
+    )
+
+    assert result == (2, 0, 1)
+    assert [call.args[0] for call in tv_rescan.await_args_list] == [2, 3]
+    fetching = next(event for event in events if event["phase"] == "fetching")
+    assert fetching["mode"] == "partial"
+    assert fetching["active"] == ["Incomplete Show", "New Show"]
+    assert "new or incomplete" in fetching["message"]
+
+
+@pytest.mark.asyncio
+async def test_rescan_plex_full_resyncs_all_active_non_completed_tv_and_polls(
+    monkeypatch, mock_db
+):
+    """Full Plex sync should resync every active non-completed TV request before polling."""
+
+    runtime_settings = MagicMock(plex_sync_concurrency=2)
+    plex_service = AsyncMock()
+
+    active_tv = MagicMock(id=10, title="Active Show", media_type=MediaType.TV)
+    active_tv.status = RequestStatus.PENDING
+    active_tv.seasons = []
+    complete_tv = MagicMock(id=11, title="Complete Episodes Show", media_type=MediaType.TV)
+    complete_tv.status = RequestStatus.PENDING
+    complete_season = MagicMock()
+    complete_season.episodes = [MagicMock(status=RequestStatus.COMPLETED)]
+    complete_tv.seasons = [complete_season]
+    completed_request = MagicMock(id=12, title="Completed Request", media_type=MediaType.TV)
+    completed_request.status = RequestStatus.COMPLETED
+    completed_request.seasons = []
+
+    polling = AsyncMock()
+    polling.get_active_requests = AsyncMock(
+        return_value=[active_tv, complete_tv, completed_request]
+    )
+    polling.poll = AsyncMock(return_value=2)
+    monkeypatch.setattr(settings, "PlexPollingService", lambda db, plex: polling)
+
+    tv_rescan = AsyncMock(return_value=True)
+    monkeypatch.setattr(settings, "_rescan_plex_tv_request", tv_rescan)
+
+    events: list[dict[str, Any]] = []
+
+    async def collect(payload):
+        events.append(payload)
+
+    result = await settings._rescan_plex_requests(
+        mock_db,
+        runtime_settings,
+        plex_service,
+        on_event=collect,
+        shallow=False,
+    )
+
+    assert result == (2, 0, 2)
+    assert [call.args[0] for call in tv_rescan.await_args_list] == [10, 11]
+    fetching = next(event for event in events if event["phase"] == "fetching")
+    polling_event = next(event for event in events if event["phase"] == "polling")
+    assert fetching["mode"] == "full"
+    assert "active non-completed" in fetching["message"]
+    assert polling_event["mode"] == "full"
+    assert "metadata refresh and availability poll" in polling_event["message"]
+    polling.poll.assert_awaited_once()
+
+
+@pytest.mark.asyncio
 async def test_rescan_plex_uses_bounded_parallel_workers_and_reports_counts(
     monkeypatch, mock_db, base_context
 ):
