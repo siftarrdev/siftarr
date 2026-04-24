@@ -1,6 +1,7 @@
 """Settings streaming and import flow tests."""
 
 import asyncio
+import json
 from datetime import UTC, datetime, timedelta
 from typing import Any, cast
 from unittest.mock import AsyncMock, MagicMock
@@ -13,7 +14,228 @@ from app.siftarr.models.request import MediaType, RequestStatus
 from app.siftarr.models.request import Request as RequestModel
 from app.siftarr.models.season import Season
 from app.siftarr.routers import settings
+from app.siftarr.services import settings_service
 from app.siftarr.services.plex_service import PlexLookupResult, PlexService
+
+
+def _parse_sse_events(chunks: list[str]) -> list[dict[str, Any]]:
+    events: list[dict[str, Any]] = []
+    for chunk in chunks:
+        for line in chunk.splitlines():
+            if line.startswith("data: "):
+                events.append(json.loads(line.removeprefix("data: ")))
+    return events
+
+
+@pytest.mark.asyncio
+async def test_bounded_progress_reports_completed_counts_before_terminal_events():
+    """Bounded progress should not report 100% before a terminal complete/error event."""
+
+    items = [MagicMock(id=1, title="One"), MagicMock(id=2, title="Two")]
+    events: list[dict[str, Any]] = []
+    release_workers = asyncio.Event()
+
+    async def collect(payload: dict[str, Any]) -> None:
+        events.append(payload)
+
+    async def worker(_item):
+        await release_workers.wait()
+        return True
+
+    task = asyncio.create_task(
+        settings._run_bounded_with_progress(
+            items,
+            2,
+            worker,
+            on_event=collect,
+            phase="processing",
+        )
+    )
+
+    while len(events) < 2:
+        await asyncio.sleep(0)
+
+    non_terminal_events = [event for event in events if event.get("phase") == "processing"]
+    assert all(event["current"] < event["total"] for event in non_terminal_events)
+    assert all("started" in event and "completed" in event for event in non_terminal_events)
+    assert [event["completed"] for event in non_terminal_events] == [0, 0]
+
+    release_workers.set()
+    assert await task == [True, True]
+    assert events[-1]["current"] == 2
+    assert events[-1]["completed"] == 2
+    assert events[-1]["active"] == []
+
+
+@pytest.mark.asyncio
+async def test_sync_overseerr_sse_streams_fetch_prefetch_import_tv_sync_and_completion(
+    monkeypatch,
+):
+    """Overseerr SSE should expose usable progress for each long-running stage."""
+
+    class FakeSessionContext:
+        async def __aenter__(self):
+            return MagicMock()
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+    runtime_settings = MagicMock(overseerr_sync_concurrency=2)
+    monkeypatch.setattr(settings_service, "get_settings", lambda: runtime_settings)
+
+    async def build_effective_settings(_db):
+        return {"overseerr_url": "http://overseerr", "overseerr_api_key": "key"}
+
+    async def import_overseerr_requests(_db, _runtime_settings, **kwargs):
+        emit = kwargs.get("on_event") or kwargs.get("on_progress")
+        if emit is not None:
+            for payload in [
+                settings_service.build_sse_progress(
+                    "fetching",
+                    current=0,
+                    total=4,
+                    message="Fetching requests from Overseerr...",
+                    active=[],
+                ),
+                settings_service.build_sse_progress(
+                    "prefetching",
+                    current=1,
+                    total=3,
+                    message="Fetching metadata for Movie One...",
+                    active=["Movie One", "Show One"],
+                ),
+                settings_service.build_sse_progress(
+                    "importing",
+                    current=1,
+                    total=2,
+                    message="Importing Show One...",
+                    active=["Show One"],
+                ),
+                settings_service.build_sse_progress(
+                    "episode_sync",
+                    current=0,
+                    total=1,
+                    message="Syncing TV episodes for Show One...",
+                    active=["Show One"],
+                ),
+            ]:
+                await emit(payload)
+        return 2, 1
+
+    chunks = [
+        chunk
+        async for chunk in settings_service.sync_overseerr_generator(
+            async_session_maker=FakeSessionContext,
+            build_effective_settings_func=build_effective_settings,
+            import_overseerr_requests_func=import_overseerr_requests,
+            build_sse_progress_func=settings_service.build_sse_progress,
+            logger=settings.logger,
+        )
+    ]
+    events = _parse_sse_events(chunks)
+
+    phases = [event["phase"] for event in events]
+    assert phases == [
+        "connecting",
+        "fetching",
+        "prefetching",
+        "importing",
+        "episode_sync",
+        "complete",
+    ]
+    for event in events[1:-1]:
+        assert isinstance(event["current"], int)
+        assert isinstance(event["total"], int)
+        assert event["current"] < event["total"]
+        assert event["message"]
+        assert isinstance(event["active"], list)
+    assert events[-1]["message"] == "Synced 2 new request(s) from Overseerr"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("shallow", [True, False])
+async def test_rescan_plex_sse_streams_partial_and_full_progress(monkeypatch, shallow):
+    """Plex SSE should stream bounded TV resync progress and the final poll/refresh step."""
+
+    class FakeSessionContext:
+        async def __aenter__(self):
+            return MagicMock()
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+    runtime_settings = MagicMock(plex_sync_concurrency=2)
+    monkeypatch.setattr(settings_service, "get_settings", lambda: runtime_settings)
+    plex = AsyncMock()
+
+    async def rescan_plex_requests(_db, _runtime_settings, _plex, *, on_event, shallow):
+        await on_event(
+            settings_service.build_sse_progress(
+                "fetching",
+                current=0,
+                total=2,
+                message="Fetching active Plex requests...",
+                active=["Show One", "Show Two"],
+                mode="partial" if shallow else "full",
+            )
+        )
+        await on_event(
+            settings_service.build_sse_progress(
+                "processing",
+                current=0,
+                total=2,
+                started=1,
+                completed=0,
+                message="Re-syncing Show One...",
+                active=["Show One"],
+            )
+        )
+        await on_event(
+            settings_service.build_sse_progress(
+                "processing",
+                current=1,
+                total=2,
+                started=1,
+                completed=1,
+                message="Completed Show One.",
+                active=[],
+            )
+        )
+        await on_event(
+            settings_service.build_sse_progress(
+                "polling",
+                current=0,
+                total=1,
+                message="Running Plex poll and metadata refresh...",
+                active=[],
+            )
+        )
+        return 1, 0, 2
+
+    chunks = [
+        chunk
+        async for chunk in settings_service.rescan_plex_generator(
+            shallow=shallow,
+            async_session_maker=FakeSessionContext,
+            plex_service_cls=lambda settings: plex,
+            rescan_plex_requests_func=rescan_plex_requests,
+            build_sse_progress_func=settings_service.build_sse_progress,
+            logger=settings.logger,
+        )
+    ]
+    events = _parse_sse_events(chunks)
+
+    phases = [event["phase"] for event in events]
+    assert phases == ["connecting", "fetching", "processing", "processing", "polling", "complete"]
+    assert events[1]["mode"] == ("partial" if shallow else "full")
+    processing_events = [event for event in events if event["phase"] == "processing"]
+    assert [event["current"] for event in processing_events] == [0, 1]
+    assert [event["completed"] for event in processing_events] == [0, 1]
+    assert all(event["current"] < event["total"] for event in events[1:-1])
+    assert events[-2]["message"] == "Running Plex poll and metadata refresh..."
+    assert events[-1]["phase"] == "complete"
+    assert events[-1]["completed"] == 2
+    plex.close.assert_awaited_once()
 
 
 @pytest.mark.asyncio

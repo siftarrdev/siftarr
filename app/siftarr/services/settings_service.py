@@ -252,6 +252,7 @@ async def run_bounded_with_progress(
     build_sse_progress_func,
 ) -> list[Any]:
     """Run async work with bounded concurrency and progress callbacks."""
+    total = len(items)
     semaphore = asyncio.Semaphore(max(1, limit))
     active_titles: list[str] = []
     active_lock = asyncio.Lock()
@@ -262,6 +263,19 @@ async def run_bounded_with_progress(
         result = on_event(payload)
         if asyncio.iscoroutine(result):
             await result
+
+    if total == 0:
+        await emit(
+            build_sse_progress_func(
+                phase,
+                current=0,
+                total=1,
+                started=0,
+                completed=0,
+                active=[],
+            )
+        )
+        return []
 
     async def run(item: Any) -> Any:
         nonlocal started, finished
@@ -276,8 +290,10 @@ async def run_bounded_with_progress(
             await emit(
                 build_sse_progress_func(
                     phase,
-                    current=started,
-                    total=len(items),
+                    current=finished,
+                    total=total,
+                    started=started,
+                    completed=finished,
                     title=title,
                     active=active_snapshot,
                 )
@@ -296,7 +312,9 @@ async def run_bounded_with_progress(
                     build_sse_progress_func(
                         phase,
                         current=finished,
-                        total=len(items),
+                        total=total,
+                        started=started,
+                        completed=finished,
                         title=title,
                         active=active_snapshot,
                     )
@@ -593,6 +611,7 @@ async def import_overseerr_requests(
     db,
     runtime_settings,
     *,
+    on_event=None,
     overseerr_service_cls,
     plex_service_cls,
     evaluate_imported_request_func,
@@ -601,7 +620,29 @@ async def import_overseerr_requests(
 ) -> tuple[int, int]:
     """Fetch, filter, and import new Overseerr requests into the local DB."""
     overseerr_service = overseerr_service_cls(settings=runtime_settings)
+
+    async def emit(payload: dict[str, Any]) -> None:
+        if on_event is None:
+            return
+        result = on_event(payload)
+        if asyncio.iscoroutine(result):
+            await result
+
+    def progress_current(current: int, total: int) -> int:
+        if total <= 0:
+            return 0
+        return min(current, total - 1)
+
     try:
+        await emit(
+            build_sse_progress(
+                "fetching",
+                current=0,
+                total=1,
+                active=[],
+                message="Fetching requests from Overseerr...",
+            )
+        )
         overseerr_requests = await overseerr_service.get_all_requests(status=None)
         if not overseerr_requests:
             return 0, 0
@@ -614,32 +655,76 @@ async def import_overseerr_requests(
         existing_request_ids = {row[1] for row in existing_rows if row[1] is not None}
 
         actionable_requests = []
-        for ov_req in overseerr_requests:
+        for index, ov_req in enumerate(overseerr_requests, start=1):
             media = ov_req.get("media") or {}
             request_status = overseerr_service.normalize_request_status(ov_req.get("status"))
             media_status = overseerr_service.normalize_media_status(media.get("status"))
-            if request_status not in {"pending", "approved"}:
-                continue
-            if media_status == "available":
-                continue
-            actionable_requests.append(ov_req)
+            if request_status in {"pending", "approved"} and media_status != "available":
+                actionable_requests.append(ov_req)
+            await emit(
+                build_sse_progress(
+                    "filtering",
+                    current=progress_current(index, len(overseerr_requests)),
+                    total=len(overseerr_requests),
+                    active=[],
+                    message="Filtering actionable Overseerr requests...",
+                )
+            )
 
         sync_concurrency = max(1, runtime_settings.overseerr_sync_concurrency)
         sync_semaphore = asyncio.Semaphore(sync_concurrency)
         media_details_tasks: dict[tuple[str, int], asyncio.Task[dict | None]] = {}
         media_details_lock = asyncio.Lock()
+        active_prefetch: list[str] = []
+        prefetch_completed = 0
+        prefetch_lock = asyncio.Lock()
 
-        prepared_requests = await asyncio.gather(
-            *(
-                prepare_overseerr_import_func(
+        async def prepare_with_progress(ov_req: dict[str, Any]) -> PreparedOverseerrImport | None:
+            nonlocal prefetch_completed
+            media = ov_req.get("media") or {}
+            title = media.get("title") or media.get("name") or f"Request #{ov_req.get('id', '?')}"
+            async with prefetch_lock:
+                active_prefetch.append(title)
+                active_snapshot = active_prefetch[:16]
+                completed_snapshot = prefetch_completed
+            await emit(
+                build_sse_progress(
+                    "prefetching",
+                    current=progress_current(completed_snapshot, len(actionable_requests)),
+                    total=len(actionable_requests),
+                    title=title,
+                    active=active_snapshot,
+                    message=f"Fetching metadata for {title}...",
+                )
+            )
+            try:
+                return await prepare_overseerr_import_func(
                     ov_req,
                     overseerr_service,
                     sync_semaphore,
                     media_details_tasks,
                     media_details_lock,
                 )
-                for ov_req in actionable_requests
-            ),
+            finally:
+                async with prefetch_lock:
+                    with contextlib.suppress(ValueError):
+                        active_prefetch.remove(title)
+                    prefetch_completed += 1
+                    active_snapshot = active_prefetch[:16]
+                    completed_snapshot = prefetch_completed
+                await emit(
+                    build_sse_progress(
+                        "prefetching",
+                        current=progress_current(completed_snapshot, len(actionable_requests)),
+                        total=len(actionable_requests),
+                        title=title,
+                        active=active_snapshot,
+                        message=f"Fetched metadata for {title}.",
+                    )
+                )
+
+        prepared_requests = await asyncio.gather(
+            *(prepare_with_progress(ov_req) for ov_req in actionable_requests),
             return_exceptions=True,
         )
 
@@ -647,7 +732,7 @@ async def import_overseerr_requests(
         skipped_count = 0
         new_tv_requests: list[RequestModel] = []
 
-        for prepared_request in prepared_requests:
+        for index, prepared_request in enumerate(prepared_requests, start=1):
             try:
                 if isinstance(prepared_request, BaseException):
                     logger.exception(
@@ -661,6 +746,16 @@ async def import_overseerr_requests(
                     continue
 
                 prepared = prepared_request
+                await emit(
+                    build_sse_progress(
+                        "importing",
+                        current=progress_current(index - 1, len(prepared_requests)),
+                        total=len(prepared_requests),
+                        title=prepared.title,
+                        active=[prepared.title] if prepared.title else [],
+                        message=f"Importing {prepared.title or 'request'}...",
+                    )
+                )
                 if (
                     prepared.external_id in existing_external_ids
                     or prepared.overseerr_request_id in existing_request_ids
@@ -710,13 +805,34 @@ async def import_overseerr_requests(
                 episode_sync = EpisodeSyncService(
                     db, overseerr=overseerr_service, plex=plex_service
                 )
-                for req in new_tv_requests:
+                for index, req in enumerate(new_tv_requests, start=1):
                     try:
+                        await emit(
+                            build_sse_progress(
+                                "episode_sync",
+                                current=progress_current(index - 1, len(new_tv_requests)),
+                                total=len(new_tv_requests),
+                                title=req.title,
+                                active=[req.title],
+                                message=f"Syncing TV episodes for {req.title}...",
+                            )
+                        )
                         await episode_sync.sync_request(req.id)
                     except Exception:
                         logger.exception(
                             "Episode sync failed for request_id=%s during import",
                             req.id,
+                        )
+                    finally:
+                        await emit(
+                            build_sse_progress(
+                                "episode_sync",
+                                current=progress_current(index, len(new_tv_requests)),
+                                total=len(new_tv_requests),
+                                title=req.title,
+                                active=[],
+                                message=f"Finished TV episode sync for {req.title}.",
+                            )
                         )
             finally:
                 await plex_service.close()
@@ -752,16 +868,39 @@ async def sync_overseerr_generator(
                 return
 
             runtime_settings = get_settings()
-            yield serialize_sse(
-                build_sse_progress_func(
-                    "fetching",
-                    title="Fetching requests from Overseerr...",
-                    active=[],
-                    message="Fetching requests from Overseerr...",
-                )
-            )
+            queue: asyncio.Queue[dict[str, Any] | None] = asyncio.Queue()
 
-            synced_count, skipped_count = await import_overseerr_requests_func(db, runtime_settings)
+            async def emit(payload: dict[str, Any]) -> None:
+                await queue.put(payload)
+
+            task = asyncio.create_task(
+                import_overseerr_requests_func(db, runtime_settings, on_event=emit)
+            )
+            get_task = asyncio.create_task(queue.get())
+
+            while True:
+                done, _pending = await asyncio.wait(
+                    {task, get_task}, return_when=asyncio.FIRST_COMPLETED
+                )
+                if get_task in done:
+                    payload = get_task.result()
+                    if payload is not None:
+                        yield serialize_sse(payload)
+                    get_task = asyncio.create_task(queue.get())
+                    continue
+
+                if task in done:
+                    if not get_task.done():
+                        get_task.cancel()
+                        with contextlib.suppress(asyncio.CancelledError):
+                            await get_task
+                    while not queue.empty():
+                        payload = queue.get_nowait()
+                        if payload is not None:
+                            yield serialize_sse(payload)
+                    break
+
+            synced_count, skipped_count = await task
             if synced_count > 0:
                 message = f"Synced {synced_count} new request(s) from Overseerr"
             elif synced_count == 0 and skipped_count == 0:

@@ -141,10 +141,11 @@ async def _prepare_overseerr_import(
     )
 
 
-async def _import_overseerr_requests(db, runtime_settings) -> tuple[int, int]:
+async def _import_overseerr_requests(db, runtime_settings, *, on_event=None) -> tuple[int, int]:
     return await import_overseerr_requests(
         db,
         runtime_settings,
+        on_event=on_event,
         overseerr_service_cls=OverseerrService,
         plex_service_cls=PlexService,
         evaluate_imported_request_func=evaluate_imported_request,
