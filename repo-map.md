@@ -74,6 +74,7 @@ The old duplicated developer guide and stale product specification under `docs/`
 - FastAPI entrypoint
 - logging setup
 - app lifespan startup/shutdown
+- startup verifies DB readiness before scheduler/background jobs start
 - router registration
 - health and root endpoints
 
@@ -85,7 +86,8 @@ The old duplicated developer guide and stale product specification under `docs/`
 ### `app/siftarr/database.py`
 
 - SQLAlchemy engine/session setup
-- database initialization helpers
+- SQLite startup repair helpers used by container boot
+- app-side database readiness verification (does not create schema directly)
 
 ### `app/siftarr/models/`
 
@@ -165,6 +167,7 @@ Static assets.
 
 - `db/alembic/env.py` — Alembic environment wiring
 - `db/alembic/versions/` — single init migration only while the database is in flux; reset/stamp existing local databases when schema history is collapsed
+- container startup runs Alembic/SQLite repair before the FastAPI app launches
 - `docker/Dockerfile` — production/container image build
 - `docker/docker-compose.yml` — local container orchestration
 - `docker/rebuild-run-logs.sh` — rebuild, run, and log-tail helper

@@ -13,6 +13,6 @@
 ## Bugs
 - the Xgb/season display in the dashboard is always showing red, even when the release is under any rules governing the size of a season pack.
 
+- the progress bars when syncing plex and overseerr are not very accurate. and they take over the entire screen, which is a bit jarring. We should make them more accurate and less intrusive.
 
 ## NEXT: 
-- Split large router modules into thinner handlers plus service methods. there are files and or test files with >1000 lines that need to be broken down into more focused modules for readability and maintainability. The sets are currently flat folder structure. the tests should mirror the app structure, so if we split a router into multiple files, we should also split the corresponding tests into multiple files with the same structure.
