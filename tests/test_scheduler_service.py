@@ -3,15 +3,18 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from app.siftarr.models._base import Base
+from app.siftarr.models.episode import Episode
 from app.siftarr.models.request import MediaType, Request, RequestStatus
+from app.siftarr.models.season import Season
 from app.siftarr.services import scheduler_service
 from app.siftarr.services.scheduler_service import (
     PLEX_POLL_JOB_NAME,
@@ -195,6 +198,120 @@ async def test_recheck_unreleased_revisits_finished_and_available_tv_requests(mo
     assert evaluator.evaluate_and_apply.await_count == 2
     queue_service.add_to_queue.assert_awaited_once_with(2)
     overseerr_instance.close.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_recheck_unreleased_persists_tv_unreleased_and_pending_transitions(
+    monkeypatch,
+):
+    """Scheduler recheck should persist unreleased and return to pending after release."""
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+    session_maker = async_sessionmaker(engine, expire_on_commit=False)
+    today = date.today()
+    queued_request_ids: list[int] = []
+
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+
+    monkeypatch.setattr(scheduler_service, "get_settings", lambda: SimpleNamespace())
+
+    class FakeOverseerrService:
+        def __init__(self, settings):
+            self.settings = settings
+
+        async def get_media_details(self, media_type, tmdb_id):
+            return {
+                "firstAirDate": "2025-01-01",
+                "status": "Returning Series",
+            }
+
+        async def close(self):
+            return None
+
+    class FakePendingQueueService:
+        def __init__(self, db):
+            self.db = db
+
+        async def add_to_queue(self, request_id):
+            queued_request_ids.append(request_id)
+
+    monkeypatch.setattr(scheduler_service, "OverseerrService", FakeOverseerrService)
+    monkeypatch.setattr(scheduler_service, "PendingQueueService", FakePendingQueueService)
+
+    async with session_maker() as session:
+        request = Request(
+            external_id="ongoing-tv-recheck",
+            media_type=MediaType.TV,
+            tmdb_id=12345,
+            title="Ongoing TV",
+            status=RequestStatus.COMPLETED,
+        )
+        session.add(request)
+        await session.flush()
+
+        season = Season(
+            request_id=request.id,
+            season_number=1,
+            status=RequestStatus.UNRELEASED,
+        )
+        session.add(season)
+        await session.flush()
+
+        session.add_all(
+            [
+                Episode(
+                    season_id=season.id,
+                    episode_number=1,
+                    air_date=today - timedelta(days=14),
+                    status=RequestStatus.COMPLETED,
+                ),
+                Episode(
+                    season_id=season.id,
+                    episode_number=2,
+                    air_date=today - timedelta(days=7),
+                    status=RequestStatus.COMPLETED,
+                ),
+                Episode(
+                    season_id=season.id,
+                    episode_number=3,
+                    air_date=today + timedelta(days=7),
+                    status=RequestStatus.UNRELEASED,
+                ),
+            ]
+        )
+        await session.commit()
+        request_id = request.id
+
+    service = SchedulerService(session_maker, logger=MagicMock())
+    await service._recheck_unreleased()
+
+    async with session_maker() as session:
+        refreshed = await session.get(Request, request_id)
+        assert refreshed is not None
+        assert refreshed.status == RequestStatus.UNRELEASED
+
+        future_episode = await session.scalar(
+            select(Episode)
+            .join(Season, Season.id == Episode.season_id)
+            .where(
+                Season.request_id == request_id,
+                Episode.episode_number == 3,
+            )
+        )
+        assert future_episode is not None
+        future_episode.air_date = today - timedelta(days=1)
+        future_episode.status = RequestStatus.COMPLETED
+        await session.commit()
+
+    await service._recheck_unreleased()
+
+    async with session_maker() as session:
+        refreshed = await session.get(Request, request_id)
+        assert refreshed is not None
+        assert refreshed.status == RequestStatus.PENDING
+
+    assert queued_request_ids == [request_id]
+    await engine.dispose()
 
 
 @pytest.mark.asyncio

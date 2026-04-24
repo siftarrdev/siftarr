@@ -1,21 +1,6 @@
 // Dashboard Filters Module - Table filtering and sorting
 // ======================================================
 
-function toggleShowUnreleased() {
-    window.showUnreleasedActive = !window.showUnreleasedActive;
-    const btn = document.getElementById('show-unreleased-toggle');
-    if (btn) {
-        if (window.showUnreleasedActive) {
-            btn.classList.remove('border-gray-700/60', 'text-gray-500');
-            btn.classList.add('border-brand-500', 'text-brand-400', 'bg-brand-500/10');
-        } else {
-            btn.classList.remove('border-brand-500', 'text-brand-400', 'bg-brand-500/10');
-            btn.classList.add('border-gray-700/60', 'text-gray-500');
-        }
-    }
-    filterTable();
-}
-
 function toggleMediaFilter(tabName, mediaType) {
     if (!window.mediaFilterState[tabName]) window.mediaFilterState[tabName] = null;
 
@@ -48,6 +33,7 @@ function applyAllFilters(tabName) {
         active: filterTable,
         pending: filterPendingTable,
         unreleased: filterUnreleasedTable,
+        staged: filterStagedTable,
         finished: filterFinishedTable,
         rejected: filterRejectedTable,
     };
@@ -63,10 +49,9 @@ function filterTable() {
         const textContent = `${row.dataset.title} ${row.dataset.type} ${row.dataset.statusLow} ${row.dataset.requestedby}`;
         const textMatch = !filter || textContent.includes(filter);
         const mediaMatch = !mediaType || row.dataset.type === mediaType;
-        const status = row.dataset.status || '';
-        const unreleasedMatch = window.showUnreleasedActive || (status !== 'unreleased' && status !== 'partially_available');
-        row.style.display = (textMatch && mediaMatch && unreleasedMatch) ? '' : 'none';
+        row.style.display = (textMatch && mediaMatch) ? '' : 'none';
     });
+    window.refreshDetailsNavigationContext();
 }
 
 function filterPendingTable() {
@@ -80,6 +65,7 @@ function filterPendingTable() {
         const mediaMatch = !mediaType || row.dataset.type === mediaType;
         row.style.display = (textMatch && mediaMatch) ? '' : 'none';
     });
+    window.refreshDetailsNavigationContext();
 }
 
 function filterStagedTable() {
@@ -93,6 +79,7 @@ function filterStagedTable() {
         const torrentState = row.dataset.state || '';
         row.style.display = textContent.includes(filter) && (!selectedStatus || torrentState === selectedStatus) ? '' : 'none';
     });
+    window.refreshDetailsNavigationContext();
 }
 
 function filterFinishedTable() {
@@ -106,6 +93,7 @@ function filterFinishedTable() {
         const mediaMatch = !mediaType || row.dataset.type === mediaType;
         row.style.display = (textMatch && mediaMatch) ? '' : 'none';
     });
+    window.refreshDetailsNavigationContext();
 }
 
 function filterRejectedTable() {
@@ -119,6 +107,7 @@ function filterRejectedTable() {
         const mediaMatch = !mediaType || row.dataset.type === mediaType;
         row.style.display = (textMatch && mediaMatch) ? '' : 'none';
     });
+    window.refreshDetailsNavigationContext();
 }
 
 function filterUnreleasedTable() {
@@ -132,6 +121,7 @@ function filterUnreleasedTable() {
         const mediaMatch = !mediaType || row.dataset.type === mediaType;
         row.style.display = (textMatch && mediaMatch) ? '' : 'none';
     });
+    window.refreshDetailsNavigationContext();
 }
 
 function filterReleaseCards() {
@@ -197,10 +187,10 @@ function sortTable(tableName, sortKey) {
         return 0;
     });
     rows.forEach(row => tbody.appendChild(row));
+    window.refreshDetailsNavigationContext();
 }
 
 // Export functions to window for HTML onclick handlers
-window.toggleShowUnreleased = toggleShowUnreleased;
 window.toggleMediaFilter = toggleMediaFilter;
 window.filterTable = filterTable;
 window.filterPendingTable = filterPendingTable;

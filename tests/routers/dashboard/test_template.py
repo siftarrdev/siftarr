@@ -168,3 +168,36 @@ def test_dashboard_js_refreshes_full_staged_content():
     assert "const newContent = doc.getElementById('content-staged');" in js
     assert "stagedContent.innerHTML = newContent.innerHTML;" in js
     assert "document.querySelectorAll('#staged-torrents-body tr[data-state=\"approved\"]')" in js
+
+
+def test_dashboard_details_navigation_uses_visible_filtered_rows():
+    """Details previous/next navigation should follow only displayed rows in the current tab."""
+    js = _read_dashboard_js()
+
+    assert "document.querySelector('.tab-content:not(.hidden)')" in js
+    assert "row.style.display !== 'none'" in js
+    assert "function refreshDetailsNavigationContext()" in js
+    assert "window.visibleRequests = window.getVisibleRequests();" in js
+    assert "findIndex(r => r.id === window.currentRequestId)" in js
+    assert "window.refreshDetailsNavigationContext();" in js
+
+
+def test_dashboard_active_unreleased_toggle_removed_and_filters_refresh_navigation(
+    dashboard_template_path,
+):
+    """Active no longer exposes unreleased rows, so the legacy toggle is removed."""
+    with open(dashboard_template_path, encoding="utf-8") as handle:
+        template = handle.read()
+    js = _read_dashboard_js()
+
+    assert "show-unreleased-toggle" not in template
+    assert "Show Unreleased" not in template
+    assert "toggleShowUnreleased" not in js
+    assert "showUnreleasedActive" not in js
+    assert "unreleasedMatch" not in js
+    assert "row.style.display = (textMatch && mediaMatch) ? '' : 'none';" in js
+    assert "window.refreshDetailsNavigationContext();" in js
+    assert (
+        "rows.forEach(row => tbody.appendChild(row));\n    window.refreshDetailsNavigationContext();"
+        in js
+    )

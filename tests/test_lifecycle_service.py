@@ -191,6 +191,54 @@ def test_is_unreleased_tv_all_aired_downloaded_with_future_remaining():
     )
 
 
+def test_is_unreleased_tv_actively_airing_completed_so_far_with_future_episode():
+    """Actively airing seasons are unreleased after all aired episodes are complete."""
+    request = SimpleNamespace(media_type="tv", tmdb_id=456)
+    details = {
+        "firstAirDate": "2025-01-01",
+        "status": "Returning Series",
+    }
+    season_episodes = [
+        SimpleNamespace(air_date=date(2026, 4, 3), status=RequestStatus.COMPLETED),
+        SimpleNamespace(air_date=date(2026, 4, 10), status=RequestStatus.COMPLETED),
+        SimpleNamespace(air_date=date(2026, 4, 24), status=RequestStatus.UNRELEASED),
+    ]
+
+    assert (
+        is_unreleased(
+            request,
+            media_details=details,
+            local_episodes=season_episodes,
+            today=TODAY,
+        )
+        is True
+    )
+
+
+def test_is_unreleased_tv_future_season_no_air_date_placeholder():
+    """A no-air-date placeholder marks a future season once prior aired episodes are complete."""
+    request = SimpleNamespace(media_type="tv", tmdb_id=456)
+    details = {
+        "firstAirDate": "2025-01-01",
+        "status": "Returning Series",
+    }
+    episodes = [
+        SimpleNamespace(air_date=date(2026, 3, 20), status=RequestStatus.COMPLETED),
+        SimpleNamespace(air_date=date(2026, 3, 27), status=RequestStatus.COMPLETED),
+        SimpleNamespace(air_date=None, status=RequestStatus.UNRELEASED),
+    ]
+
+    assert (
+        is_unreleased(
+            request,
+            media_details=details,
+            local_episodes=episodes,
+            today=TODAY,
+        )
+        is True
+    )
+
+
 def test_is_unreleased_tv_all_aired_downloaded_with_empty_season():
     """A series with all aired episodes downloaded but an empty future season is unreleased."""
     request = SimpleNamespace(media_type="tv", tmdb_id=456)
