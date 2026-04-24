@@ -16,6 +16,142 @@ from app.siftarr.services.rule_service import RuleImportPreview
 class TestRulesRouter:
     """Focused tests for size-limit rule routing."""
 
+    @staticmethod
+    def _rule(
+        rule_id: int,
+        name: str,
+        rule_type: RuleType,
+        priority: int,
+        pattern: str = "test",
+        media_scope: str = "both",
+        score: int = 0,
+        min_size_gb: float | None = None,
+        max_size_gb: float | None = None,
+        is_enabled: bool = True,
+        tv_target: TVTarget | None = None,
+    ) -> MagicMock:
+        rule = MagicMock()
+        rule.id = rule_id
+        rule.name = name
+        rule.rule_type = rule_type
+        rule.priority = priority
+        rule.pattern = pattern
+        rule.media_scope = media_scope
+        rule.score = score
+        rule.min_size_gb = min_size_gb
+        rule.max_size_gb = max_size_gb
+        rule.is_enabled = is_enabled
+        rule.tv_target = tv_target
+        return rule
+
+    @pytest.mark.asyncio
+    async def test_list_rules_context_includes_unified_ordered_and_grouped_rules(self, monkeypatch):
+        """Rules page should expose the future unified list while grouped data remains."""
+        exclusion = self._rule(1, "Reject CAM", RuleType.EXCLUSION, 2)
+        scorer = self._rule(2, "Prefer x265", RuleType.SCORER, 1)
+        size_limit = self._rule(3, "Movie Size", RuleType.SIZE_LIMIT, 3)
+        ordered_rules = [scorer, exclusion, size_limit]
+
+        service = MagicMock()
+        service.ensure_default_rules = AsyncMock()
+        service.get_all_rules = AsyncMock(return_value=ordered_rules)
+        service.get_all_rules_by_type = AsyncMock(
+            side_effect=lambda rule_type: {
+                RuleType.EXCLUSION: [exclusion],
+                RuleType.REQUIREMENT: [],
+                RuleType.SCORER: [scorer],
+                RuleType.SIZE_LIMIT: [size_limit],
+            }[rule_type]
+        )
+        monkeypatch.setattr(rules, "RuleService", lambda db: service)
+
+        captured = {}
+        monkeypatch.setattr(
+            rules.templates,
+            "TemplateResponse",
+            lambda request, template, context: (
+                captured.setdefault("context", context) or MagicMock()
+            ),
+        )
+
+        await rules.list_rules(request=MagicMock(), db=AsyncMock())
+
+        context = cast(dict, captured["context"])
+        assert context["rules"] == ordered_rules
+        assert context["exclusion_rules"] == [exclusion]
+        assert context["requirement_rules"] == []
+        assert context["scorer_rules"] == [scorer]
+        assert context["size_limit_rules"] == [size_limit]
+
+    @pytest.mark.asyncio
+    async def test_test_rule_accepts_multiple_rows_with_media_type_and_size(self, monkeypatch):
+        """Rule testing should evaluate each submitted title row independently."""
+        size_limit = self._rule(
+            1,
+            "Movie Size",
+            RuleType.SIZE_LIMIT,
+            1,
+            pattern="size_limit",
+            media_scope="movie",
+            min_size_gb=1.0,
+            max_size_gb=2.0,
+        )
+        scorer = self._rule(
+            2,
+            "Prefer x265",
+            RuleType.SCORER,
+            2,
+            pattern="x265",
+            score=25,
+        )
+        all_rules = [size_limit, scorer]
+
+        service = MagicMock()
+        service.ensure_default_rules = AsyncMock()
+        service.get_all_rules = AsyncMock(return_value=all_rules)
+        service.get_all_rules_by_type = AsyncMock(
+            side_effect=lambda rule_type: {
+                RuleType.EXCLUSION: [],
+                RuleType.REQUIREMENT: [],
+                RuleType.SCORER: [scorer],
+                RuleType.SIZE_LIMIT: [size_limit],
+            }[rule_type]
+        )
+        monkeypatch.setattr(rules, "RuleService", lambda db: service)
+
+        captured = {}
+        monkeypatch.setattr(
+            rules.templates,
+            "TemplateResponse",
+            lambda request, template, context: (
+                captured.setdefault("context", context) or MagicMock()
+            ),
+        )
+
+        await rules.test_rule(
+            request=MagicMock(),
+            title=["Movie.2024.1080p.x265", "Large.Movie.2024.1080p"],
+            media_type=["movie", "movie"],
+            size_gb=[1.5, 3.0],
+            db=AsyncMock(),
+        )
+
+        context = cast(dict, captured["context"])
+        results = context["test_results"]
+        assert len(results) == 2
+        assert results[0]["title"] == "Movie.2024.1080p.x265"
+        assert results[0]["media_type"] == "movie"
+        assert results[0]["size_gb"] == 1.5
+        assert results[0]["passed"] is True
+        assert results[0]["total_score"] == 25
+        assert [match.rule_name for match in results[0]["matched_rules"]] == [
+            "Movie Size",
+            "Prefer x265",
+        ]
+        assert results[1]["passed"] is False
+        assert results[1]["rejection_reason"] == "Size 3.00 GB above maximum 2.00 GB"
+        assert context["test_result"] == results[0]
+
     def test_validate_rule_input_rejects_missing_tv_target_for_tv_size_rule(self):
         """TV size rules should require explicit episode-vs-pack targeting."""
         with pytest.raises(HTTPException) as exc_info:

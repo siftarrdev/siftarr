@@ -1,7 +1,7 @@
 """Router for rules management pages."""
 
 import re
-from typing import Annotated
+from typing import Annotated, cast
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, UploadFile
 from fastapi.responses import HTMLResponse, PlainTextResponse, RedirectResponse
@@ -9,7 +9,7 @@ from fastapi.templating import Jinja2Templates
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.siftarr.database import get_db
-from app.siftarr.models.rule import Rule, RuleType, TVTarget
+from app.siftarr.models.rule import RuleType, TVTarget
 from app.siftarr.services.prowlarr_service import ProwlarrRelease
 from app.siftarr.services.rule_engine import RuleEngine
 from app.siftarr.services.rule_service import RuleImportPreview, RuleService
@@ -97,6 +97,7 @@ async def list_rules(
     requirements = await rule_service.get_all_rules_by_type(RuleType.REQUIREMENT)
     scorers = await rule_service.get_all_rules_by_type(RuleType.SCORER)
     size_limits = await rule_service.get_all_rules_by_type(RuleType.SIZE_LIMIT)
+    all_rules = await rule_service.get_all_rules()
 
     return templates.TemplateResponse(
         request,
@@ -107,8 +108,38 @@ async def list_rules(
             "requirement_rules": requirements,
             "scorer_rules": scorers,
             "size_limit_rules": size_limits,
+            "rules": all_rules,
         },
     )
+
+
+def _as_list[T](value: T | list[T] | tuple[T, ...] | None) -> list[T]:
+    """Normalize single or repeated form values into a list."""
+    if value is None:
+        return []
+    if isinstance(value, list | tuple):
+        return list(value)
+    return [value]
+
+
+def _test_rows(
+    titles: str | list[str],
+    media_types: str | list[str | None] | None,
+    size_gb_values: float | list[float | None] | None,
+) -> list[dict[str, str | float | None]]:
+    """Build rule-test rows from repeated form fields."""
+    title_values = [title.strip() for title in _as_list(titles) if title.strip()]
+    media_values = _as_list(media_types)
+    size_values = _as_list(size_gb_values)
+
+    rows: list[dict[str, str | float | None]] = []
+    for index, title in enumerate(title_values):
+        media_type = media_values[index] if index < len(media_values) else None
+        if media_type == "":
+            media_type = None
+        size_gb = size_values[index] if index < len(size_values) else None
+        rows.append({"title": title, "media_type": media_type, "size_gb": size_gb})
+    return rows
 
 
 @router.get("/new")
@@ -275,31 +306,42 @@ async def delete_rule(
 @router.post("/test")
 async def test_rule(
     request: Request,
-    title: str = Form(...),
+    title: str | list[str] = Form(...),
+    media_type: str | list[str | None] | None = Form(None),
+    size_gb: float | list[float | None] | None = Form(None),
     db: AsyncSession = Depends(get_db),
 ) -> HTMLResponse:
     """Test a release title against all rules."""
-    from sqlalchemy import select
-
     rule_service = RuleService(db)
     await rule_service.ensure_default_rules()
+    all_rules = await rule_service.get_all_rules()
 
-    result = await db.execute(select(Rule))
-    rules = list(result.scalars().all())
+    test_results = []
+    for row in _test_rows(title, media_type, size_gb):
+        engine = RuleEngine.from_db_rules(rules=all_rules, media_type=cast(str | None, row["media_type"]))
+        size = int(cast(float, row["size_gb"]) * 1024 * 1024 * 1024) if row["size_gb"] else 0
+        mock_release = ProwlarrRelease(
+            title=cast(str, row["title"]),
+            size=size,
+            seeders=0,
+            leechers=0,
+            download_url="",
+            indexer="test",
+        )
 
-    engine = RuleEngine.from_db_rules(rules=rules)
-
-    # Create a mock release for testing
-    mock_release = ProwlarrRelease(
-        title=title,
-        size=0,
-        seeders=0,
-        leechers=0,
-        download_url="",
-        indexer="test",
-    )
-
-    evaluation = engine.evaluate(mock_release)
+        evaluation = engine.evaluate(mock_release)
+        test_results.append(
+            {
+                "title": row["title"],
+                "media_type": row["media_type"],
+                "size_gb": row["size_gb"],
+                "passed": evaluation.passed,
+                "rejection_reason": evaluation.rejection_reason,
+                "total_score": evaluation.total_score,
+                "matched_rules": [m for m in evaluation.matches if m.matched],
+                "matches": evaluation.matches,
+            }
+        )
 
     # Re-render the rules page with test results
     rule_service = RuleService(db)
@@ -317,12 +359,9 @@ async def test_rule(
             "requirement_rules": requirements,
             "scorer_rules": scorers,
             "size_limit_rules": size_limits,
-            "test_result": {
-                "passed": evaluation.passed,
-                "rejection_reason": evaluation.rejection_reason,
-                "total_score": evaluation.total_score,
-                "matched_rules": [m for m in evaluation.matches if m.matched],
-            },
+            "rules": all_rules,
+            "test_results": test_results,
+            "test_result": test_results[0] if test_results else None,
         },
     )
 
