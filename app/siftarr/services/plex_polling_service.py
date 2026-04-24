@@ -212,10 +212,12 @@ class PlexPollingService:
             await emit(
                 {
                     "phase": phase,
-                    "current": started,
+                    "current": finished,
                     "total": len(requests),
                     "title": title,
                     "active": active_snapshot,
+                    "started": started,
+                    "completed": finished,
                 }
             )
 
@@ -242,6 +244,8 @@ class PlexPollingService:
                         "total": len(requests),
                         "title": title,
                         "active": active_snapshot,
+                        "started": started,
+                        "completed": finished,
                     }
                 )
 

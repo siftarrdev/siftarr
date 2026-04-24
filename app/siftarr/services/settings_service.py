@@ -470,7 +470,30 @@ async def rescan_plex_requests(
             )
         )
 
-    completed = await polling_service.poll(on_progress=on_event)
+    async def emit_polling_progress(payload: dict[str, Any]) -> None:
+        if on_event is None:
+            return
+        phase = "polling" if payload.get("phase") == "poll" else payload.get("phase", "polling")
+        completed_count = payload.get("completed", payload.get("current", 0))
+        await on_event(
+            build_sse_progress_func(
+                str(phase),
+                current=completed_count if isinstance(completed_count, int) else 0,
+                total=payload.get("total") if isinstance(payload.get("total"), int) else None,
+                title=payload.get("title") if isinstance(payload.get("title"), str) else None,
+                active=payload.get("active") if isinstance(payload.get("active"), list) else [],
+                mode=mode,
+                started=payload.get("started"),
+                completed=completed_count,
+                message=(
+                    "Polling Plex availability for active requests after partial sync..."
+                    if shallow
+                    else "Running full Plex metadata refresh and availability poll..."
+                ),
+            )
+        )
+
+    completed = await polling_service.poll(on_progress=emit_polling_progress)
     return tv_resynced, tv_failed, completed
 
 

@@ -536,9 +536,25 @@ function startOverseerrSync() {
                 applyProgress(bar, progressText, data, { fallbackPercent: 15 });
                 renderActiveItems(activeList, activeWrap, data.active || []);
                 break;
+            case 'filtering':
+                applyProgress(bar, progressText, data, { fallbackPercent: 18, minimumPercent: 15 });
+                status.textContent = data.message || (data.total ? `Filtering ${data.current}/${data.total} Overseerr request(s)…` : 'Filtering actionable Overseerr requests…');
+                renderActiveItems(activeList, activeWrap, data.active || []);
+                break;
+            case 'prefetching':
+                applyProgress(bar, progressText, data, { fallbackPercent: 30, minimumPercent: 20 });
+                status.textContent = data.message || (data.total ? `Prefetching ${data.current}/${data.total}: ${data.title}` : `Prefetching ${data.title || 'metadata'}…`);
+                renderActiveItems(activeList, activeWrap, data.active || (data.title ? [data.title] : []));
+                break;
+            case 'importing':
             case 'processing':
                 applyProgress(bar, progressText, data, { fallbackPercent: 20, minimumPercent: 20 });
-                status.textContent = data.total ? `Processing ${data.current}/${data.total}: ${data.title}` : (data.message || `Processing ${data.title || 'items'}…`);
+                status.textContent = data.message || (data.total ? `Importing ${data.current}/${data.total}: ${data.title}` : `Importing ${data.title || 'items'}…`);
+                renderActiveItems(activeList, activeWrap, data.active || (data.title ? [data.title] : []));
+                break;
+            case 'episode_sync':
+                applyProgress(bar, progressText, data, { fallbackPercent: 70, minimumPercent: 45 });
+                status.textContent = data.message || (data.total ? `Syncing episodes ${data.current}/${data.total}: ${data.title}` : `Syncing episodes for ${data.title || 'TV requests'}…`);
                 renderActiveItems(activeList, activeWrap, data.active || (data.title ? [data.title] : []));
                 break;
             case 'complete':
