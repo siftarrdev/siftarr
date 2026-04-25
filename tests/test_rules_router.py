@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from fastapi import HTTPException
+from fastapi.routing import APIRoute
 from starlette.responses import RedirectResponse
 
 from app.siftarr.models.rule import RuleType, TVTarget
@@ -211,7 +212,7 @@ class TestRulesRouter:
             request=MagicMock(),
             title=["Movie.2024.1080p.x265", "Large.Movie.2024.1080p"],
             media_type=["movie", "movie"],
-            size_gb=[1.5, 3.0],
+            size_gb=["1.5", "3.0"],
             db=AsyncMock(),
         )
 
@@ -230,6 +231,68 @@ class TestRulesRouter:
         assert results[1]["passed"] is False
         assert results[1]["rejection_reason"] == "Size 3.00 GB above maximum 2.00 GB"
         assert context["test_result"] == results[0]
+
+    def test_static_post_routes_are_registered_before_dynamic_rule_update(self):
+        """Static POST routes should not be captured by /rules/{rule_id}."""
+        post_paths = [
+            route.path
+            for route in rules.router.routes
+            if isinstance(route, APIRoute) and "POST" in route.methods
+        ]
+
+        dynamic_index = post_paths.index("/rules/{rule_id}")
+        assert post_paths.index("/rules/test") < dynamic_index
+        assert post_paths.index("/rules/import-preview") < dynamic_index
+        assert post_paths.index("/rules/import-apply") < dynamic_index
+
+    @pytest.mark.asyncio
+    async def test_test_rule_normalizes_blank_size_values(self, monkeypatch):
+        """Blank size fields from repeated form rows should not cause 422-style parsing failures."""
+        scorer = self._rule(
+            2,
+            "Prefer x265",
+            RuleType.SCORER,
+            1,
+            pattern="x265",
+            score=25,
+        )
+
+        service = MagicMock()
+        service.ensure_default_rules = AsyncMock()
+        service.get_all_rules = AsyncMock(return_value=[scorer])
+        service.get_all_rules_by_type = AsyncMock(
+            side_effect=lambda rule_type: {
+                RuleType.EXCLUSION: [],
+                RuleType.REQUIREMENT: [],
+                RuleType.SCORER: [scorer],
+                RuleType.SIZE_LIMIT: [],
+            }[rule_type]
+        )
+        monkeypatch.setattr(rules, "RuleService", lambda db: service)
+
+        captured = {}
+        monkeypatch.setattr(
+            rules.templates,
+            "TemplateResponse",
+            lambda request, template, context: (
+                captured.setdefault("context", context) or MagicMock()
+            ),
+        )
+
+        await rules.test_rule(
+            request=MagicMock(),
+            title=["Movie.2024.1080p.x265", "Movie.2024.1080p"],
+            media_type=["movie", "movie"],
+            size_gb=["", "  "],
+            db=AsyncMock(),
+        )
+
+        context = cast(dict, captured["context"])
+        assert context["test_rows"] == [
+            {"title": "Movie.2024.1080p.x265", "media_type": "movie", "size_gb": None},
+            {"title": "Movie.2024.1080p", "media_type": "movie", "size_gb": None},
+        ]
+        assert [result["size_gb"] for result in context["test_results"]] == [None, None]
 
     def test_rules_template_renders_multi_title_tester_with_preserved_results(self):
         """Rules template should preserve submitted rows and compare per-title results."""
