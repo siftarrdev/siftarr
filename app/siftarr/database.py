@@ -2,6 +2,7 @@
 
 import sqlite3
 from collections.abc import AsyncGenerator
+from contextlib import closing
 from dataclasses import dataclass
 from enum import StrEnum
 from functools import lru_cache
@@ -73,7 +74,7 @@ def _inspect_sqlite_database(db_path: Path) -> tuple[set[str], str | None]:
     if not db_path.exists():
         return set(), None
 
-    with sqlite3.connect(db_path) as connection:
+    with closing(sqlite3.connect(db_path)) as connection:
         table_rows = connection.execute(
             "SELECT name FROM sqlite_master WHERE type = 'table'"
         ).fetchall()
@@ -204,7 +205,7 @@ def _sqlite_schema_matches_expected(
 ) -> bool:
     """Return whether the on-disk SQLite schema matches current models."""
 
-    with sqlite3.connect(db_path) as connection:
+    with closing(sqlite3.connect(db_path)) as connection:
         actual_signature = _collect_sqlite_schema_signature(
             connection, table_names=set(table_names)
         )

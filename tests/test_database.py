@@ -79,7 +79,8 @@ class TestDatabaseModule:
         from app.siftarr.database import CURRENT_ALEMBIC_REVISION, init_db
 
         db_path = tmp_path / "drifted.db"
-        with sqlite3.connect(db_path) as connection:
+        connection = sqlite3.connect(db_path)
+        try:
             connection.execute("CREATE TABLE alembic_version (version_num VARCHAR(32) NOT NULL)")
             connection.execute(
                 "INSERT INTO alembic_version (version_num) VALUES (?)",
@@ -96,6 +97,9 @@ class TestDatabaseModule:
                 CREATE TABLE episodes (id INTEGER PRIMARY KEY);
                 """
             )
+            connection.commit()
+        finally:
+            connection.close()
 
         with (
             patch(
@@ -294,9 +298,13 @@ class TestDatabaseModule:
         )
 
         db_path = tmp_path / "broken-history.db"
-        with sqlite3.connect(db_path) as connection:
+        connection = sqlite3.connect(db_path)
+        try:
             connection.execute("CREATE TABLE alembic_version (version_num VARCHAR(32) NOT NULL)")
             connection.execute("INSERT INTO alembic_version (version_num) VALUES ('deadbeef')")
+            connection.commit()
+        finally:
+            connection.close()
 
         with (
             patch("app.siftarr.database._delete_sqlite_database_files") as delete_db,
