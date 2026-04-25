@@ -116,10 +116,10 @@ class TestRulesRouter:
         assert "Pattern / size range" in html
         assert "+25 points" in html
         assert "Min 1.0 GB" in html
-        assert "action=\"/rules/2/toggle\"" in html
-        assert "href=\"#rule-wizard-edit-2\"" in html
-        assert "href=\"/rules/2/edit\"" in html
-        assert "action=\"/rules/2/delete\"" in html
+        assert 'action="/rules/2/toggle"' in html
+        assert 'href="#rule-wizard-edit-2"' in html
+        assert 'href="/rules/2/edit"' in html
+        assert 'action="/rules/2/delete"' in html
         assert "Delete this rule?" in html
         assert "showRuleTab" not in html
         assert "rule-tab" not in html
@@ -253,9 +253,7 @@ class TestRulesRouter:
                         "passed": True,
                         "rejection_reason": None,
                         "total_score": 25,
-                        "matched_rules": [
-                            SimpleNamespace(rule_name="Prefer x265", score_delta=25)
-                        ],
+                        "matched_rules": [SimpleNamespace(rule_name="Prefer x265", score_delta=25)],
                         "rejection_rules": [],
                     },
                     {
@@ -300,7 +298,9 @@ class TestRulesRouter:
         assert "openRuleImportExportModal" in html
         assert 'data-modal-open="rule-import-export-modal">Import / Export</button>' in html
         assert 'id="rule-import-export-modal"' in html
-        assert 'class="rule-modal fixed inset-0 z-50 items-center justify-center bg-black/70' in html
+        assert (
+            'class="rule-modal fixed inset-0 z-50 items-center justify-center bg-black/70' in html
+        )
         assert 'role="dialog" aria-modal="true" tabindex="-1"' in html
         assert 'href="/rules/export"' in html
         assert 'action="/rules/import-preview"' in html
@@ -335,7 +335,7 @@ class TestRulesRouter:
         )
 
         assert 'id="rule-import-export-modal" class="rule-modal fixed inset-0 z-50' in html
-        assert 'is-open' in html
+        assert "is-open" in html
         assert "Invalid JSON: bad payload" in html
         assert ">bad</textarea>" in html
 

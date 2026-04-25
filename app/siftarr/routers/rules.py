@@ -1,6 +1,7 @@
 """Router for rules management pages."""
 
 import re
+from collections.abc import Awaitable
 from inspect import isawaitable
 from typing import Annotated, cast
 
@@ -115,11 +116,11 @@ async def _rules_page_context(
     return context
 
 
-async def _maybe_await[T](value: T) -> T:
+async def _maybe_await[T](value: T | Awaitable[T]) -> T:
     """Return awaited service results while tolerating simple test doubles."""
     if isawaitable(value):
-        return await value
-    return value
+        return await cast(Awaitable[T], value)
+    return cast(T, value)
 
 
 @router.get("")
@@ -142,8 +143,10 @@ def _as_list[T](value: T | list[T] | tuple[T, ...] | None) -> list[T]:
     """Normalize single or repeated form values into a list."""
     if value is None:
         return []
-    if isinstance(value, list | tuple):
-        return list(value)
+    if isinstance(value, list):
+        return value
+    if isinstance(value, tuple):
+        return list(cast(tuple[T, ...], value))
     return [value]
 
 
@@ -347,7 +350,9 @@ async def test_rule(
     test_results = []
     test_rows = _test_rows(title, media_type, size_gb)
     for row in test_rows:
-        engine = RuleEngine.from_db_rules(rules=all_rules, media_type=cast(str | None, row["media_type"]))
+        engine = RuleEngine.from_db_rules(
+            rules=all_rules, media_type=cast(str | None, row["media_type"])
+        )
         size = (
             int(cast(float, row["size_gb"]) * 1024 * 1024 * 1024)
             if row["size_gb"] is not None

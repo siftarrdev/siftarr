@@ -556,7 +556,9 @@ class TestRuleEngine:
         assert good.passed is True
         assert good.rejection_reason is None
         assert good.total_score == 50
-        assert [(match.rule_name, match.score_delta) for match in good.matches if match.matched] == [
+        assert [
+            (match.rule_name, match.score_delta) for match in good.matches if match.matched
+        ] == [
             ("Movie Size", 0),
             ("x265 bonus", 50),
         ]
