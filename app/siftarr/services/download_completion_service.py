@@ -92,19 +92,33 @@ class DownloadCompletionService:
 
         # 2 & 3. Determine per-torrent qBit progress and which are "done"
         done_torrent_ids: set[int] = set()
+        qbit_evidence_by_torrent_id: dict[int, dict[str, Any]] = {}
         for torrent, _request in rows:
             torrent_hash = _extract_hash(torrent.magnet_url)
+            info: dict[str, Any] | None = None
             progress: float | None = None
 
             if torrent_hash:
                 info = await self.qbittorrent.get_torrent_info(torrent_hash)
                 if info is not None:
-                    progress = info["progress"]
+                    progress = info.get("progress")
                 # If info is None, torrent not found in qBit → treat as done
             else:
-                progress = await self.qbittorrent.get_torrent_progress_by_name(torrent.title)
+                info = await self.qbittorrent.get_torrent_info_by_name(torrent.title)
+                if info is not None:
+                    progress = info.get("progress")
+                else:
+                    progress = await self.qbittorrent.get_torrent_progress_by_name(torrent.title)
 
             qbit_done = (progress is None) or (progress >= 1.0)
+            qbit_evidence_by_torrent_id[torrent.id] = {
+                "torrent_id": torrent.id,
+                "title": torrent.title,
+                "hash": torrent_hash,
+                "qbit_found": info is not None,
+                "qbit_progress": progress,
+                "qbit_state": info.get("state") if info else None,
+            }
             if qbit_done:
                 done_torrent_ids.add(torrent.id)
 
@@ -156,6 +170,7 @@ class DownloadCompletionService:
                     details={
                         "title": request.title,
                         "torrent_count": len(torrents),
+                        "done_torrents": [qbit_evidence_by_torrent_id[t.id] for t in done_torrents],
                     },
                 )
                 existing_download_completed_logs.add(request_id)

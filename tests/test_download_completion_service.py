@@ -1,5 +1,6 @@
 """Tests for DownloadCompletionService."""
 
+import json
 import logging
 from unittest.mock import AsyncMock, MagicMock
 
@@ -107,6 +108,63 @@ class TestDownloadCompletionService:
         # Plex returned None, so not completed
         assert result == 0
         mock_plex_polling.check_request.assert_called_once_with(10)
+
+    @pytest.mark.asyncio
+    async def test_name_only_torrent_match_logs_qbit_finished_evidence(
+        self, mock_db, mock_qbit, mock_plex_polling
+    ):
+        """Name-only approved torrents should persist qBit state/progress evidence."""
+        from app.siftarr.models.request import MediaType, RequestStatus
+        from app.siftarr.services.plex_polling_service import CheckRequestResult
+
+        torrent = MagicMock()
+        torrent.id = 2
+        torrent.request_id = 40
+        torrent.title = "The Cheetah Girls 2003"
+        torrent.magnet_url = None
+
+        request = MagicMock()
+        request.id = 40
+        request.title = "The Cheetah Girls"
+        request.media_type = MediaType.MOVIE
+        request.status = RequestStatus.DOWNLOADING
+
+        mock_qbit.get_torrent_info_by_name = AsyncMock(
+            return_value={"name": torrent.title, "progress": 1.0, "state": "stalledUP"}
+        )
+        mock_qbit.get_torrent_progress_by_name = AsyncMock()
+        mock_plex_polling.check_request = AsyncMock(
+            return_value=CheckRequestResult(
+                request_id=40,
+                matched=False,
+                available=False,
+                status_before=RequestStatus.DOWNLOADING,
+                status_after=RequestStatus.DOWNLOADING,
+            )
+        )
+        mock_db.execute.side_effect = [
+            _rows_result([(torrent, request)]),
+            _request_id_rows([]),
+        ]
+
+        service = DownloadCompletionService(mock_db, mock_qbit, mock_plex_polling)
+        result = await service.check_downloading_requests()
+
+        assert result == 0
+        mock_qbit.get_torrent_info_by_name.assert_awaited_once_with(torrent.title)
+        mock_qbit.get_torrent_progress_by_name.assert_not_called()
+        added_log = mock_db.add.call_args.args[0]
+        details = json.loads(added_log.details)
+        assert details["done_torrents"] == [
+            {
+                "torrent_id": 2,
+                "title": "The Cheetah Girls 2003",
+                "hash": None,
+                "qbit_found": True,
+                "qbit_progress": 1.0,
+                "qbit_state": "stalledUP",
+            }
+        ]
 
     @pytest.mark.asyncio
     async def test_plex_confirms_completion(self, mock_db, mock_qbit, mock_plex_polling):
@@ -413,3 +471,48 @@ class TestDownloadCompletionService:
 
         assert result == 0
         mock_db.add.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_qbit_progress_one_retries_plex_without_completing_request(
+        self, mock_db, mock_qbit, mock_plex_polling
+    ):
+        """qBit progress 1.0 should log once and leave request downloading until Plex confirms."""
+        from app.siftarr.models.request import MediaType, RequestStatus
+        from app.siftarr.services.plex_polling_service import CheckRequestResult
+
+        torrent = MagicMock()
+        torrent.id = 1
+        torrent.request_id = 10
+        torrent.title = "Test Movie 2020"
+        torrent.magnet_url = "magnet:?xt=urn:btih:da39a3ee5e6b4b0d3255bfef95601890afd80709"
+
+        request = MagicMock()
+        request.id = 10
+        request.title = "Test Movie"
+        request.media_type = MediaType.MOVIE
+        request.status = RequestStatus.DOWNLOADING
+
+        mock_qbit.get_torrent_info = AsyncMock(return_value={"progress": 1.0, "state": "stalledUP"})
+        mock_plex_polling.check_request = AsyncMock(
+            return_value=CheckRequestResult(
+                request_id=10,
+                matched=False,
+                available=False,
+                status_before=RequestStatus.DOWNLOADING,
+                status_after=RequestStatus.DOWNLOADING,
+            )
+        )
+        mock_db.execute.side_effect = [
+            _rows_result([(torrent, request)]),
+            _request_id_rows([]),
+        ]
+
+        service = DownloadCompletionService(mock_db, mock_qbit, mock_plex_polling)
+        result = await service.check_downloading_requests()
+
+        assert result == 0
+        assert request.status == RequestStatus.DOWNLOADING
+        mock_plex_polling.check_request.assert_called_once_with(10)
+        details = json.loads(mock_db.add.call_args.args[0].details)
+        assert details["done_torrents"][0]["qbit_progress"] == 1.0
+        assert details["done_torrents"][0]["qbit_state"] == "stalledUP"

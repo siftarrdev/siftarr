@@ -7,6 +7,7 @@ import re
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 
 from fastapi import APIRouter, Depends, Form, HTTPException
 from fastapi import Request as FastAPIRequest
@@ -36,6 +37,19 @@ _BTIH_RE = re.compile(r"urn:btih:([0-9a-fA-F]{40}|[2-7A-Za-z]{32})", re.IGNORECA
 STAGING_DECISION_LOG_PATH = Path("/data/staging/decision-log.jsonl")
 
 router = APIRouter(prefix="/staged", tags=["staged"])
+
+
+def _safe_local_redirect_url(redirect_to: str | None, default: str) -> str:
+    """Return redirect_to only when it is a same-origin absolute path."""
+    if not redirect_to or "\\" in redirect_to or not redirect_to.startswith("/"):
+        return default
+    if redirect_to.startswith("//"):
+        return default
+
+    parsed = urlsplit(redirect_to)
+    if parsed.scheme or parsed.netloc:
+        return default
+    return redirect_to
 
 
 def _build_torrent_payload(torrent: StagedTorrent | None) -> dict[str, Any] | None:
@@ -121,6 +135,12 @@ def log_replacement_decision(
 
 def _wants_json(http_request: FastAPIRequest) -> bool:
     return "application/json" in http_request.headers.get("accept", "")
+
+
+def _progress_percent(progress: float | None) -> float | None:
+    if progress is None:
+        return None
+    return round(progress * 100, 1)
 
 
 async def _finalize_action_response(
@@ -397,6 +417,7 @@ async def bulk_staged_action(
 async def replace_staged_torrent(
     torrent_id: int,
     reason: str | None = Form(None),
+    redirect_to: str | None = Form(None),
     db: AsyncSession = Depends(get_db),
 ) -> RedirectResponse:
     """Replace an approved torrent with a new staged one."""
@@ -406,6 +427,12 @@ async def replace_staged_torrent(
 
     if not new_torrent:
         raise HTTPException(status_code=404, detail="Staged torrent not found")
+
+    if new_torrent.status != "staged":
+        raise HTTPException(
+            status_code=400,
+            detail="Replacement torrent must be staged",
+        )
 
     # Handle case where torrent has no request_id (manual add)
     if not new_torrent.request_id:
@@ -490,7 +517,8 @@ async def replace_staged_torrent(
 
     await db.commit()
 
-    return RedirectResponse(url="/?tab=staged", status_code=303)
+    redirect_url = _safe_local_redirect_url(redirect_to, "/?tab=staged")
+    return RedirectResponse(url=redirect_url, status_code=303)
 
 
 @router.get("/download-status")
@@ -529,6 +557,7 @@ async def get_download_status(
 
     torrent_data = []
     for torrent in torrents:
+        info: dict[str, Any] | None = None
         qbit_progress: float | None = None
         qbit_state: str | None = None
 
@@ -542,10 +571,13 @@ async def get_download_status(
         if torrent_hash:
             info = await qbittorrent.get_torrent_info(torrent_hash)
             if info:
-                qbit_progress = info["progress"]
-                qbit_state = info["state"]
+                qbit_progress = info.get("progress")
+                qbit_state = info.get("state")
         else:
-            qbit_progress = await qbittorrent.get_torrent_progress_by_name(torrent.title)
+            info = await qbittorrent.get_torrent_info_by_name(torrent.title)
+            if info:
+                qbit_progress = info.get("progress")
+                qbit_state = info.get("state")
 
         request_status_value = request_statuses.get(torrent.request_id or -1)
         if isinstance(request_status_value, RequestStatus):
@@ -566,7 +598,10 @@ async def get_download_status(
                 "request_id": torrent.request_id,
                 "request_status": resolved_request_status,
                 "qbit_progress": qbit_progress,
+                "qbit_progress_percent": _progress_percent(qbit_progress),
                 "qbit_state": qbit_state,
+                "qbit_eta_seconds": info.get("eta") if info else None,
+                "qbit_download_speed": info.get("dlspeed") if info else None,
                 "qbit_complete": qbit_complete,
                 "plex_available": plex_available,
                 "refresh_staged_tab": _should_refresh_staged_tab(

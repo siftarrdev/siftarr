@@ -3,6 +3,7 @@
 import asyncio
 import logging
 from enum import StrEnum
+from typing import Any
 
 import qbittorrentapi
 
@@ -36,6 +37,23 @@ class QbittorrentService:
                 password=self.settings.qbittorrent_password,
             )
         return self._client
+
+    @staticmethod
+    def _serialize_torrent(torrent: Any) -> dict[str, Any]:
+        return {
+            "hash": getattr(torrent, "hash", None),
+            "name": getattr(torrent, "name", None),
+            "size": getattr(torrent, "size", None),
+            "progress": getattr(torrent, "progress", None),
+            "state": getattr(torrent, "state", None),
+            "category": getattr(torrent, "category", None),
+            "ratio": getattr(torrent, "ratio", None),
+            "added_on": getattr(torrent, "added_on", None),
+            "completed_on": getattr(torrent, "completed_on", None),
+            "download_location": getattr(torrent, "download_location", None),
+            "eta": getattr(torrent, "eta", None),
+            "dlspeed": getattr(torrent, "dlspeed", None),
+        }
 
     async def authenticate(self) -> bool:
         """Authenticate with qBittorrent.
@@ -155,18 +173,7 @@ class QbittorrentService:
             )
             if torrents:
                 torrent = torrents[0]
-                return {
-                    "hash": torrent.hash,
-                    "name": torrent.name,
-                    "size": torrent.size,
-                    "progress": torrent.progress,
-                    "state": torrent.state,
-                    "category": torrent.category,
-                    "ratio": torrent.ratio,
-                    "added_on": torrent.added_on,
-                    "completed_on": torrent.completed_on,
-                    "download_location": torrent.download_location,
-                }
+                return self._serialize_torrent(torrent)
             return None
         except Exception:
             return None
@@ -185,16 +192,7 @@ class QbittorrentService:
                 self.client.torrents_info,
                 category=category,
             )
-            return [
-                {
-                    "hash": t.hash,
-                    "name": t.name,
-                    "size": t.size,
-                    "progress": t.progress,
-                    "state": t.state,
-                }
-                for t in torrents
-            ]
+            return [self._serialize_torrent(t) for t in torrents]
         except Exception:
             return []
 
@@ -206,16 +204,7 @@ class QbittorrentService:
         """
         try:
             torrents = await asyncio.to_thread(self.client.torrents_info)
-            return [
-                {
-                    "hash": t.hash,
-                    "name": t.name,
-                    "progress": t.progress,
-                    "state": t.state,
-                    "category": t.category,
-                }
-                for t in torrents
-            ]
+            return [self._serialize_torrent(t) for t in torrents]
         except Exception:
             return []
 
@@ -233,6 +222,15 @@ class QbittorrentService:
         for torrent in torrents:
             if fragment_lower in (torrent.get("name") or "").lower():
                 return torrent["progress"]
+        return None
+
+    async def get_torrent_info_by_name(self, name_fragment: str) -> dict | None:
+        """Get qBittorrent info for the first torrent matching a name fragment."""
+        torrents = await self.get_all_active_torrents()
+        fragment_lower = name_fragment.lower()
+        for torrent in torrents:
+            if fragment_lower in (torrent.get("name") or "").lower():
+                return torrent
         return None
 
     async def delete_torrent(self, torrent_hash: str, delete_files: bool = False) -> bool:

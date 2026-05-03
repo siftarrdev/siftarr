@@ -10,7 +10,7 @@
     </div>
 
     {# ── Stat cards ── #}
-    <div class="grid grid-cols-2 md:grid-cols-6 gap-3">
+    <div class="grid grid-cols-2 md:grid-cols-7 gap-3">
         <button onclick="showTab('active')" class="card group text-left hover:border-gray-600 transition-colors">
             <div class="px-4 py-3.5">
                 <div class="text-xs font-medium uppercase tracking-wider text-gray-500 group-hover:text-gray-400">Active</div>
@@ -27,6 +27,12 @@
             <div class="px-4 py-3.5">
                 <div class="text-xs font-medium uppercase tracking-wider text-gray-500 group-hover:text-gray-400">Staged</div>
                 <div class="mt-1 text-2xl font-bold text-blue-400 tabular-nums">{{ stats.staged }}</div>
+            </div>
+        </button>
+        <button onclick="showTab('downloading')" class="card group text-left hover:border-gray-600 transition-colors">
+            <div class="px-4 py-3.5">
+                <div class="text-xs font-medium uppercase tracking-wider text-gray-500 group-hover:text-gray-400">Downloading</div>
+                <div class="mt-1 text-2xl font-bold text-cyan-400 tabular-nums">{{ stats.downloading }}</div>
             </div>
         </button>
         <button onclick="showTab('finished')" class="card group text-left hover:border-gray-600 transition-colors">
@@ -59,7 +65,9 @@
             <button onclick="showTab('pending')" id="tab-pending"
                     class="tab-button border-b-2 border-transparent pb-3 text-sm font-medium text-gray-500 hover:text-gray-300 whitespace-nowrap">Pending Search</button>
             <button onclick="showTab('staged')" id="tab-staged"
-                    class="tab-button border-b-2 border-transparent pb-3 text-sm font-medium text-gray-500 hover:text-gray-300 whitespace-nowrap">Staged / Downloading</button>
+                    class="tab-button border-b-2 border-transparent pb-3 text-sm font-medium text-gray-500 hover:text-gray-300 whitespace-nowrap">Staged</button>
+            <button onclick="showTab('downloading')" id="tab-downloading"
+                    class="tab-button border-b-2 border-transparent pb-3 text-sm font-medium text-gray-500 hover:text-gray-300 whitespace-nowrap">Downloading</button>
             <button onclick="showTab('finished')" id="tab-finished"
                     class="tab-button border-b-2 border-transparent pb-3 text-sm font-medium text-gray-500 hover:text-gray-300 whitespace-nowrap">Finished</button>
             <button onclick="showTab('rejected')" id="tab-rejected"
@@ -183,10 +191,10 @@
                             <col data-col-key="title" style="width: 200px;">
                             <col data-col-key="year" style="width: 70px;">
                             <col data-col-key="type" style="width: 80px;">
+                            <col data-col-key="requested" style="width: 140px;">
                             <col data-col-key="requestedby" style="width: 120px;">
-                            <col data-col-key="nextretry" style="width: 140px;">
-                            <col data-col-key="lasterror" style="width: 192px;">
-                            <col data-col-key="actions" style="width: 256px;">
+                            <col data-col-key="status" style="width: 110px;">
+                            <col data-col-key="actions" style="width: 220px;">
                         </colgroup>
                         <thead>
                             <tr class="bg-surface-850">
@@ -197,24 +205,24 @@
                                 <th class="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500" data-table="pending" data-sort="title" data-col-key="title" style="position: relative;"><span class="sort-title cursor-pointer hover:text-gray-300">Title <span class="sort-indicator"></span></span><div class="resize-handle"></div></th>
                                 <th class="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500" data-table="pending" data-sort="year" data-col-key="year" style="position: relative;"><span class="sort-title cursor-pointer hover:text-gray-300">Year <span class="sort-indicator"></span></span><div class="resize-handle"></div></th>
                                 <th class="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500" data-table="pending" data-sort="type" data-col-key="type" style="position: relative;"><span class="sort-title cursor-pointer hover:text-gray-300">Type <span class="sort-indicator"></span></span><div class="resize-handle"></div></th>
+                                <th class="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500" data-table="pending" data-sort="requested" data-col-key="requested" style="position: relative;"><span class="sort-title cursor-pointer hover:text-gray-300">Requested On <span class="sort-indicator"></span></span><div class="resize-handle"></div></th>
                                 <th class="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500" data-table="pending" data-sort="requestedby" data-col-key="requestedby" style="position: relative;"><span class="sort-title cursor-pointer hover:text-gray-300">Requested By <span class="sort-indicator"></span></span><div class="resize-handle"></div></th>
-                                <th class="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500" data-table="pending" data-sort="nextretry" data-col-key="nextretry" style="position: relative;"><span class="sort-title cursor-pointer hover:text-gray-300">Next Retry <span class="sort-indicator"></span></span><div class="resize-handle"></div></th>
-                                <th class="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 w-48" data-table="pending" data-sort="lasterror" data-col-key="lasterror" style="position: relative;"><span class="sort-title cursor-pointer hover:text-gray-300">Last Error <span class="sort-indicator"></span></span><div class="resize-handle"></div></th>
-                                <th class="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 w-64" data-col-key="actions" style="position: relative;"><span class="sort-title">Actions</span><div class="resize-handle"></div></th>
+                                <th class="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500" data-table="pending" data-sort="status" data-col-key="status" style="position: relative;"><span class="sort-title cursor-pointer hover:text-gray-300">Status <span class="sort-indicator"></span></span><div class="resize-handle"></div></th>
+                                <th class="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 w-56" data-col-key="actions" style="position: relative;"><span class="sort-title">Actions</span><div class="resize-handle"></div></th>
                             </tr>
                         </thead>
                         <tbody class="divide-y divide-gray-700/40" id="pending-requests-body">
                             {% for req in pending_requests %}
-                            <tr class="hover:bg-surface-850/80 cursor-pointer transition-colors" onclick="openRequestDetails({{ req.id }})" data-request-id="{{ req.id }}" data-title="{{ req.title|lower }}" data-type="{{ req.media_type.value|lower }}" data-requestedby="{{ req.requester_username|default('Unknown')|lower }}" data-nextretry="{{ req.next_retry_at.strftime('%Y-%m-%d %H:%M') if req.next_retry_at else '0000-00-00 00:00' }}" data-lasterror="{{ (req.rejection_reason or '-')|lower }}" data-year="{{ req.year or 0 }}">
+                            <tr class="hover:bg-surface-850/80 cursor-pointer transition-colors" onclick="openRequestDetails({{ req.id }})" data-request-id="{{ req.id }}" data-title="{{ req.title|lower }}" data-type="{{ req.media_type.value|lower }}" data-requestedby="{{ req.requester_username|default('Unknown')|lower }}" data-requested="{{ req.created_at.strftime('%Y-%m-%d %H:%M') }}" data-status="{{ req.status.value|lower }}" data-year="{{ req.year or 0 }}">
                                 <td class="px-4 py-3.5 whitespace-nowrap text-sm" onclick="event.stopPropagation()">
                                     <input name="request_ids" value="{{ req.id }}" type="checkbox" class="pending-request-checkbox rounded border-gray-600 bg-surface-900 text-brand-500 focus:ring-brand-500">
                                 </td>
                                 <td class="px-4 py-3.5 whitespace-nowrap text-sm font-medium text-white max-w-sm overflow-hidden text-ellipsis">{{ req.title }}</td>
                                 <td class="px-4 py-3.5 whitespace-nowrap text-sm text-gray-500 tabular-nums" data-sort-value="{{ req.year or 0 }}">{{ req.year or '-' }}</td>
                                 <td class="px-4 py-3.5 whitespace-nowrap text-sm capitalize text-gray-400">{{ req.media_type.value }}</td>
+                                <td class="px-4 py-3.5 whitespace-nowrap text-sm text-gray-500 tabular-nums">{{ req.created_at.strftime('%Y-%m-%d %H:%M') }}</td>
                                 <td class="px-4 py-3.5 whitespace-nowrap text-sm text-gray-400">{{ req.requester_username or 'Unknown' }}</td>
-                                <td class="px-4 py-3.5 whitespace-nowrap text-sm text-gray-500 tabular-nums">{{ req.next_retry_at.strftime('%Y-%m-%d %H:%M') if req.next_retry_at else 'Ready now' }}</td>
-                                <td class="px-4 py-3.5 text-sm max-w-[12rem] overflow-hidden text-ellipsis {% if req.rejection_reason %}text-red-400{% else %}text-gray-600{% endif %}">{{ req.rejection_reason if req.rejection_reason else '-' }}</td>
+                                <td class="px-4 py-3.5 whitespace-nowrap text-sm"><span class="badge {% if req.status.value == 'searching' %}badge-blue{% elif req.status.value == 'pending' %}badge-yellow{% else %}badge-gray{% endif %}">{{ req.status.value }}</span></td>
                                 <td class="px-4 py-3.5 whitespace-nowrap text-sm" onclick="event.stopPropagation()">
                                     <div class="flex items-center gap-3">
                                         <button type="button" onclick="openRequestDetails({{ req.id }})" class="text-brand-400 hover:text-brand-300 font-medium">Details</button>
@@ -257,7 +265,7 @@
                         <col data-col-key="type" style="width: 80px;">
                         <col data-col-key="requested" style="width: 140px;">
                         <col data-col-key="requestedby" style="width: 120px;">
-                        <col data-col-key="expected" style="width: 140px;">
+                        <col data-col-key="releasedate" style="width: 140px;">
                         <col data-col-key="actions" style="width: 100px;">
                     </colgroup>
                     <thead>
@@ -267,14 +275,14 @@
                             <th class="px-5 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 cursor-pointer hover:text-gray-300" data-table="unreleased" data-sort="type" data-col-key="type" style="position: relative;"><span class="sort-title">Type <span class="sort-indicator"></span></span><div class="resize-handle"></div></th>
                             <th class="px-5 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 cursor-pointer hover:text-gray-300" data-table="unreleased" data-sort="requested" data-col-key="requested" style="position: relative;"><span class="sort-title">Requested <span class="sort-indicator"></span></span><div class="resize-handle"></div></th>
                             <th class="px-5 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 cursor-pointer hover:text-gray-300" data-table="unreleased" data-sort="requestedby" data-col-key="requestedby" style="position: relative;"><span class="sort-title">Requested By <span class="sort-indicator"></span></span><div class="resize-handle"></div></th>
-                            <th class="px-5 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 cursor-pointer hover:text-gray-300" data-table="unreleased" data-sort="expected" data-col-key="expected" style="position: relative;"><span class="sort-title">Expected <span class="sort-indicator"></span></span><div class="resize-handle"></div></th>
+                            <th class="px-5 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 cursor-pointer hover:text-gray-300" data-table="unreleased" data-sort="releasedate" data-col-key="releasedate" style="position: relative;"><span class="sort-title">Release Date <span class="sort-indicator"></span></span><div class="resize-handle"></div></th>
                             <th class="px-5 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500" data-col-key="actions" style="position: relative;"><span class="sort-title">Actions</span><div class="resize-handle"></div></th>
                         </tr>
                     </thead>
                     <tbody class="divide-y divide-gray-700/40" id="unreleased-requests-body">
                         {% for req in unreleased_requests %}
-                        {% set expected_date = unreleased_earliest.get(req.id) %}
-                        <tr class="hover:bg-surface-850/80 cursor-pointer transition-colors" onclick="openRequestDetails({{ req.id }})" data-request-id="{{ req.id }}" data-title="{{ req.title|lower }}" data-type="{{ req.media_type.value|lower }}" data-requestedby="{{ req.requester_username|default('Unknown')|lower }}" data-requested="{{ req.created_at.strftime('%Y-%m-%d %H:%M') }}" data-expected="{{ expected_date or '' }}" data-year="{{ req.year or 0 }}">
+                        {% set expected_date = unreleased_release_dates.get(req.id) %}
+                        <tr class="hover:bg-surface-850/80 cursor-pointer transition-colors" onclick="openRequestDetails({{ req.id }})" data-request-id="{{ req.id }}" data-title="{{ req.title|lower }}" data-type="{{ req.media_type.value|lower }}" data-requestedby="{{ req.requester_username|default('Unknown')|lower }}" data-requested="{{ req.created_at.strftime('%Y-%m-%d %H:%M') }}" data-releasedate="{{ expected_date or '9999-12-31' }}" data-year="{{ req.year or 0 }}">
                             <td class="px-5 py-3.5 whitespace-nowrap text-sm font-medium text-white">{{ req.title }}</td>
                             <td class="px-5 py-3.5 whitespace-nowrap text-sm text-gray-500 tabular-nums" data-sort-value="{{ req.year or 0 }}">{{ req.year or '-' }}</td>
                             <td class="px-5 py-3.5 whitespace-nowrap text-sm capitalize text-gray-400">{{ req.media_type.value }}</td>
@@ -293,42 +301,32 @@
         {% else %}<p class="text-gray-500">No unreleased requests.</p>{% endif %}
     </div>
 
-    {# ═══════════════ STAGED / DOWNLOADING TAB ═══════════════ #}
+    {# ═══════════════ STAGED TAB ═══════════════ #}
     <div id="content-staged" class="tab-content hidden">
         {% if staged_torrents %}
         <div class="card overflow-hidden">
             <div class="card-header flex flex-col gap-3 md:flex-row md:items-center">
-                <input type="text" id="staged-filter-input" placeholder="Filter staged or downloading torrents..." class="form-input md:flex-1">
+                <input type="text" id="staged-filter-input" placeholder="Filter staged torrents..." class="form-input md:flex-1">
                 <div class="flex flex-wrap items-center gap-2">
-                    <select id="staged-status-filter" class="form-select md:w-56">
-                        <option value="">All Torrent States</option>
-                        <option value="staged">Staged</option>
-                        <option value="approved">Sent to qBittorrent</option>
-                        <option value="replaced">Replaced</option>
-                    </select>
                     <button type="button" onclick="bulkStagedAction('approve')" class="btn-primary btn-sm">Approve Selected</button>
                     <button type="button" onclick="bulkStagedAction('discard')" class="btn-danger btn-sm">Discard Selected</button>
-                    {% if qbittorrent_url %}
-                    <a href="{{ qbittorrent_url }}" target="_blank" rel="noopener noreferrer" class="btn-ghost btn-sm">Open qBittorrent ↗</a>
-                    {% endif %}
                 </div>
             </div>
             <div class="overflow-x-auto">
                 <table class="min-w-full divide-y divide-gray-700/60 data-resizable" id="staged-torrents-table">
                     <colgroup>
-                        <col data-col-key="title" style="width: 200px;">
-                        <col data-col-key="state" style="width: 140px;">
+                        <col data-col-key="title" style="width: 240px;">
+                        <col data-col-key="select" style="width: 80px;">
                         <col data-col-key="requeststate" style="width: 130px;">
                         <col data-col-key="size" style="width: 100px;">
-                        <col data-col-key="indexer" style="width: 100px;">
+                        <col data-col-key="indexer" style="width: 120px;">
                         <col data-col-key="score" style="width: 70px;">
-                        <col data-col-key="actions" style="width: 120px;">
+                        <col data-col-key="actions" style="width: 180px;">
                     </colgroup>
                     <thead>
                         <tr class="bg-surface-850">
                             <th class="px-5 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 cursor-pointer hover:text-gray-300" data-table="staged" data-sort="title" data-col-key="title" style="position: relative;"><span class="sort-title">Title <span class="sort-indicator"></span></span><div class="resize-handle"></div></th>
                             <th class="px-5 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500" data-col-key="select" style="position: relative;"><span class="sort-title">Select</span><div class="resize-handle"></div></th>
-                            <th class="px-5 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 cursor-pointer hover:text-gray-300" data-table="staged" data-sort="state" data-col-key="state" style="position: relative;"><span class="sort-title">Torrent State <span class="sort-indicator"></span></span><div class="resize-handle"></div></th>
                             <th class="px-5 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 cursor-pointer hover:text-gray-300" data-table="staged" data-sort="requeststate" data-col-key="requeststate" style="position: relative;"><span class="sort-title">Request State <span class="sort-indicator"></span></span><div class="resize-handle"></div></th>
                             <th class="px-5 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 cursor-pointer hover:text-gray-300" data-table="staged" data-sort="size" data-col-key="size" style="position: relative;"><span class="sort-title">Size <span class="sort-indicator"></span></span><div class="resize-handle"></div></th>
                             <th class="px-5 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 cursor-pointer hover:text-gray-300" data-table="staged" data-sort="indexer" data-col-key="indexer" style="position: relative;"><span class="sort-title">Indexer <span class="sort-indicator"></span></span><div class="resize-handle"></div></th>
@@ -339,48 +337,93 @@
                     <tbody class="divide-y divide-gray-700/40" id="staged-torrents-body">
                         {% for torrent in staged_torrents %}
                         {% set request_state = staged_request_statuses.get(torrent.request_id, 'unknown') %}
+                        {% set identity_warning = movie_identity_mismatch_warnings.get(torrent.id) %}
                         <tr class="hover:bg-surface-850/80 cursor-pointer transition-colors" onclick="{% if torrent.request_id %}openRequestDetails({{ torrent.request_id }}){% endif %}" data-torrent-id="{{ torrent.id }}" data-request-id="{{ torrent.request_id }}" data-title="{{ torrent.title|lower }}" data-state="{{ torrent.status|lower }}" data-requeststate="{{ request_state|lower }}" data-size="{{ torrent.size }}" data-indexer="{{ torrent.indexer|lower }}" data-score="{{ torrent.score }}">
-                            <td class="px-5 py-3.5 text-sm font-medium text-white">{{ torrent.title }}</td>
-                            <td class="px-5 py-3.5 whitespace-nowrap text-sm" onclick="event.stopPropagation()">
-                                <input type="checkbox" class="staged-torrent-checkbox rounded border-gray-600 bg-surface-900 text-brand-500 focus:ring-brand-500" value="{{ torrent.id }}">
-                            </td>
-                            <td class="px-5 py-3.5 whitespace-nowrap text-sm">
-                                {% if torrent.status == 'replaced' %}
-                                {% set replacement_title = replaced_by_titles.get(torrent.replaced_by_id, 'Unknown') %}
-                                <span class="badge badge-purple" title="Replaced by: {{ replacement_title }}{% if torrent.replacement_reason %} - {{ torrent.replacement_reason }}{% endif %}">replaced</span>
-                                {% else %}
-                                <span class="badge {% if torrent.status == 'staged' %}badge-yellow{% elif torrent.status == 'approved' %}badge-blue{% else %}badge-gray{% endif %}">{{ 'sent to qBittorrent' if torrent.status == 'approved' else torrent.status }}</span>
+                            <td class="px-5 py-3.5 text-sm font-medium text-white">
+                                <div>{{ torrent.title }}</div>
+                                {% if identity_warning %}
+                                <div class="mt-1 text-xs text-amber-300">Possible wrong movie: {{ identity_warning }}</div>
                                 {% endif %}
                             </td>
-                            <td class="px-5 py-3.5 whitespace-nowrap text-sm"><span class="badge {% if request_state == 'downloading' %}badge-blue{% elif request_state == 'staged' %}badge-yellow{% else %}badge-gray{% endif %}">{{ request_state }}</span></td>
+                            <td class="px-5 py-3.5 whitespace-nowrap text-sm" onclick="event.stopPropagation()"><input type="checkbox" class="staged-torrent-checkbox rounded border-gray-600 bg-surface-900 text-brand-500 focus:ring-brand-500" value="{{ torrent.id }}"></td>
+                            <td class="px-5 py-3.5 whitespace-nowrap text-sm"><span class="badge {% if request_state == 'staged' %}badge-yellow{% else %}badge-gray{% endif %}">{{ request_state }}</span></td>
                             <td class="px-5 py-3.5 whitespace-nowrap text-sm text-gray-400 tabular-nums">{{ (torrent.size / 1024 / 1024 / 1024)|round(2) }} GB</td>
                             <td class="px-5 py-3.5 whitespace-nowrap text-sm text-gray-400">{{ torrent.indexer }}</td>
                             <td class="px-5 py-3.5 whitespace-nowrap text-sm text-emerald-400 font-medium tabular-nums">{{ torrent.score }}</td>
-                            <td class="px-5 py-3.5 whitespace-nowrap text-sm" onclick="event.stopPropagation()">
-                                <div class="flex items-center gap-3">
-                                    {% if torrent.request_id %}
-                                    <button type="button" onclick="openRequestDetails({{ torrent.request_id }})" class="text-brand-400 hover:text-brand-300 font-medium">Details</button>
-                                    {% endif %}
-                                    {% if torrent.status == 'staged' %}
-                                    <button type="button" onclick="postStagedAction('/staged/{{ torrent.id }}/approve', '/?tab=staged')" class="text-emerald-400 hover:text-emerald-300 font-medium">Approve</button>
-                                    <button type="button" onclick="openReplaceModal({{ torrent.id }}, {{ torrent.request_id }}, '{{ torrent.title|replace("'", "\\'") }}')" class="text-amber-400 hover:text-amber-300 font-medium">Replace</button>
-                                    <button type="button" onclick="postStagedAction('/staged/{{ torrent.id }}/discard', '/?tab=staged')" class="text-red-400 hover:text-red-300 font-medium">Discard</button>
-                                    {% elif torrent.status == 'replaced' %}
-                                    <span class="text-gray-500 text-xs" title="Replaced{% if torrent.replacement_reason %}: {{ torrent.replacement_reason }}{% endif %}">Replaced</span>
-                                    {% elif torrent.status == 'approved' %}
-                                    <button type="button" onclick="checkNow({{ torrent.id }})" class="bg-brand-500 hover:bg-brand-400 text-white text-xs px-2 py-0.5 rounded">Check Now</button>
-                                    {% else %}
-                                    {% if not torrent.request_id %}<span class="text-gray-600">No actions</span>{% endif %}
-                                    {% endif %}
-                                </div>
-                            </td>
+                            <td class="px-5 py-3.5 whitespace-nowrap text-sm" onclick="event.stopPropagation()"><div class="flex items-center gap-3">{% if torrent.request_id %}<button type="button" onclick="openRequestDetails({{ torrent.request_id }})" class="text-brand-400 hover:text-brand-300 font-medium">Details</button>{% endif %}{% if torrent.request_id in downloading_request_ids %}<button type="button" onclick="openReplaceModal({{ torrent.id }}, {{ torrent.request_id }}, '{{ torrent.title|replace("'", "\'") }}', '/?tab=downloading')" class="text-amber-400 hover:text-amber-300 font-medium">Replace</button>{% else %}<button type="button" onclick="postStagedAction('/staged/{{ torrent.id }}/approve', '/?tab=staged')" class="text-emerald-400 hover:text-emerald-300 font-medium">Approve</button>{% endif %}<button type="button" onclick="postStagedAction('/staged/{{ torrent.id }}/discard', '/?tab=staged')" class="text-red-400 hover:text-red-300 font-medium">Discard</button></div></td>
                         </tr>
                         {% endfor %}
                     </tbody>
                 </table>
             </div>
         </div>
-        {% else %}<p class="text-gray-500">No staged or downloading torrents.</p>{% endif %}
+        {% else %}<p class="text-gray-500">No staged torrents.</p>{% endif %}
+    </div>
+
+    {# ═══════════════ DOWNLOADING TAB ═══════════════ #}
+    <div id="content-downloading" class="tab-content hidden">
+        {% if downloading_torrents %}
+        <div class="card overflow-hidden">
+            <div class="card-header flex flex-col gap-3 md:flex-row md:items-center">
+                <input type="text" id="downloading-filter-input" placeholder="Filter downloading torrents..." class="form-input md:flex-1">
+                <div class="flex flex-wrap items-center gap-2">{% if qbittorrent_url %}<a href="{{ qbittorrent_url }}" target="_blank" rel="noopener noreferrer" class="btn-ghost btn-sm">Open qBittorrent ↗</a>{% endif %}</div>
+            </div>
+            <div class="overflow-x-auto">
+                <table class="min-w-full divide-y divide-gray-700/60 data-resizable" id="downloading-torrents-table">
+                    <colgroup>
+                        <col data-col-key="title" style="width: 220px;">
+                        <col data-col-key="progress" style="width: 120px;">
+                        <col data-col-key="eta" style="width: 120px;">
+                        <col data-col-key="state" style="width: 150px;">
+                        <col data-col-key="requeststate" style="width: 130px;">
+                        <col data-col-key="size" style="width: 100px;">
+                        <col data-col-key="indexer" style="width: 120px;">
+                        <col data-col-key="score" style="width: 70px;">
+                        <col data-col-key="actions" style="width: 190px;">
+                    </colgroup>
+                    <thead>
+                        <tr class="bg-surface-850">
+                            <th class="px-5 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 cursor-pointer hover:text-gray-300" data-table="downloading" data-sort="title" data-col-key="title" style="position: relative;"><span class="sort-title">Title <span class="sort-indicator"></span></span><div class="resize-handle"></div></th>
+                            <th class="px-5 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 cursor-pointer hover:text-gray-300" data-table="downloading" data-sort="progress" data-col-key="progress" style="position: relative;"><span class="sort-title">Progress <span class="sort-indicator"></span></span><div class="resize-handle"></div></th>
+                            <th class="px-5 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 cursor-pointer hover:text-gray-300" data-table="downloading" data-sort="eta" data-col-key="eta" style="position: relative;"><span class="sort-title">ETA <span class="sort-indicator"></span></span><div class="resize-handle"></div></th>
+                            <th class="px-5 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 cursor-pointer hover:text-gray-300" data-table="downloading" data-sort="state" data-col-key="state" style="position: relative;"><span class="sort-title">qBittorrent State <span class="sort-indicator"></span></span><div class="resize-handle"></div></th>
+                            <th class="px-5 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 cursor-pointer hover:text-gray-300" data-table="downloading" data-sort="requeststate" data-col-key="requeststate" style="position: relative;"><span class="sort-title">Request State <span class="sort-indicator"></span></span><div class="resize-handle"></div></th>
+                            <th class="px-5 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 cursor-pointer hover:text-gray-300" data-table="downloading" data-sort="size" data-col-key="size" style="position: relative;"><span class="sort-title">Size <span class="sort-indicator"></span></span><div class="resize-handle"></div></th>
+                            <th class="px-5 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 cursor-pointer hover:text-gray-300" data-table="downloading" data-sort="indexer" data-col-key="indexer" style="position: relative;"><span class="sort-title">Indexer <span class="sort-indicator"></span></span><div class="resize-handle"></div></th>
+                            <th class="px-5 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 cursor-pointer hover:text-gray-300" data-table="downloading" data-sort="score" data-col-key="score" style="position: relative;"><span class="sort-title">Score <span class="sort-indicator"></span></span><div class="resize-handle"></div></th>
+                            <th class="px-5 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500" data-col-key="actions" style="position: relative;"><span class="sort-title">Actions</span><div class="resize-handle"></div></th>
+                        </tr>
+                    </thead>
+                    <tbody class="divide-y divide-gray-700/40" id="downloading-torrents-body">
+                        {% for torrent in downloading_torrents %}
+                        {% set request_state = downloading_request_statuses.get(torrent.request_id, 'unknown') %}
+                        {% set waiting_for_plex = torrent.request_id in downloading_waiting_plex_request_ids %}
+                        {% set identity_warning = movie_identity_mismatch_warnings.get(torrent.id) %}
+                        <tr class="hover:bg-surface-850/80 cursor-pointer transition-colors" onclick="{% if torrent.request_id %}openRequestDetails({{ torrent.request_id }}){% endif %}" data-torrent-id="{{ torrent.id }}" data-request-id="{{ torrent.request_id }}" data-title="{{ torrent.title|lower }}" data-state="{{ 'qbit_finished_waiting_plex' if waiting_for_plex else torrent.status|lower }}" data-requeststate="{{ request_state|lower }}" data-progress="-1" data-eta="999999999" data-size="{{ torrent.size }}" data-indexer="{{ torrent.indexer|lower }}" data-score="{{ torrent.score }}" data-qbit-finished-waiting-plex="{{ 'true' if waiting_for_plex else 'false' }}">
+                            <td class="px-5 py-3.5 text-sm font-medium text-white">
+                                <div>{{ torrent.title }}</div>
+                                {% if identity_warning %}
+                                <div class="mt-1 text-xs text-amber-300">Possible wrong movie: {{ identity_warning }}</div>
+                                {% endif %}
+                                {% if waiting_for_plex %}
+                                <div class="mt-1 text-xs text-amber-300">qBittorrent finished; waiting for Plex. If this does not import, the release may be RAR-packed or otherwise unimportable.</div>
+                                {% endif %}
+                            </td>
+                            <td class="px-5 py-3.5 whitespace-nowrap text-sm text-gray-400 tabular-nums" data-download-progress>—</td>
+                            <td class="px-5 py-3.5 whitespace-nowrap text-sm text-gray-400 tabular-nums" data-download-eta>—</td>
+                            <td class="px-5 py-3.5 whitespace-nowrap text-sm"><span class="badge {{ 'badge-yellow' if waiting_for_plex else 'badge-blue' }}" data-download-state>{{ 'qBittorrent finished; waiting for Plex' if waiting_for_plex else 'sent to qBittorrent' }}</span></td>
+                            <td class="px-5 py-3.5 whitespace-nowrap text-sm"><span class="badge {% if request_state == 'downloading' %}badge-blue{% elif request_state == 'staged' %}badge-yellow{% else %}badge-gray{% endif %}">{{ request_state }}</span></td>
+                            <td class="px-5 py-3.5 whitespace-nowrap text-sm text-gray-400 tabular-nums">{{ (torrent.size / 1024 / 1024 / 1024)|round(2) }} GB</td>
+                            <td class="px-5 py-3.5 whitespace-nowrap text-sm text-gray-400">{{ torrent.indexer }}</td>
+                            <td class="px-5 py-3.5 whitespace-nowrap text-sm text-emerald-400 font-medium tabular-nums">{{ torrent.score }}</td>
+                            <td class="px-5 py-3.5 whitespace-nowrap text-sm" onclick="event.stopPropagation()"><div class="flex items-center gap-3">{% if torrent.request_id %}<button type="button" onclick="openRequestDetails({{ torrent.request_id }})" class="text-brand-400 hover:text-brand-300 font-medium">Details</button>{% endif %}<button type="button" onclick="checkNow({{ torrent.id }})" class="bg-brand-500 hover:bg-brand-400 text-white text-xs px-2 py-0.5 rounded">Check Now</button></div></td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+        {% else %}<p class="text-gray-500">No downloading torrents.</p>{% endif %}
     </div>
 
     {# ═══════════════ FINISHED TAB ═══════════════ #}
@@ -608,11 +651,11 @@
     <div class="absolute inset-0 bg-black/60 backdrop-blur-sm" onclick="closeReplaceModal()"></div>
     <div class="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-full max-w-lg bg-surface-900 border border-gray-700/60 rounded-2xl shadow-2xl p-6">
         <h3 class="text-lg font-semibold text-white mb-2">Replace Torrent</h3>
-        <p class="text-sm text-gray-400 mb-4">Replace the currently downloading torrent with a different one. The current torrent will be marked as replaced.</p>
+        <p class="text-sm text-gray-400 mb-4">Send this staged torrent as the replacement for the currently downloading torrent. The current torrent will be marked as replaced.</p>
         <form id="replace-form" method="post">
-            <input type="hidden" name="redirect_to" id="replace-redirect" value="/?tab=staged">
+            <input type="hidden" name="redirect_to" id="replace-redirect" value="/?tab=downloading">
             <div class="mb-4 p-3 rounded-lg bg-surface-800 border border-gray-700/40">
-                <div class="text-xs text-gray-500 uppercase tracking-wider mb-1">Current Torrent</div>
+                <div class="text-xs text-gray-500 uppercase tracking-wider mb-1">Replacement Candidate</div>
                 <div id="replace-current-torrent" class="text-sm text-white font-medium break-words"></div>
             </div>
             <div class="mb-4">

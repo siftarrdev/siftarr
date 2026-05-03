@@ -112,6 +112,9 @@ async def store_search_results(
             season_coverage=serialize_release_coverage(coverage),
             score=evaluation.total_score,
             passed_rules=evaluation.passed,
+            rejection_reason=evaluation.rejection_reason[:500]
+            if evaluation.rejection_reason
+            else None,
         )
         db.add(record)
         records_by_key[dedupe_key] = record
@@ -167,6 +170,9 @@ async def persist_manual_release(
             season_coverage=serialize_release_coverage(coverage),
             score=evaluation.total_score,
             passed_rules=evaluation.passed,
+            rejection_reason=evaluation.rejection_reason[:500]
+            if evaluation.rejection_reason
+            else None,
         )
         db.add(record)
     else:
@@ -186,6 +192,9 @@ async def persist_manual_release(
         record.season_coverage = serialize_release_coverage(coverage)
         record.score = evaluation.total_score
         record.passed_rules = evaluation.passed
+        record.rejection_reason = (
+            evaluation.rejection_reason[:500] if evaluation.rejection_reason else None
+        )
 
     await db.commit()
     await db.refresh(record)

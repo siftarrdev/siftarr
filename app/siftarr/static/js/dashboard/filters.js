@@ -34,6 +34,7 @@ function applyAllFilters(tabName) {
         pending: filterPendingTable,
         unreleased: filterUnreleasedTable,
         staged: filterStagedTable,
+        downloading: filterDownloadingTable,
         finished: filterFinishedTable,
         rejected: filterRejectedTable,
     };
@@ -60,7 +61,7 @@ function filterPendingTable() {
     const filter = filterEl.value.toLowerCase();
     const mediaType = window.mediaFilterState['pending'] || null;
     document.querySelectorAll('#pending-requests-body tr').forEach(row => {
-        const textContent = `${row.dataset.title} ${row.dataset.type} ${row.dataset.requestedby} ${row.dataset.lasterror}`;
+        const textContent = `${row.dataset.title} ${row.dataset.type} ${row.dataset.requestedby} ${row.dataset.status}`;
         const textMatch = !filter || textContent.includes(filter);
         const mediaMatch = !mediaType || row.dataset.type === mediaType;
         row.style.display = (textMatch && mediaMatch) ? '' : 'none';
@@ -70,14 +71,22 @@ function filterPendingTable() {
 
 function filterStagedTable() {
     const filterEl = document.getElementById('staged-filter-input');
-    const statusEl = document.getElementById('staged-status-filter');
-    if (!filterEl || !statusEl) return;
+    if (!filterEl) return;
     const filter = filterEl.value.toLowerCase();
-    const selectedStatus = statusEl.value;
     document.querySelectorAll('#staged-torrents-body tr').forEach(row => {
+        const textContent = `${row.dataset.title} ${row.dataset.indexer} ${row.dataset.requeststate}`;
+        row.style.display = textContent.includes(filter) ? '' : 'none';
+    });
+    window.refreshDetailsNavigationContext();
+}
+
+function filterDownloadingTable() {
+    const filterEl = document.getElementById('downloading-filter-input');
+    if (!filterEl) return;
+    const filter = filterEl.value.toLowerCase();
+    document.querySelectorAll('#downloading-torrents-body tr').forEach(row => {
         const textContent = `${row.dataset.title} ${row.dataset.indexer} ${row.dataset.state} ${row.dataset.requeststate}`;
-        const torrentState = row.dataset.state || '';
-        row.style.display = textContent.includes(filter) && (!selectedStatus || torrentState === selectedStatus) ? '' : 'none';
+        row.style.display = textContent.includes(filter) ? '' : 'none';
     });
     window.refreshDetailsNavigationContext();
 }
@@ -116,7 +125,7 @@ function filterUnreleasedTable() {
     const filter = filterEl.value.toLowerCase();
     const mediaType = window.mediaFilterState['unreleased'] || null;
     document.querySelectorAll('#unreleased-requests-body tr').forEach(row => {
-        const textContent = `${row.dataset.title} ${row.dataset.type} ${row.dataset.requestedby} ${row.dataset.expected}`.toLowerCase();
+        const textContent = `${row.dataset.title} ${row.dataset.type} ${row.dataset.requestedby} ${row.dataset.releasedate}`.toLowerCase();
         const textMatch = !filter || textContent.includes(filter);
         const mediaMatch = !mediaType || row.dataset.type === mediaType;
         row.style.display = (textMatch && mediaMatch) ? '' : 'none';
@@ -141,6 +150,7 @@ function sortTable(tableName, sortKey) {
         pending: 'pending-requests-table',
         unreleased: 'unreleased-requests-table',
         staged: 'staged-torrents-table',
+        downloading: 'downloading-torrents-table',
         finished: 'finished-requests-table',
         rejected: 'rejected-requests-table',
     };
@@ -149,10 +159,11 @@ function sortTable(tableName, sortKey) {
         pending: 'pending-requests-body',
         unreleased: 'unreleased-requests-body',
         staged: 'staged-torrents-body',
+        downloading: 'downloading-torrents-body',
         finished: 'finished-requests-body',
         rejected: 'rejected-requests-body',
     };
-    const numericKeys = new Set(['ovrank', 'retrycount', 'size', 'score']);
+    const numericKeys = new Set(['ovrank', 'retrycount', 'size', 'score', 'progress', 'eta']);
     const state = window.tableSortState[tableName];
     const tbody = document.getElementById(bodyIdMap[tableName]);
     const table = document.getElementById(tableIdMap[tableName]);
@@ -195,6 +206,7 @@ window.toggleMediaFilter = toggleMediaFilter;
 window.filterTable = filterTable;
 window.filterPendingTable = filterPendingTable;
 window.filterStagedTable = filterStagedTable;
+window.filterDownloadingTable = filterDownloadingTable;
 window.filterFinishedTable = filterFinishedTable;
 window.filterRejectedTable = filterRejectedTable;
 window.filterUnreleasedTable = filterUnreleasedTable;

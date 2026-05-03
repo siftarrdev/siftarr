@@ -3,6 +3,7 @@
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+from fastapi import HTTPException
 
 from app.siftarr.models.request import MediaType, RequestStatus
 from app.siftarr.routers import staged
@@ -197,8 +198,8 @@ class TestStagedRouter:
         assert torrent_two.status == "discarded"
 
     @pytest.mark.asyncio
-    async def test_replace_staged_torrent_redirects_to_staged_tab(self, mock_db, monkeypatch):
-        """Replacing a downloading torrent should keep the user on the staged tab."""
+    async def test_replace_staged_torrent_uses_redirect_to(self, mock_db, monkeypatch):
+        """Replacing with a staged candidate should honor redirect_to."""
         new_torrent = MagicMock()
         new_torrent.id = 9
         new_torrent.request_id = 4
@@ -232,13 +233,92 @@ class TestStagedRouter:
         monkeypatch.setattr(staged.os.path, "exists", MagicMock(return_value=False))
 
         response = await staged.replace_staged_torrent(
-            torrent_id=9, reason="Better quality", db=mock_db
+            torrent_id=9,
+            reason="Better quality",
+            redirect_to="/?tab=downloading",
+            db=mock_db,
+        )
+
+        assert response.status_code == 303
+        assert response.headers["location"] == "/?tab=downloading"
+        assert old_torrent.status == "replaced"
+        assert new_torrent.status == "approved"
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "malicious_redirect",
+        [
+            "https://evil.example/phish",
+            "//evil.example/phish",
+            "http:\\evil.example\\phish",
+        ],
+    )
+    async def test_replace_staged_torrent_ignores_malicious_redirect_to(
+        self, mock_db, monkeypatch, malicious_redirect
+    ):
+        """Replacing with a staged candidate should ignore external redirect_to values."""
+        new_torrent = MagicMock()
+        new_torrent.id = 9
+        new_torrent.request_id = 4
+        new_torrent.magnet_url = "magnet:?xt=urn:btih:def"
+        new_torrent.torrent_path = "/tmp/new.torrent"
+        new_torrent.json_path = "/tmp/new.json"
+        new_torrent.status = "staged"
+
+        old_torrent = MagicMock()
+        old_torrent.id = 10
+        old_torrent.request_id = 4
+        old_torrent.status = "approved"
+
+        request = MagicMock()
+        request.id = 4
+        request.media_type = MediaType.TV
+
+        new_result = MagicMock()
+        new_result.scalar_one_or_none.return_value = new_torrent
+        request_result = MagicMock()
+        request_result.scalar_one_or_none.return_value = request
+        old_result = MagicMock()
+        old_result.scalar_one_or_none.return_value = old_torrent
+        mock_db.execute.side_effect = [new_result, request_result, old_result]
+
+        qbittorrent = AsyncMock()
+        qbittorrent.add_torrent.return_value = "hash456"
+        monkeypatch.setattr(staged, "get_settings", lambda: MagicMock())
+        monkeypatch.setattr(staged, "QbittorrentService", MagicMock(return_value=qbittorrent))
+        monkeypatch.setattr(staged, "log_replacement_decision", MagicMock())
+        monkeypatch.setattr(staged.os.path, "exists", MagicMock(return_value=False))
+
+        response = await staged.replace_staged_torrent(
+            torrent_id=9,
+            reason="Better quality",
+            redirect_to=malicious_redirect,
+            db=mock_db,
         )
 
         assert response.status_code == 303
         assert response.headers["location"] == "/?tab=staged"
-        assert old_torrent.status == "replaced"
-        assert new_torrent.status == "approved"
+
+    @pytest.mark.asyncio
+    async def test_replace_staged_torrent_rejects_approved_id(self, mock_db):
+        """Replace endpoint must receive the staged replacement candidate ID."""
+        approved_torrent = MagicMock()
+        approved_torrent.status = "approved"
+
+        result = MagicMock()
+        result.scalar_one_or_none.return_value = approved_torrent
+        mock_db.execute.return_value = result
+
+        with pytest.raises(HTTPException) as exc_info:
+            await staged.replace_staged_torrent(
+                torrent_id=10,
+                reason=None,
+                redirect_to="/?tab=downloading",
+                db=mock_db,
+            )
+
+        assert exc_info.value.status_code == 400
+        assert exc_info.value.detail == "Replacement torrent must be staged"
 
 
 class TestDownloadStatusEndpoint:
@@ -292,7 +372,14 @@ class TestDownloadStatusEndpoint:
         mock_db.execute.side_effect = [torrent_result, request_status_result]
 
         qbit = AsyncMock()
-        qbit.get_torrent_info = AsyncMock(return_value={"progress": 0.6, "state": "downloading"})
+        qbit.get_torrent_info = AsyncMock(
+            return_value={
+                "progress": 0.6,
+                "state": "downloading",
+                "eta": 120,
+                "dlspeed": 2048,
+            }
+        )
         monkeypatch.setattr(staged, "get_settings", lambda: MagicMock())
         monkeypatch.setattr(staged_module, "QbittorrentService", MagicMock(return_value=qbit))
 
@@ -302,6 +389,9 @@ class TestDownloadStatusEndpoint:
         assert len(body["torrents"]) == 1
         assert body["torrents"][0]["id"] == 5
         assert body["torrents"][0]["qbit_progress"] == 0.6
+        assert body["torrents"][0]["qbit_progress_percent"] == 60.0
+        assert body["torrents"][0]["qbit_eta_seconds"] == 120
+        assert body["torrents"][0]["qbit_download_speed"] == 2048
         assert body["torrents"][0]["refresh_staged_tab"] is False
 
     @pytest.mark.asyncio
@@ -398,6 +488,7 @@ class TestDownloadStatusEndpoint:
         assert body["torrents"][0]["plex_available"] is False
         assert body["torrents"][0]["request_status"] == RequestStatus.DOWNLOADING.value
         assert body["torrents"][0]["refresh_staged_tab"] is True
+        mock_db.commit.assert_not_awaited()
 
     @pytest.mark.asyncio
     async def test_reconcile_request_via_plex_closes_service_on_error(self, mock_db, monkeypatch):

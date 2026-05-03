@@ -1,9 +1,13 @@
 """Tests for the release parser."""
 
+import pytest
+
 from app.siftarr.services.release_parser import (
     ParsedReleaseCoverage,
     ParsedSeasonEpisode,
     is_exact_single_episode_release,
+    movie_release_identity_rejection_reason,
+    parse_movie_release_identity,
     parse_release_coverage,
     parse_season_episode,
 )
@@ -218,6 +222,72 @@ class TestIsExactSingleEpisodeRelease:
 
     def test_complete_series(self):
         assert is_exact_single_episode_release("Show.Complete.1080p", 1, 1) is False
+
+
+class TestMovieReleaseIdentity:
+    def test_parses_movie_title_and_year_before_quality_tokens(self):
+        result = parse_movie_release_identity("The.Cheetah.Girls.2003.1080p.WEB-DL")
+        assert result.title == "The.Cheetah.Girls"
+        assert result.year == 2003
+
+    def test_exact_title_variant_passes(self):
+        assert (
+            movie_release_identity_rejection_reason(
+                request_title="The Cheetah Girls",
+                request_year=2003,
+                release_title="the.cheetah-girls.(2003).1080p.WEB-DL",
+            )
+            is None
+        )
+
+    def test_numbered_sequel_rejected_even_with_high_quality_tokens(self):
+        reason = movie_release_identity_rejection_reason(
+            request_title="The Cheetah Girls",
+            request_year=2003,
+            release_title="The.Cheetah.Girls.2.2005.1080p.WEB-DL",
+        )
+        assert reason is not None
+        assert "release title 'The.Cheetah.Girls.2'" in reason
+
+    def test_wrong_year_rejected_when_title_matches(self):
+        reason = movie_release_identity_rejection_reason(
+            request_title="The Cheetah Girls",
+            request_year=2003,
+            release_title="The.Cheetah.Girls.2005.1080p.WEB-DL",
+        )
+        assert (
+            reason == "Movie identity mismatch: release year 2005 does not match request year 2003"
+        )
+
+    def test_missing_release_year_does_not_reject_exact_title(self):
+        assert (
+            movie_release_identity_rejection_reason(
+                request_title="The Cheetah Girls",
+                request_year=2003,
+                release_title="The.Cheetah.Girls.1080p.WEB-DL",
+            )
+            is None
+        )
+
+    @pytest.mark.parametrize(
+        ("request_title", "request_year", "release_title"),
+        [
+            ("1917", 2019, "1917.2019.1080p.BluRay.x265"),
+            ("Blade Runner 2049", 2017, "Blade.Runner.2049.2017.1080p.WEB-DL"),
+            ("2012", 2009, "2012.2009.1080p.BluRay.x264"),
+        ],
+    )
+    def test_exact_titles_with_year_like_tokens_pass(
+        self, request_title, request_year, release_title
+    ):
+        assert (
+            movie_release_identity_rejection_reason(
+                request_title=request_title,
+                request_year=request_year,
+                release_title=release_title,
+            )
+            is None
+        )
 
     def test_no_pattern_at_all(self):
         assert is_exact_single_episode_release("Some.Random.Title", 1, 1) is False
