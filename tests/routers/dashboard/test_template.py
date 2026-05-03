@@ -48,6 +48,29 @@ def test_dashboard_css_contains_resize_styles():
     assert "cursor: col-resize" in css
     assert "table.data-resizable" in css
     assert ".accordion-chevron" in css
+    assert ".dashboard-search-loading" in css
+
+
+def test_dashboard_js_uses_shared_search_loading_state():
+    """Torrent searches should share one accessible loading indicator."""
+    js = _read_dashboard_js()
+
+    assert "function renderSearchLoadingState(message)" in js
+    assert "function renderMovieSearchLoadingState()" in js
+    assert 'role="status" aria-live="polite"' in js
+    assert "window.renderSearchLoadingState = renderSearchLoadingState;" in js
+    assert "window.renderMovieSearchLoadingState = renderMovieSearchLoadingState;" in js
+    assert "function ensureSearchProgressPanel()" in js
+    assert "document.createElement('section')" in js
+    assert "window.showSearchProgressPanel = showSearchProgressPanel;" in js
+    assert "window.completeSearchProgressPanel = completeSearchProgressPanel;" in js
+    assert js.count("window.escapeHtml = escapeHtml;") == 1
+    assert "renderSearchLoadingState('Searching episode...')" in js
+    assert "renderSearchLoadingState('Searching season packs...')" in js
+    assert "renderSearchLoadingState('Searching multi season packs...')" in js
+    assert "window.renderMovieSearchLoadingState()" in js
+    assert "Searching movie torrents" in js
+    assert "Checking indexers now" in js
 
 
 def test_dashboard_tv_scope_selector_uses_explicit_actions():
@@ -82,7 +105,73 @@ def test_dashboard_js_includes_search_multi_season_ui():
     assert "function searchAllPendingEpisodes()" in js
     assert "No pending aired episodes to search." in js
     assert "Finished searching all pending aired episodes" in js
+    assert "window.showSearchProgressPanel('Searching season packs'" in js
+    assert "window.showSearchProgressPanel('Searching multi-season packs'" in js
+    assert "window.showSearchProgressPanel('Searching episode'" in js
+    assert "window.showSearchProgressPanel('Searching pending episodes'" in js
     assert "tv-search-all-results" not in js
+
+
+def test_dashboard_details_search_sets_progress_and_restores_button():
+    """Movie details searches should show progress and restore controls."""
+    js = _read_dashboard_js()
+    css = _read_dashboard_css()
+
+    assert "releasesContainer.innerHTML = window.renderMovieSearchLoadingState();" in js
+    assert ".dashboard-details-search-loading" in css
+    assert ".dashboard-search-progress-panel" in css
+    assert "z-index: 100" in css
+    assert "border: 1px solid rgba(59, 130, 246, 0.3)" in css
+    assert "btn.disabled = true;" in js
+    assert "btn.textContent = 'Searching...';" in js
+    assert "window.showSearchProgressPanel(" in js
+    assert "'Searching movie torrents'" in js
+    assert "window.completeSearchProgressPanel('Search complete. Results updated.');" in js
+    assert "btn.innerHTML = originalText || 'Refresh Search';" in js
+    assert "cacheInd.classList.add('hidden');" in js
+    assert "cacheIndText.textContent = 'Fresh results';" in js
+
+
+def test_dashboard_template_search_actions_use_progress_helpers(dashboard_template_path):
+    """Search actions should opt into progress helpers without changing deny actions."""
+    with open(dashboard_template_path, encoding="utf-8") as handle:
+        template = handle.read()
+    js = _read_dashboard_js()
+
+    assert 'onsubmit="return handleBulkRequestActionSubmit(event, this)"' in template
+    assert 'name="action" value="search" data-search-submit-control="true"' in template
+    assert 'name="action" value="search_all_pending" data-search-submit-control="true"' in template
+    assert "Search All" in template
+    assert template.count('data-bulk-search-status="true"') == 2
+    assert 'role="status" aria-live="polite"' in template
+    assert "Searching selected requests/torrents" in template
+    assert "Preparing selected search. You will be redirected when the search starts." in template
+    assert 'id="dashboard-search-progress-panel" role="status" aria-live="polite"' in template
+    assert "dashboard-search-progress-panel fixed bottom-4 right-4 z-[100]" in template
+    assert 'id="dashboard-search-active-list"' in template
+    assert "Searching for" in template
+    assert "postToAction('/requests/{{ req.id }}/search', '/?tab=pending', this)" in template
+    assert 'data-search-action="true"' in template
+    assert "openDenyModal({{ req.id }}, '/?tab=pending')" in template
+    assert "handleBulkRequestActionSubmit(event, form)" in js
+    assert "event.preventDefault();" in js
+    assert "submitSearchRequest(form.action, body" in js
+    assert "fetch(action" in js
+    assert "window.location.assign(url);" in js
+    assert "showSearchProgressPanel(" in js
+    assert "collectBulkSearchTitles(form, searchAll)" in js
+    assert "getRequestTitleFromRow(row)" in js
+    assert "if (form.dataset.searchSubmitting === 'true') return false;" in js
+    assert "form.dataset.searchSubmitting = 'true';" in js
+    assert "submitter.dataset.searchSubmitControl !== 'true'" in js
+    assert 'input[name="request_ids"]:checked, input[name="torrent_ids"]:checked' in js
+    assert "actionInput.name = 'action';" in js
+    assert "actionInput.value = submitter.value;" in js
+    assert "showBulkSearchStatus(form, searchAll);" in js
+    assert "Searching all pending requests" in js
+    assert "window.showBulkSearchStatus = showBulkSearchStatus;" in js
+    assert "setSearchActionLoading(trigger" in js
+    assert "disableSearchControls(form);" in js
 
 
 def test_dashboard_js_uses_collapsible_episode_results():

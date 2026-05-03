@@ -34,6 +34,96 @@ function escapeHtml(value) {
         .replaceAll("'", '&#39;');
 }
 
+function ensureSearchProgressPanel() {
+    let panel = document.getElementById('dashboard-search-progress-panel');
+    if (panel) return panel;
+
+    panel = document.createElement('section');
+    panel.id = 'dashboard-search-progress-panel';
+    panel.setAttribute('role', 'status');
+    panel.setAttribute('aria-live', 'polite');
+    panel.className = 'hidden dashboard-search-progress-panel fixed bottom-4 right-4 z-[100] w-[min(24rem,calc(100vw-2rem))] pointer-events-auto rounded-2xl border border-gray-700/70 bg-surface-800/95 shadow-2xl p-4';
+    panel.innerHTML = '<div class="flex items-start justify-between gap-3 mb-3">' +
+        '<div class="min-w-0">' +
+            '<h3 id="dashboard-search-progress-title" class="text-sm font-semibold text-white">Searching requests</h3>' +
+            '<p id="dashboard-search-progress-text" class="text-xs text-gray-500 mt-0.5">Working…</p>' +
+        '</div>' +
+    '</div>' +
+    '<div class="mb-3"><div class="w-full h-2 rounded-full bg-surface-700 overflow-hidden">' +
+        '<div id="dashboard-search-progress-bar" class="h-2 rounded-full bg-brand-500 transition-all duration-700" style="width: 0%"></div>' +
+    '</div></div>' +
+    '<p id="dashboard-search-status-text" class="text-sm text-gray-400">Preparing search…</p>' +
+    '<div id="dashboard-search-active-wrap" class="hidden mt-3">' +
+        '<div class="text-[10px] uppercase tracking-wide text-gray-500 mb-1">Searching for</div>' +
+        '<ul id="dashboard-search-active-list" class="space-y-1 text-gray-300 max-h-28 overflow-y-auto"></ul>' +
+    '</div>';
+    document.body.appendChild(panel);
+    return panel;
+}
+
+function showSearchProgressPanel(title, message, items = []) {
+    const panel = ensureSearchProgressPanel();
+    const titleEl = document.getElementById('dashboard-search-progress-title');
+    const textEl = document.getElementById('dashboard-search-progress-text');
+    const statusEl = document.getElementById('dashboard-search-status-text');
+    const listWrap = document.getElementById('dashboard-search-active-wrap');
+    const listEl = document.getElementById('dashboard-search-active-list');
+    const bar = document.getElementById('dashboard-search-progress-bar');
+
+    if (titleEl) titleEl.textContent = title;
+    if (textEl) textEl.textContent = 'Working…';
+    if (statusEl) {
+        statusEl.textContent = message;
+        statusEl.classList.remove('text-red-400', 'text-emerald-400');
+        statusEl.classList.add('text-gray-400');
+    }
+    if (bar) {
+        bar.style.width = '15%';
+        bar.classList.remove('bg-red-500', 'bg-emerald-500');
+        bar.classList.add('bg-brand-500');
+    }
+    if (listEl && listWrap) {
+        listEl.innerHTML = '';
+        const values = items.slice(0, 5);
+        values.forEach(item => {
+            const li = document.createElement('li');
+            li.className = 'rounded-lg bg-surface-850 px-2.5 py-1 text-xs text-gray-300 truncate';
+            li.textContent = item;
+            listEl.appendChild(li);
+        });
+        if (items.length > values.length) {
+            const li = document.createElement('li');
+            li.className = 'px-2.5 py-0.5 text-[11px] text-gray-500';
+            li.textContent = '+' + (items.length - values.length) + ' more';
+            listEl.appendChild(li);
+        }
+        listWrap.classList.toggle('hidden', items.length === 0);
+    }
+    panel.classList.remove('hidden');
+    panel.style.zIndex = '100';
+    window.setTimeout(() => { if (bar) bar.style.width = '90%'; }, 150);
+}
+
+function completeSearchProgressPanel(message, failed = false) {
+    const panel = ensureSearchProgressPanel();
+    const bar = document.getElementById('dashboard-search-progress-bar');
+    const textEl = document.getElementById('dashboard-search-progress-text');
+    const statusEl = document.getElementById('dashboard-search-status-text');
+    panel.classList.remove('hidden');
+    panel.style.zIndex = '100';
+    if (bar) {
+        bar.style.width = '100%';
+        bar.classList.remove('bg-brand-500');
+        bar.classList.add(failed ? 'bg-red-500' : 'bg-emerald-500');
+    }
+    if (textEl) textEl.textContent = failed ? 'Failed' : 'Complete';
+    if (statusEl) {
+        statusEl.textContent = message;
+        statusEl.classList.remove('text-gray-400');
+        statusEl.classList.add(failed ? 'text-red-400' : 'text-emerald-400');
+    }
+}
+
 function setActiveTab(tabName) {
     const url = new URL(window.location);
     url.searchParams.set('tab', tabName);
@@ -162,6 +252,9 @@ window.showTab = showTab;
 window.closeRequestDetails = closeRequestDetails;
 window.navigateDetails = navigateDetails;
 window.escapeHtml = escapeHtml;
+window.ensureSearchProgressPanel = ensureSearchProgressPanel;
+window.showSearchProgressPanel = showSearchProgressPanel;
+window.completeSearchProgressPanel = completeSearchProgressPanel;
 window.setActiveTab = setActiveTab;
 window.setPoster = setPoster;
 window.getVisibleRequests = getVisibleRequests;

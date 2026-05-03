@@ -79,7 +79,7 @@
     <div id="content-active" class="tab-content">
         {% if active_requests %}
         <div class="card overflow-hidden">
-            <form action="/requests/bulk" method="post">
+            <form action="/requests/bulk" method="post" onsubmit="return handleBulkRequestActionSubmit(event, this)">
                 <input type="hidden" name="redirect_to" value="/?tab=active">
                 <div class="card-header">
                     <div class="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
@@ -88,10 +88,19 @@
                             <div class="section-subtitle">Browse active requests, filter the list, and run actions on multiple items at once.</div>
                         </div>
                         <div class="flex flex-wrap gap-2">
-                            <button type="submit" name="action" value="search" class="btn-primary btn-sm">Search Selected</button>
+                            <button type="submit" name="action" value="search" data-search-submit-control="true" class="btn-primary btn-sm">Search Selected</button>
                             <button type="submit" name="action" value="deny" class="btn-danger btn-sm">Deny Selected</button>
                         </div>
                     </div>
+                    <section data-bulk-search-status="true" role="status" aria-live="polite" class="hidden mt-4 rounded-2xl border border-gray-700/70 bg-surface-800/95 shadow-2xl p-4">
+                        <div class="flex items-start gap-3">
+                            <svg class="animate-spin h-5 w-5 mt-0.5 text-brand-400" aria-hidden="true" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
+                            <div>
+                                <h3 data-bulk-search-status-title="true" class="text-sm font-semibold text-white">Searching selected requests/torrents</h3>
+                                <p data-bulk-search-status-message="true" class="text-sm text-gray-400">Preparing selected search. You will be redirected when the search starts.</p>
+                            </div>
+                        </div>
+                    </section>
                     <div class="mt-4 flex flex-col gap-2 lg:flex-row lg:items-center">
                         <input type="text" id="filter-input" placeholder="Filter active requests..." class="form-input lg:flex-1">
                         <div class="flex items-center gap-1.5">
@@ -161,7 +170,7 @@
     <div id="content-pending" class="tab-content hidden">
         {% if pending_requests %}
         <div class="card overflow-hidden">
-            <form action="/requests/bulk" method="post">
+            <form action="/requests/bulk" method="post" onsubmit="return handleBulkRequestActionSubmit(event, this)">
                 <input type="hidden" name="redirect_to" value="/?tab=pending">
                 <div class="card-header">
                     <div class="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
@@ -170,10 +179,20 @@
                             <div class="section-subtitle">Pending and searching requests that still need a torrent search.</div>
                         </div>
                         <div class="flex flex-wrap gap-2">
-                            <button type="submit" name="action" value="search" class="btn-primary btn-sm">Search Selected</button>
+                            <button type="submit" name="action" value="search_all_pending" data-search-submit-control="true" class="btn-primary btn-sm">Search All</button>
+                            <button type="submit" name="action" value="search" data-search-submit-control="true" class="btn-primary btn-sm">Search Selected</button>
                             <button type="submit" name="action" value="deny" class="btn-danger btn-sm">Deny Selected</button>
                         </div>
                     </div>
+                    <section data-bulk-search-status="true" role="status" aria-live="polite" class="hidden mt-4 rounded-2xl border border-gray-700/70 bg-surface-800/95 shadow-2xl p-4">
+                        <div class="flex items-start gap-3">
+                            <svg class="animate-spin h-5 w-5 mt-0.5 text-brand-400" aria-hidden="true" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
+                            <div>
+                                <h3 data-bulk-search-status-title="true" class="text-sm font-semibold text-white">Searching selected requests/torrents</h3>
+                                <p data-bulk-search-status-message="true" class="text-sm text-gray-400">Preparing selected search. You will be redirected when the search starts.</p>
+                            </div>
+                        </div>
+                    </section>
                     <div class="mt-4 flex flex-col gap-2 lg:flex-row lg:items-center">
                         <input type="text" id="pending-filter-input" placeholder="Filter pending requests..." class="form-input lg:flex-1">
                         <div class="flex items-center gap-1.5">
@@ -226,7 +245,7 @@
                                 <td class="px-4 py-3.5 whitespace-nowrap text-sm" onclick="event.stopPropagation()">
                                     <div class="flex items-center gap-3">
                                         <button type="button" onclick="openRequestDetails({{ req.id }})" class="text-brand-400 hover:text-brand-300 font-medium">Details</button>
-                                        <button type="button" onclick="postToAction('/requests/{{ req.id }}/search', '/?tab=pending')" class="text-brand-400 hover:text-brand-300 font-medium">Search</button>
+                                        <button type="button" onclick="postToAction('/requests/{{ req.id }}/search', '/?tab=pending', this)" data-search-action="true" class="text-brand-400 hover:text-brand-300 font-medium">Search</button>
                                         <button type="button" onclick="openDenyModal({{ req.id }}, '/?tab=pending')" class="text-red-400 hover:text-red-300 font-medium">Deny</button>
                                     </div>
                                 </td>
@@ -628,6 +647,25 @@
 
 {# ═══════════════ TOAST CONTAINER ═══════════════ #}
 <div id="toast-container" class="fixed bottom-6 left-1/2 -translate-x-1/2 z-[70] flex flex-col items-center gap-2 pointer-events-none"></div>
+
+<section id="dashboard-search-progress-panel" role="status" aria-live="polite" class="hidden dashboard-search-progress-panel fixed bottom-4 right-4 z-[100] w-[min(24rem,calc(100vw-2rem))] pointer-events-auto rounded-2xl border border-gray-700/70 bg-surface-800/95 shadow-2xl p-4">
+    <div class="flex items-start justify-between gap-3 mb-3">
+        <div class="min-w-0">
+            <h3 id="dashboard-search-progress-title" class="text-sm font-semibold text-white">Searching requests</h3>
+            <p id="dashboard-search-progress-text" class="text-xs text-gray-500 mt-0.5">Working…</p>
+        </div>
+    </div>
+    <div class="mb-3">
+        <div class="w-full h-2 rounded-full bg-surface-700 overflow-hidden">
+            <div id="dashboard-search-progress-bar" class="h-2 rounded-full bg-brand-500 transition-all duration-700" style="width: 0%"></div>
+        </div>
+    </div>
+    <p id="dashboard-search-status-text" class="text-sm text-gray-400">Preparing search…</p>
+    <div id="dashboard-search-active-wrap" class="hidden mt-3">
+        <div class="text-[10px] uppercase tracking-wide text-gray-500 mb-1">Searching for</div>
+        <ul id="dashboard-search-active-list" class="space-y-1 text-gray-300 max-h-28 overflow-y-auto"></ul>
+    </div>
+</section>
 
 {# ═══════════════ DENY MODAL ═══════════════ #}
 <div id="deny-modal" class="fixed inset-0 z-[60] hidden">
