@@ -7,6 +7,7 @@ window.tableSortState = {
     pending: { column: null, direction: 'asc' },
     unreleased: { column: null, direction: 'asc' },
     staged: { column: null, direction: 'asc' },
+    downloading: { column: null, direction: 'asc' },
     finished: { column: null, direction: 'asc' },
     rejected: { column: null, direction: 'asc' },
 };
@@ -53,6 +54,9 @@ function showTab(tabName) {
     setActiveTab(tabName);
     if (tabName === 'staged') {
         if (window.refreshStagedTabData) window.refreshStagedTabData();
+        if (window._stopStagedStatusPoll) window._stopStagedStatusPoll();
+    } else if (tabName === 'downloading') {
+        if (window.refreshDownloadingTabData) window.refreshDownloadingTabData();
         if (window._startStagedStatusPoll) window._startStagedStatusPoll();
     } else {
         if (window._stopStagedStatusPoll) window._stopStagedStatusPoll();

@@ -121,7 +121,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const filterInput = document.getElementById('filter-input');
     const pendingFilterInput = document.getElementById('pending-filter-input');
     const stagedFilterInput = document.getElementById('staged-filter-input');
-    const stagedStatusFilter = document.getElementById('staged-status-filter');
+    const downloadingFilterInput = document.getElementById('downloading-filter-input');
     const finishedFilterInput = document.getElementById('finished-filter-input');
     const rejectedFilterInput = document.getElementById('rejected-filter-input');
     const unreleasedFilterInput = document.getElementById('unreleased-filter-input');
@@ -130,6 +130,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     if (filterInput) filterInput.addEventListener('input', window.filterTable);
     if (pendingFilterInput) pendingFilterInput.addEventListener('input', window.filterPendingTable);
+    if (downloadingFilterInput) downloadingFilterInput.addEventListener('input', window.filterDownloadingTable);
     if (finishedFilterInput) finishedFilterInput.addEventListener('input', window.filterFinishedTable);
     if (rejectedFilterInput) rejectedFilterInput.addEventListener('input', window.filterRejectedTable);
     if (unreleasedFilterInput) unreleasedFilterInput.addEventListener('input', window.filterUnreleasedTable);
@@ -141,18 +142,20 @@ document.addEventListener('DOMContentLoaded', () => {
         if (event.target?.id === 'staged-filter-input') {
             window.filterStagedTable();
         }
-    });
-
-    document.addEventListener('change', (event) => {
-        if (event.target?.id === 'staged-status-filter') {
-            window.filterStagedTable();
+        if (event.target?.id === 'downloading-filter-input') {
+            window.filterDownloadingTable();
         }
     });
+
 
     // Bind select all checkboxes
     window.bindSelectAll(activeSelectAll, '.active-request-checkbox');
     window.bindSelectAll(pendingSelectAll, '.pending-request-checkbox');
     window.bindStagedSelectionHandlers();
+
+    if (document.getElementById('unreleased-requests-table')) {
+        window.sortTable('unreleased', 'releasedate');
+    }
 
     // Bind sort handlers
     document.addEventListener('click', (e) => {

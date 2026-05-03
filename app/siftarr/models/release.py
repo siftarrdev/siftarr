@@ -54,6 +54,7 @@ class Release(Base):
     # Scoring
     score: Mapped[int] = mapped_column(Integer, default=0)
     passed_rules: Mapped[bool] = mapped_column(Boolean, default=False)
+    rejection_reason: Mapped[str | None] = mapped_column(String(500), nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utc_now)
 

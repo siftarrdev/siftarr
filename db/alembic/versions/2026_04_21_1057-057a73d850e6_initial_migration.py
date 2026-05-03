@@ -144,6 +144,7 @@ def upgrade() -> None:
         sa.Column("season_coverage", sa.String(length=100), nullable=True),
         sa.Column("score", sa.Integer(), nullable=False),
         sa.Column("passed_rules", sa.Boolean(), nullable=False),
+        sa.Column("rejection_reason", sa.String(length=500), nullable=True),
         sa.Column("created_at", sa.DateTime(), nullable=False),
         sa.ForeignKeyConstraint(
             ["request_id"],

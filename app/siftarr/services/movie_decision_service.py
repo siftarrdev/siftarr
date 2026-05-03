@@ -9,6 +9,7 @@ from app.siftarr.services.activity_log_service import ActivityLogService
 from app.siftarr.services.pending_queue_service import PendingQueueService
 from app.siftarr.services.prowlarr_service import ProwlarrService
 from app.siftarr.services.qbittorrent_service import QbittorrentService
+from app.siftarr.services.release_parser import movie_release_identity_rejection_reason
 from app.siftarr.services.release_storage import get_release_persistence_key, store_search_results
 from app.siftarr.services.rule_engine import RuleEngine
 from app.siftarr.services.staging_actions import use_releases
@@ -137,7 +138,18 @@ class MovieDecisionService:
                 "message": "No releases found in Prowlarr, added to pending queue",
             }
 
-        all_evaluated = [rule_engine.evaluate(release) for release in search_result.releases]
+        all_evaluated = []
+        for release in search_result.releases:
+            evaluation = rule_engine.evaluate(release)
+            identity_rejection = movie_release_identity_rejection_reason(
+                request_title=request.title,
+                request_year=request.year,
+                release_title=release.title,
+            )
+            if identity_rejection:
+                evaluation.passed = False
+                evaluation.rejection_reason = identity_rejection
+            all_evaluated.append(evaluation)
         stored_releases_by_key = await store_search_results(self.db, request.id, all_evaluated)
 
         passed_results = [evaluation for evaluation in all_evaluated if evaluation.passed]

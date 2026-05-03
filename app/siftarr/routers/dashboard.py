@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.siftarr.config import get_settings
 from app.siftarr.database import get_db
+from app.siftarr.models.activity_log import ActivityLog, EventType
 from app.siftarr.models.episode import Episode
 from app.siftarr.models.request import (
     MediaType,
@@ -25,6 +26,7 @@ from app.siftarr.models.staged_torrent import StagedTorrent
 from app.siftarr.services.http_client import get_shared_client
 from app.siftarr.services.lifecycle_service import LifecycleService
 from app.siftarr.services.overseerr_service import OverseerrService
+from app.siftarr.services.release_parser import movie_release_identity_rejection_reason
 from app.siftarr.services.tv_details_service import load_tv_seasons_with_episodes
 
 logger = logging.getLogger(__name__)
@@ -73,37 +75,95 @@ async def dashboard(
         .where(StagedTorrent.status.in_(["staged", "approved"]))
         .order_by(StagedTorrent.created_at.desc())
     )
-    staged_torrents = list(result.scalars().all())
+    active_workflow_torrents = list(result.scalars().all())
 
     staged_request_ids = {
-        torrent.request_id for torrent in staged_torrents if torrent.request_id is not None
+        torrent.request_id for torrent in active_workflow_torrents if torrent.request_id is not None
     }
     raw_staged_request_statuses: dict[int, RequestStatus] = {}
     staged_request_statuses: dict[int, str] = {}
+    staged_request_identity: dict[int, tuple[MediaType, str | None, int | None]] = {}
     if staged_request_ids:
         staged_request_result = await db.execute(
-            select(RequestModel.id, RequestModel.status).where(
-                RequestModel.id.in_(staged_request_ids)
-            )
+            select(
+                RequestModel.id,
+                RequestModel.status,
+                RequestModel.media_type,
+                RequestModel.title,
+                RequestModel.year,
+            ).where(RequestModel.id.in_(staged_request_ids))
         )
-        for request_id, status in staged_request_result.all():
+        for row in staged_request_result.all():
+            request_id = row[0]
+            status = row[1]
             raw_staged_request_statuses[request_id] = status
+            if len(row) >= 5:
+                staged_request_identity[request_id] = (row[2], row[3], row[4])
         staged_request_statuses = {
             request_id: status.value for request_id, status in raw_staged_request_statuses.items()
         }
 
     # Only keep request-linked torrents while the linked request is still
     # actively staged or downloading.
-    staged_torrents = [
+    active_workflow_torrents = [
         t
-        for t in staged_torrents
+        for t in active_workflow_torrents
         if t.request_id is None
         or is_active_staging_workflow_status(raw_staged_request_statuses.get(t.request_id))
     ]
+    staged_torrents = [t for t in active_workflow_torrents if t.status == "staged"]
+    downloading_torrents = [
+        t
+        for t in active_workflow_torrents
+        if t.status == "approved"
+        and t.request_id is not None
+        and is_active_staging_workflow_status(raw_staged_request_statuses.get(t.request_id))
+    ]
+    downloading_request_statuses = {
+        request_id: status
+        for request_id, status in staged_request_statuses.items()
+        if any(t.request_id == request_id for t in downloading_torrents)
+    }
+    downloading_request_ids = {t.request_id for t in downloading_torrents if t.request_id}
+    movie_identity_mismatch_warnings: dict[int, str] = {}
+    for torrent in active_workflow_torrents:
+        if torrent.request_id is None:
+            continue
+        request_identity = staged_request_identity.get(torrent.request_id)
+        if not request_identity:
+            continue
+        media_type, request_title, request_year = request_identity
+        if media_type != MediaType.MOVIE:
+            continue
+        reason = movie_release_identity_rejection_reason(
+            request_title=request_title,
+            request_year=request_year,
+            release_title=torrent.title,
+        )
+        if reason:
+            movie_identity_mismatch_warnings[torrent.id] = reason
+    downloading_waiting_plex_request_ids: set[int] = set()
+    downloading_waiting_plex_candidate_ids = {
+        request_id
+        for request_id in downloading_request_ids
+        if raw_staged_request_statuses.get(request_id) == RequestStatus.DOWNLOADING
+    }
+    if downloading_waiting_plex_candidate_ids:
+        download_completed_result = await db.execute(
+            select(ActivityLog.request_id).where(
+                ActivityLog.request_id.in_(downloading_waiting_plex_candidate_ids),
+                ActivityLog.event_type == EventType.DOWNLOAD_COMPLETED.value,
+            )
+        )
+        downloading_waiting_plex_request_ids = {
+            request_id
+            for (request_id,) in download_completed_result.all()
+            if request_id is not None
+        }
 
     # Build mapping for replaced torrents to their replacements
     replaced_by_titles: dict[int, str] = {}
-    replaced_ids = [t.replaced_by_id for t in staged_torrents if t.replaced_by_id]
+    replaced_ids = [t.replaced_by_id for t in active_workflow_torrents if t.replaced_by_id]
     if replaced_ids:
         replaced_result = await db.execute(
             select(StagedTorrent.id, StagedTorrent.title).where(StagedTorrent.id.in_(replaced_ids))
@@ -211,11 +271,11 @@ async def dashboard(
             )
             return req_obj.id, None
 
-    unreleased_earliest: dict[int, str | None] = {}
+    unreleased_release_dates: dict[int, str | None] = {}
     if unreleased_requests:
         earliest_results = [await _earliest_future_release(req) for req in unreleased_requests]
         for req_id, iso_date in earliest_results:
-            unreleased_earliest[req_id] = iso_date
+            unreleased_release_dates[req_id] = iso_date
 
     denied_cutoff = datetime.now(UTC) - timedelta(days=30)
     denied_result = await db.execute(
@@ -240,16 +300,22 @@ async def dashboard(
             "qbittorrent_url": str(effective_settings.qbittorrent_url or "").rstrip("/"),
             "pending_requests": pending_requests,
             "staged_torrents": staged_torrents,
+            "downloading_torrents": downloading_torrents,
             "staged_request_statuses": staged_request_statuses,
+            "downloading_request_statuses": downloading_request_statuses,
+            "downloading_request_ids": downloading_request_ids,
+            "downloading_waiting_plex_request_ids": downloading_waiting_plex_request_ids,
+            "movie_identity_mismatch_warnings": movie_identity_mismatch_warnings,
             "replaced_by_titles": replaced_by_titles,
             "unreleased_requests": unreleased_requests,
-            "unreleased_earliest": unreleased_earliest,
+            "unreleased_release_dates": unreleased_release_dates,
             "completed_requests": completed_requests,
             "denied_requests": denied_requests,
             "stats": {
                 "active": len(filtered_requests),
                 "pending": len(pending_requests),
                 "staged": len(staged_torrents),
+                "downloading": len(downloading_torrents),
                 "completed": len(completed_requests),
                 "unreleased": len(unreleased_requests),
                 "denied": len(denied_requests),

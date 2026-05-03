@@ -44,12 +44,13 @@ function closeDenyModal() {
     document.getElementById('deny-modal').classList.add('hidden');
 }
 
-function openReplaceModal(torrentId, requestId, torrentTitle) {
+function openReplaceModal(torrentId, requestId, torrentTitle, redirectTo) {
     const modal = document.getElementById('replace-modal');
     const form = document.getElementById('replace-form');
     const currentTorrentEl = document.getElementById('replace-current-torrent');
     const reason = document.getElementById('replace-reason');
     form.action = '/staged/' + torrentId + '/replace';
+    document.getElementById('replace-redirect').value = redirectTo || '/?tab=downloading';
     currentTorrentEl.textContent = torrentTitle || 'Unknown torrent';
     reason.value = '';
     modal.classList.remove('hidden');

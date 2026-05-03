@@ -98,6 +98,136 @@ def is_exact_single_episode_release(title: str, season_number: int, episode_numb
     return not ADDITIONAL_EPISODE_TOKEN_PATTERN.search(remainder)
 
 
+@dataclass(frozen=True)
+class MovieReleaseIdentity:
+    title: str | None
+    year: int | None
+
+
+_MOVIE_YEAR_PATTERN = re.compile(
+    r"(?:^|[.()\s_\-\[\]])(?P<year>(?:19|20)\d{2})(?:$|[.()\s_\-\[\]])"
+)
+_MOVIE_QUALITY_TOKEN_PATTERN = re.compile(
+    r"(?:^|[.()\s_\-\[\]])(?:720p|1080p|2160p|480p|web(?:-?dl)?|bluray|brrip|hdrip|dvdrip|hdtv|remux|x264|x265|h264|h265|hevc|av1)(?:$|[.()\s_\-\[\]])",
+    re.IGNORECASE,
+)
+_MOVIE_QUALITY_IDENTITY_TOKENS = {
+    "480p",
+    "720p",
+    "1080p",
+    "2160p",
+    "web",
+    "dl",
+    "webrip",
+    "bluray",
+    "brrip",
+    "hdrip",
+    "dvdrip",
+    "hdtv",
+    "remux",
+    "x264",
+    "x265",
+    "h264",
+    "h265",
+    "hevc",
+    "av1",
+}
+
+
+def normalize_movie_title_identity(title: str | None) -> str:
+    """Normalize a movie title for release/request identity comparisons."""
+    if not title:
+        return ""
+    normalized = re.sub(r"[\W_]+", " ", title.casefold())
+    return " ".join(normalized.split())
+
+
+def _movie_year_token(token: str) -> int | None:
+    if re.fullmatch(r"(?:19|20)\d{2}", token):
+        return int(token)
+    return None
+
+
+def _movie_year_after_exact_request_title(
+    *, request_title: str | None, release_title: str
+) -> tuple[bool, int | None]:
+    expected_tokens = normalize_movie_title_identity(request_title).split()
+    release_tokens = normalize_movie_title_identity(release_title).split()
+    if not expected_tokens or release_tokens[: len(expected_tokens)] != expected_tokens:
+        return (False, None)
+
+    remaining_tokens = release_tokens[len(expected_tokens) :]
+    if not remaining_tokens or remaining_tokens[0] in _MOVIE_QUALITY_IDENTITY_TOKENS:
+        return (True, None)
+
+    release_year = _movie_year_token(remaining_tokens[0])
+    if release_year is None:
+        return (False, None)
+    return (True, release_year)
+
+
+def parse_movie_release_identity(release_title: str) -> MovieReleaseIdentity:
+    """Parse the likely movie title/year prefix from a torrent release title."""
+    if not release_title:
+        return MovieReleaseIdentity(title=None, year=None)
+
+    year_match = _MOVIE_YEAR_PATTERN.search(release_title)
+    if year_match:
+        title_part = release_title[: year_match.start()]
+        return MovieReleaseIdentity(
+            title=title_part.strip(" ._-[()]") or None,
+            year=int(year_match.group("year")),
+        )
+
+    quality_match = _MOVIE_QUALITY_TOKEN_PATTERN.search(release_title)
+    if quality_match:
+        title_part = release_title[: quality_match.start()]
+        return MovieReleaseIdentity(title=title_part.strip(" ._-[()]") or None, year=None)
+
+    return MovieReleaseIdentity(title=release_title.strip(" ._-[()]") or None, year=None)
+
+
+def movie_release_identity_rejection_reason(
+    *,
+    request_title: str | None,
+    request_year: int | None,
+    release_title: str,
+) -> str | None:
+    """Return a rejection reason when a movie release appears to be the wrong title/year."""
+    parsed = parse_movie_release_identity(release_title)
+    expected_title = normalize_movie_title_identity(request_title)
+    parsed_title = normalize_movie_title_identity(parsed.title)
+    exact_title_matches, exact_title_release_year = _movie_year_after_exact_request_title(
+        request_title=request_title, release_title=release_title
+    )
+
+    if exact_title_matches:
+        if (
+            request_year is not None
+            and exact_title_release_year is not None
+            and exact_title_release_year != request_year
+        ):
+            return (
+                "Movie identity mismatch: release year "
+                f"{exact_title_release_year} does not match request year {request_year}"
+            )
+        return None
+
+    if expected_title and parsed_title and parsed_title != expected_title:
+        return (
+            "Movie identity mismatch: release title "
+            f"'{parsed.title}' does not match request title '{request_title}'"
+        )
+
+    if request_year is not None and parsed.year is not None and parsed.year != request_year:
+        return (
+            "Movie identity mismatch: release year "
+            f"{parsed.year} does not match request year {request_year}"
+        )
+
+    return None
+
+
 _SEASON_EPISODE_PATTERNS = [
     re.compile(r"(?:^|[.()\s_]+)S(\d{1,2})E(\d{1,3})(?![0-9])", re.IGNORECASE),
 ]

@@ -24,6 +24,12 @@ def _read_dashboard_css():
         return handle.read()
 
 
+def _read_dashboard_entry_js():
+    js_path = os.path.join(os.path.dirname(__file__), "../../../app/siftarr/static/js/dashboard.js")
+    with open(js_path, encoding="utf-8") as handle:
+        return handle.read()
+
+
 def test_dashboard_template_loads_external_assets(dashboard_template_path):
     """Dashboard template should load external CSS and JS files."""
     with open(dashboard_template_path, encoding="utf-8") as handle:
@@ -167,7 +173,61 @@ def test_dashboard_js_refreshes_full_staged_content():
     assert "const stagedContent = document.getElementById('content-staged');" in js
     assert "const newContent = doc.getElementById('content-staged');" in js
     assert "stagedContent.innerHTML = newContent.innerHTML;" in js
-    assert "document.querySelectorAll('#staged-torrents-body tr[data-state=\"approved\"]')" in js
+    assert "const downloadingContent = document.getElementById('content-downloading');" in js
+    assert "const newContent = doc.getElementById('content-downloading');" in js
+    assert "downloadingContent.innerHTML = newContent.innerHTML;" in js
+    assert "document.querySelectorAll('#downloading-torrents-body tr')" in js
+
+
+def test_dashboard_template_splits_staged_and_downloading_tabs(dashboard_template_path):
+    """Staged review controls and downloading qBittorrent controls live separately."""
+    with open(dashboard_template_path, encoding="utf-8") as handle:
+        template = handle.read()
+
+    assert "Staged / Downloading" not in template
+    assert 'id="tab-staged"' in template
+    assert 'id="tab-downloading"' in template
+    assert 'id="content-staged"' in template
+    assert 'id="content-downloading"' in template
+    assert 'id="downloading-torrents-body"' in template
+    assert "data-download-progress" in template
+    assert "data-download-eta" in template
+    assert "data-qbit-finished-waiting-plex" in template
+    assert "qBittorrent finished; waiting for Plex" in template
+    assert "RAR-packed or otherwise unimportable" in template
+    assert "Open qBittorrent" in template
+    assert "torrent.request_id in downloading_request_ids" in template
+    assert "openReplaceModal({{ torrent.id }}" in template
+    assert (
+        "openReplaceModal({{ torrent.id }}, {{ torrent.request_id }}"
+        not in template[
+            template.index('id="content-downloading"') : template.index(
+                "{# ═══════════════ FINISHED TAB"
+            )
+        ]
+    )
+    assert "/?tab=downloading" in template
+
+
+def test_dashboard_template_updates_pending_and_unreleased_columns(dashboard_template_path):
+    """Pending and unreleased tables expose the new sort columns."""
+    with open(dashboard_template_path, encoding="utf-8") as handle:
+        template = handle.read()
+    js = _read_dashboard_js()
+    entry_js = _read_dashboard_entry_js()
+
+    assert "Requested On" in template
+    assert 'data-sort="status"' in template
+    assert "Next Retry" not in template
+    assert "Last Error" not in template
+    assert "Release Date" in template
+    assert 'data-sort="releasedate"' in template
+    assert "window.sortTable('unreleased', 'releasedate');" in entry_js
+    assert "downloading: 'downloading-torrents-table'" in js
+    assert "function filterDownloadingTable()" in js
+    assert "row.dataset.releasedate" in js
+    assert "row.dataset.expected" not in js
+    assert "event.target?.id === 'downloading-filter-input'" in entry_js
 
 
 def test_dashboard_details_navigation_uses_visible_filtered_rows():
