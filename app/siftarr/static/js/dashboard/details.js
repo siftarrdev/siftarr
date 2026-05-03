@@ -113,7 +113,6 @@ async function openRequestDetails(requestId, explicitIndex = null) {
                     cacheIndicator.classList.remove('hidden');
                 }
             } else {
-                releases.innerHTML = '<div class="text-gray-500 text-sm">No cached results – searching automatically...</div>';
                 if (cacheIndicator) cacheIndicator.classList.add('hidden');
                 searchRequestFromDetails();
             }
@@ -161,7 +160,20 @@ async function searchRequestFromDetails() {
         btn.disabled = true;
         btn.textContent = 'Searching...';
     }
+    const detailsTitle = document.getElementById('request-details-title')?.textContent?.trim();
+    window.showSearchProgressPanel(
+        'Searching movie torrents',
+        detailsTitle ? 'Searching for ' + detailsTitle + '…' : 'Checking indexers now…',
+        detailsTitle && detailsTitle !== 'Loading...' ? [detailsTitle] : []
+    );
     const releasesContainer = document.getElementById('request-details-releases');
+    if (releasesContainer) {
+        releasesContainer.innerHTML = window.renderMovieSearchLoadingState();
+    }
+    const cacheInd = document.getElementById('release-cache-indicator');
+    if (cacheInd) {
+        cacheInd.classList.add('hidden');
+    }
     try {
         const response = await fetch('/requests/' + window.currentRequestId + '/search', { method: 'POST' });
         if (!response.ok) {
@@ -173,7 +185,6 @@ async function searchRequestFromDetails() {
         if (releasesContainer) {
             releasesContainer.innerHTML = window.currentReleases.map(release => window.renderReleaseCard(release, window.currentRequestId)).join('') || '<div class="text-gray-500 text-sm">No search results found for this request.</div>';
         }
-        const cacheInd = document.getElementById('release-cache-indicator');
         const cacheIndText = document.getElementById('release-cache-indicator-text');
         if (cacheInd && cacheIndText && window.currentReleases.length > 0) {
             cacheIndText.textContent = 'Fresh results';
@@ -181,11 +192,13 @@ async function searchRequestFromDetails() {
         } else if (cacheInd) {
             cacheInd.classList.add('hidden');
         }
+        window.completeSearchProgressPanel('Search complete. Results updated.');
         renderTimeline(window.currentRequestTimeline);
     } catch (err) {
         if (releasesContainer) {
             releasesContainer.innerHTML = '<div class="text-red-400 text-sm">Search failed: ' + window.escapeHtml(err.message) + '</div>';
         }
+        window.completeSearchProgressPanel(err.message || 'Search failed. Please try again.', true);
     } finally {
         if (btn) {
             btn.disabled = false;

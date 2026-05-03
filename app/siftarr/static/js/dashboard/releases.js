@@ -6,6 +6,25 @@ function renderAnnotation(value, toneClass = 'text-gray-400', dataAttr = '') {
     return `<span class="${toneClass}" ${dataAttr}>${window.escapeHtml(value)}</span>`;
 }
 
+function renderSearchLoadingState(message) {
+    return '<div class="dashboard-search-loading" role="status" aria-live="polite">' +
+        '<svg class="animate-spin h-4 w-4 shrink-0" aria-hidden="true" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>' +
+        '<span>' + window.escapeHtml(message) + '</span>' +
+    '</div>';
+}
+
+function renderMovieSearchLoadingState() {
+    return '<div class="dashboard-details-search-loading" role="status" aria-live="polite">' +
+        '<div class="flex items-start gap-3">' +
+            '<svg class="animate-spin h-5 w-5 shrink-0 text-blue-300 mt-0.5" aria-hidden="true" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>' +
+            '<div>' +
+                '<div class="text-sm font-semibold text-white">Searching movie torrents</div>' +
+                '<div class="mt-1 text-xs text-blue-200/90">Checking indexers now. Results will appear here when the search completes.</div>' +
+            '</div>' +
+        '</div>' +
+    '</div>';
+}
+
 function releaseAnnotationTone(release, field) {
     const isSizeFailure = !release.passed && typeof release.rejection_reason === 'string' && release.rejection_reason.toLowerCase().startsWith('size ');
     if (field === 'size') {
@@ -297,9 +316,8 @@ async function markSeasonAvailable(requestId, seasonId) {
 async function searchSeasonPacks(requestId, seasonNumber) {
     var container = document.getElementById('season-packs-' + requestId + '-' + seasonNumber);
     if (!container) return;
-    container.innerHTML = '<div class="flex items-center gap-2 text-gray-400 text-sm py-2">' +
-        '<svg class="animate-spin h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>' +
-        ' Searching season packs...</div>';
+    container.innerHTML = renderSearchLoadingState('Searching season packs...');
+    window.showSearchProgressPanel('Searching season packs', 'Searching Season ' + seasonNumber + ' packs…', ['Season ' + seasonNumber]);
 
     try {
         var response = await fetch('/requests/' + requestId + '/seasons/' + seasonNumber + '/season-packs/search', { method: 'POST' });
@@ -311,8 +329,10 @@ async function searchSeasonPacks(requestId, seasonNumber) {
         } else {
             container.innerHTML = '<div class="text-gray-500 text-sm py-2">No season pack results found.</div>';
         }
+        window.completeSearchProgressPanel('Season pack search complete.');
     } catch (err) {
         container.innerHTML = '<div class="text-red-400 text-sm py-2">Error: ' + window.escapeHtml(err.message) + '</div>';
+        window.completeSearchProgressPanel(err.message || 'Season pack search failed.', true);
     }
 }
 
@@ -329,9 +349,8 @@ async function searchMultiSeasonPacks(requestId = null) {
     var container = document.getElementById('season-packs-all-' + targetRequestId);
     if (!container) return;
 
-    container.innerHTML = '<div class="flex items-center gap-2 text-gray-400 text-sm py-2">' +
-        '<svg class="animate-spin h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>' +
-        ' Searching multi season packs...</div>';
+    container.innerHTML = renderSearchLoadingState('Searching multi season packs...');
+    window.showSearchProgressPanel('Searching multi-season packs', 'Searching broad multi-season and complete-series packs…');
 
     try {
         var response = await fetch('/requests/' + targetRequestId + '/multi-season-packs/search', { method: 'POST' });
@@ -343,8 +362,10 @@ async function searchMultiSeasonPacks(requestId = null) {
         } else {
             container.innerHTML = '<div class="text-gray-500 text-sm py-2">No multi season or complete-series results found.</div>';
         }
+        window.completeSearchProgressPanel('Multi-season pack search complete.');
     } catch (err) {
         container.innerHTML = '<div class="text-red-400 text-sm py-2">Error: ' + window.escapeHtml(err.message) + '</div>';
+        window.completeSearchProgressPanel(err.message || 'Multi-season pack search failed.', true);
     }
 }
 
@@ -353,9 +374,9 @@ async function searchEpisode(requestId, seasonNumber, episodeNumber) {
     var container = document.getElementById('episode-search-' + requestId + '-' + seasonNumber + '-' + episodeNumber);
     if (!container) return;
     if (details) details.open = true;
-    container.innerHTML = '<div class="flex items-center gap-2 text-gray-400 text-sm py-2">' +
-        '<svg class="animate-spin h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>' +
-        ' Searching episode...</div>';
+    container.innerHTML = renderSearchLoadingState('Searching episode...');
+    const episodeLabel = 'S' + String(seasonNumber).padStart(2, '0') + 'E' + String(episodeNumber).padStart(2, '0');
+    window.showSearchProgressPanel('Searching episode', 'Searching ' + episodeLabel + '…', [episodeLabel]);
 
     try {
         var response = await fetch('/requests/' + requestId + '/seasons/' + seasonNumber + '/episodes/' + episodeNumber + '/search', { method: 'POST' });
@@ -367,8 +388,10 @@ async function searchEpisode(requestId, seasonNumber, episodeNumber) {
         } else {
             container.innerHTML = '<div class="text-gray-500 text-sm py-2">No results found for this episode.</div>';
         }
+        window.completeSearchProgressPanel('Episode search complete.');
     } catch (err) {
         container.innerHTML = '<div class="text-red-400 text-sm py-2">Error: ' + window.escapeHtml(err.message) + '</div>';
+        window.completeSearchProgressPanel(err.message || 'Episode search failed.', true);
     }
 }
 
@@ -411,12 +434,16 @@ async function searchAllPendingEpisodes() {
         return;
     }
 
+    const labels = allEpisodes.map(ep => 'S' + String(ep.season).padStart(2, '0') + 'E' + String(ep.episode).padStart(2, '0'));
+    window.showSearchProgressPanel('Searching pending episodes', 'Searching ' + allEpisodes.length + ' pending aired episode' + (allEpisodes.length === 1 ? '' : 's') + '…', labels);
+
     for (let i = 0; i < allEpisodes.length; i++) {
         const ep = allEpisodes[i];
         window.showToast('Searching S' + String(ep.season).padStart(2, '0') + 'E' + String(ep.episode).padStart(2, '0') + '... (' + (i + 1) + '/' + allEpisodes.length + ')');
         await searchEpisode(window.currentRequestId, ep.season, ep.episode);
     }
 
+    window.completeSearchProgressPanel('Finished searching all pending aired episodes.');
     window.showToast('Finished searching all pending aired episodes (' + allEpisodes.length + ' total).');
 }
 
@@ -475,6 +502,8 @@ function updateActiveStageBanner(data) {
 
 // Export functions to window for HTML onclick handlers
 window.renderReleaseCard = renderReleaseCard;
+window.renderSearchLoadingState = renderSearchLoadingState;
+window.renderMovieSearchLoadingState = renderMovieSearchLoadingState;
 window.renderSeasonAccordion = renderSeasonAccordion;
 window.markEpisodeAvailable = markEpisodeAvailable;
 window.markSeasonAvailable = markSeasonAvailable;
@@ -487,4 +516,3 @@ window.populateTvSearchScopeMenu = populateTvSearchScopeMenu;
 window.searchAllPendingEpisodes = searchAllPendingEpisodes;
 window.stageRelease = stageRelease;
 window.updateActiveStageBanner = updateActiveStageBanner;
-window.escapeHtml = escapeHtml;

@@ -2,7 +2,7 @@
 
 import json
 from typing import cast
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, call
 
 import pytest
 from fastapi import HTTPException
@@ -48,6 +48,33 @@ async def test_bulk_request_action_defaults_to_pending_tab(mock_db):
 
     assert response.status_code == 303
     assert response.headers["location"] == "/?tab=pending"
+
+
+@pytest.mark.asyncio
+async def test_bulk_request_action_searches_all_pending_requests(mock_db, monkeypatch):
+    """Search All should load pending/searching requests without selected IDs."""
+    pending_request = MagicMock()
+    searching_request = MagicMock()
+
+    execute_result = MagicMock()
+    execute_result.scalars.return_value.all.return_value = [pending_request, searching_request]
+    mock_db.execute.return_value = execute_result
+
+    process_request_search = AsyncMock()
+    monkeypatch.setattr(dashboard_actions, "_process_request_search", process_request_search)
+
+    response = await dashboard_actions.bulk_request_action(
+        action="search_all_pending",
+        request_ids=[],
+        redirect_to="/?tab=pending",
+        db=mock_db,
+    )
+
+    assert response.status_code == 303
+    assert response.headers["location"] == "/?tab=pending"
+    process_request_search.assert_has_awaits(
+        [call(pending_request, mock_db), call(searching_request, mock_db)]
+    )
 
 
 @pytest.mark.asyncio

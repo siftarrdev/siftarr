@@ -179,6 +179,17 @@ async def bulk_request_action(
 ) -> RedirectResponse:
     """Apply a bulk action to selected requests."""
     redirect_url = bulk_redirect_url(redirect_to)
+    if action == "search_all_pending":
+        result = await db.execute(
+            select(RequestModel)
+            .where(RequestModel.status.in_([RequestStatus.PENDING, RequestStatus.SEARCHING]))
+            .order_by(RequestModel.created_at.desc())
+        )
+        requests = list(result.scalars().all())
+        for request in requests:
+            await _process_request_search(request, db)
+        return RedirectResponse(url=redirect_url, status_code=303)
+
     if not request_ids:
         return RedirectResponse(url=redirect_url, status_code=303)
 
