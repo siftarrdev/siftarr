@@ -13,6 +13,4 @@
 ## Bugs
 - the Xgb/season display in the dashboard is always showing red, even when the release is under any rules governing the size of a season pack.
 
-- the progress bars when syncing plex and overseerr are not very accurate. and they take over the entire screen, which is a bit jarring. We should make them more accurate and less intrusive.
-
 ## NEXT: 

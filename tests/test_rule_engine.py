@@ -523,6 +523,55 @@ class TestRuleEngine:
         assert result.passed is True
         assert result.total_score == 150
 
+    def test_evaluate_exposes_matches_rejection_and_score_per_release(self):
+        """Evaluation results should carry UI-ready matched rules and decisions per title."""
+        engine = RuleEngine(
+            size_limit_rules=[(1, "Movie Size", 1 * 1024**3, 2 * 1024**3)],
+            exclusion_patterns=[(2, "Reject CAM", r"CAM")],
+            scorer_patterns=[(3, "x265 bonus", r"x265|HEVC", 50)],
+        )
+
+        good = engine.evaluate(
+            ProwlarrRelease(
+                title="Movie.2024.1080p.x265-RLSGRP",
+                size=int(1.5 * 1024**3),
+                seeders=10,
+                leechers=2,
+                download_url="http://example.com/1",
+                indexer="test",
+            )
+        )
+        rejected = engine.evaluate(
+            ProwlarrRelease(
+                title="Movie.2024.HDCAM.x264-RLSGRP",
+                size=int(1.5 * 1024**3),
+                seeders=10,
+                leechers=2,
+                download_url="http://example.com/2",
+                indexer="test",
+            )
+        )
+
+        assert good.release.title == "Movie.2024.1080p.x265-RLSGRP"
+        assert good.passed is True
+        assert good.rejection_reason is None
+        assert good.total_score == 50
+        assert [
+            (match.rule_name, match.score_delta) for match in good.matches if match.matched
+        ] == [
+            ("Movie Size", 0),
+            ("x265 bonus", 50),
+        ]
+
+        assert rejected.release.title == "Movie.2024.HDCAM.x264-RLSGRP"
+        assert rejected.passed is False
+        assert rejected.rejection_reason == "Matched exclusion pattern: Reject CAM"
+        assert rejected.total_score == 0
+        assert [match.rule_name for match in rejected.matches if match.matched] == [
+            "Movie Size",
+            "Reject CAM",
+        ]
+
     def test_evaluate_batch(self):
         """Test batch evaluation."""
         engine = RuleEngine(

@@ -2,150 +2,206 @@
 
 {% block title %}Rules - Siftarr{% endblock %}
 
+{% macro rule_wizard_modal(modal_id, rule, action, default_type) %}
+{% set current_type = rule.rule_type.value if rule else default_type %}
+{% set is_size_limit = current_type == 'size_limit' %}
+{% set current_tv_target = rule.tv_target.value if rule and rule.tv_target else '' %}
+<div id="{{ modal_id }}" class="rule-modal fixed inset-0 z-50 items-center justify-center bg-black/70 p-2 sm:p-6" role="dialog" aria-modal="true" aria-labelledby="{{ modal_id }}-title" tabindex="-1">
+    <button type="button" class="absolute inset-0 cursor-default" data-modal-close aria-label="Close rule wizard" tabindex="-1"></button>
+    <div class="relative flex max-h-[96vh] w-full max-w-[75vw] flex-col overflow-hidden rounded-2xl border border-gray-700 bg-surface-900 shadow-2xl max-lg:max-w-[94vw] max-sm:max-h-[98vh]">
+        <div class="flex items-start justify-between gap-4 border-b border-gray-800 px-5 py-4">
+            <div>
+                <h2 id="{{ modal_id }}-title" class="section-title">{{ 'Edit' if rule else 'Create' }} {{ current_type.replace('_', ' ')|title }} Rule</h2>
+                <p class="section-subtitle">Configure the rule, test it against samples, then save when ready.</p>
+            </div>
+            <button type="button" class="rounded-md px-2 text-2xl leading-none text-gray-500 hover:text-white focus:outline-none focus:ring-2 focus:ring-brand-500" data-modal-close aria-label="Close rule wizard">&times;</button>
+        </div>
+        <div class="grid min-h-0 flex-1 grid-cols-1 gap-0 overflow-y-auto lg:grid-cols-[minmax(0,1.35fr)_minmax(320px,0.65fr)]">
+            <form action="{{ action }}" method="post" class="space-y-5 p-5" data-rule-wizard-form data-rule-type="{{ current_type }}">
+                <div>
+                    <label class="form-label">Rule Name</label>
+                    <input type="text" name="name" value="{{ rule.name if rule else ('Size Limits' if is_size_limit else '') }}" required class="form-input" placeholder="e.g., Reject Camera/TS, Prefer HEVC, TV Episode Sizes">
+                </div>
+
+                <div>
+                    <label class="form-label">Rule Type</label>
+                    {% if rule %}
+                    <div class="mt-1 rounded-lg border border-gray-700/60 bg-surface-850 px-3.5 py-2 text-sm capitalize text-gray-400">{{ current_type.replace('_', ' ') }}</div>
+                    <p class="mt-1.5 text-xs text-gray-500">Rule type cannot be changed after creation.</p>
+                    {% else %}
+                    <input type="hidden" name="rule_type" value="{{ current_type }}">
+                    <div class="mt-1 rounded-lg border border-gray-700/60 bg-surface-850 px-3.5 py-2 text-sm capitalize text-gray-300">{{ current_type.replace('_', ' ') }}</div>
+                    <p class="mt-1.5 text-xs text-gray-500">Open a different create card to choose another rule type.</p>
+                    {% endif %}
+                </div>
+
+                <div>
+                    <label class="form-label">Applies To</label>
+                    <select name="media_scope" required class="form-select">
+                        <option value="both" {% if (rule and rule.media_scope == 'both') or (not rule) %}selected{% endif %}>Movies and TV</option>
+                        <option value="movie" {% if rule and rule.media_scope == 'movie' %}selected{% endif %}>Movies only</option>
+                        <option value="tv" {% if rule and rule.media_scope == 'tv' %}selected{% endif %}>TV only</option>
+                    </select>
+                </div>
+
+                {% if is_size_limit %}
+                <input type="hidden" name="pattern" value="size_limit">
+                <input type="hidden" name="score" value="0">
+                <div class="grid grid-cols-1 gap-4 md:grid-cols-2">
+                    <div>
+                        <label class="form-label">Minimum Size (GB)</label>
+                        <input type="number" name="min_size_gb" value="{{ rule.min_size_gb if rule and rule.min_size_gb is not none else '' }}" step="0.1" min="0" class="form-input" placeholder="e.g. 1.5">
+                    </div>
+                    <div>
+                        <label class="form-label">Maximum Size (GB)</label>
+                        <input type="number" name="max_size_gb" value="{{ rule.max_size_gb if rule and rule.max_size_gb is not none else '' }}" step="0.1" min="0" class="form-input" placeholder="e.g. 20">
+                    </div>
+                </div>
+                <div>
+                    <label class="form-label">TV Target</label>
+                    <select name="tv_target" class="form-select">
+                        <option value="" {% if not current_tv_target %}selected{% endif %}>Not applicable / movies only</option>
+                        <option value="episode" {% if current_tv_target == 'episode' %}selected{% endif %}>TV episodes</option>
+                        <option value="season_pack" {% if current_tv_target == 'season_pack' %}selected{% endif %}>TV season packs</option>
+                    </select>
+                </div>
+                {% else %}
+                <div>
+                    <label class="form-label">Regex Pattern</label>
+                    <input type="text" name="pattern" value="{{ rule.pattern if rule else '' }}" required placeholder="e.g., CAM|TS|HDCAM" class="form-input font-mono">
+                </div>
+                <div>
+                    <label class="form-label">Score</label>
+                    <input type="number" name="score" value="{{ rule.score if rule else 0 }}" min="0" class="form-input w-32">
+                </div>
+                {% endif %}
+
+                <div>
+                    <label class="form-label">Description (optional)</label>
+                    <textarea name="description" rows="2" placeholder="Explain what this rule does..." class="form-input">{{ rule.description if rule else '' }}</textarea>
+                </div>
+
+                <div class="flex flex-wrap gap-3 pt-2">
+                    <button type="submit" class="btn-primary">{{ 'Update' if rule else 'Create' }} Rule</button>
+                    <button type="button" class="btn-ghost" data-modal-close>Cancel</button>
+                    {% if rule %}<a href="/rules/{{ rule.id }}/edit" class="btn-ghost">Open full-page editor</a>{% endif %}
+                </div>
+            </form>
+
+            <div class="border-t border-gray-800 bg-surface-950/50 p-5 lg:border-l lg:border-t-0" data-rule-wizard-test>
+                <h3 class="text-sm font-semibold text-white">Test before saving</h3>
+                <p class="mt-1 text-xs text-gray-500">Checks the currently entered values only. Persisted rules are not changed.</p>
+                <div class="mt-4 space-y-3">
+                    {% for sample_index in range(1, 4) %}
+                    <div class="rounded-xl border border-gray-800 bg-surface-900 p-3">
+                        <input type="text" class="form-input wizard-sample-title" placeholder="Sample release title {{ sample_index }}" aria-label="Wizard sample title {{ sample_index }}">
+                        <div class="mt-2 grid grid-cols-2 gap-2">
+                            <select class="form-input wizard-sample-media" aria-label="Wizard sample media {{ sample_index }}">
+                                <option value="movie">Movie</option>
+                                <option value="tv">TV</option>
+                            </select>
+                            <input type="number" step="0.01" min="0" class="form-input wizard-sample-size" placeholder="Size GB" aria-label="Wizard sample size {{ sample_index }}">
+                        </div>
+                    </div>
+                    {% endfor %}
+                </div>
+                <button type="button" class="btn-primary mt-4" data-rule-wizard-test-button>Test Entered Rule</button>
+                <div class="mt-4 space-y-2 text-sm" data-rule-wizard-results></div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endmacro %}
+
 {% block content %}
+<style>
+    .rule-modal { display: none; }
+    .rule-modal:target,
+    .rule-modal.is-open { display: flex; }
+</style>
 <div class="space-y-8">
-    <div class="flex justify-between items-center">
+    <div class="flex flex-wrap justify-between items-center gap-3">
         <h1 class="page-title">Rules Configuration</h1>
+        <button type="button" class="btn-secondary" data-modal-open="rule-import-export-modal">Import / Export</button>
     </div>
 
-    {# ── Existing Rules ── #}
+    {# ── Unified Rules ── #}
     <div class="card">
         <div class="card-header">
-            <div class="flex items-center justify-between">
-                <h2 class="section-title">Existing Rules</h2>
-                <span class="text-sm text-gray-500">{{ exclusion_rules|length + requirement_rules|length + scorer_rules|length + size_limit_rules|length }} total rules</span>
-            </div>
-            <nav class="mt-5 -mb-4 flex flex-wrap gap-x-6 gap-y-2">
-                <button onclick="showRuleTab('exclusion')" id="rtab-exclusion" class="rule-tab border-b-2 border-red-500 pb-4 px-1 text-red-400 font-medium text-sm">Exclusions <span class="ml-1 badge badge-red">{{ exclusion_rules|length }}</span></button>
-                <button onclick="showRuleTab('requirement')" id="rtab-requirement" class="rule-tab border-b-2 border-transparent pb-4 px-1 text-gray-500 hover:text-gray-300 font-medium text-sm">Requirements <span class="ml-1 badge badge-gray">{{ requirement_rules|length }}</span></button>
-                <button onclick="showRuleTab('scorer')" id="rtab-scorer" class="rule-tab border-b-2 border-transparent pb-4 px-1 text-gray-500 hover:text-gray-300 font-medium text-sm">Scoring <span class="ml-1 badge badge-gray">{{ scorer_rules|length }}</span></button>
-                <button onclick="showRuleTab('size-limit')" id="rtab-size-limit" class="rule-tab border-b-2 border-transparent pb-4 px-1 text-gray-500 hover:text-gray-300 font-medium text-sm">Size Limits <span class="ml-1 badge badge-gray">{{ size_limit_rules|length }}</span></button>
-            </nav>
-        </div>
-
-        {# Exclusion rules #}
-        <div id="rcontent-exclusion" class="rule-tab-content p-5">
-            <p class="text-sm text-gray-400 mb-5">Release titles matching these patterns will be automatically rejected.</p>
-            {% if exclusion_rules %}
-            <div class="space-y-2">
-                {% for rule in exclusion_rules %}
-                <div class="flex items-center justify-between rounded-xl bg-surface-850 px-4 py-3.5 border border-gray-700/40 {% if not rule.is_enabled %}opacity-50{% endif %}">
-                    <div class="min-w-0 flex-1">
-                        <div class="flex items-center gap-2 flex-wrap">
-                            <span class="font-medium text-white text-sm">{{ rule.name }}</span>
-                            {% if rule.media_scope == 'movie' %}<span class="badge badge-purple">Movie</span>{% elif rule.media_scope == 'tv' %}<span class="badge badge-blue">TV</span>{% else %}<span class="badge badge-gray">All</span>{% endif %}
-                            {% if not rule.is_enabled %}<span class="badge badge-gray">Disabled</span>{% endif %}
-                        </div>
-                        <code class="text-red-400 text-xs mt-1.5 block truncate font-mono">{{ rule.pattern }}</code>
-                        {% if rule.description %}<p class="text-xs text-gray-500 mt-1">{{ rule.description }}</p>{% endif %}
-                    </div>
-                    <div class="flex items-center gap-2.5 ml-4 shrink-0">
-                        <form action="/rules/{{ rule.id }}/toggle" method="post"><button type="submit" class="w-8 h-5 rounded-full relative transition-colors {% if rule.is_enabled %}bg-emerald-600{% else %}bg-gray-600{% endif %}" title="{{ 'Disable' if rule.is_enabled else 'Enable' }}"><span class="absolute top-0.5 {% if rule.is_enabled %}right-0.5{% else %}left-0.5{% endif %} w-4 h-4 bg-white rounded-full shadow transition-all"></span></button></form>
-                        <a href="/rules/{{ rule.id }}/edit" class="text-gray-500 hover:text-brand-400 transition-colors" title="Edit"><svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"></path></svg></a>
-                        <form action="/rules/{{ rule.id }}/delete" method="post" onsubmit="return confirm('Delete this rule?')"><button type="submit" class="text-gray-500 hover:text-red-400 transition-colors" title="Delete"><svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg></button></form>
-                    </div>
+            <div class="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+                <div>
+                    <h2 class="section-title">All Rules</h2>
+                    <p class="section-subtitle">Unified priority order across exclusion, requirement, scoring, and size-limit rules.</p>
                 </div>
-                {% endfor %}
+                <div class="flex flex-wrap gap-2 text-sm text-gray-500">
+                    <span>{{ rules|length }} total</span>
+                    <span>&middot;</span>
+                    <span>{{ exclusion_rules|length }} exclusion</span>
+                    <span>{{ requirement_rules|length }} requirement</span>
+                    <span>{{ scorer_rules|length }} scoring</span>
+                    <span>{{ size_limit_rules|length }} size limit</span>
+                </div>
+            </div>
+        </div>
+        <div class="card-body">
+            {% if rules %}
+            <div class="overflow-x-auto">
+                <table class="min-w-full divide-y divide-gray-700/60 text-left text-sm">
+                    <thead class="text-xs uppercase tracking-wider text-gray-500">
+                        <tr>
+                            <th class="py-3 pr-4 font-medium">Priority</th>
+                            <th class="px-4 py-3 font-medium">Rule</th>
+                            <th class="px-4 py-3 font-medium">Type</th>
+                            <th class="px-4 py-3 font-medium">Scope</th>
+                            <th class="px-4 py-3 font-medium">Pattern / size range</th>
+                            <th class="px-4 py-3 font-medium">Behavior</th>
+                            <th class="px-4 py-3 font-medium text-right">Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody class="divide-y divide-gray-800/80">
+                        {% for rule in rules %}
+                        {% set rule_type = rule.rule_type.value %}
+                        <tr class="align-top {% if not rule.is_enabled %}opacity-50{% endif %}">
+                            <td class="whitespace-nowrap py-4 pr-4 text-gray-400 tabular-nums">{{ rule.priority }}</td>
+                            <td class="px-4 py-4">
+                                <div class="font-medium text-white">{{ rule.name }}</div>
+                                {% if rule.description %}<div class="mt-1 max-w-xs text-xs text-gray-500">{{ rule.description }}</div>{% endif %}
+                            </td>
+                            <td class="whitespace-nowrap px-4 py-4">
+                                {% if rule_type == 'exclusion' %}<span class="badge badge-red">Exclusion</span>{% elif rule_type == 'requirement' %}<span class="badge badge-yellow">Requirement</span>{% elif rule_type == 'scorer' %}<span class="badge badge-green">Scoring</span>{% else %}<span class="badge badge-cyan">Size Limit</span>{% endif %}
+                            </td>
+                            <td class="px-4 py-4">
+                                <div class="flex flex-wrap gap-1.5">
+                                    {% if rule.media_scope == 'movie' %}<span class="badge badge-purple">Movie</span>{% elif rule.media_scope == 'tv' %}<span class="badge badge-blue">TV</span>{% else %}<span class="badge badge-gray">All media</span>{% endif %}
+                                    {% if rule.tv_target %}<span class="badge badge-cyan">{{ 'Episode' if rule.tv_target.value == 'episode' else 'Season Pack' }}</span>{% endif %}
+                                    {% if rule.is_enabled %}<span class="badge badge-green">Enabled</span>{% else %}<span class="badge badge-gray">Disabled</span>{% endif %}
+                                </div>
+                            </td>
+                            <td class="px-4 py-4">
+                                {% if rule_type == 'size_limit' %}
+                                <div class="text-cyan-300 tabular-nums">{% if rule.min_size_gb is not none %}Min {{ rule.min_size_gb }} GB{% else %}No min{% endif %} &middot; {% if rule.max_size_gb is not none %}Max {{ rule.max_size_gb }} GB{% else %}No max{% endif %}</div>
+                                {% else %}
+                                <code class="block max-w-xs truncate font-mono text-xs {% if rule_type == 'exclusion' %}text-red-300{% elif rule_type == 'requirement' %}text-amber-300{% else %}text-emerald-300{% endif %}">{{ rule.pattern }}</code>
+                                {% endif %}
+                            </td>
+                            <td class="px-4 py-4 text-gray-300">
+                                {% if rule_type == 'exclusion' %}Reject on match{% elif rule_type == 'requirement' %}Must match to pass{% elif rule_type == 'scorer' %}<span class="font-semibold text-emerald-300">+{{ rule.score }} points</span>{% else %}Reject outside range{% endif %}
+                            </td>
+                            <td class="px-4 py-4">
+                                <div class="flex items-center justify-end gap-2.5">
+                                    <form action="/rules/{{ rule.id }}/toggle" method="post"><button type="submit" class="w-8 h-5 rounded-full relative transition-colors focus:outline-none focus:ring-2 focus:ring-brand-500 {% if rule.is_enabled %}bg-emerald-600{% else %}bg-gray-600{% endif %}" title="{{ 'Disable' if rule.is_enabled else 'Enable' }} {{ rule.name }}" aria-label="{{ 'Disable' if rule.is_enabled else 'Enable' }} {{ rule.name }}"><span class="absolute top-0.5 {% if rule.is_enabled %}right-0.5{% else %}left-0.5{% endif %} w-4 h-4 bg-white rounded-full shadow transition-all"></span></button></form>
+                                    <a href="#rule-wizard-edit-{{ rule.id }}" data-modal-open="rule-wizard-edit-{{ rule.id }}" class="text-gray-500 hover:text-brand-400 transition-colors focus:outline-none focus:ring-2 focus:ring-brand-500" title="Edit {{ rule.name }}" aria-label="Edit {{ rule.name }}"><svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"></path></svg></a>
+                                    <form action="/rules/{{ rule.id }}/delete" method="post" onsubmit="return confirm('Delete this rule?')"><button type="submit" class="text-gray-500 hover:text-red-400 transition-colors focus:outline-none focus:ring-2 focus:ring-red-500" title="Delete {{ rule.name }}" aria-label="Delete {{ rule.name }}"><svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg></button></form>
+                                </div>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
             </div>
             {% else %}
-            <p class="text-gray-600 text-sm">No exclusion rules defined.</p>
+            <p class="text-gray-600 text-sm">No rules defined.</p>
             {% endif %}
-            <a href="/rules/new?type=exclusion" class="inline-flex items-center gap-1 mt-5 text-red-400 hover:text-red-300 text-sm font-medium"><svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"></path></svg>Add Exclusion Rule</a>
-        </div>
-
-        {# Requirement rules #}
-        <div id="rcontent-requirement" class="rule-tab-content hidden p-5">
-            <p class="text-sm text-gray-400 mb-5">Release titles must match at least one of these patterns to pass.</p>
-            {% if requirement_rules %}
-            <div class="space-y-2">
-                {% for rule in requirement_rules %}
-                <div class="flex items-center justify-between rounded-xl bg-surface-850 px-4 py-3.5 border border-gray-700/40 {% if not rule.is_enabled %}opacity-50{% endif %}">
-                    <div class="min-w-0 flex-1">
-                        <div class="flex items-center gap-2 flex-wrap">
-                            <span class="font-medium text-white text-sm">{{ rule.name }}</span>
-                            {% if rule.media_scope == 'movie' %}<span class="badge badge-purple">Movie</span>{% elif rule.media_scope == 'tv' %}<span class="badge badge-blue">TV</span>{% else %}<span class="badge badge-gray">All</span>{% endif %}
-                            {% if not rule.is_enabled %}<span class="badge badge-gray">Disabled</span>{% endif %}
-                        </div>
-                        <code class="text-amber-400 text-xs mt-1.5 block truncate font-mono">{{ rule.pattern }}</code>
-                        {% if rule.description %}<p class="text-xs text-gray-500 mt-1">{{ rule.description }}</p>{% endif %}
-                    </div>
-                    <div class="flex items-center gap-2.5 ml-4 shrink-0">
-                        <form action="/rules/{{ rule.id }}/toggle" method="post"><button type="submit" class="w-8 h-5 rounded-full relative transition-colors {% if rule.is_enabled %}bg-emerald-600{% else %}bg-gray-600{% endif %}" title="{{ 'Disable' if rule.is_enabled else 'Enable' }}"><span class="absolute top-0.5 {% if rule.is_enabled %}right-0.5{% else %}left-0.5{% endif %} w-4 h-4 bg-white rounded-full shadow transition-all"></span></button></form>
-                        <a href="/rules/{{ rule.id }}/edit" class="text-gray-500 hover:text-brand-400 transition-colors" title="Edit"><svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"></path></svg></a>
-                        <form action="/rules/{{ rule.id }}/delete" method="post" onsubmit="return confirm('Delete this rule?')"><button type="submit" class="text-gray-500 hover:text-red-400 transition-colors" title="Delete"><svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg></button></form>
-                    </div>
-                </div>
-                {% endfor %}
-            </div>
-            {% else %}
-            <p class="text-gray-600 text-sm">No requirement rules defined.</p>
-            {% endif %}
-            <a href="/rules/new?type=requirement" class="inline-flex items-center gap-1 mt-5 text-amber-400 hover:text-amber-300 text-sm font-medium"><svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"></path></svg>Add Requirement Rule</a>
-        </div>
-
-        {# Scorer rules #}
-        <div id="rcontent-scorer" class="rule-tab-content hidden p-5">
-            <p class="text-sm text-gray-400 mb-5">Matching these patterns adds points to the release score. Higher scoring releases are preferred.</p>
-            {% if scorer_rules %}
-            <div class="space-y-2">
-                {% for rule in scorer_rules %}
-                <div class="flex items-center justify-between rounded-xl bg-surface-850 px-4 py-3.5 border border-gray-700/40 {% if not rule.is_enabled %}opacity-50{% endif %}">
-                    <div class="flex items-center gap-4 min-w-0 flex-1">
-                        <div class="shrink-0 w-16 text-center"><span class="text-xl font-bold text-emerald-400 tabular-nums">+{{ rule.score }}</span></div>
-                        <div class="min-w-0 flex-1">
-                            <div class="flex items-center gap-2 flex-wrap">
-                                <span class="font-medium text-white text-sm">{{ rule.name }}</span>
-                                {% if rule.media_scope == 'movie' %}<span class="badge badge-purple">Movie</span>{% elif rule.media_scope == 'tv' %}<span class="badge badge-blue">TV</span>{% else %}<span class="badge badge-gray">All</span>{% endif %}
-                                {% if not rule.is_enabled %}<span class="badge badge-gray">Disabled</span>{% endif %}
-                            </div>
-                            <code class="text-emerald-400 text-xs mt-1.5 block truncate font-mono">{{ rule.pattern }}</code>
-                            {% if rule.description %}<p class="text-xs text-gray-500 mt-1">{{ rule.description }}</p>{% endif %}
-                        </div>
-                    </div>
-                    <div class="flex items-center gap-2.5 ml-4 shrink-0">
-                        <form action="/rules/{{ rule.id }}/toggle" method="post"><button type="submit" class="w-8 h-5 rounded-full relative transition-colors {% if rule.is_enabled %}bg-emerald-600{% else %}bg-gray-600{% endif %}" title="{{ 'Disable' if rule.is_enabled else 'Enable' }}"><span class="absolute top-0.5 {% if rule.is_enabled %}right-0.5{% else %}left-0.5{% endif %} w-4 h-4 bg-white rounded-full shadow transition-all"></span></button></form>
-                        <a href="/rules/{{ rule.id }}/edit" class="text-gray-500 hover:text-brand-400 transition-colors" title="Edit"><svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"></path></svg></a>
-                        <form action="/rules/{{ rule.id }}/delete" method="post" onsubmit="return confirm('Delete this rule?')"><button type="submit" class="text-gray-500 hover:text-red-400 transition-colors" title="Delete"><svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg></button></form>
-                    </div>
-                </div>
-                {% endfor %}
-            </div>
-            {% else %}
-            <p class="text-gray-600 text-sm">No scoring rules defined.</p>
-            {% endif %}
-            <a href="/rules/new?type=scorer" class="inline-flex items-center gap-1 mt-5 text-emerald-400 hover:text-emerald-300 text-sm font-medium"><svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"></path></svg>Add Scoring Rule</a>
-        </div>
-
-        {# Size limit rules #}
-        <div id="rcontent-size-limit" class="rule-tab-content hidden p-5">
-            <p class="text-sm text-gray-400 mb-5">Size limits now behave like rules and can be scoped to Movies, TV, or both.</p>
-            {% if size_limit_rules %}
-            <div class="space-y-2">
-                {% for rule in size_limit_rules %}
-                <div class="flex items-center justify-between rounded-xl bg-surface-850 px-4 py-3.5 border border-gray-700/40 {% if not rule.is_enabled %}opacity-50{% endif %}">
-                    <div class="min-w-0 flex-1">
-                        <div class="flex items-center gap-2 flex-wrap">
-                            <span class="font-medium text-white text-sm">{{ rule.name }}</span>
-                            {% if rule.media_scope == 'movie' %}<span class="badge badge-purple">Movie</span>{% elif rule.media_scope == 'tv' %}<span class="badge badge-blue">TV</span>{% else %}<span class="badge badge-gray">All</span>{% endif %}
-                            {% if rule.tv_target %}<span class="badge badge-cyan">{{ 'Episode' if rule.tv_target.value == 'episode' else 'Season Pack' }}</span>{% endif %}
-                            {% if not rule.is_enabled %}<span class="badge badge-gray">Disabled</span>{% endif %}
-                        </div>
-                        <div class="text-cyan-400 text-sm mt-1.5 tabular-nums">{% if rule.min_size_gb is not none %}Min {{ rule.min_size_gb }} GB{% else %}No min{% endif %} &middot; {% if rule.max_size_gb is not none %}Max {{ rule.max_size_gb }} GB{% else %}No max{% endif %}</div>
-                        <div class="text-xs text-gray-500 mt-1">{% if rule.tv_target and rule.tv_target.value == 'episode' %}Targets single-episode TV releases{% elif rule.tv_target and rule.tv_target.value == 'season_pack' %}Targets season, multi-season, and complete TV packs{% else %}Targets movie releases{% endif %}</div>
-                        {% if rule.description %}<p class="text-xs text-gray-500 mt-1">{{ rule.description }}</p>{% endif %}
-                    </div>
-                    <div class="flex items-center gap-2.5 ml-4 shrink-0">
-                        <form action="/rules/{{ rule.id }}/toggle" method="post"><button type="submit" class="w-8 h-5 rounded-full relative transition-colors {% if rule.is_enabled %}bg-emerald-600{% else %}bg-gray-600{% endif %}" title="{{ 'Disable' if rule.is_enabled else 'Enable' }}"><span class="absolute top-0.5 {% if rule.is_enabled %}right-0.5{% else %}left-0.5{% endif %} w-4 h-4 bg-white rounded-full shadow transition-all"></span></button></form>
-                        <a href="/rules/{{ rule.id }}/edit" class="text-gray-500 hover:text-brand-400 transition-colors" title="Edit"><svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"></path></svg></a>
-                        <form action="/rules/{{ rule.id }}/delete" method="post" onsubmit="return confirm('Delete this rule?')"><button type="submit" class="text-gray-500 hover:text-red-400 transition-colors" title="Delete"><svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg></button></form>
-                    </div>
-                </div>
-                {% endfor %}
-            </div>
-            {% else %}
-            <p class="text-gray-600 text-sm">No size limit rules defined.</p>
-            {% endif %}
-            <a href="/rules/new?type=size_limit" class="inline-flex items-center gap-1 mt-5 text-cyan-400 hover:text-cyan-300 text-sm font-medium"><svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"></path></svg>Add Size Limit Rule</a>
         </div>
     </div>
 
@@ -157,7 +213,7 @@
         </div>
         <div class="card-body">
             <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
-                <a href="/rules/new?type=exclusion" class="group block rounded-xl bg-surface-850 hover:bg-red-900/20 border border-gray-700/40 hover:border-red-700/50 p-5 transition-colors">
+                <a href="#rule-wizard-new-exclusion" data-modal-open="rule-wizard-new-exclusion" class="group block rounded-xl bg-surface-850 hover:bg-red-900/20 border border-gray-700/40 hover:border-red-700/50 p-5 transition-colors focus:outline-none focus:ring-2 focus:ring-red-500">
                     <div class="flex items-center gap-3">
                         <div class="w-10 h-10 rounded-lg bg-red-900/40 flex items-center justify-center shrink-0"><svg class="w-5 h-5 text-red-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636"></path></svg></div>
                         <div>
@@ -166,7 +222,7 @@
                         </div>
                     </div>
                 </a>
-                <a href="/rules/new?type=requirement" class="group block rounded-xl bg-surface-850 hover:bg-amber-900/20 border border-gray-700/40 hover:border-amber-700/50 p-5 transition-colors">
+                <a href="#rule-wizard-new-requirement" data-modal-open="rule-wizard-new-requirement" class="group block rounded-xl bg-surface-850 hover:bg-amber-900/20 border border-gray-700/40 hover:border-amber-700/50 p-5 transition-colors focus:outline-none focus:ring-2 focus:ring-amber-500">
                     <div class="flex items-center gap-3">
                         <div class="w-10 h-10 rounded-lg bg-amber-900/40 flex items-center justify-center shrink-0"><svg class="w-5 h-5 text-amber-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg></div>
                         <div>
@@ -175,7 +231,7 @@
                         </div>
                     </div>
                 </a>
-                <a href="/rules/new?type=scorer" class="group block rounded-xl bg-surface-850 hover:bg-emerald-900/20 border border-gray-700/40 hover:border-emerald-700/50 p-5 transition-colors">
+                <a href="#rule-wizard-new-scorer" data-modal-open="rule-wizard-new-scorer" class="group block rounded-xl bg-surface-850 hover:bg-emerald-900/20 border border-gray-700/40 hover:border-emerald-700/50 p-5 transition-colors focus:outline-none focus:ring-2 focus:ring-emerald-500">
                     <div class="flex items-center gap-3">
                         <div class="w-10 h-10 rounded-lg bg-emerald-900/40 flex items-center justify-center shrink-0"><svg class="w-5 h-5 text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6"></path></svg></div>
                         <div>
@@ -184,7 +240,7 @@
                         </div>
                     </div>
                 </a>
-                <a href="/rules/new?type=size_limit" class="group block rounded-xl bg-surface-850 hover:bg-cyan-900/20 border border-gray-700/40 hover:border-cyan-700/50 p-5 transition-colors">
+                <a href="#rule-wizard-new-size_limit" data-modal-open="rule-wizard-new-size_limit" class="group block rounded-xl bg-surface-850 hover:bg-cyan-900/20 border border-gray-700/40 hover:border-cyan-700/50 p-5 transition-colors focus:outline-none focus:ring-2 focus:ring-cyan-500">
                     <div class="flex items-center gap-3">
                         <div class="w-10 h-10 rounded-lg bg-cyan-900/40 flex items-center justify-center shrink-0"><svg class="w-5 h-5 text-cyan-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-10V6m0 12v-2m9-4a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg></div>
                         <div>
@@ -200,96 +256,357 @@
     {# ── Test Rule Matching ── #}
     <div class="card">
         <div class="card-header">
-            <h2 class="section-title">Test Rule Matching</h2>
-            <p class="section-subtitle">Enter a release title to see how your rules would evaluate it</p>
+            <h2 class="section-title">Multi-title Rule Tester</h2>
+            <p class="section-subtitle">Compare several release titles against the full ruleset, with optional media type and size context.</p>
         </div>
         <div class="card-body">
-            <form action="/rules/test" method="post" class="flex gap-4">
-                <input type="text" name="title" placeholder="Enter release title to test..." class="form-input flex-1">
-                <button type="submit" class="btn-primary">Test</button>
+            {% set preserved_rows = test_rows if test_rows else [{'title': '', 'media_type': '', 'size_gb': none}, {'title': '', 'media_type': '', 'size_gb': none}, {'title': '', 'media_type': '', 'size_gb': none}] %}
+            <form action="/rules/test" method="post" class="space-y-4" id="rule-test-form">
+                <div class="overflow-x-auto rounded-xl border border-gray-700/40">
+                    <table class="min-w-full divide-y divide-gray-700/40 text-sm">
+                        <thead class="bg-surface-850 text-xs uppercase tracking-wide text-gray-500">
+                            <tr>
+                                <th class="px-4 py-3 text-left font-medium">Release title</th>
+                                <th class="px-4 py-3 text-left font-medium w-36">Media type</th>
+                                <th class="px-4 py-3 text-left font-medium w-36">Size (GB)</th>
+                            </tr>
+                        </thead>
+                        <tbody id="rule-test-rows" class="divide-y divide-gray-800/80 bg-surface-900">
+                            {% for row in preserved_rows %}
+                            <tr>
+                                <td class="px-4 py-3">
+                                    <input type="text" name="title" value="{{ row.title }}" placeholder="Example.Movie.2024.1080p.WEB-DL.x265" class="form-input" aria-label="Release title {{ loop.index }}">
+                                </td>
+                                <td class="px-4 py-3">
+                                    <select name="media_type" class="form-input" aria-label="Media type {{ loop.index }}">
+                                        <option value="" {% if not row.media_type %}selected{% endif %}>Auto / all</option>
+                                        <option value="movie" {% if row.media_type == 'movie' %}selected{% endif %}>Movie</option>
+                                        <option value="tv" {% if row.media_type == 'tv' %}selected{% endif %}>TV</option>
+                                    </select>
+                                </td>
+                                <td class="px-4 py-3">
+                                    <input type="number" name="size_gb" value="{{ row.size_gb if row.size_gb is not none else '' }}" step="0.01" min="0" placeholder="Optional" class="form-input" aria-label="Size in GB {{ loop.index }}">
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+                <div class="flex flex-wrap items-center justify-between gap-3">
+                    <button type="button" class="btn-ghost" onclick="addRuleTestRow()">Add another row</button>
+                    <button type="submit" class="btn-primary">Test Titles</button>
+                </div>
             </form>
-            {% if test_result %}
-            <div class="mt-5 rounded-xl p-4 {% if test_result.passed %}bg-emerald-900/30 border border-emerald-700/50{% else %}bg-red-900/30 border border-red-700/50{% endif %}">
-                <p class="font-semibold text-sm {% if test_result.passed %}text-emerald-300{% else %}text-red-300{% endif %}">{{ 'Would PASS' if test_result.passed else 'Would REJECT' }}{% if test_result.rejection_reason %} - {{ test_result.rejection_reason }}{% endif %}</p>
-                {% if test_result.matched_rules %}
-                <p class="text-sm text-gray-300 mt-3">Matched rules:</p>
-                <ul class="text-sm text-gray-400 mt-1 space-y-0.5">
-                    {% for match in test_result.matched_rules %}
-                    <li>{{ match.rule_name }}{% if match.score_delta %}: <span class="text-emerald-400 font-medium">+{{ match.score_delta }}</span>{% endif %}</li>
+
+            {% if test_results %}
+            <div class="mt-6 space-y-3">
+                <h3 class="text-sm font-semibold text-white">Rule test results</h3>
+                <div class="grid grid-cols-1 xl:grid-cols-2 gap-4">
+                    {% for result in test_results %}
+                    <div class="rounded-xl p-4 border {% if result.passed %}bg-emerald-900/20 border-emerald-700/50{% else %}bg-red-900/20 border-red-700/50{% endif %}">
+                        <div class="flex flex-wrap items-start justify-between gap-3">
+                            <div class="min-w-0">
+                                <p class="font-semibold text-white truncate">{{ result.title }}</p>
+                                <div class="mt-1 flex flex-wrap gap-2 text-xs text-gray-400">
+                                    <span class="badge badge-gray">{{ result.media_type|title if result.media_type else 'All media' }}</span>
+                                    <span class="badge badge-gray">{% if result.size_gb is not none %}{{ '%.2f'|format(result.size_gb) }} GB{% else %}No size supplied{% endif %}</span>
+                                </div>
+                            </div>
+                            <span class="badge {% if result.passed %}badge-green{% else %}badge-red{% endif %}">{{ 'PASS' if result.passed else 'REJECT' }}</span>
+                        </div>
+
+                        {% if result.rejection_reason %}
+                        <div class="mt-3 rounded-lg bg-red-950/30 border border-red-800/40 px-3 py-2 text-sm text-red-200">
+                            {{ result.rejection_reason }}
+                        </div>
+                        {% endif %}
+
+                        <div class="mt-4 grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <div>
+                                <p class="text-xs uppercase tracking-wide text-gray-500 font-medium">Matched rules</p>
+                                {% if result.matched_rules %}
+                                <ul class="mt-2 space-y-1 text-sm text-gray-300">
+                                    {% for match in result.matched_rules %}
+                                    <li class="flex justify-between gap-3 rounded-lg bg-surface-850 px-3 py-2">
+                                        <span>{{ match.rule_name }}</span>
+                                        {% if match.score_delta %}<span class="text-emerald-400 font-medium">+{{ match.score_delta }}</span>{% endif %}
+                                    </li>
+                                    {% endfor %}
+                                </ul>
+                                {% else %}
+                                <p class="mt-2 text-sm text-gray-500">No rules matched.</p>
+                                {% endif %}
+                            </div>
+                            <div>
+                                <p class="text-xs uppercase tracking-wide text-gray-500 font-medium">Score & rejection details</p>
+                                <p class="mt-2 text-sm text-gray-300">Total points: <span class="font-semibold {% if result.total_score > 0 %}text-emerald-300{% else %}text-gray-300{% endif %}">{% if result.total_score > 0 %}+{% endif %}{{ result.total_score }}</span></p>
+                                {% if result.rejection_rules %}
+                                <ul class="mt-2 space-y-1 text-sm text-red-200">
+                                    {% for match in result.rejection_rules %}
+                                    <li class="rounded-lg bg-red-950/20 px-3 py-2">{{ match.rule_name }}</li>
+                                    {% endfor %}
+                                </ul>
+                                {% elif result.passed %}
+                                <p class="mt-2 text-sm text-emerald-300">No rejection rules fired.</p>
+                                {% endif %}
+                            </div>
+                        </div>
+                    </div>
                     {% endfor %}
-                </ul>
-                {% endif %}
-                {% if test_result.total_score > 0 %}<p class="text-sm text-emerald-300 mt-3 font-semibold">Total score: +{{ test_result.total_score }}</p>{% endif %}
+                </div>
             </div>
             {% endif %}
         </div>
     </div>
 
-    <div class="card">
-        <div class="card-header">
-            <h2 class="section-title">Rule Import / Export</h2>
-            <p class="section-subtitle">Export the current ruleset as JSON, preview replacements safely, then confirm before applying.</p>
-        </div>
-        <div class="card-body grid grid-cols-1 lg:grid-cols-2 gap-6">
-            <div class="space-y-3">
-                <a href="/rules/export" class="btn-primary">Export Rules JSON</a>
-                <p class="text-xs text-gray-500">Export uses a versioned schema that round-trips the full ruleset, including TV episode vs season-pack targeting.</p>
-            </div>
-            <div class="space-y-4">
-                <form action="/rules/import-preview" method="post" enctype="multipart/form-data" class="space-y-3">
-                    <label class="form-label">Import JSON</label>
-                    <textarea name="import_payload" rows="10" class="form-input font-mono" placeholder='{"version":1,"rules":[...]}'>{{ import_payload or '' }}</textarea>
+    {% set show_import_modal = import_preview or import_error %}
+    <div id="rule-import-export-modal" class="rule-modal fixed inset-0 z-50 items-center justify-center bg-black/70 p-2 sm:p-6 {% if show_import_modal %}is-open{% endif %}" aria-labelledby="rule-import-export-title" role="dialog" aria-modal="true" tabindex="-1">
+        <button type="button" class="absolute inset-0 cursor-default" data-modal-close aria-label="Close import/export modal" tabindex="-1"></button>
+        <div class="relative flex max-h-[96vh] w-full max-w-[75vw] flex-col overflow-y-auto rounded-2xl max-lg:max-w-[94vw] max-sm:max-h-[98vh]">
+            <div class="card w-full border border-gray-700/60 shadow-2xl">
+                <div class="card-header flex flex-wrap items-start justify-between gap-4">
                     <div>
-                        <label class="form-label">Or upload JSON file</label>
-                        <input type="file" name="import_file" accept="application/json,.json" class="form-input file:mr-3 file:rounded-md file:border-0 file:bg-surface-800 file:px-3 file:py-1.5 file:text-sm file:text-gray-200">
+                        <h2 id="rule-import-export-title" class="section-title">Rule Import / Export</h2>
+                        <p class="section-subtitle">Export the current ruleset as JSON, preview replacements safely, then confirm before applying.</p>
                     </div>
-                    <button type="submit" class="btn-warning">Preview Import</button>
-                </form>
-
-                {% if import_error %}
-                <div class="rounded-xl border border-red-700/50 bg-red-900/30 p-4 text-sm text-red-200">{{ import_error }}</div>
-                {% endif %}
-
-                {% if import_preview %}
-                <div class="rounded-xl border border-amber-700/50 bg-amber-900/20 p-4 space-y-3">
-                    <div class="text-sm font-semibold text-white">Import Preview</div>
-                    <div class="text-xs text-gray-400">Version {{ import_preview.version }} &middot; replacing {{ import_preview.replace_count }} rule(s)</div>
-                    <ul class="text-sm text-gray-300 space-y-1 max-h-56 overflow-auto">
-                        {% for rule in import_preview.rules %}
-                        <li>
-                            {{ rule.name }} &middot; {{ rule.rule_type.value.replace('_', ' ') }} &middot; {{ rule.media_scope }}{% if rule.tv_target %} / {{ rule.tv_target.value }}{% endif %}
-                        </li>
-                        {% endfor %}
-                    </ul>
-                    <form action="/rules/import-apply" method="post" class="space-y-3">
-                        <input type="hidden" name="import_payload" value="{{ import_payload }}">
-                        <input type="hidden" name="confirm_replace" value="yes">
-                        <button type="submit" class="btn-danger" onclick="return confirm('Replace the current ruleset with this imported preview?')">Confirm Replace Rules</button>
-                    </form>
+                    <button type="button" class="btn-ghost" data-modal-close aria-label="Close import/export modal">Close</button>
                 </div>
-                {% endif %}
+                <div class="card-body grid grid-cols-1 gap-6 lg:grid-cols-2">
+                    <div class="space-y-3">
+                        <a href="/rules/export" class="btn-primary">Export Rules JSON</a>
+                        <p class="text-xs text-gray-500">Export uses a versioned schema that round-trips the full ruleset, including TV episode vs season-pack targeting.</p>
+                    </div>
+                    <div class="space-y-4">
+                        <form action="/rules/import-preview" method="post" enctype="multipart/form-data" class="space-y-3">
+                            <label class="form-label">Import JSON</label>
+                            <textarea name="import_payload" rows="10" class="form-input font-mono" placeholder='{"version":1,"rules":[...]}'>{{ import_payload or '' }}</textarea>
+                            <div>
+                                <label class="form-label">Or upload JSON file</label>
+                                <input type="file" name="import_file" accept="application/json,.json" class="form-input file:mr-3 file:rounded-md file:border-0 file:bg-surface-800 file:px-3 file:py-1.5 file:text-sm file:text-gray-200">
+                            </div>
+                            <button type="submit" class="btn-warning">Preview Import</button>
+                        </form>
+
+                        {% if import_error %}
+                        <div class="rounded-xl border border-red-700/50 bg-red-900/30 p-4 text-sm text-red-200">{{ import_error }}</div>
+                        {% endif %}
+
+                        {% if import_preview %}
+                        <div class="rounded-xl border border-amber-700/50 bg-amber-900/20 p-4 space-y-3">
+                            <div class="text-sm font-semibold text-white">Import Preview</div>
+                            <div class="text-xs text-gray-400">Version {{ import_preview.version }} &middot; replacing {{ import_preview.replace_count }} rule(s)</div>
+                            <ul class="text-sm text-gray-300 space-y-1 max-h-56 overflow-auto">
+                                {% for rule in import_preview.rules %}
+                                <li>
+                                    {{ rule.name }} &middot; {{ rule.rule_type.value.replace('_', ' ') }} &middot; {{ rule.media_scope }}{% if rule.tv_target %} / {{ rule.tv_target.value }}{% endif %}
+                                </li>
+                                {% endfor %}
+                            </ul>
+                            <form action="/rules/import-apply" method="post" class="space-y-3">
+                                <input type="hidden" name="import_payload" value="{{ import_payload }}">
+                                <input type="hidden" name="confirm_replace" value="yes">
+                                <button type="submit" class="btn-danger" onclick="return confirm('Replace the current ruleset with this imported preview?')">Confirm Replace Rules</button>
+                            </form>
+                        </div>
+                        {% endif %}
+                    </div>
+                </div>
             </div>
         </div>
     </div>
 </div>
 
+{{ rule_wizard_modal('rule-wizard-new-exclusion', none, '/rules', 'exclusion') }}
+{{ rule_wizard_modal('rule-wizard-new-requirement', none, '/rules', 'requirement') }}
+{{ rule_wizard_modal('rule-wizard-new-scorer', none, '/rules', 'scorer') }}
+{{ rule_wizard_modal('rule-wizard-new-size_limit', none, '/rules', 'size_limit') }}
+{% for rule in rules %}
+{{ rule_wizard_modal('rule-wizard-edit-' ~ rule.id, rule, '/rules/' ~ rule.id, rule.rule_type.value) }}
+{% endfor %}
+
 <script>
-function showRuleTab(tabName) {
-    document.querySelectorAll('.rule-tab-content').forEach(el => el.classList.add('hidden'));
-    document.querySelectorAll('.rule-tab').forEach(el => {
-        el.classList.remove('border-red-500', 'text-red-400', 'border-amber-500', 'text-amber-400', 'border-emerald-500', 'text-emerald-400', 'border-cyan-500', 'text-cyan-400');
-        el.classList.add('border-transparent', 'text-gray-500');
+function addRuleTestRow() {
+    const tbody = document.getElementById('rule-test-rows');
+    const rowNumber = tbody.children.length + 1;
+    const row = document.createElement('tr');
+    row.innerHTML = `
+        <td class="px-4 py-3"><input type="text" name="title" placeholder="Example.Movie.2024.1080p.WEB-DL.x265" class="form-input" aria-label="Release title ${rowNumber}"></td>
+        <td class="px-4 py-3"><select name="media_type" class="form-input" aria-label="Media type ${rowNumber}"><option value="" selected>Auto / all</option><option value="movie">Movie</option><option value="tv">TV</option></select></td>
+        <td class="px-4 py-3"><input type="number" name="size_gb" step="0.01" min="0" placeholder="Optional" class="form-input" aria-label="Size in GB ${rowNumber}"></td>
+    `;
+    tbody.appendChild(row);
+    row.querySelector('input[name="title"]').focus();
+}
+
+function wizardMediaApplies(ruleMedia, sampleMedia) {
+    return ruleMedia === 'both' || ruleMedia === sampleMedia;
+}
+
+function runRuleWizardTest(button) {
+    const panel = button.closest('[data-rule-wizard-test]');
+    const container = button.closest('.rule-modal');
+    const form = container.querySelector('[data-rule-wizard-form]');
+    const ruleType = form.dataset.ruleType;
+    const ruleName = form.querySelector('[name="name"]').value || 'Entered rule';
+    const mediaScope = form.querySelector('[name="media_scope"]').value;
+    const results = panel.querySelector('[data-rule-wizard-results]');
+    const titles = panel.querySelectorAll('.wizard-sample-title');
+    const media = panel.querySelectorAll('.wizard-sample-media');
+    const sizes = panel.querySelectorAll('.wizard-sample-size');
+    const rows = [];
+
+    titles.forEach((titleInput, index) => {
+        const title = titleInput.value.trim();
+        if (!title) return;
+        const sampleMedia = media[index].value;
+        const sizeGb = sizes[index].value === '' ? null : Number(sizes[index].value);
+        let status = 'Skipped';
+        let detail = 'Rule media scope does not apply.';
+
+        if (wizardMediaApplies(mediaScope, sampleMedia)) {
+            if (ruleType === 'size_limit') {
+                const minField = form.querySelector('[name="min_size_gb"]');
+                const maxField = form.querySelector('[name="max_size_gb"]');
+                const min = minField.value === '' ? null : Number(minField.value);
+                const max = maxField.value === '' ? null : Number(maxField.value);
+                if (sizeGb === null) {
+                    status = 'Needs size';
+                    detail = 'Enter a sample size to test size-limit rules.';
+                } else if ((min !== null && sizeGb < min) || (max !== null && sizeGb > max)) {
+                    status = 'Reject';
+                    detail = `${sizeGb.toFixed(2)} GB is outside the configured range.`;
+                } else {
+                    status = 'Pass';
+                    detail = `${sizeGb.toFixed(2)} GB is inside the configured range.`;
+                }
+            } else {
+                const pattern = form.querySelector('[name="pattern"]').value;
+                try {
+                    const matched = new RegExp(pattern, 'i').test(title);
+                    if (ruleType === 'exclusion') {
+                        status = matched ? 'Reject' : 'Pass';
+                        detail = matched ? 'Pattern matched and would reject.' : 'Pattern did not match.';
+                    } else if (ruleType === 'requirement') {
+                        status = matched ? 'Pass' : 'Reject';
+                        detail = matched ? 'Required pattern matched.' : 'Required pattern did not match.';
+                    } else {
+                        const score = Number(form.querySelector('[name="score"]').value || 0);
+                        status = 'Pass';
+                        detail = matched ? `Pattern matched: +${score} points.` : 'Pattern did not match: +0 points.';
+                    }
+                } catch (error) {
+                    status = 'Invalid regex';
+                    detail = error.message;
+                }
+            }
+        }
+
+        const tone = status === 'Reject' || status === 'Invalid regex' ? 'text-red-300 border-red-800/50 bg-red-950/20' : status === 'Pass' ? 'text-emerald-300 border-emerald-800/50 bg-emerald-950/20' : 'text-amber-300 border-amber-800/50 bg-amber-950/20';
+        rows.push(`<div class="rounded-lg border px-3 py-2 ${tone}"><div class="font-medium">${ruleName}: ${status}</div><div class="text-xs opacity-90">${title} — ${detail}</div></div>`);
     });
-    document.getElementById('rcontent-' + tabName).classList.remove('hidden');
-    const tab = document.getElementById('rtab-' + tabName);
-    tab.classList.remove('border-transparent', 'text-gray-500');
-    const colors = {
-        exclusion: ['border-red-500', 'text-red-400'],
-        requirement: ['border-amber-500', 'text-amber-400'],
-        scorer: ['border-emerald-500', 'text-emerald-400'],
-        'size-limit': ['border-cyan-500', 'text-cyan-400'],
-    };
-    tab.classList.add(...(colors[tabName] || ['border-brand-500', 'text-brand-400']));
+
+    results.innerHTML = rows.length ? rows.join('') : '<div class="text-gray-500">Enter at least one sample title to test.</div>';
+}
+
+document.querySelectorAll('[data-rule-wizard-test-button]').forEach((button) => {
+    button.addEventListener('click', () => runRuleWizardTest(button));
+});
+
+const modalFocusState = new Map();
+const focusableSelector = 'a[href], button:not([disabled]), textarea, input, select, [tabindex]:not([tabindex="-1"])';
+
+function getModal(modalId) {
+    return document.getElementById(modalId);
+}
+
+function focusFirstModalControl(modal) {
+    const target = modal.querySelector(focusableSelector) || modal;
+    target.focus({ preventScroll: true });
+}
+
+function openModal(modalId, trigger = document.activeElement) {
+    const modal = getModal(modalId);
+    if (!modal) return;
+    modalFocusState.set(modalId, trigger);
+    modal.classList.add('is-open');
+    document.body.classList.add('overflow-hidden');
+    window.setTimeout(() => focusFirstModalControl(modal), 0);
+}
+
+function closeModal(modal) {
+    if (!modal) return;
+    modal.classList.remove('is-open');
+    if (window.location.hash === `#${modal.id}`) {
+        history.pushState('', document.title, window.location.pathname + window.location.search);
+    }
+    if (!document.querySelector('.rule-modal.is-open, .rule-modal:target')) {
+        document.body.classList.remove('overflow-hidden');
+    }
+    const trigger = modalFocusState.get(modal.id);
+    if (trigger && typeof trigger.focus === 'function') {
+        trigger.focus({ preventScroll: true });
+    }
+}
+
+function trapModalFocus(event) {
+    if (event.key !== 'Tab') return;
+    const modal = event.target.closest('.rule-modal.is-open, .rule-modal:target');
+    if (!modal) return;
+    const focusable = Array.from(modal.querySelectorAll(focusableSelector)).filter((element) => element.offsetParent !== null || element === document.activeElement);
+    if (!focusable.length) return;
+    const first = focusable[0];
+    const last = focusable[focusable.length - 1];
+    if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+    } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+    }
+}
+
+document.querySelectorAll('[data-modal-open]').forEach((trigger) => {
+    trigger.addEventListener('click', (event) => {
+        const modalId = trigger.dataset.modalOpen;
+        if (!modalId) return;
+        event.preventDefault();
+        openModal(modalId, trigger);
+        history.replaceState(null, '', `#${modalId}`);
+    });
+});
+
+document.querySelectorAll('[data-modal-close]').forEach((trigger) => {
+    trigger.addEventListener('click', () => closeModal(trigger.closest('.rule-modal')));
+});
+
+document.addEventListener('keydown', (event) => {
+    const modal = document.querySelector('.rule-modal.is-open, .rule-modal:target');
+    if (!modal) return;
+    if (event.key === 'Escape') {
+        event.preventDefault();
+        closeModal(modal);
+    } else {
+        trapModalFocus(event);
+    }
+});
+
+window.addEventListener('hashchange', () => {
+    const modalId = window.location.hash.slice(1);
+    if (modalId && getModal(modalId)?.classList.contains('rule-modal')) {
+        openModal(modalId);
+    }
+});
+
+if (window.location.hash && getModal(window.location.hash.slice(1))?.classList.contains('rule-modal')) {
+    openModal(window.location.hash.slice(1));
+}
+
+function openRuleImportExportModal() {
+    openModal('rule-import-export-modal');
+}
+
+function closeRuleImportExportModal() {
+    closeModal(getModal('rule-import-export-modal'));
 }
 </script>
 {% endblock %}

@@ -74,7 +74,9 @@ def _failing_eval(release):
 class TestProcessRequest:
     @pytest.fixture
     def mock_db(self):
-        return AsyncMock()
+        db = AsyncMock()
+        db.add = MagicMock()
+        return db
 
     @pytest.fixture
     def service(self, mock_db):
@@ -137,6 +139,8 @@ class TestProcessRequest:
         mock_db.flush = AsyncMock()
 
         pack_release = _make_release(title="Show.S01.1080p")
+        stored_pack_release = MagicMock()
+        stored_pack_release.title = "Show.S01.1080p"
 
         pack_result = ProwlarrSearchResult(releases=[pack_release], query_time_ms=100)
 
@@ -152,6 +156,7 @@ class TestProcessRequest:
             patch(
                 "app.siftarr.services.tv_decision_service.store_search_results",
                 new_callable=AsyncMock,
+                return_value={"Show.S01.1080p": stored_pack_release},
             ),
             patch(
                 "app.siftarr.services.tv_decision_service.use_releases", new_callable=AsyncMock
@@ -247,6 +252,8 @@ class TestProcessRequest:
         mock_db.flush = AsyncMock()
 
         broad_pack = _make_release(title="Show.S01-S02.1080p")
+        stored_broad_pack = MagicMock()
+        stored_broad_pack.title = "Show.S01-S02.1080p"
 
         broad_pack_result = ProwlarrSearchResult(releases=[broad_pack], query_time_ms=100)
         service.prowlarr.search_by_tvdbid = AsyncMock(
@@ -267,6 +274,7 @@ class TestProcessRequest:
             patch(
                 "app.siftarr.services.tv_decision_service.store_search_results",
                 new_callable=AsyncMock,
+                return_value={"Show.S01-S02.1080p": stored_broad_pack},
             ),
             patch(
                 "app.siftarr.services.tv_decision_service.use_releases", new_callable=AsyncMock
@@ -302,6 +310,8 @@ class TestProcessRequest:
         pack_eval = _passing_eval(pack_release, score=80)
         ep_eval = _passing_eval(ep_release, score=50)
         rule_engine.evaluate.side_effect = [pack_eval, ep_eval]
+        stored_pack_release = MagicMock()
+        stored_pack_release.title = "Show.S01.1080p"
 
         with (
             patch.object(
@@ -310,6 +320,7 @@ class TestProcessRequest:
             patch(
                 "app.siftarr.services.tv_decision_service.store_search_results",
                 new_callable=AsyncMock,
+                return_value={"Show.S01.1080p": stored_pack_release},
             ),
             patch(
                 "app.siftarr.services.tv_decision_service.use_releases", new_callable=AsyncMock
@@ -348,6 +359,8 @@ class TestProcessRequest:
             _passing_eval(broad_pack, score=95),
             _passing_eval(episode_release, score=50),
         ]
+        stored_episode_release = MagicMock()
+        stored_episode_release.title = "Show.S01E01.1080p"
 
         with (
             patch.object(
@@ -356,6 +369,7 @@ class TestProcessRequest:
             patch(
                 "app.siftarr.services.tv_decision_service.store_search_results",
                 new_callable=AsyncMock,
+                return_value={"season-episode": stored_episode_release},
             ),
             patch(
                 "app.siftarr.services.tv_decision_service.use_releases", new_callable=AsyncMock
@@ -401,6 +415,8 @@ class TestProcessRequest:
             _passing_eval(season_one_episode, score=50),
             _passing_eval(season_two_episode, score=45),
         ]
+        stored_complete_series = MagicMock()
+        stored_complete_series.title = "Show.Complete.Series.1080p"
 
         with (
             patch.object(
@@ -409,6 +425,7 @@ class TestProcessRequest:
             patch(
                 "app.siftarr.services.tv_decision_service.store_search_results",
                 new_callable=AsyncMock,
+                return_value={"broad-complete-series": stored_complete_series},
             ),
             patch(
                 "app.siftarr.services.tv_decision_service.use_releases", new_callable=AsyncMock
@@ -449,6 +466,10 @@ class TestProcessRequest:
             _passing_eval(season_one_pack, score=80),
             _passing_eval(season_two_episode, score=55),
         ]
+        stored_season_one_pack = MagicMock()
+        stored_season_one_pack.title = "Show.S01.1080p"
+        stored_season_two_episode = MagicMock()
+        stored_season_two_episode.title = "Show.S02E01.1080p"
 
         with (
             patch.object(
@@ -457,6 +478,10 @@ class TestProcessRequest:
             patch(
                 "app.siftarr.services.tv_decision_service.store_search_results",
                 new_callable=AsyncMock,
+                return_value={
+                    "fallback-s01-pack": stored_season_one_pack,
+                    "fallback-s02e01": stored_season_two_episode,
+                },
             ),
             patch(
                 "app.siftarr.services.tv_decision_service.use_releases", new_callable=AsyncMock
@@ -497,6 +522,8 @@ class TestProcessRequest:
             _passing_eval(complete_series, score=95),
             _passing_eval(episode_release, score=50),
         ]
+        stored_episode_release = MagicMock()
+        stored_episode_release.title = "Show.S01E01.1080p"
 
         with (
             patch.object(
@@ -505,6 +532,7 @@ class TestProcessRequest:
             patch(
                 "app.siftarr.services.tv_decision_service.store_search_results",
                 new_callable=AsyncMock,
+                return_value={"complete-fallback": stored_episode_release},
             ),
             patch(
                 "app.siftarr.services.tv_decision_service.use_releases", new_callable=AsyncMock
@@ -589,6 +617,7 @@ class TestProcessRequest:
             patch(
                 "app.siftarr.services.tv_decision_service.store_search_results",
                 new_callable=AsyncMock,
+                return_value={"Show.S01.1080p": stored_release},
             ),
             patch(
                 "app.siftarr.services.tv_decision_service.use_releases", new_callable=AsyncMock

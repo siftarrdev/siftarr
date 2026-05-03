@@ -108,7 +108,7 @@ HTTP route layer.
 - `dashboard.py` — main dashboard page routes
 - `dashboard_api.py` — dashboard JSON endpoints for details/search data
 - `dashboard_actions.py` — dashboard-triggered actions and mutations
-- `rules.py` — rule management UI/API
+- `rules.py` — rule management UI/API, including unified rule listing, multi-title testing, modal import/export, and create/edit actions
 - `settings.py` — settings UI, maintenance, jobs, and connection actions
 - `staged.py` — staged torrent review/approval endpoints
 - `webhooks.py` — inbound webhook handling
@@ -143,7 +143,8 @@ Server-rendered HTML templates.
 
 - `base.html` — shared layout
 - `dashboard.html` — main dashboard UI
-- `rules.html` / `rule_form.html` — rule management UI
+- `rules.html` — single-pane rules UI with unified rule table, multi-title tester, modal create/edit wizard, and modal import/export
+- `rule_form.html` — fallback full-page create/edit rule form
 - `settings.html` — settings UI
 
 ### `app/siftarr/static/`
@@ -161,6 +162,7 @@ Static assets.
 - `tests/services/release_selection_service/` — release persistence/staging behavior coverage
 - `tests/services/plex_service/` — Plex service unit coverage
 - `tests/services/plex_polling_service/` — Plex polling flow coverage
+- `tests/test_rules_router.py` / `tests/test_rule_engine.py` / `tests/test_rule_service.py` — rules UI/API, evaluation, and import/export coverage
 - top-level `tests/test_*.py` — service, router, parser, config, lifecycle, and integration-focused tests
 
 ## Database and operations

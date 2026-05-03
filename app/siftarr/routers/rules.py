@@ -1,7 +1,9 @@
 """Router for rules management pages."""
 
 import re
-from typing import Annotated
+from collections.abc import Awaitable
+from inspect import isawaitable
+from typing import Annotated, cast
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, UploadFile
 from fastapi.responses import HTMLResponse, PlainTextResponse, RedirectResponse
@@ -9,7 +11,7 @@ from fastapi.templating import Jinja2Templates
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.siftarr.database import get_db
-from app.siftarr.models.rule import Rule, RuleType, TVTarget
+from app.siftarr.models.rule import RuleType, TVTarget
 from app.siftarr.services.prowlarr_service import ProwlarrRelease
 from app.siftarr.services.rule_engine import RuleEngine
 from app.siftarr.services.rule_service import RuleImportPreview, RuleService
@@ -84,6 +86,43 @@ def _validate_rule_input(
         raise HTTPException(status_code=400, detail=f"Invalid regex pattern: {e}") from e
 
 
+async def _rules_page_context(
+    request: Request,
+    rule_service: RuleService,
+    **overrides: object,
+) -> dict[str, object]:
+    """Build the shared rules page context."""
+    rules_override = overrides.pop("rules", None)
+    all_rules = (
+        rules_override
+        if rules_override is not None
+        else await _maybe_await(rule_service.get_all_rules())
+    )
+    context: dict[str, object] = {
+        "request": request,
+        "rules": all_rules,
+        "exclusion_rules": await _maybe_await(
+            rule_service.get_all_rules_by_type(RuleType.EXCLUSION)
+        ),
+        "requirement_rules": await _maybe_await(
+            rule_service.get_all_rules_by_type(RuleType.REQUIREMENT)
+        ),
+        "scorer_rules": await _maybe_await(rule_service.get_all_rules_by_type(RuleType.SCORER)),
+        "size_limit_rules": await _maybe_await(
+            rule_service.get_all_rules_by_type(RuleType.SIZE_LIMIT)
+        ),
+    }
+    context.update(overrides)
+    return context
+
+
+async def _maybe_await[T](value: T | Awaitable[T]) -> T:
+    """Return awaited service results while tolerating simple test doubles."""
+    if isawaitable(value):
+        return await cast(Awaitable[T], value)
+    return cast(T, value)
+
+
 @router.get("")
 async def list_rules(
     request: Request,
@@ -93,22 +132,50 @@ async def list_rules(
     rule_service = RuleService(db)
     await rule_service.ensure_default_rules()
 
-    exclusions = await rule_service.get_all_rules_by_type(RuleType.EXCLUSION)
-    requirements = await rule_service.get_all_rules_by_type(RuleType.REQUIREMENT)
-    scorers = await rule_service.get_all_rules_by_type(RuleType.SCORER)
-    size_limits = await rule_service.get_all_rules_by_type(RuleType.SIZE_LIMIT)
-
     return templates.TemplateResponse(
         request,
         "rules.html",
-        {
-            "request": request,
-            "exclusion_rules": exclusions,
-            "requirement_rules": requirements,
-            "scorer_rules": scorers,
-            "size_limit_rules": size_limits,
-        },
+        await _rules_page_context(request, rule_service),
     )
+
+
+def _as_list[T](value: T | list[T] | tuple[T, ...] | None) -> list[T]:
+    """Normalize single or repeated form values into a list."""
+    if value is None:
+        return []
+    if isinstance(value, list):
+        return value
+    if isinstance(value, tuple):
+        return list(cast(tuple[T, ...], value))
+    return [value]
+
+
+def _test_rows(
+    titles: str | list[str],
+    media_types: str | list[str | None] | None,
+    size_gb_values: str | list[str | None] | None,
+) -> list[dict[str, str | float | None]]:
+    """Build rule-test rows from repeated form fields."""
+    title_values = _as_list(titles)
+    media_values = _as_list(media_types)
+    size_values = _as_list(size_gb_values)
+
+    rows: list[dict[str, str | float | None]] = []
+    for index, raw_title in enumerate(title_values):
+        title = raw_title.strip()
+        if not title:
+            continue
+        media_type = media_values[index] if index < len(media_values) else None
+        if media_type == "":
+            media_type = None
+        raw_size_gb = size_values[index] if index < len(size_values) else None
+        if isinstance(raw_size_gb, str):
+            normalized_size_gb = raw_size_gb.strip()
+            size_gb = float(normalized_size_gb) if normalized_size_gb else None
+        else:
+            size_gb = raw_size_gb
+        rows.append({"title": title, "media_type": media_type, "size_gb": size_gb})
+    return rows
 
 
 @router.get("/new")
@@ -169,6 +236,127 @@ async def create_rule(
         description=description,
     )
 
+    return RedirectResponse(url="/rules", status_code=303)
+
+
+@router.post("/test")
+async def test_rule(
+    request: Request,
+    title: str | list[str] = Form(...),
+    media_type: str | list[str | None] | None = Form(None),
+    size_gb: str | list[str | None] | None = Form(None),
+    db: AsyncSession = Depends(get_db),
+) -> HTMLResponse:
+    """Test a release title against all rules."""
+    rule_service = RuleService(db)
+    await rule_service.ensure_default_rules()
+    all_rules = await rule_service.get_all_rules()
+
+    test_results = []
+    test_rows = _test_rows(title, media_type, size_gb)
+    for row in test_rows:
+        engine = RuleEngine.from_db_rules(
+            rules=all_rules, media_type=cast(str | None, row["media_type"])
+        )
+        size = (
+            int(cast(float, row["size_gb"]) * 1024 * 1024 * 1024)
+            if row["size_gb"] is not None
+            else 0
+        )
+        mock_release = ProwlarrRelease(
+            title=cast(str, row["title"]),
+            size=size,
+            seeders=0,
+            leechers=0,
+            download_url="",
+            indexer="test",
+        )
+
+        evaluation = engine.evaluate(mock_release)
+        test_results.append(
+            {
+                "title": row["title"],
+                "media_type": row["media_type"],
+                "size_gb": row["size_gb"],
+                "passed": evaluation.passed,
+                "rejection_reason": evaluation.rejection_reason,
+                "total_score": evaluation.total_score,
+                "matched_rules": [m for m in evaluation.matches if m.matched],
+                "rejection_rules": [m for m in evaluation.matches if not m.matched]
+                if not evaluation.passed
+                else [],
+                "matches": evaluation.matches,
+            }
+        )
+
+    # Re-render the rules page with test results
+    return templates.TemplateResponse(
+        request,
+        "rules.html",
+        await _rules_page_context(
+            request,
+            rule_service,
+            rules=all_rules,
+            test_rows=test_rows,
+            test_results=test_results,
+            test_result=test_results[0] if test_results else None,
+        ),
+    )
+
+
+@router.post("/import-preview")
+async def import_rules_preview(
+    request: Request,
+    import_payload: str | None = Form(default=None),
+    import_file: UploadFile | None = File(default=None),
+    db: AsyncSession = Depends(get_db),
+) -> HTMLResponse:
+    """Validate an import payload and render a non-destructive preview."""
+    resolved_payload = await _resolve_import_payload(import_payload, import_file)
+    rule_service = RuleService(db)
+    await rule_service.ensure_default_rules()
+    context = await _rules_page_context(
+        request,
+        rule_service,
+        import_payload=resolved_payload,
+        import_preview=None,
+        import_error=None,
+    )
+
+    try:
+        preview = rule_service.preview_import_rules(resolved_payload)
+        return templates.TemplateResponse(
+            request,
+            "rules.html",
+            {
+                **context,
+                "import_preview": preview,
+            },
+        )
+    except ValueError as exc:
+        return templates.TemplateResponse(
+            request,
+            "rules.html",
+            {
+                **context,
+                "import_error": str(exc),
+            },
+        )
+
+
+@router.post("/import-apply")
+async def import_rules_apply(
+    import_payload: str = Form(...),
+    confirm_replace: str = Form(...),
+    db: AsyncSession = Depends(get_db),
+) -> RedirectResponse:
+    """Apply a previously previewed rule import by replacing the ruleset."""
+    if confirm_replace != "yes":
+        raise HTTPException(status_code=400, detail="Import confirmation is required.")
+
+    rule_service = RuleService(db)
+    preview: RuleImportPreview = rule_service.preview_import_rules(import_payload)
+    await rule_service.replace_rules_from_preview(preview)
     return RedirectResponse(url="/rules", status_code=303)
 
 
@@ -272,61 +460,6 @@ async def delete_rule(
     return RedirectResponse(url="/rules", status_code=303)
 
 
-@router.post("/test")
-async def test_rule(
-    request: Request,
-    title: str = Form(...),
-    db: AsyncSession = Depends(get_db),
-) -> HTMLResponse:
-    """Test a release title against all rules."""
-    from sqlalchemy import select
-
-    rule_service = RuleService(db)
-    await rule_service.ensure_default_rules()
-
-    result = await db.execute(select(Rule))
-    rules = list(result.scalars().all())
-
-    engine = RuleEngine.from_db_rules(rules=rules)
-
-    # Create a mock release for testing
-    mock_release = ProwlarrRelease(
-        title=title,
-        size=0,
-        seeders=0,
-        leechers=0,
-        download_url="",
-        indexer="test",
-    )
-
-    evaluation = engine.evaluate(mock_release)
-
-    # Re-render the rules page with test results
-    rule_service = RuleService(db)
-    exclusions = await rule_service.get_all_rules_by_type(RuleType.EXCLUSION)
-    requirements = await rule_service.get_all_rules_by_type(RuleType.REQUIREMENT)
-    scorers = await rule_service.get_all_rules_by_type(RuleType.SCORER)
-    size_limits = await rule_service.get_all_rules_by_type(RuleType.SIZE_LIMIT)
-
-    return templates.TemplateResponse(
-        request,
-        "rules.html",
-        {
-            "request": request,
-            "exclusion_rules": exclusions,
-            "requirement_rules": requirements,
-            "scorer_rules": scorers,
-            "size_limit_rules": size_limits,
-            "test_result": {
-                "passed": evaluation.passed,
-                "rejection_reason": evaluation.rejection_reason,
-                "total_score": evaluation.total_score,
-                "matched_rules": [m for m in evaluation.matches if m.matched],
-            },
-        },
-    )
-
-
 @router.get("/export")
 async def export_rules(db: AsyncSession = Depends(get_db)) -> PlainTextResponse:
     """Export current ruleset as versioned JSON."""
@@ -337,68 +470,3 @@ async def export_rules(db: AsyncSession = Depends(get_db)) -> PlainTextResponse:
         media_type="application/json",
         headers={"Content-Disposition": 'attachment; filename="siftarr-rules.json"'},
     )
-
-
-@router.post("/import-preview")
-async def import_rules_preview(
-    request: Request,
-    import_payload: str | None = Form(default=None),
-    import_file: UploadFile | None = File(default=None),
-    db: AsyncSession = Depends(get_db),
-) -> HTMLResponse:
-    """Validate an import payload and render a non-destructive preview."""
-    resolved_payload = await _resolve_import_payload(import_payload, import_file)
-    rule_service = RuleService(db)
-    await rule_service.ensure_default_rules()
-
-    exclusions = await rule_service.get_all_rules_by_type(RuleType.EXCLUSION)
-    requirements = await rule_service.get_all_rules_by_type(RuleType.REQUIREMENT)
-    scorers = await rule_service.get_all_rules_by_type(RuleType.SCORER)
-    size_limits = await rule_service.get_all_rules_by_type(RuleType.SIZE_LIMIT)
-
-    context = {
-        "request": request,
-        "exclusion_rules": exclusions,
-        "requirement_rules": requirements,
-        "scorer_rules": scorers,
-        "size_limit_rules": size_limits,
-        "import_payload": resolved_payload,
-        "import_preview": None,
-        "import_error": None,
-    }
-
-    try:
-        preview = rule_service.preview_import_rules(resolved_payload)
-        return templates.TemplateResponse(
-            request,
-            "rules.html",
-            {
-                **context,
-                "import_preview": preview,
-            },
-        )
-    except ValueError as exc:
-        return templates.TemplateResponse(
-            request,
-            "rules.html",
-            {
-                **context,
-                "import_error": str(exc),
-            },
-        )
-
-
-@router.post("/import-apply")
-async def import_rules_apply(
-    import_payload: str = Form(...),
-    confirm_replace: str = Form(...),
-    db: AsyncSession = Depends(get_db),
-) -> RedirectResponse:
-    """Apply a previously previewed rule import by replacing the ruleset."""
-    if confirm_replace != "yes":
-        raise HTTPException(status_code=400, detail="Import confirmation is required.")
-
-    rule_service = RuleService(db)
-    preview: RuleImportPreview = rule_service.preview_import_rules(import_payload)
-    await rule_service.replace_rules_from_preview(preview)
-    return RedirectResponse(url="/rules", status_code=303)
