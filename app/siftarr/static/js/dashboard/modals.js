@@ -208,10 +208,7 @@ function handleBulkRequestActionSubmit(event, form) {
     disableSearchControls(form);
 
     var ids = [];
-    if (searchAll) {
-        var rows = form.querySelectorAll('tbody tr[data-request-id]');
-        ids = Array.from(rows).map(function(r) { return parseInt(r.dataset.requestId, 10); }).filter(Boolean);
-    } else {
+    if (!searchAll) {
         var checkboxes = form.querySelectorAll('input[name="request_ids"]:checked');
         ids = Array.from(checkboxes).map(function(cb) { return parseInt(cb.value, 10); }).filter(Boolean);
     }
@@ -225,7 +222,7 @@ function handleBulkRequestActionSubmit(event, form) {
         submitter.removeAttribute('aria-busy');
     }
 
-    if (ids.length > 0) {
+    if (searchAll || ids.length > 0) {
         window.startBulkSearchProgress(ids, titles, function(data) {
             if (data.results) {
                 data.results.forEach(function(r) {
@@ -235,7 +232,7 @@ function handleBulkRequestActionSubmit(event, form) {
             resetSubmitter();
         }, function() {
             resetSubmitter();
-        });
+        }, { searchAllPending: searchAll });
     } else {
         resetSubmitter();
     }

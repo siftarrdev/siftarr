@@ -176,7 +176,7 @@ function startSearchProgress(requestId, title, onComplete, onError) {
     };
 }
 
-function startBulkSearchProgress(requestIds, titles, onComplete, onError) {
+function startBulkSearchProgress(requestIds, titles, onComplete, onError, options) {
     closeSearchProgress();
     resetProgressPanel();
 
@@ -199,8 +199,12 @@ function startBulkSearchProgress(requestIds, titles, onComplete, onError) {
 
     let finished = false;
 
-    const params = requestIds.map(function(id) { return 'request_ids=' + encodeURIComponent(id); }).join('&');
-    const url = '/requests/bulk/search/stream?' + params;
+    const params = requestIds.map(function(id) { return 'request_ids=' + encodeURIComponent(id); });
+    if (options && options.searchAllPending) {
+        params.push('search_all_pending=true');
+    }
+    const query = params.join('&');
+    const url = '/requests/bulk/search/stream' + (query ? '?' + query : '');
     const es = new EventSource(url);
     activeSearchEventSource = es;
 
