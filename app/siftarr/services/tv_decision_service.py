@@ -251,7 +251,17 @@ class TVDecisionService:
             season.status = status
             await self.db.flush()
 
-    async def process_request(self, request_id: int) -> dict:
+    async def process_request(self, request_id: int, search_episodes: bool = True) -> dict:
+        """
+        Process a TV request search.
+
+        Args:
+            request_id: The ID of the request to search.
+            search_episodes: If True (default), also search for individual episodes
+                for uncovered seasons. When called from the dashboard "Search Selected"
+                action, this is False to limit the search to season packs and multi-season
+                packs only.
+        """
         result = await self.db.execute(
             select(Request)
             .where(Request.id == request_id)
@@ -366,41 +376,44 @@ class TVDecisionService:
             covered_seasons.add(season)
             all_selected_releases.append(evaluation)
 
-        episode_searches: list[tuple[str, int | None, int | None]] = []
-        for season in requested_seasons:
-            if season in covered_seasons:
-                continue
-            for episode in await self._get_episode_search_targets(
-                request, season, requested_episodes
-            ):
-                episode_searches.append(("episode", season, episode))
+        if search_episodes:
+            episode_searches: list[tuple[str, int | None, int | None]] = []
+            for season in requested_seasons:
+                if season in covered_seasons:
+                    continue
+                for episode in await self._get_episode_search_targets(
+                    request, season, requested_episodes
+                ):
+                    episode_searches.append(("episode", season, episode))
 
-        (
-            episode_stage_evaluations,
-            episode_candidates,
-            episode_errors,
-        ) = await self._search_and_evaluate(
-            request,
-            rule_engine,
-            episode_searches,
-        )
-        all_evaluated_releases.extend(episode_stage_evaluations)
-        all_search_errors.extend(episode_errors)
+            (
+                episode_stage_evaluations,
+                episode_candidates,
+                episode_errors,
+            ) = await self._search_and_evaluate(
+                request,
+                rule_engine,
+                episode_searches,
+            )
+            all_evaluated_releases.extend(episode_stage_evaluations)
+            all_search_errors.extend(episode_errors)
 
-        best_episodes_by_key: dict[tuple[int, int], ReleaseEvaluation] = {}
-        for season, episode, evaluation in episode_candidates:
-            assert season is not None
-            assert episode is not None
-            if not self._is_exact_episode_match(evaluation, season, episode):
-                continue
-            episode_evaluations.append((season, episode, evaluation))
-            key = (season, episode)
-            existing = best_episodes_by_key.get(key)
-            if existing is None or evaluation.total_score > existing.total_score:
-                best_episodes_by_key[key] = evaluation
+            best_episodes_by_key: dict[tuple[int, int], ReleaseEvaluation] = {}
+            for season, episode, evaluation in episode_candidates:
+                assert season is not None
+                assert episode is not None
+                if not self._is_exact_episode_match(evaluation, season, episode):
+                    continue
+                episode_evaluations.append((season, episode, evaluation))
+                key = (season, episode)
+                existing = best_episodes_by_key.get(key)
+                if existing is None or evaluation.total_score > existing.total_score:
+                    best_episodes_by_key[key] = evaluation
 
-        for (_season, _episode), evaluation in best_episodes_by_key.items():
-            all_selected_releases.append(evaluation)
+            for (_season, _episode), evaluation in best_episodes_by_key.items():
+                all_selected_releases.append(evaluation)
+        else:
+            best_episodes_by_key = {}
 
         logger.info(
             "TV search completed: request_id=%s total_results=%s passing_packs=%s passing_episodes=%s errors=%s",
