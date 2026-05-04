@@ -1,10 +1,13 @@
 """Application settings loaded from environment variables."""
 
 import os
+import time
 from functools import lru_cache
 
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+from app.siftarr.version import __version__
 
 
 class Settings(BaseSettings):
@@ -55,8 +58,24 @@ class Settings(BaseSettings):
         )
     )
 
+    cache_static_assets: bool = True
+
 
 @lru_cache
 def get_settings() -> Settings:
     """Get cached settings instance."""
     return Settings()
+
+
+def get_static_version(settings: Settings | None = None) -> str:
+    """Return a cache-busting query-string value for static assets.
+
+    When ``cache_static_assets`` is enabled (the default) the app version is
+    used so browsers only re-fetch after a release.  Disabling the setting
+    (e.g. ``CACHE_STATIC_ASSETS=false`` in dev) uses a timestamp so every
+    request gets fresh assets.
+    """
+    effective = settings or get_settings()
+    if effective.cache_static_assets:
+        return __version__
+    return str(int(time.time()))

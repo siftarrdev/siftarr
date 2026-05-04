@@ -17,6 +17,7 @@ from app.siftarr.routers import (
     dashboard_actions,
     dashboard_api,
     rules,
+    search_sse,
     settings,
     staged,
     webhooks,
@@ -132,6 +133,7 @@ def create_app() -> FastAPI:
     app.include_router(dashboard_actions.router)
     app.include_router(webhooks.router)
     app.include_router(rules.router)
+    app.include_router(search_sse.router)
     app.include_router(settings.router)
     app.include_router(staged.router)
 

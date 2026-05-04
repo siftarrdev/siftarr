@@ -16,17 +16,230 @@ function showToast(message) {
     }, 4000);
 }
 
-function postToAction(action, redirectTo) {
-    const form = document.createElement('form');
-    form.method = 'POST';
-    form.action = action;
-    const input = document.createElement('input');
-    input.type = 'hidden';
-    input.name = 'redirect_to';
-    input.value = redirectTo;
-    form.appendChild(input);
-    document.body.appendChild(form);
-    form.submit();
+function showSearchProgressToast(title, message, items) {
+    const container = document.getElementById('toast-container');
+    if (!container) return { update: () => {}, dismiss: () => {} };
+
+    const el = document.createElement('div');
+    el.className = 'search-progress-toast bg-surface-800 border border-gray-700/70 rounded-2xl shadow-2xl p-4 pointer-events-auto w-full max-w-sm transition-opacity duration-300 opacity-0';
+    el.innerHTML = '<div class="flex items-start justify-between gap-3 mb-3">' +
+        '<div class="min-w-0">' +
+            '<h3 class="text-sm font-semibold text-white">' + window.escapeHtml(title) + '</h3>' +
+            '<p class="text-xs text-gray-500 mt-0.5">Working…</p>' +
+        '</div>' +
+    '</div>' +
+    '<div class="mb-3"><div class="w-full h-2 rounded-full bg-surface-700 overflow-hidden">' +
+        '<div class="search-progress-bar h-2 rounded-full bg-brand-500 transition-all duration-700" style="width: 0%"></div>' +
+    '</div></div>' +
+    '<p class="search-progress-status text-sm text-gray-400">' + window.escapeHtml(message) + '</p>' +
+    '<div class="search-progress-items-wrap hidden mt-3">' +
+        '<div class="text-[10px] uppercase tracking-wide text-gray-500 mb-1">Searching for</div>' +
+        '<ul class="search-progress-items space-y-1 text-gray-300 max-h-28 overflow-y-auto"></ul>' +
+    '</div>';
+
+    // Populate items list
+    const itemsWrap = el.querySelector('.search-progress-items-wrap');
+    const itemsList = el.querySelector('.search-progress-items');
+    if (itemsList && itemsWrap && items.length) {
+        itemsWrap.classList.remove('hidden');
+        items.slice(0, 5).forEach(item => {
+            const li = document.createElement('li');
+            li.className = 'rounded-lg bg-surface-850 px-2.5 py-1 text-xs text-gray-300 truncate';
+            li.textContent = item;
+            itemsList.appendChild(li);
+        });
+        if (items.length > 5) {
+            const li = document.createElement('li');
+            li.className = 'px-2.5 py-0.5 text-[11px] text-gray-500';
+            li.textContent = '+' + (items.length - 5) + ' more';
+            itemsList.appendChild(li);
+        }
+    }
+
+    container.appendChild(el);
+
+    // Animate bar
+    const bar = el.querySelector('.search-progress-bar');
+    if (bar) {
+        requestAnimationFrame(() => { bar.style.width = '15%'; });
+        setTimeout(() => { if (bar) bar.style.width = '90%'; }, 150);
+    }
+
+    // Fade in
+    requestAnimationFrame(() => { el.classList.remove('opacity-0'); el.classList.add('opacity-100'); });
+
+    return {
+        update(newMessage, failed = false) {
+            const statusEl = el.querySelector('.search-progress-status');
+            const barEl = el.querySelector('.search-progress-bar');
+            const textEl = el.querySelector('p.text-xs.text-gray-500');
+            if (statusEl) {
+                statusEl.textContent = newMessage;
+                statusEl.classList.remove('text-gray-400', 'text-emerald-400', 'text-red-400');
+                statusEl.classList.add(failed ? 'text-red-400' : 'text-emerald-400');
+            }
+            if (barEl) {
+                barEl.style.width = '100%';
+                barEl.classList.remove('bg-brand-500', 'bg-emerald-500', 'bg-red-500');
+                barEl.classList.add(failed ? 'bg-red-500' : 'bg-emerald-500');
+            }
+            if (textEl) textEl.textContent = failed ? 'Failed' : 'Complete';
+        },
+        dismiss(delayMs = 3000) {
+            setTimeout(() => {
+                el.classList.remove('opacity-100');
+                el.classList.add('opacity-0');
+                setTimeout(() => el.remove(), 300);
+            }, delayMs);
+        }
+    };
+}
+
+function setSearchActionLoading(trigger, message = 'Searching...') {
+    if (!trigger) return;
+    trigger.disabled = true;
+    trigger.dataset.originalText = trigger.textContent;
+    trigger.innerHTML = '<span class="inline-flex items-center gap-1.5">' +
+        '<svg class="animate-spin h-3.5 w-3.5" aria-hidden="true" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>' +
+        '<span>' + window.escapeHtml(message) + '</span>' +
+    '</span>';
+    trigger.setAttribute('aria-busy', 'true');
+}
+
+function disableSearchControls(scope) {
+    if (!scope) return;
+    scope.querySelectorAll('[data-search-action="true"], [data-search-submit-control="true"]').forEach(control => {
+        control.disabled = true;
+    });
+}
+
+function getRequestTitleFromRow(row) {
+    if (!row) return null;
+    const titleCell = row.querySelector('td:nth-child(2)');
+    const title = titleCell ? titleCell.textContent.trim() : '';
+    return title || row.dataset.title || null;
+}
+
+function collectBulkSearchTitles(form, searchAll = false) {
+    if (!form) return [];
+    const selector = searchAll
+        ? 'tbody tr'
+        : 'input[name="request_ids"]:checked, input[name="torrent_ids"]:checked';
+    const nodes = Array.from(form.querySelectorAll(selector));
+    return nodes
+        .map(node => getRequestTitleFromRow(searchAll ? node : node.closest('tr')))
+        .filter(Boolean);
+}
+
+async function submitSearchRequest(action, body, redirectTo) {
+    const response = await fetch(action, {
+        method: 'POST',
+        body: body,
+        headers: { 'Accept': 'text/html' },
+    });
+    if (!response.ok) throw new Error('Search request failed (' + response.status + ')');
+    return response.url || redirectTo || window.location.href;
+}
+
+function showBulkSearchStatus(form, searchAll = false) {
+    if (!form) return;
+    const panel = form.querySelector('[data-bulk-search-status="true"]');
+    if (!panel) return;
+    const selectedCount = form.querySelectorAll('input[name="request_ids"]:checked, input[name="torrent_ids"]:checked').length;
+    const title = panel.querySelector('[data-bulk-search-status-title="true"]');
+    const message = panel.querySelector('[data-bulk-search-status-message="true"]');
+    if (title) title.textContent = searchAll ? 'Searching all pending requests' : 'Searching selected requests/torrents';
+    if (message) {
+        message.textContent = searchAll
+            ? 'Searching all pending items. You will be redirected when the search starts.'
+            : selectedCount > 0
+            ? 'Searching ' + selectedCount + ' selected item' + (selectedCount === 1 ? '' : 's') + '. You will be redirected when the search starts.'
+            : 'Preparing selected search. You will be redirected when the search starts.';
+    }
+    panel.classList.remove('hidden');
+}
+
+function postToAction(action, redirectTo, trigger = null) {
+    const row = trigger ? trigger.closest('tr') : null;
+    const title = getRequestTitleFromRow(row);
+    if (trigger && trigger.dataset.searchAction === 'true') {
+        setSearchActionLoading(trigger);
+        disableSearchControls(trigger.closest('tr'));
+        const match = action.match(/\/requests\/(\d+)\/search/);
+        const requestId = match ? parseInt(match[1], 10) : null;
+        if (requestId) {
+            function resetTrigger() {
+                trigger.disabled = false;
+                trigger.innerHTML = trigger.dataset.originalText || trigger.textContent;
+                trigger.removeAttribute('aria-busy');
+            }
+            window.startSearchProgress(requestId, title, function(data) {
+                window.updateRequestRow(requestId, data.result);
+                resetTrigger();
+            }, function() {
+                resetTrigger();
+            });
+        }
+        return;
+    }
+    const body = new FormData();
+    body.append('redirect_to', redirectTo);
+    submitSearchRequest(action, body, redirectTo)
+        .then(url => {
+            setTimeout(() => window.location.assign(url), 800);
+        })
+        .catch(() => {});
+}
+
+function handleBulkRequestActionSubmit(event, form) {
+    const submitter = event.submitter;
+    if (!submitter || submitter.dataset.searchSubmitControl !== 'true') return true;
+    if (form.dataset.searchSubmitting === 'true') return false;
+    event.preventDefault();
+    form.dataset.searchSubmitting = 'true';
+    const actionInput = document.createElement('input');
+    actionInput.type = 'hidden';
+    actionInput.name = 'action';
+    actionInput.value = submitter.value;
+    form.appendChild(actionInput);
+    const searchAll = submitter.value === 'search_all_pending';
+    const titles = collectBulkSearchTitles(form, searchAll);
+    setSearchActionLoading(submitter, searchAll ? 'Searching all...' : 'Searching...');
+    disableSearchControls(form);
+
+    var ids = [];
+    if (searchAll) {
+        var rows = form.querySelectorAll('tbody tr[data-request-id]');
+        ids = Array.from(rows).map(function(r) { return parseInt(r.dataset.requestId, 10); }).filter(Boolean);
+    } else {
+        var checkboxes = form.querySelectorAll('input[name="request_ids"]:checked');
+        ids = Array.from(checkboxes).map(function(cb) { return parseInt(cb.value, 10); }).filter(Boolean);
+    }
+
+    function resetSubmitter() {
+        form.dataset.searchSubmitting = '';
+        var originalText = submitter.dataset.originalText || submitter.value;
+        submitter.disabled = false;
+        submitter.innerHTML = '';
+        submitter.textContent = originalText;
+        submitter.removeAttribute('aria-busy');
+    }
+
+    if (ids.length > 0) {
+        window.startBulkSearchProgress(ids, titles, function(data) {
+            if (data.results) {
+                data.results.forEach(function(r) {
+                    window.updateRequestRow(r.request_id, r);
+                });
+            }
+            resetSubmitter();
+        }, function() {
+            resetSubmitter();
+        });
+    } else {
+        resetSubmitter();
+    }
+    return false;
 }
 
 function openDenyModal(requestId, redirectTo) {
@@ -71,7 +284,11 @@ function bindSelectAll(toggle, checkboxSelector) {
 
 // Export functions to window for HTML onclick handlers
 window.showToast = showToast;
+window.showSearchProgressToast = showSearchProgressToast;
 window.postToAction = postToAction;
+window.setSearchActionLoading = setSearchActionLoading;
+window.showBulkSearchStatus = showBulkSearchStatus;
+window.handleBulkRequestActionSubmit = handleBulkRequestActionSubmit;
 window.openDenyModal = openDenyModal;
 window.closeDenyModal = closeDenyModal;
 window.openReplaceModal = openReplaceModal;
