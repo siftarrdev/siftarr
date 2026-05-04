@@ -11,6 +11,7 @@ from math import ceil
 from typing import Any
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
+from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.interval import IntervalTrigger
 
 from app.siftarr.config import get_settings
@@ -495,12 +496,20 @@ class SchedulerService:
             replace_existing=True,
         )
 
+        full_sync_time = getattr(settings, "plex_full_sync_time", "03:00")
+        try:
+            hour_str, minute_str = full_sync_time.split(":")
+            full_sync_hour = int(hour_str)
+            full_sync_minute = int(minute_str)
+        except (ValueError, AttributeError):
+            full_sync_hour = 3
+            full_sync_minute = 0
         self.scheduler.add_job(
             self._run_plex_poll_job,
-            trigger=IntervalTrigger(minutes=getattr(settings, "plex_poll_interval_minutes", 360)),
+            trigger=CronTrigger(hour=full_sync_hour, minute=full_sync_minute),
             kwargs={"trigger_source": "scheduler"},
             id="plex_poll",
-            name="Run Plex poll",
+            name="Run full Plex sync",
             replace_existing=True,
         )
 
