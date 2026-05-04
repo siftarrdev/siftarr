@@ -35,8 +35,8 @@ def test_dashboard_template_loads_external_assets(dashboard_template_path):
     with open(dashboard_template_path, encoding="utf-8") as handle:
         template = handle.read()
 
-    assert "url_for('static', path='/css/dashboard.css')" in template
-    assert "url_for('static', path='/js/dashboard.js')" in template
+    assert "url_for('static', path='/css/dashboard.css') }}?v={{ static_version }}" in template
+    assert "url_for('static', path='/js/dashboard.js') }}?v={{ static_version }}" in template
     assert 'type="module"' in template
 
 

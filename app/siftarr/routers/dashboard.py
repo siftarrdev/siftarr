@@ -11,7 +11,7 @@ from fastapi.templating import Jinja2Templates
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.siftarr.config import get_settings
+from app.siftarr.config import get_settings, get_static_version
 from app.siftarr.database import get_db
 from app.siftarr.models.activity_log import ActivityLog, EventType
 from app.siftarr.models.episode import Episode
@@ -311,6 +311,7 @@ async def dashboard(
             "unreleased_release_dates": unreleased_release_dates,
             "completed_requests": completed_requests,
             "denied_requests": denied_requests,
+            "static_version": get_static_version(effective_settings),
             "stats": {
                 "active": len(filtered_requests),
                 "pending": len(pending_requests),
