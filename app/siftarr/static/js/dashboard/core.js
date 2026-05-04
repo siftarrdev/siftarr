@@ -157,6 +157,55 @@ function closeRequestDetails() {
     document.getElementById('request-details-modal').classList.add('hidden');
 }
 
+/**
+ * Refresh the currently visible tab's content by fetching fresh HTML from the server.
+ * Preserves text filter, media filter, and sort state.
+ * Also updates stat cards.
+ */
+async function refreshCurrentTabContent() {
+    const activeTabEl = document.querySelector('.tab-content:not(.hidden)');
+    if (!activeTabEl) return;
+    const tabName = activeTabEl.id.replace('content-', '');
+
+    const restore = window.saveTabState(tabName);
+    try {
+        const response = await fetch(window.location.pathname, { headers: { 'Accept': 'text/html' } });
+        if (!response.ok) return;
+        const html = await response.text();
+        const parser = new DOMParser();
+        const doc = parser.parseFromString(html, 'text/html');
+
+        // Update tab content
+        const newTabContent = doc.getElementById('content-' + tabName);
+        if (newTabContent) {
+            activeTabEl.innerHTML = newTabContent.innerHTML;
+        }
+
+        // Update stat cards
+        const statsContainer = document.querySelector('.grid.grid-cols-2.md\\:grid-cols-7');
+        const newStatsContainer = doc.querySelector('.grid.grid-cols-2.md\\:grid-cols-7');
+        if (statsContainer && newStatsContainer) {
+            statsContainer.innerHTML = newStatsContainer.innerHTML;
+        }
+
+        restore();
+
+        // Re-bind selection handlers if applicable
+        if (tabName === 'staged' && window.bindStagedSelectionHandlers) {
+            window.bindStagedSelectionHandlers();
+        }
+        if (tabName === 'active' || tabName === 'pending') {
+            const selectAll = document.getElementById(tabName === 'active' ? 'active-select-all' : 'pending-select-all');
+            const checkboxSelector = tabName === 'active' ? '.active-request-checkbox' : '.pending-request-checkbox';
+            if (selectAll && window.bindSelectAll) {
+                window.bindSelectAll(selectAll, checkboxSelector);
+            }
+        }
+    } catch (err) {
+        console.error('Failed to refresh tab content:', err);
+    }
+}
+
 // Export functions to window for HTML onclick handlers
 window.showTab = showTab;
 window.closeRequestDetails = closeRequestDetails;
@@ -167,3 +216,4 @@ window.setPoster = setPoster;
 window.getVisibleRequests = getVisibleRequests;
 window.refreshDetailsNavigationContext = refreshDetailsNavigationContext;
 window.updateNavigationButtons = updateNavigationButtons;
+window.refreshCurrentTabContent = refreshCurrentTabContent;

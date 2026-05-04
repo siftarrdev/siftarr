@@ -95,7 +95,7 @@ async function refreshStagedTabData() {
     const stagedContent = document.getElementById('content-staged');
     if (!stagedContent) return;
 
-    const priorFilter = document.getElementById('staged-filter-input')?.value || '';
+    const restore = window.saveTabState('staged');
     stagedTabRefreshInFlight = true;
     try {
         const response = await fetch(window.location.pathname, { headers: { 'Accept': 'text/html' } });
@@ -107,10 +107,8 @@ async function refreshStagedTabData() {
         if (!newContent) return;
 
         stagedContent.innerHTML = newContent.innerHTML;
-        const stagedFilterInput = document.getElementById('staged-filter-input');
-        if (stagedFilterInput) stagedFilterInput.value = priorFilter;
-        window.filterStagedTable();
         bindStagedSelectionHandlers();
+        restore();
     } catch (err) {
         console.error('Failed to refresh staged tab:', err);
     } finally {
@@ -123,8 +121,7 @@ async function refreshDownloadingTabData() {
     const downloadingContent = document.getElementById('content-downloading');
     if (!downloadingContent) return;
 
-    const priorFilter = document.getElementById('downloading-filter-input')?.value || '';
-
+    const restore = window.saveTabState('downloading');
     downloadingTabRefreshInFlight = true;
     try {
         const response = await fetch(window.location.pathname, { headers: { 'Accept': 'text/html' } });
@@ -136,10 +133,8 @@ async function refreshDownloadingTabData() {
         if (!newContent) return;
 
         downloadingContent.innerHTML = newContent.innerHTML;
-        const downloadingFilterInput = document.getElementById('downloading-filter-input');
-        if (downloadingFilterInput) downloadingFilterInput.value = priorFilter;
-        window.filterDownloadingTable();
         await _patchStagedDownloadStatus();
+        restore();
     } catch (err) {
         console.error('Failed to refresh downloading tab:', err);
     } finally {
