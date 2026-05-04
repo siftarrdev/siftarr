@@ -312,7 +312,7 @@ details[open] summary .accordion-chevron { transform: rotate(90deg); }
             <div class="flex items-center justify-between gap-4 py-3 first:pt-0 last:pb-0">
                 <div class="min-w-0">
                     <div class="text-sm font-semibold text-white">Plex Sync</div>
-                    <div class="text-xs text-gray-500">Partial sync checks new or incomplete TV content; full sync refreshes active non-completed TV metadata and polls Plex availability</div>
+                    <div class="text-xs text-gray-500">Partial sync scans recently added Plex items for matching requests; full sync refreshes all active TV metadata and polls Plex availability</div>
                 </div>
                 <div class="flex items-center gap-2 shrink-0">
                     <button type="button" onclick="startPlexRescan(true)" class="btn-primary btn-sm shrink-0">Partial Sync</button>
@@ -630,7 +630,7 @@ function startPlexRescan(shallow = false) {
     title.textContent = shallow ? 'Partial Plex Sync' : 'Full Plex Sync';
     progressText.textContent = 'Preparing…';
     status.textContent = shallow
-        ? 'Connecting for partial sync (new or incomplete content only)...'
+        ? 'Connecting for partial sync (recently added Plex items)...'
         : 'Connecting for full metadata refresh and availability poll...';
     status.classList.remove('text-red-400', 'text-emerald-400');
     status.classList.add('text-gray-400');
@@ -648,7 +648,7 @@ function startPlexRescan(shallow = false) {
         switch (data.phase) {
             case 'connecting':
                 status.textContent = shallow
-                    ? 'Connecting to Plex for partial sync...'
+                    ? 'Scanning recently added Plex items...'
                     : 'Connecting to Plex for full sync...';
                 applyProgress(bar, progressText, data, { fallbackPercent: 5 });
                 break;

@@ -368,35 +368,50 @@ async def rescan_plex_requests(
     """Run the manual Plex rescan path."""
     mode = "partial" if shallow else "full"
     polling_service = plex_polling_service_cls(db, plex)
+
+    if shallow:
+        # ── Partial sync: scan recently added Plex items only ──
+        if on_event is not None:
+            await on_event(
+                build_sse_progress_func(
+                    "connecting",
+                    mode=mode,
+                    message="Scanning recently added Plex items for matching requests...",
+                )
+            )
+
+        async def emit_scan_progress(payload: dict[str, Any]) -> None:
+            if on_event is None:
+                return
+            await on_event(
+                build_sse_progress_func(
+                    "processing",
+                    current=payload.get("current", 0),
+                    total=payload.get("total"),
+                    title=payload.get("title"),
+                    active=payload.get("active", []),
+                    mode=mode,
+                    message=(
+                        f"Checking recently added Plex items: {payload.get('title', '')}"
+                    ),
+                )
+            )
+
+        result = await polling_service.scan_recent(on_progress=emit_scan_progress)
+
+        matched = result.metrics.matched_requests
+        skipped = result.metrics.skipped_on_error_items
+        completed = result.completed_requests
+        return matched, skipped, completed
+
+    # ── Full sync: resync all active TV requests + poll all ──
     active_requests = await polling_service.get_active_requests()
     active_requests = [req for req in active_requests if req.status != RequestStatus.COMPLETED]
-
-    def is_completed_status(value: Any) -> bool:
-        if value == RequestStatus.COMPLETED:
-            return True
-        return getattr(value, "value", value) == RequestStatus.COMPLETED.value
 
     def title_for(req: RequestModel) -> str:
         return req.title or f"Request #{req.id}"
 
     tv_requests = [req for req in active_requests if req.media_type == MediaType.TV]
-
-    if shallow:
-
-        def all_episodes_available(req: RequestModel) -> bool:
-            seasons = list(getattr(req, "seasons", []) or [])
-            if not seasons:
-                return False
-            for season in seasons:
-                episodes = list(getattr(season, "episodes", []) or [])
-                if not episodes:
-                    return False
-                for episode in episodes:
-                    if not is_completed_status(episode.status):
-                        return False
-            return True
-
-        tv_requests = [req for req in tv_requests if not all_episodes_available(req)]
 
     configured_concurrency = getattr(runtime_settings, "plex_sync_concurrency", 1)
     sync_concurrency = (
@@ -411,20 +426,10 @@ async def rescan_plex_requests(
                 "fetching",
                 current=0,
                 total=max(1, len(active_requests)),
-                title=(
-                    "Finding new or incomplete Plex content..."
-                    if shallow
-                    else "Finding active Plex requests for full sync..."
-                ),
-                active=[
-                    title_for(req) for req in (tv_requests if shallow else active_requests)[:16]
-                ],
+                title="Finding active Plex requests for full sync...",
+                active=[title_for(req) for req in active_requests[:16]],
                 mode=mode,
-                message=(
-                    "Partial Plex sync: checking new or incomplete TV content only."
-                    if shallow
-                    else "Full Plex sync: refreshing active non-completed TV metadata."
-                ),
+                message="Full Plex sync: refreshing active non-completed TV metadata.",
             )
         )
 
@@ -455,18 +460,10 @@ async def rescan_plex_requests(
                 "polling",
                 current=0,
                 total=1,
-                title=(
-                    "Polling Plex availability after partial sync..."
-                    if shallow
-                    else "Refreshing metadata and polling Plex availability..."
-                ),
+                title="Refreshing metadata and polling Plex availability...",
                 active=[],
                 mode=mode,
-                message=(
-                    "Polling Plex availability for active requests after partial sync..."
-                    if shallow
-                    else "Running full Plex metadata refresh and availability poll..."
-                ),
+                message="Running full Plex metadata refresh and availability poll...",
             )
         )
 
@@ -485,11 +482,7 @@ async def rescan_plex_requests(
                 mode=mode,
                 started=payload.get("started"),
                 completed=completed_count,
-                message=(
-                    "Polling Plex availability for active requests after partial sync..."
-                    if shallow
-                    else "Running full Plex metadata refresh and availability poll..."
-                ),
+                message="Running full Plex metadata refresh and availability poll...",
             )
         )
 
@@ -553,25 +546,30 @@ async def rescan_plex_generator(
                                 yield serialize_sse(payload)
                         break
 
-                resynced, failed, completed = await task
+                scanned, errors, completed = await task
+                if shallow:
+                    message = (
+                        f"Partial Plex sync completed. "
+                        f"Scanned {scanned} matching request(s), "
+                        f"{errors} error(s), "
+                        f"{completed} transitioned to completed."
+                    )
+                else:
+                    message = (
+                        f"Full Plex sync completed. "
+                        f"Re-synced {scanned} TV request(s), "
+                        f"{errors} failed, "
+                        f"{completed} transitioned to completed."
+                    )
                 yield serialize_sse(
                     build_sse_progress_func(
                         "complete",
                         mode=mode,
-                        resynced=resynced,
-                        failed=failed,
+                        resynced=scanned,
+                        failed=errors,
                         completed=completed,
                         active=[],
-                        message=(
-                            (
-                                "Partial Plex sync completed. "
-                                if shallow
-                                else "Full Plex sync completed. "
-                            )
-                            + f"Re-synced {resynced} TV request(s), "
-                            f"{failed} failed, "
-                            f"{completed} transitioned to completed."
-                        ),
+                        message=message,
                     )
                 )
             finally:
