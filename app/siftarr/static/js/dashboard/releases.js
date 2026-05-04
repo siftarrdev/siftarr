@@ -141,7 +141,7 @@ function renderReleaseCard(release, requestId) {
             <div class="flex flex-col gap-2 lg:flex-row lg:items-start lg:justify-between">
                 <div class="min-w-0">
                     <div class="font-medium text-white text-sm break-words">${window.escapeHtml(release.title)}</div>
-                    <div class="mt-1 text-xs text-gray-400">Score <span class="font-semibold text-emerald-400">${release.score}</span> &middot; ${secondaryMeta || '<span class="text-gray-400">No release metadata</span>'} &middot; ${window.escapeHtml(availability)}${publishAge ? ` &middot; <span data-release-upload-age="true">${window.escapeHtml(publishAge)}</span>` : ''}${release.files != null ? ` &middot; <span class="text-gray-400">${release.files} file${release.files !== 1 ? 's' : ''}</span>` : ''}</div>
+                    <div class="mt-1 text-xs text-gray-400">Score <span class="font-semibold text-emerald-400">${release.score}</span> &middot; ${secondaryMeta || '<span class="text-gray-400">No release metadata</span>'} &middot; ${window.escapeHtml(availability)}${publishAge ? ` &middot; <span data-release-upload-age="true">${window.escapeHtml(publishAge)}</span>` : ''}</div>
                     ${coverageHtml}
                 </div>
                 <div class="flex shrink-0 flex-col items-end gap-2 text-right" data-release-status-column="true">

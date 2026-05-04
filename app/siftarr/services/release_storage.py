@@ -71,6 +71,7 @@ def build_prowlarr_release(release: Release) -> ProwlarrRelease:
         resolution=release.resolution,
         codec=release.codec,
         release_group=release.release_group,
+        files=release.files,
     )
 
 
@@ -107,6 +108,7 @@ async def store_search_results(
             resolution=release.resolution,
             codec=release.codec,
             release_group=release.release_group,
+            files=release.files,
             season_number=parsed.season_number,
             episode_number=parsed.episode_number,
             season_coverage=serialize_release_coverage(coverage),
@@ -165,6 +167,7 @@ async def persist_manual_release(
             resolution=release.resolution,
             codec=release.codec,
             release_group=release.release_group,
+            files=release.files,
             season_number=parsed.season_number,
             episode_number=parsed.episode_number,
             season_coverage=serialize_release_coverage(coverage),
@@ -187,6 +190,7 @@ async def persist_manual_release(
         record.resolution = release.resolution
         record.codec = release.codec
         record.release_group = release.release_group
+        record.files = release.files
         record.season_number = parsed.season_number
         record.episode_number = parsed.episode_number
         record.season_coverage = serialize_release_coverage(coverage)

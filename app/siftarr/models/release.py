@@ -40,6 +40,7 @@ class Release(Base):
     info_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
     indexer: Mapped[str] = mapped_column(String(255), nullable=False)
     publish_date: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    files: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
     # Resolution info (parsed)
     resolution: Mapped[str | None] = mapped_column(
