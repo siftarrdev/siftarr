@@ -113,7 +113,6 @@ async function openRequestDetails(requestId, explicitIndex = null) {
                     cacheIndicator.classList.remove('hidden');
                 }
             } else {
-                releases.innerHTML = '<div class="text-gray-500 text-sm">No cached results – searching automatically...</div>';
                 if (cacheIndicator) cacheIndicator.classList.add('hidden');
                 searchRequestFromDetails();
             }
@@ -161,37 +160,22 @@ async function searchRequestFromDetails() {
         btn.disabled = true;
         btn.textContent = 'Searching...';
     }
+    const detailsTitle = document.getElementById('request-details-title')?.textContent?.trim();
     const releasesContainer = document.getElementById('request-details-releases');
-    try {
-        const response = await fetch('/requests/' + window.currentRequestId + '/search', { method: 'POST' });
-        if (!response.ok) {
-            const errorData = await response.json().catch(() => null);
-            throw new Error(errorData?.error || 'Server error: ' + response.status);
-        }
-        const data = await response.json();
-        window.currentReleases = data.releases || [];
-        if (releasesContainer) {
-            releasesContainer.innerHTML = window.currentReleases.map(release => window.renderReleaseCard(release, window.currentRequestId)).join('') || '<div class="text-gray-500 text-sm">No search results found for this request.</div>';
-        }
-        const cacheInd = document.getElementById('release-cache-indicator');
-        const cacheIndText = document.getElementById('release-cache-indicator-text');
-        if (cacheInd && cacheIndText && window.currentReleases.length > 0) {
-            cacheIndText.textContent = 'Fresh results';
-            cacheInd.classList.remove('hidden');
-        } else if (cacheInd) {
-            cacheInd.classList.add('hidden');
-        }
-        renderTimeline(window.currentRequestTimeline);
-    } catch (err) {
-        if (releasesContainer) {
-            releasesContainer.innerHTML = '<div class="text-red-400 text-sm">Search failed: ' + window.escapeHtml(err.message) + '</div>';
-        }
-    } finally {
+    if (releasesContainer) {
+        releasesContainer.innerHTML = window.renderMovieSearchLoadingState();
+    }
+    const cacheInd = document.getElementById('release-cache-indicator');
+    if (cacheInd) {
+        cacheInd.classList.add('hidden');
+    }
+    window.startSearchProgress(window.currentRequestId, detailsTitle, function(data) {
+        window.openRequestDetails(window.currentRequestId, window.currentDetailsIndex);
         if (btn) {
             btn.disabled = false;
             btn.innerHTML = originalText || 'Refresh Search';
         }
-    }
+    });
 }
 
 function renderTimeline(timelineData) {
