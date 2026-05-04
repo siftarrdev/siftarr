@@ -7,6 +7,7 @@ Main FastAPI application package for Siftarr.
 - `main.py` creates the FastAPI app, mounts static assets, registers routers, starts schedulers, and handles app startup/shutdown.
 - `config.py` owns environment-backed defaults; runtime settings persisted in the database are loaded by services that need them.
 - `database.py` owns the async SQLAlchemy engine, session dependency, and SQLite connection pragmas.
+- `version.py` provides runtime version string derived from git tags or package metadata.
 - `routers/` handles HTTP, UI, and API boundaries.
 - `services/` owns business workflows, external integrations, background jobs, and domain coordination.
 - `models/` owns persisted SQLAlchemy entities and enums.

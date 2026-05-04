@@ -85,6 +85,10 @@ The old duplicated developer guide and stale product specification under `docs/`
 - application settings loading
 - environment and runtime configuration access
 
+### `app/siftarr/version.py`
+
+- runtime version string derived from git tags or package metadata
+
 ### `app/siftarr/database.py`
 
 - SQLAlchemy engine/session setup

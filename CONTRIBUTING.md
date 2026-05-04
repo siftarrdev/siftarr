@@ -50,7 +50,7 @@ uv run alembic revision --autogenerate -m "describe_change"
 uv run alembic upgrade head
 ```
 
-The schema is still in flux; keep only a single init migration until the database design settles. If migration history is collapsed, reset or stamp local databases as instructed in the related PR.
+The schema is still in flux; keep migrations focused and compact. If migration history is collapsed, reset or stamp local databases as instructed in the related PR.
 
 ## Running and modifying the app
 

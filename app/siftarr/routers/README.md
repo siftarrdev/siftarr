@@ -8,6 +8,7 @@ HTTP boundary for the FastAPI app. Routers should translate requests into servic
 - `dashboard_api.py` returns dashboard JSON for details, release search, timeline, and enrichment flows.
 - `dashboard_actions.py` handles dashboard-triggered mutations such as retries, discard, and availability actions.
 - `rules.py` manages rule UI/API interactions.
+- `search_sse.py` provides SSE streaming endpoints for live search progress and TV inspect results.
 - `settings.py` manages settings, maintenance, connection tests, sync jobs, and scheduler actions.
 - `staged.py` exposes staged torrent approval and discard endpoints.
 - `webhooks.py` receives Overseerr webhooks and queues request processing.

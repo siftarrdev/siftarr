@@ -5,7 +5,7 @@ Media search and download decision middleware (FastAPI app).
 ## Dev Commands
 
 ```bash
-uv sync -- extra dev       # Install dependencies
+uv sync --extra dev       # Install dependencies
 uv run alembic upgrade head # Run database migrations
 uv run uvicorn app.siftarr.main:app --reload  # Dev server
 ```
@@ -64,9 +64,8 @@ Before using `gh` commands (PRs, issues, etc.), verify the active account is cor
 
 ## Database guidance
 
-- The database schema is currently in flux.
-- Keep only a single init Alembic migration until the schema stabilizes.
-- Avoid reintroducing split migration chains unless the database design has settled.
+- The database schema is currently in flux; keep migrations focused and compact.
+- If migration history is collapsed, reset or stamp local databases as instructed in the related PR.
 
 ## Repo Map Maintenance
 
