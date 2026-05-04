@@ -6,9 +6,8 @@
 - A bulk search of torrents only resulted in very few staged torrents. And one of the movie releases has two staged torrents. there should only be max of one staged torrent per movie.
 - make sure that the searched torrents details shows the number of files in the torrent for both tv shows or packs and movies.
 - make the qbittorrent state wrap around to multiple lines when the column isn't big enough. this should be the case for everything in all of the columns in the dashboards.
+
 - remove enabled tag from scope in the rules tab. there is already an enabled toggle.
-- allow sorting by columns in teh rules tab.
+- allow sorting by columns in the rules tab.
 - allow filtering in the rules tab. as well as sowing just movie rules or just tv show rules.
 
-## DONE
-- [x] fix Tailwind CDN production warning — replaced `cdn.tailwindcss.com` with pre-built `tailwind.css` via Tailwind CLI
