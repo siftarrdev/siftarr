@@ -58,6 +58,9 @@ data/
 plan.md
 .ignore
 
+# Node / Tailwind
+node_modules/
+
 # Temporary files
 *.tmp
 *.temp

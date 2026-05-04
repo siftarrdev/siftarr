@@ -1,3 +1,13 @@
+# Stage 1: Build Tailwind CSS
+FROM node:20-slim AS tailwind-builder
+WORKDIR /build
+COPY package.json tailwind.config.js ./
+COPY app/siftarr/static/css/tailwind-input.css ./app/siftarr/static/css/tailwind-input.css
+COPY app/siftarr/templates/ ./app/siftarr/templates/
+RUN npm install && \
+    npx tailwindcss -i ./app/siftarr/static/css/tailwind-input.css -o ./app/siftarr/static/css/tailwind.css --minify
+
+# Stage 2: Python application
 FROM python:3.12-slim
 
 ARG SIFTARR_VERSION=0.0.0
@@ -22,6 +32,8 @@ RUN SETUPTOOLS_SCM_PRETEND_VERSION_FOR_SIFTARR="${SIFTARR_VERSION#v}" uv sync --
 
 # Copy application code
 COPY app/ ./app/
+# Copy pre-built Tailwind CSS from build stage
+COPY --from=tailwind-builder /build/app/siftarr/static/css/tailwind.css ./app/siftarr/static/css/tailwind.css
 COPY db/alembic/ ./alembic/
 COPY db/alembic.ini ./
 
