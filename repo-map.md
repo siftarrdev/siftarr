@@ -52,6 +52,8 @@ Primary flow:
 - `pyproject.toml` — Python project metadata, dependencies, pytest, and Ruff config
 - `ty.toml` — static type checker configuration
 - `uv.lock` — locked dependency graph for `uv`
+- `package.json` / `tailwind.config.js` — Tailwind CSS build config (npm dev dependency)
+- `node_modules/` — JavaScript dependencies (gitignored)
 
 ## Documentation map
 
@@ -152,7 +154,9 @@ Server-rendered HTML templates.
 
 Static assets.
 
-- `css/dashboard.css` — main UI styling
+- `css/dashboard.css` — supplemental UI styling
+- `css/tailwind.css` — built Tailwind CSS output (generated, committed)
+- `css/tailwind-input.css` — Tailwind CSS input with `@tailwind` directives and custom component classes
 - `js/dashboard*.js` and `js/dashboard/` — dashboard client-side behavior, filters, details, staged actions, release search UX, and SSE progress panel
 - favicon assets
 
@@ -171,10 +175,20 @@ Static assets.
 - `db/alembic/env.py` — Alembic environment wiring
 - `db/alembic/versions/` — single init migration only while the database is in flux; reset/stamp existing local databases when schema history is collapsed
 - container startup runs Alembic/SQLite repair before the FastAPI app launches
-- `docker/Dockerfile` — production/container image build
+- `docker/Dockerfile` — multi-stage production image build (Node stage builds Tailwind CSS, Python stage runs the app)
 - `docker/docker-compose.yml` — local container orchestration
 - `docker/rebuild-run-logs.sh` — rebuild, run, and log-tail helper
 - `docker/entrypoint.sh` — container startup script
+
+## Tailwind CSS Build
+
+After changing custom styles or Tailwind classes in templates, rebuild the CSS:
+
+```bash
+npm run build:css
+```
+
+The Docker multi-stage build rebuilds Tailwind CSS automatically.
 
 ## Quality gates
 
