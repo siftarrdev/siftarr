@@ -27,6 +27,7 @@ class ProwlarrRelease(BaseModel):
     resolution: str | None = None
     codec: str | None = None
     release_group: str | None = None
+    uploaded_by: str | None = None
     files: int | None = None
 
 
@@ -62,7 +63,8 @@ class ProwlarrService:
         title = release.get("title", "")
         resolution = self._extract_resolution(title)
         codec = self._extract_codec(title)
-        release_group = self._extract_release_group(title)
+        release_group = release.get("releaseGroup") or self._extract_release_group(title)
+        uploaded_by = release.get("uploadedBy") or release.get("uploader")
         files = (
             release.get("files")
             or release.get("fileCount")
@@ -85,6 +87,7 @@ class ProwlarrService:
             resolution=resolution,
             codec=codec,
             release_group=release_group,
+            uploaded_by=uploaded_by,
             files=files,
         )
 

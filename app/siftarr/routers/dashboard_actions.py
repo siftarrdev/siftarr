@@ -271,6 +271,7 @@ async def use_manual_release(
     resolution: str | None = Form(default=None),
     codec: str | None = Form(default=None),
     release_group: str | None = Form(default=None),
+    uploaded_by: str | None = Form(default=None),
     redirect_to: str | None = Form(default=None),
     db: AsyncSession = Depends(get_db),
 ) -> RedirectResponse | JSONResponse:
@@ -297,6 +298,7 @@ async def use_manual_release(
         resolution=resolution,
         codec=codec,
         release_group=release_group,
+        uploaded_by=uploaded_by,
     )
 
     result = await _select_manual_release_for_request(db, request, release)

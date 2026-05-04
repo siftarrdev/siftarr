@@ -99,6 +99,15 @@ class RuleEngine:
                 continue
 
     @staticmethod
+    def _matches_any_field(compiled: re.Pattern, release: ProwlarrRelease) -> bool:
+        """Check if compiled pattern matches any of the release's relevant fields."""
+        return bool(
+            compiled.search(release.title)
+            or (release.release_group and compiled.search(release.release_group))
+            or (release.uploaded_by and compiled.search(release.uploaded_by))
+        )
+
+    @staticmethod
     def _scope_matches(rule_scope: str, media_type: str | None) -> bool:
         if not rule_scope or rule_scope == "both" or media_type is None:
             return True
@@ -253,7 +262,7 @@ class RuleEngine:
 
         # Check exclusion patterns (reject immediately)
         for rule_id, rule_name, compiled in self._compiled_exclusion:
-            if compiled.search(release.title):
+            if self._matches_any_field(compiled, release):
                 passed = False
                 rejection_reason = f"Matched exclusion pattern: {rule_name}"
                 matches.append(
@@ -277,7 +286,7 @@ class RuleEngine:
         if passed and self._compiled_requirement:
             any_matched = False
             for rule_id, rule_name, compiled in self._compiled_requirement:
-                if compiled.search(release.title):
+                if self._matches_any_field(compiled, release):
                     any_matched = True
                     matches.append(
                         RuleMatch(
@@ -301,7 +310,7 @@ class RuleEngine:
 
         # Calculate score for scorer patterns
         for rule_id, rule_name, compiled, score in self._compiled_scorer:
-            if compiled.search(release.title):
+            if self._matches_any_field(compiled, release):
                 total_score += score
                 matches.append(
                     RuleMatch(

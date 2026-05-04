@@ -36,4 +36,5 @@ def selected_release():
     release.resolution = None
     release.codec = None
     release.release_group = None
+    release.uploaded_by = None
     return release

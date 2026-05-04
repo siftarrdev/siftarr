@@ -103,6 +103,7 @@ def serialize_evaluated_release(
         "resolution": release.resolution,
         "codec": release.codec,
         "release_group": release.release_group,
+        "uploaded_by": release.uploaded_by,
         "info_hash": release.info_hash,
         "score": evaluation.total_score,
         "passed": evaluation.passed,

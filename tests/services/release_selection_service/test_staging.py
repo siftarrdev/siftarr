@@ -119,6 +119,7 @@ async def test_use_releases_tv_single_episode_selection_only_replaces_same_episo
     episode_one_release.resolution = None
     episode_one_release.codec = None
     episode_one_release.release_group = None
+    episode_one_release.uploaded_by = None
 
     episode_two_release = MagicMock()
     episode_two_release.id = 102
@@ -135,6 +136,7 @@ async def test_use_releases_tv_single_episode_selection_only_replaces_same_episo
     episode_two_release.resolution = None
     episode_two_release.codec = None
     episode_two_release.release_group = None
+    episode_two_release.uploaded_by = None
 
     reselection_release = MagicMock()
     reselection_release.id = 103
@@ -151,6 +153,7 @@ async def test_use_releases_tv_single_episode_selection_only_replaces_same_episo
     reselection_release.resolution = None
     reselection_release.codec = None
     reselection_release.release_group = None
+    reselection_release.uploaded_by = None
 
     stage_episode_one = StagedTorrent(
         id=61,

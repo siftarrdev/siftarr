@@ -48,6 +48,7 @@ class Release(Base):
     )  # e.g., "1080p", "2160p"
     codec: Mapped[str | None] = mapped_column(String(50), nullable=True)  # e.g., "x265", "H.264"
     release_group: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    uploaded_by: Mapped[str | None] = mapped_column(String(255), nullable=True)
     season_number: Mapped[int | None] = mapped_column(Integer, nullable=True)
     episode_number: Mapped[int | None] = mapped_column(Integer, nullable=True)
     season_coverage: Mapped[str | None] = mapped_column(String(100), nullable=True)
