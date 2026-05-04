@@ -181,6 +181,7 @@ async def test_use_manual_release_persists_then_uses_release(mock_db, monkeypatc
         resolution="1080p",
         codec="x265",
         release_group="GROUP",
+        uploaded_by=None,
         redirect_to=None,
         db=mock_db,
     )
@@ -269,6 +270,7 @@ async def test_use_manual_release_json_reports_replacement_outcome(mock_db, monk
         resolution="1080p",
         codec="x265",
         release_group="GROUP",
+        uploaded_by=None,
         redirect_to=None,
         db=mock_db,
     )

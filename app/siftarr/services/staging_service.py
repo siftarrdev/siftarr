@@ -133,6 +133,7 @@ class StagingService:
                 "resolution": release.resolution,
                 "codec": release.codec,
                 "release_group": release.release_group,
+                "uploaded_by": release.uploaded_by,
                 "seeders": release.seeders,
                 "leechers": release.leechers,
                 "download_url": release.download_url,
