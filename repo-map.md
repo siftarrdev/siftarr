@@ -108,6 +108,7 @@ HTTP route layer.
 - `dashboard.py` — main dashboard page routes
 - `dashboard_api.py` — dashboard JSON endpoints for details/search data
 - `dashboard_actions.py` — dashboard-triggered actions and mutations
+- `search_sse.py` — SSE streaming endpoints for live search progress and TV inspect results
 - `rules.py` — rule management UI/API, including unified rule listing, multi-title testing, modal import/export, and create/edit actions
 - `settings.py` — settings UI, maintenance, jobs, and connection actions
 - `staged.py` — staged torrent review/approval endpoints
@@ -152,12 +153,12 @@ Server-rendered HTML templates.
 Static assets.
 
 - `css/dashboard.css` — main UI styling
-- `js/dashboard*.js` and `js/dashboard/` — dashboard client-side behavior, filters, details, staged actions, and release search UX
+- `js/dashboard*.js` and `js/dashboard/` — dashboard client-side behavior, filters, details, staged actions, release search UX, and SSE progress panel
 - favicon assets
 
 ## Tests map
 
-- `tests/routers/dashboard/` — dashboard page/API/action coverage
+- `tests/routers/dashboard/` — dashboard page/API/action coverage, including SSE search streams
 - `tests/routers/settings/` — settings page, connections, maintenance, and jobs coverage
 - `tests/services/release_selection_service/` — release persistence/staging behavior coverage
 - `tests/services/plex_service/` — Plex service unit coverage
