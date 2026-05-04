@@ -47,7 +47,12 @@ local_scheme = "node-and-date"
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"
-addopts = "-p no:sugar"
+addopts = [
+  "-q",
+  "--tb=short",
+  "--disable-warnings",
+  "--no-header",
+]
 
 [tool.ruff]
 line-length = 100
