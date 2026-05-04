@@ -8,6 +8,7 @@ import './dashboard/filters.js';
 import './dashboard/details.js';
 import './dashboard/staged.js';
 import './dashboard/modals.js';
+import './dashboard/search_sse.js';
 
 // Column Resizer Class - Must be defined here as it's used across modules
 class ColumnResizer {
