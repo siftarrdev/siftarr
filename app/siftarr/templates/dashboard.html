@@ -132,16 +132,16 @@
                     <tbody class="divide-y divide-gray-700/40" id="active-requests-body">
                         {% for req in active_requests %}
                         <tr class="hover:bg-surface-850/80 cursor-pointer transition-colors" onclick="openRequestDetails({{ req.id }})" data-request-id="{{ req.id }}" data-overseerr="{{ 'true' if req.overseerr_request_id else 'false' }}" data-status="{{ req.status.value }}" data-title="{{ req.title|lower }}" data-type="{{ req.media_type.value|lower }}" data-status-low="{{ req.status.value|lower }}" data-requestedby="{{ req.requester_username|default('Unknown')|lower }}" data-requested="{{ req.created_at.strftime('%Y-%m-%d %H:%M') }}" data-year="{{ req.year or 0 }}">
-                            <td class="px-5 py-3.5 whitespace-nowrap text-sm" onclick="event.stopPropagation()">
+                            <td class="px-5 py-3.5  text-sm" onclick="event.stopPropagation()">
                                 <input name="request_ids" value="{{ req.id }}" type="checkbox" class="active-request-checkbox rounded border-gray-600 bg-surface-900 text-brand-500 focus:ring-brand-500">
                             </td>
-                            <td class="px-5 py-3.5 whitespace-nowrap text-sm font-medium text-white">{{ req.title }}</td>
-                            <td class="px-5 py-3.5 whitespace-nowrap text-sm text-gray-400 tabular-nums" data-sort-value="{{ req.year or 0 }}">{{ req.year or '-' }}</td>
-                            <td class="px-5 py-3.5 whitespace-nowrap text-sm capitalize text-gray-400">{{ req.media_type.value }}</td>
-                            <td class="px-5 py-3.5 whitespace-nowrap text-sm"><span class="badge {% if req.status.value == 'searching' %}badge-yellow{% elif req.status.value == 'downloading' %}badge-blue{% else %}badge-gray{% endif %}">{{ req.status.value }}</span></td>
-                            <td class="px-5 py-3.5 whitespace-nowrap text-sm text-gray-500 tabular-nums" data-sort-value="{{ req.created_at.strftime('%Y-%m-%d %H:%M') }}">{{ req.created_at.strftime('%Y-%m-%d %H:%M') }}</td>
-                            <td class="px-5 py-3.5 whitespace-nowrap text-sm text-gray-400">{{ req.requester_username or 'Unknown' }}</td>
-                            <td class="px-5 py-3.5 whitespace-nowrap text-sm" onclick="event.stopPropagation()">
+                            <td class="px-5 py-3.5  text-sm font-medium text-white">{{ req.title }}</td>
+                            <td class="px-5 py-3.5  text-sm text-gray-400 tabular-nums" data-sort-value="{{ req.year or 0 }}">{{ req.year or '-' }}</td>
+                            <td class="px-5 py-3.5  text-sm capitalize text-gray-400">{{ req.media_type.value }}</td>
+                            <td class="px-5 py-3.5  text-sm"><span class="badge {% if req.status.value == 'searching' %}badge-yellow{% elif req.status.value == 'downloading' %}badge-blue{% else %}badge-gray{% endif %}">{{ req.status.value }}</span></td>
+                            <td class="px-5 py-3.5  text-sm text-gray-500 tabular-nums" data-sort-value="{{ req.created_at.strftime('%Y-%m-%d %H:%M') }}">{{ req.created_at.strftime('%Y-%m-%d %H:%M') }}</td>
+                            <td class="px-5 py-3.5  text-sm text-gray-400">{{ req.requester_username or 'Unknown' }}</td>
+                            <td class="px-5 py-3.5  text-sm" onclick="event.stopPropagation()">
                                 <div class="flex items-center gap-3">
                                     <button type="button" onclick="openRequestDetails({{ req.id }})" class="text-brand-400 hover:text-brand-300 font-medium">Details</button>
                                     <button type="button" onclick="openDenyModal({{ req.id }}, '/?tab=active')" class="text-red-400 hover:text-red-300 font-medium">Deny</button>
@@ -215,16 +215,16 @@
                         <tbody class="divide-y divide-gray-700/40" id="pending-requests-body">
                             {% for req in pending_requests %}
                             <tr class="hover:bg-surface-850/80 cursor-pointer transition-colors" onclick="openRequestDetails({{ req.id }})" data-request-id="{{ req.id }}" data-title="{{ req.title|lower }}" data-type="{{ req.media_type.value|lower }}" data-requestedby="{{ req.requester_username|default('Unknown')|lower }}" data-requested="{{ req.created_at.strftime('%Y-%m-%d %H:%M') }}" data-status="{{ req.status.value|lower }}" data-year="{{ req.year or 0 }}">
-                                <td class="px-4 py-3.5 whitespace-nowrap text-sm" onclick="event.stopPropagation()">
+                                <td class="px-4 py-3.5  text-sm" onclick="event.stopPropagation()">
                                     <input name="request_ids" value="{{ req.id }}" type="checkbox" class="pending-request-checkbox rounded border-gray-600 bg-surface-900 text-brand-500 focus:ring-brand-500">
                                 </td>
-                                <td class="px-4 py-3.5 whitespace-nowrap text-sm font-medium text-white max-w-sm overflow-hidden text-ellipsis">{{ req.title }}</td>
-                                <td class="px-4 py-3.5 whitespace-nowrap text-sm text-gray-500 tabular-nums" data-sort-value="{{ req.year or 0 }}">{{ req.year or '-' }}</td>
-                                <td class="px-4 py-3.5 whitespace-nowrap text-sm capitalize text-gray-400">{{ req.media_type.value }}</td>
-                                <td class="px-4 py-3.5 whitespace-nowrap text-sm text-gray-500 tabular-nums">{{ req.created_at.strftime('%Y-%m-%d %H:%M') }}</td>
-                                <td class="px-4 py-3.5 whitespace-nowrap text-sm text-gray-400">{{ req.requester_username or 'Unknown' }}</td>
-                                <td class="px-4 py-3.5 whitespace-nowrap text-sm"><span class="badge {% if req.status.value == 'searching' %}badge-blue{% elif req.status.value == 'pending' %}badge-yellow{% else %}badge-gray{% endif %}">{{ req.status.value }}</span></td>
-                                <td class="px-4 py-3.5 whitespace-nowrap text-sm" onclick="event.stopPropagation()">
+                                <td class="px-4 py-3.5 text-sm font-medium text-white max-w-sm">{{ req.title }}</td>
+                                <td class="px-4 py-3.5  text-sm text-gray-500 tabular-nums" data-sort-value="{{ req.year or 0 }}">{{ req.year or '-' }}</td>
+                                <td class="px-4 py-3.5  text-sm capitalize text-gray-400">{{ req.media_type.value }}</td>
+                                <td class="px-4 py-3.5  text-sm text-gray-500 tabular-nums">{{ req.created_at.strftime('%Y-%m-%d %H:%M') }}</td>
+                                <td class="px-4 py-3.5  text-sm text-gray-400">{{ req.requester_username or 'Unknown' }}</td>
+                                <td class="px-4 py-3.5  text-sm"><span class="badge {% if req.status.value == 'searching' %}badge-blue{% elif req.status.value == 'pending' %}badge-yellow{% else %}badge-gray{% endif %}">{{ req.status.value }}</span></td>
+                                <td class="px-4 py-3.5  text-sm" onclick="event.stopPropagation()">
                                     <div class="flex items-center gap-3">
                                         <button type="button" onclick="openRequestDetails({{ req.id }})" class="text-brand-400 hover:text-brand-300 font-medium">Details</button>
                                         <button type="button" onclick="postToAction('/requests/{{ req.id }}/search', '/?tab=pending', this)" data-search-action="true" class="text-brand-400 hover:text-brand-300 font-medium">Search</button>
@@ -284,13 +284,13 @@
                         {% for req in unreleased_requests %}
                         {% set expected_date = unreleased_release_dates.get(req.id) %}
                         <tr class="hover:bg-surface-850/80 cursor-pointer transition-colors" onclick="openRequestDetails({{ req.id }})" data-request-id="{{ req.id }}" data-title="{{ req.title|lower }}" data-type="{{ req.media_type.value|lower }}" data-requestedby="{{ req.requester_username|default('Unknown')|lower }}" data-requested="{{ req.created_at.strftime('%Y-%m-%d %H:%M') }}" data-releasedate="{{ expected_date or '9999-12-31' }}" data-year="{{ req.year or 0 }}">
-                            <td class="px-5 py-3.5 whitespace-nowrap text-sm font-medium text-white">{{ req.title }}</td>
-                            <td class="px-5 py-3.5 whitespace-nowrap text-sm text-gray-500 tabular-nums" data-sort-value="{{ req.year or 0 }}">{{ req.year or '-' }}</td>
-                            <td class="px-5 py-3.5 whitespace-nowrap text-sm capitalize text-gray-400">{{ req.media_type.value }}</td>
-                            <td class="px-5 py-3.5 whitespace-nowrap text-sm text-gray-500 tabular-nums">{{ req.created_at.strftime('%Y-%m-%d %H:%M') }}</td>
-                            <td class="px-5 py-3.5 whitespace-nowrap text-sm text-gray-400">{{ req.requester_username or 'Unknown' }}</td>
-                            <td class="px-5 py-3.5 whitespace-nowrap text-sm text-purple-300 tabular-nums">{{ expected_date or '-' }}</td>
-                            <td class="px-5 py-3.5 whitespace-nowrap text-sm" onclick="event.stopPropagation()">
+                            <td class="px-5 py-3.5  text-sm font-medium text-white">{{ req.title }}</td>
+                            <td class="px-5 py-3.5  text-sm text-gray-500 tabular-nums" data-sort-value="{{ req.year or 0 }}">{{ req.year or '-' }}</td>
+                            <td class="px-5 py-3.5  text-sm capitalize text-gray-400">{{ req.media_type.value }}</td>
+                            <td class="px-5 py-3.5  text-sm text-gray-500 tabular-nums">{{ req.created_at.strftime('%Y-%m-%d %H:%M') }}</td>
+                            <td class="px-5 py-3.5  text-sm text-gray-400">{{ req.requester_username or 'Unknown' }}</td>
+                            <td class="px-5 py-3.5  text-sm text-purple-300 tabular-nums">{{ expected_date or '-' }}</td>
+                            <td class="px-5 py-3.5  text-sm" onclick="event.stopPropagation()">
                                 <button type="button" onclick="openRequestDetails({{ req.id }})" class="text-brand-400 hover:text-brand-300 font-medium">Details</button>
                             </td>
                         </tr>
@@ -346,12 +346,12 @@
                                 <div class="mt-1 text-xs text-amber-300">Possible wrong movie: {{ identity_warning }}</div>
                                 {% endif %}
                             </td>
-                            <td class="px-5 py-3.5 whitespace-nowrap text-sm" onclick="event.stopPropagation()"><input type="checkbox" class="staged-torrent-checkbox rounded border-gray-600 bg-surface-900 text-brand-500 focus:ring-brand-500" value="{{ torrent.id }}"></td>
-                            <td class="px-5 py-3.5 whitespace-nowrap text-sm"><span class="badge {% if request_state == 'staged' %}badge-yellow{% else %}badge-gray{% endif %}">{{ request_state }}</span></td>
-                            <td class="px-5 py-3.5 whitespace-nowrap text-sm text-gray-400 tabular-nums">{{ (torrent.size / 1024 / 1024 / 1024)|round(2) }} GB</td>
-                            <td class="px-5 py-3.5 whitespace-nowrap text-sm text-gray-400">{{ torrent.indexer }}</td>
-                            <td class="px-5 py-3.5 whitespace-nowrap text-sm text-emerald-400 font-medium tabular-nums">{{ torrent.score }}</td>
-                            <td class="px-5 py-3.5 whitespace-nowrap text-sm" onclick="event.stopPropagation()"><div class="flex items-center gap-3">{% if torrent.request_id %}<button type="button" onclick="openRequestDetails({{ torrent.request_id }})" class="text-brand-400 hover:text-brand-300 font-medium">Details</button>{% endif %}{% if torrent.request_id in downloading_request_ids %}<button type="button" onclick="openReplaceModal({{ torrent.id }}, {{ torrent.request_id }}, '{{ torrent.title|replace("'", "\'") }}', '/?tab=downloading')" class="text-amber-400 hover:text-amber-300 font-medium">Replace</button>{% else %}<button type="button" onclick="postStagedAction('/staged/{{ torrent.id }}/approve', '/?tab=staged')" class="text-emerald-400 hover:text-emerald-300 font-medium">Approve</button>{% endif %}<button type="button" onclick="postStagedAction('/staged/{{ torrent.id }}/discard', '/?tab=staged')" class="text-red-400 hover:text-red-300 font-medium">Discard</button></div></td>
+                            <td class="px-5 py-3.5  text-sm" onclick="event.stopPropagation()"><input type="checkbox" class="staged-torrent-checkbox rounded border-gray-600 bg-surface-900 text-brand-500 focus:ring-brand-500" value="{{ torrent.id }}"></td>
+                            <td class="px-5 py-3.5  text-sm"><span class="badge {% if request_state == 'staged' %}badge-yellow{% else %}badge-gray{% endif %}">{{ request_state }}</span></td>
+                            <td class="px-5 py-3.5  text-sm text-gray-400 tabular-nums">{{ (torrent.size / 1024 / 1024 / 1024)|round(2) }} GB</td>
+                            <td class="px-5 py-3.5  text-sm text-gray-400">{{ torrent.indexer }}</td>
+                            <td class="px-5 py-3.5  text-sm text-emerald-400 font-medium tabular-nums">{{ torrent.score }}</td>
+                            <td class="px-5 py-3.5  text-sm" onclick="event.stopPropagation()"><div class="flex items-center gap-3">{% if torrent.request_id %}<button type="button" onclick="openRequestDetails({{ torrent.request_id }})" class="text-brand-400 hover:text-brand-300 font-medium">Details</button>{% endif %}{% if torrent.request_id in downloading_request_ids %}<button type="button" onclick="openReplaceModal({{ torrent.id }}, {{ torrent.request_id }}, '{{ torrent.title|replace("'", "\'") }}', '/?tab=downloading')" class="text-amber-400 hover:text-amber-300 font-medium">Replace</button>{% else %}<button type="button" onclick="postStagedAction('/staged/{{ torrent.id }}/approve', '/?tab=staged')" class="text-emerald-400 hover:text-emerald-300 font-medium">Approve</button>{% endif %}<button type="button" onclick="postStagedAction('/staged/{{ torrent.id }}/discard', '/?tab=staged')" class="text-red-400 hover:text-red-300 font-medium">Discard</button></div></td>
                         </tr>
                         {% endfor %}
                     </tbody>
@@ -410,14 +410,14 @@
                                 <div class="mt-1 text-xs text-amber-300">qBittorrent finished; waiting for Plex. If this does not import, the release may be RAR-packed or otherwise unimportable.</div>
                                 {% endif %}
                             </td>
-                            <td class="px-5 py-3.5 whitespace-nowrap text-sm text-gray-400 tabular-nums" data-download-progress>—</td>
-                            <td class="px-5 py-3.5 whitespace-nowrap text-sm text-gray-400 tabular-nums" data-download-eta>—</td>
-                            <td class="px-5 py-3.5 whitespace-nowrap text-sm"><span class="badge {{ 'badge-yellow' if waiting_for_plex else 'badge-blue' }}" data-download-state>{{ 'qBittorrent finished; waiting for Plex' if waiting_for_plex else 'sent to qBittorrent' }}</span></td>
-                            <td class="px-5 py-3.5 whitespace-nowrap text-sm"><span class="badge {% if request_state == 'downloading' %}badge-blue{% elif request_state == 'staged' %}badge-yellow{% else %}badge-gray{% endif %}">{{ request_state }}</span></td>
-                            <td class="px-5 py-3.5 whitespace-nowrap text-sm text-gray-400 tabular-nums">{{ (torrent.size / 1024 / 1024 / 1024)|round(2) }} GB</td>
-                            <td class="px-5 py-3.5 whitespace-nowrap text-sm text-gray-400">{{ torrent.indexer }}</td>
-                            <td class="px-5 py-3.5 whitespace-nowrap text-sm text-emerald-400 font-medium tabular-nums">{{ torrent.score }}</td>
-                            <td class="px-5 py-3.5 whitespace-nowrap text-sm" onclick="event.stopPropagation()"><div class="flex items-center gap-3">{% if torrent.request_id %}<button type="button" onclick="openRequestDetails({{ torrent.request_id }})" class="text-brand-400 hover:text-brand-300 font-medium">Details</button>{% endif %}<button type="button" onclick="checkNow({{ torrent.id }})" class="bg-brand-500 hover:bg-brand-400 text-white text-xs px-2 py-0.5 rounded">Check Now</button></div></td>
+                            <td class="px-5 py-3.5  text-sm text-gray-400 tabular-nums" data-download-progress>—</td>
+                            <td class="px-5 py-3.5  text-sm text-gray-400 tabular-nums" data-download-eta>—</td>
+                            <td class="px-5 py-3.5  text-sm"><span class="badge {{ 'badge-yellow' if waiting_for_plex else 'badge-blue' }}" data-download-state>{{ 'qBittorrent finished; waiting for Plex' if waiting_for_plex else 'sent to qBittorrent' }}</span></td>
+                            <td class="px-5 py-3.5  text-sm"><span class="badge {% if request_state == 'downloading' %}badge-blue{% elif request_state == 'staged' %}badge-yellow{% else %}badge-gray{% endif %}">{{ request_state }}</span></td>
+                            <td class="px-5 py-3.5  text-sm text-gray-400 tabular-nums">{{ (torrent.size / 1024 / 1024 / 1024)|round(2) }} GB</td>
+                            <td class="px-5 py-3.5  text-sm text-gray-400">{{ torrent.indexer }}</td>
+                            <td class="px-5 py-3.5  text-sm text-emerald-400 font-medium tabular-nums">{{ torrent.score }}</td>
+                            <td class="px-5 py-3.5  text-sm" onclick="event.stopPropagation()"><div class="flex items-center gap-3">{% if torrent.request_id %}<button type="button" onclick="openRequestDetails({{ torrent.request_id }})" class="text-brand-400 hover:text-brand-300 font-medium">Details</button>{% endif %}<button type="button" onclick="checkNow({{ torrent.id }})" class="bg-brand-500 hover:bg-brand-400 text-white text-xs px-2 py-0.5 rounded">Check Now</button></div></td>
                         </tr>
                         {% endfor %}
                     </tbody>
@@ -469,13 +469,13 @@
                     <tbody class="divide-y divide-gray-700/40" id="finished-requests-body">
                         {% for req in completed_requests %}
                         <tr class="hover:bg-surface-850/80 cursor-pointer transition-colors" onclick="openRequestDetails({{ req.id }})" data-request-id="{{ req.id }}" data-title="{{ req.title|lower }}" data-type="{{ req.media_type.value|lower }}" data-requestedby="{{ req.requester_username|default('Unknown')|lower }}" data-requested="{{ req.created_at.strftime('%Y-%m-%d %H:%M') }}" data-completed="{{ req.updated_at.strftime('%Y-%m-%d %H:%M') }}" data-year="{{ req.year or 0 }}">
-                            <td class="px-5 py-3.5 whitespace-nowrap text-sm font-medium text-white">{{ req.title }}</td>
-                            <td class="px-5 py-3.5 whitespace-nowrap text-sm text-gray-500 tabular-nums" data-sort-value="{{ req.year or 0 }}">{{ req.year or '-' }}</td>
-                            <td class="px-5 py-3.5 whitespace-nowrap text-sm capitalize text-gray-400">{{ req.media_type.value }}</td>
-                            <td class="px-5 py-3.5 whitespace-nowrap text-sm text-gray-400">{{ req.requester_username or 'Unknown' }}</td>
-                            <td class="px-5 py-3.5 whitespace-nowrap text-sm text-gray-500 tabular-nums">{{ req.created_at.strftime('%Y-%m-%d %H:%M') }}</td>
-                            <td class="px-5 py-3.5 whitespace-nowrap text-sm text-emerald-400 tabular-nums">{{ req.updated_at.strftime('%Y-%m-%d %H:%M') }}</td>
-                            <td class="px-5 py-3.5 whitespace-nowrap text-sm" onclick="event.stopPropagation()">
+                            <td class="px-5 py-3.5  text-sm font-medium text-white">{{ req.title }}</td>
+                            <td class="px-5 py-3.5  text-sm text-gray-500 tabular-nums" data-sort-value="{{ req.year or 0 }}">{{ req.year or '-' }}</td>
+                            <td class="px-5 py-3.5  text-sm capitalize text-gray-400">{{ req.media_type.value }}</td>
+                            <td class="px-5 py-3.5  text-sm text-gray-400">{{ req.requester_username or 'Unknown' }}</td>
+                            <td class="px-5 py-3.5  text-sm text-gray-500 tabular-nums">{{ req.created_at.strftime('%Y-%m-%d %H:%M') }}</td>
+                            <td class="px-5 py-3.5  text-sm text-emerald-400 tabular-nums">{{ req.updated_at.strftime('%Y-%m-%d %H:%M') }}</td>
+                            <td class="px-5 py-3.5  text-sm" onclick="event.stopPropagation()">
                                 <button type="button" onclick="openRequestDetails({{ req.id }})" class="text-brand-400 hover:text-brand-300 font-medium">Details</button>
                             </td>
                         </tr>
@@ -529,13 +529,13 @@
                     <tbody class="divide-y divide-gray-700/40" id="rejected-requests-body">
                         {% for req in denied_requests %}
                         <tr class="hover:bg-surface-850/80 cursor-pointer transition-colors" onclick="openRequestDetails({{ req.id }})" data-request-id="{{ req.id }}" data-title="{{ req.title|lower }}" data-type="{{ req.media_type.value|lower }}" data-requestedby="{{ req.requester_username|default('Unknown')|lower }}" data-reason="{{ (req.rejection_reason or '')|lower }}" data-rejectedat="{{ req.updated_at.strftime('%Y-%m-%d %H:%M') }}" data-year="{{ req.year or 0 }}">
-                            <td class="px-5 py-3.5 whitespace-nowrap text-sm font-medium text-white">{{ req.title }}</td>
-                            <td class="px-5 py-3.5 whitespace-nowrap text-sm text-gray-500 tabular-nums" data-sort-value="{{ req.year or 0 }}">{{ req.year or '-' }}</td>
-                            <td class="px-5 py-3.5 whitespace-nowrap text-sm capitalize text-gray-400">{{ req.media_type.value }}</td>
-                            <td class="px-5 py-3.5 whitespace-nowrap text-sm text-gray-400">{{ req.requester_username or 'Unknown' }}</td>
-                            <td class="px-5 py-3.5 text-sm text-red-400 max-w-xs overflow-hidden text-ellipsis">{{ req.rejection_reason or '-' }}</td>
-                            <td class="px-5 py-3.5 whitespace-nowrap text-sm text-gray-500 tabular-nums">{{ req.updated_at.strftime('%Y-%m-%d %H:%M') }}</td>
-                            <td class="px-5 py-3.5 whitespace-nowrap text-sm" onclick="event.stopPropagation()">
+                            <td class="px-5 py-3.5  text-sm font-medium text-white">{{ req.title }}</td>
+                            <td class="px-5 py-3.5  text-sm text-gray-500 tabular-nums" data-sort-value="{{ req.year or 0 }}">{{ req.year or '-' }}</td>
+                            <td class="px-5 py-3.5  text-sm capitalize text-gray-400">{{ req.media_type.value }}</td>
+                            <td class="px-5 py-3.5  text-sm text-gray-400">{{ req.requester_username or 'Unknown' }}</td>
+                            <td class="px-5 py-3.5 text-sm text-red-400 max-w-xs">{{ req.rejection_reason or '-' }}</td>
+                            <td class="px-5 py-3.5  text-sm text-gray-500 tabular-nums">{{ req.updated_at.strftime('%Y-%m-%d %H:%M') }}</td>
+                            <td class="px-5 py-3.5  text-sm" onclick="event.stopPropagation()">
                                 <button type="button" onclick="openRequestDetails({{ req.id }})" class="text-brand-400 hover:text-brand-300 font-medium">Details</button>
                             </td>
                         </tr>
