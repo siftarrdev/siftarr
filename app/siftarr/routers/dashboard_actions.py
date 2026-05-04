@@ -113,12 +113,15 @@ async def _process_request_search(
         from app.siftarr.services.movie_decision_service import MovieDecisionService
 
         decision_service = MovieDecisionService(db, prowlarr_service, qbittorrent_service)
+        result = await decision_service.process_request(request.id)
     else:
         from app.siftarr.services.tv_decision_service import TVDecisionService
 
         decision_service = TVDecisionService(db, prowlarr_service, qbittorrent_service)
-
-    result = await decision_service.process_request(request.id)
+        # Dashboard-triggered searches for TV shows should only search for
+        # season packs and multi-season packs, not individual episodes.
+        # Individual episode searching is done from the details modal.
+        result = await decision_service.process_request(request.id, search_episodes=False)
 
     activity_log = ActivityLogService(db)
     await activity_log.log(

@@ -11,8 +11,6 @@
 - allow filtering in the rules tab. as well as sowing just movie rules or just tv show rules.
 
 ## NEXT: 
-- When i click search selected on TV shows it appears it is searching TV shows for the season packs and multi season packs which is good, but it also appears to be searching for the individual episodes which is not good. I should only be searching for the season packs and multi season packs when i click search selected on TV shows. I should only be searching for the individual episodes when i click search selected on the individual episodes.
-
 - fix this warning in the console: 
 ```
 (index):64 cdn.tailwindcss.com should not be used in production. To use Tailwind CSS in production, install it as a PostCSS plugin or use the Tailwind CLI: https://tailwindcss.com/docs/installation
