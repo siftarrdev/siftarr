@@ -104,6 +104,94 @@ class TestProwlarrService:
 
         assert release.files == 1
 
+    def test_parse_release_info_prefers_api_release_group(self) -> None:
+        """_parse_release_info should prefer the API's releaseGroup field over title parsing."""
+        service = ProwlarrService()
+
+        release = service._parse_release_info(
+            {
+                "title": "Movie.2024.1080p.x264",  # no group in title
+                "releaseGroup": "MeGusta",
+                "size": 1234,
+                "seeders": 10,
+                "leechers": 1,
+                "downloadUrl": "https://example.com/torrent",
+                "indexer": "Test",
+            }
+        )
+
+        assert release.release_group == "MeGusta"
+
+    def test_parse_release_info_falls_back_to_title_parsing(self) -> None:
+        """_parse_release_info should fall back to parsing release group from title."""
+        service = ProwlarrService()
+
+        release = service._parse_release_info(
+            {
+                "title": "Movie.2024.1080p.x264-MeGusta",
+                "size": 1234,
+                "seeders": 10,
+                "leechers": 1,
+                "downloadUrl": "https://example.com/torrent",
+                "indexer": "Test",
+            }
+        )
+
+        assert release.release_group == "MeGusta"
+
+    def test_parse_release_info_reads_uploaded_by(self) -> None:
+        """_parse_release_info should read the uploadedBy API field."""
+        service = ProwlarrService()
+
+        release = service._parse_release_info(
+            {
+                "title": "Movie.2024.1080p.x264-RLSGRP",
+                "uploadedBy": "SomeUploader",
+                "size": 1234,
+                "seeders": 10,
+                "leechers": 1,
+                "downloadUrl": "https://example.com/torrent",
+                "indexer": "Test",
+            }
+        )
+
+        assert release.uploaded_by == "SomeUploader"
+
+    def test_parse_release_info_falls_back_to_uploader_field(self) -> None:
+        """_parse_release_info should fall back to the uploader API field."""
+        service = ProwlarrService()
+
+        release = service._parse_release_info(
+            {
+                "title": "Movie.2024.1080p.x264-RLSGRP",
+                "uploader": "FallbackUploader",
+                "size": 1234,
+                "seeders": 10,
+                "leechers": 1,
+                "downloadUrl": "https://example.com/torrent",
+                "indexer": "Test",
+            }
+        )
+
+        assert release.uploaded_by == "FallbackUploader"
+
+    def test_parse_release_info_uploaded_by_none_when_missing(self) -> None:
+        """_parse_release_info should set uploaded_by to None when not in API response."""
+        service = ProwlarrService()
+
+        release = service._parse_release_info(
+            {
+                "title": "Movie.2024.1080p.x264-RLSGRP",
+                "size": 1234,
+                "seeders": 10,
+                "leechers": 1,
+                "downloadUrl": "https://example.com/torrent",
+                "indexer": "Test",
+            }
+        )
+
+        assert release.uploaded_by is None
+
     def test_build_movie_query_uses_tmdbid_tokens(self) -> None:
         """Movie queries should encode metadata in the query string."""
         query = ProwlarrService._build_movie_query("Return to Me", 1234, 2000)

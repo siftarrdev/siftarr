@@ -101,13 +101,11 @@ class RuleEngine:
     @staticmethod
     def _matches_any_field(compiled: re.Pattern, release: ProwlarrRelease) -> bool:
         """Check if compiled pattern matches any of the release's relevant fields."""
-        if compiled.search(release.title):
-            return True
-        if release.release_group and compiled.search(release.release_group):
-            return True
-        if release.uploaded_by and compiled.search(release.uploaded_by):
-            return True
-        return False
+        return bool(
+            compiled.search(release.title)
+            or (release.release_group and compiled.search(release.release_group))
+            or (release.uploaded_by and compiled.search(release.uploaded_by))
+        )
 
     @staticmethod
     def _scope_matches(rule_scope: str, media_type: str | None) -> bool:

@@ -182,6 +182,7 @@ class TestSerializeEvaluatedRelease:
             "codec": "h264",
             "release_group": "GROUP",
             "files": None,
+            "uploaded_by": None,
         }
         defaults.update(overrides)
         return ProwlarrRelease(**defaults)  # type: ignore[arg-type]

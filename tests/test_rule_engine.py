@@ -699,6 +699,133 @@ class TestRuleEngine:
 
         assert result.passed is True
 
+    def test_exclusion_matches_release_group_when_title_does_not_match(self):
+        """Exclusion pattern should match against release_group when title doesn't match."""
+        engine = RuleEngine(
+            exclusion_patterns=[(1, "Bad Group", r"BadGroup")],
+        )
+
+        release = ProwlarrRelease(
+            title="Movie.2024.1080p.x264",
+            release_group="BadGroup",
+            size=1024,
+            seeders=10,
+            leechers=2,
+            download_url="http://example.com",
+            indexer="test",
+        )
+
+        result = engine.evaluate(release)
+
+        assert result.passed is False
+        assert "exclusion" in (result.rejection_reason or "").lower()
+
+    def test_exclusion_matches_uploaded_by_when_title_does_not_match(self):
+        """Exclusion pattern should match against uploaded_by when title doesn't match."""
+        engine = RuleEngine(
+            exclusion_patterns=[(1, "Bad Uploader", r"BadUploader")],
+        )
+
+        release = ProwlarrRelease(
+            title="Movie.2024.1080p.x264",
+            release_group="SomeGroup",
+            uploaded_by="BadUploader",
+            size=1024,
+            seeders=10,
+            leechers=2,
+            download_url="http://example.com",
+            indexer="test",
+        )
+
+        result = engine.evaluate(release)
+
+        assert result.passed is False
+        assert "exclusion" in (result.rejection_reason or "").lower()
+
+    def test_requirement_matches_release_group_when_title_does_not_match(self):
+        """Requirement pattern should match against release_group when title doesn't match."""
+        engine = RuleEngine(
+            requirement_patterns=[(1, "Group Required", r"MeGusta|LAMA")],
+        )
+
+        release = ProwlarrRelease(
+            title="Movie.2024.1080p.x264",
+            release_group="MeGusta",
+            size=1024,
+            seeders=10,
+            leechers=2,
+            download_url="http://example.com",
+            indexer="test",
+        )
+
+        result = engine.evaluate(release)
+
+        assert result.passed is True
+
+    def test_scorer_matches_release_group_when_title_does_not_match(self):
+        """Scorer pattern should score against release_group when title doesn't match."""
+        engine = RuleEngine(
+            scorer_patterns=[(1, "Prefer LAMA", r"LAMA", 100)],
+        )
+
+        release = ProwlarrRelease(
+            title="Movie.2024.1080p.x264",
+            release_group="LAMA",
+            size=1024,
+            seeders=10,
+            leechers=2,
+            download_url="http://example.com",
+            indexer="test",
+        )
+
+        result = engine.evaluate(release)
+
+        assert result.passed is True
+        assert result.total_score == 100
+
+    def test_scorer_matches_uploaded_by_when_title_does_not_match(self):
+        """Scorer pattern should score against uploaded_by when title doesn't match."""
+        engine = RuleEngine(
+            scorer_patterns=[(1, "Prefer Uploader", r"TopUploader", 50)],
+        )
+
+        release = ProwlarrRelease(
+            title="Movie.2024.1080p.x264",
+            release_group="SomeGroup",
+            uploaded_by="TopUploader",
+            size=1024,
+            seeders=10,
+            leechers=2,
+            download_url="http://example.com",
+            indexer="test",
+        )
+
+        result = engine.evaluate(release)
+
+        assert result.passed is True
+        assert result.total_score == 50
+
+    def test_no_match_when_all_fields_differ_from_pattern(self):
+        """Rule should not match when none of title, release_group, or uploaded_by match."""
+        engine = RuleEngine(
+            requirement_patterns=[(1, "Need MeGusta", r"MeGusta")],
+        )
+
+        release = ProwlarrRelease(
+            title="Movie.2024.1080p.x264",
+            release_group="OtherGroup",
+            uploaded_by="OtherUploader",
+            size=1024,
+            seeders=10,
+            leechers=2,
+            download_url="http://example.com",
+            indexer="test",
+        )
+
+        result = engine.evaluate(release)
+
+        assert result.passed is False
+
     def test_rule_match_dataclass(self):
         """Test RuleMatch dataclass."""
         match = RuleMatch(
