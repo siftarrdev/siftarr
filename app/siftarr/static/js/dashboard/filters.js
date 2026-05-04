@@ -201,6 +201,106 @@ function sortTable(tableName, sortKey) {
     window.refreshDetailsNavigationContext();
 }
 
+/**
+ * Restore tab UI state after an in-place DOM refresh.
+ * Re-applies media filter button styling, re-applies the current sort,
+ * and updates sort indicators in table headers.
+ */
+function restoreTabState(tabName) {
+    // Restore media filter button styling
+    const activeMediaType = window.mediaFilterState[tabName] || null;
+    const tvBtn = document.getElementById('media-filter-' + tabName + '-tv');
+    const movieBtn = document.getElementById('media-filter-' + tabName + '-movie');
+    [tvBtn, movieBtn].forEach(btn => {
+        if (!btn) return;
+        btn.classList.remove('border-brand-500', 'text-brand-400', 'bg-brand-500/10');
+        btn.classList.add('border-gray-700/60', 'text-gray-500');
+    });
+    const activeBtn = activeMediaType === 'tv' ? tvBtn : activeMediaType === 'movie' ? movieBtn : null;
+    if (activeBtn) {
+        activeBtn.classList.remove('border-gray-700/60', 'text-gray-500');
+        activeBtn.classList.add('border-brand-500', 'text-brand-400', 'bg-brand-500/10');
+    }
+
+    // Restore text filter value
+    const filterInputIdMap = {
+        active: 'filter-input',
+        pending: 'pending-filter-input',
+        unreleased: 'unreleased-filter-input',
+        staged: 'staged-filter-input',
+        downloading: 'downloading-filter-input',
+        finished: 'finished-filter-input',
+        rejected: 'rejected-filter-input',
+    };
+    const filterInput = document.getElementById(filterInputIdMap[tabName]);
+    if (filterInput && filterInput.dataset.priorValue !== undefined) {
+        filterInput.value = filterInput.dataset.priorValue;
+        delete filterInput.dataset.priorValue;
+    }
+
+    // Re-apply sorting using saved state
+    const sortState = window.tableSortState[tabName];
+    if (sortState && sortState.column) {
+        // Update sort indicator in the header
+        const tableIdMap = {
+            active: 'active-requests-table',
+            pending: 'pending-requests-table',
+            unreleased: 'unreleased-requests-table',
+            staged: 'staged-torrents-table',
+            downloading: 'downloading-torrents-table',
+            finished: 'finished-requests-table',
+            rejected: 'rejected-requests-table',
+        };
+        const table = document.getElementById(tableIdMap[tabName]);
+        if (table) {
+            table.querySelectorAll('.sort-indicator').forEach(el => {
+                el.textContent = '';
+            });
+            const indicator = table.querySelector(
+                `th[data-table="${tabName}"][data-sort="${sortState.column}"] .sort-indicator`
+            );
+            if (indicator) {
+                indicator.textContent = sortState.direction === 'asc' ? ' \u25B2' : ' \u25BC';
+            }
+        }
+        // Re-sort rows
+        window.sortTable(tabName, sortState.column);
+    } else {
+        // No saved sort, just re-apply filters
+        applyAllFilters(tabName);
+    }
+}
+
+/**
+ * Save and restore tab state around an in-place refresh.
+ * Call before replacing innerHTML to save state, call after to restore.
+ * Usage:
+ *   const cleanup = saveTabState('staged');
+ *   // ... replace DOM ...
+ *   cleanup();
+ */
+function saveTabState(tabName) {
+    // Save text filter value onto the input element so restoreTabState can find it
+    const filterInputIdMap = {
+        active: 'filter-input',
+        pending: 'pending-filter-input',
+        unreleased: 'unreleased-filter-input',
+        staged: 'staged-filter-input',
+        downloading: 'downloading-filter-input',
+        finished: 'finished-filter-input',
+        rejected: 'rejected-filter-input',
+    };
+    const filterInput = document.getElementById(filterInputIdMap[tabName]);
+    if (filterInput && filterInput.value) {
+        filterInput.dataset.priorValue = filterInput.value;
+    }
+
+    // Return a cleanup function that restores state
+    return function restore() {
+        restoreTabState(tabName);
+    };
+}
+
 // Export functions to window for HTML onclick handlers
 window.toggleMediaFilter = toggleMediaFilter;
 window.filterTable = filterTable;
@@ -212,3 +312,5 @@ window.filterRejectedTable = filterRejectedTable;
 window.filterUnreleasedTable = filterUnreleasedTable;
 window.filterReleaseCards = filterReleaseCards;
 window.sortTable = sortTable;
+window.restoreTabState = restoreTabState;
+window.saveTabState = saveTabState;

@@ -183,22 +183,28 @@ async def search_request_now(
     return RedirectResponse(url=redirect_to or "/?tab=pending", status_code=303)
 
 
-@router.post("/bulk")
+@router.post("/bulk", response_model=None)
 async def bulk_request_action(
+    http_request: FastAPIRequest,
     action: str = Form(...),
     request_ids: list[int] = Form(default=[]),
     redirect_to: str | None = Form(default=None),
     db: AsyncSession = Depends(get_db),
-) -> RedirectResponse:
+) -> RedirectResponse | JSONResponse:
     """Apply a bulk action to selected requests."""
+    wants_json = "application/json" in http_request.headers.get("accept", "")
     redirect_url = bulk_redirect_url(redirect_to)
     if action == "search_all_pending":
         requests = await _load_all_pending_search_requests(db)
         for request in requests:
             await _process_request_search(request, db)
+        if wants_json:
+            return JSONResponse({"status": "ok", "message": "Search started"})
         return RedirectResponse(url=redirect_url, status_code=303)
 
     if not request_ids:
+        if wants_json:
+            return JSONResponse({"status": "ok", "message": "No items selected"})
         return RedirectResponse(url=redirect_url, status_code=303)
 
     result = await db.execute(
@@ -208,12 +214,16 @@ async def bulk_request_action(
     )
     requests = list(result.scalars().all())
 
+    count = 0
     for request in requests:
         if action == "search":
             await _process_request_search(request, db)
         elif action == "deny":
             await _deny_request_record(request, db, reason="Bulk denied")
+            count += 1
 
+    if wants_json:
+        return JSONResponse({"status": "ok", "message": f"Denied {count} request(s)"})
     return RedirectResponse(url=redirect_url, status_code=303)
 
 
@@ -319,17 +329,20 @@ async def use_manual_release(
     )
 
 
-@router.post("/{request_id}/deny")
+@router.post("/{request_id}/deny", response_model=None)
 async def deny_request(
     request_id: int,
+    http_request: FastAPIRequest,
     redirect_to: str | None = Form(default=None),
     reason: str | None = Form(default=None),
     db: AsyncSession = Depends(get_db),
-) -> RedirectResponse:
+) -> RedirectResponse | JSONResponse:
     """Decline a request in Overseerr and mark as denied."""
     request = await load_request_or_404(db, request_id)
 
     await _deny_request_record(request, db, reason=reason)
+    if "application/json" in http_request.headers.get("accept", ""):
+        return JSONResponse({"status": "ok", "message": "Request denied"})
     return RedirectResponse(url=redirect_to or "/", status_code=303)
 
 

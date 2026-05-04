@@ -191,9 +191,57 @@ function postToAction(action, redirectTo, trigger = null) {
         .catch(() => {});
 }
 
+async function handleBulkDenyAction(event, form) {
+    event.preventDefault();
+    const submitter = event.submitter;
+    const formData = new FormData(form);
+    // Ensure action is set
+    if (submitter && submitter.value) {
+        formData.set('action', submitter.value);
+    }
+
+    // Collect selected request IDs from checkboxes
+    const checkboxes = form.querySelectorAll('input[name="request_ids"]:checked');
+    const ids = Array.from(checkboxes).map(cb => cb.value).filter(Boolean);
+    if (ids.length === 0) {
+        window.showToast('No requests selected.');
+        return false;
+    }
+
+    if (submitter) submitter.disabled = true;
+    try {
+        const response = await fetch('/requests/bulk', {
+            method: 'POST',
+            headers: { 'Accept': 'application/json' },
+            body: formData,
+        });
+        if (!response.ok) {
+            const errorData = await response.json().catch(() => null);
+            throw new Error(errorData?.detail || `Server error: ${response.status}`);
+        }
+        // Uncheck all selected checkboxes
+        checkboxes.forEach(cb => cb.checked = false);
+        window.showToast('Request(s) denied');
+        await window.refreshCurrentTabContent();
+    } catch (err) {
+        window.showToast('Error: ' + err.message);
+    } finally {
+        if (submitter) submitter.disabled = false;
+    }
+    return false;
+}
+
 function handleBulkRequestActionSubmit(event, form) {
     const submitter = event.submitter;
-    if (!submitter || submitter.dataset.searchSubmitControl !== 'true') return true;
+    if (!submitter) return true;
+
+    // Handle deny actions via fetch
+    if (submitter.value === 'deny') {
+        return handleBulkDenyAction(event, form);
+    }
+
+    // Search actions
+    if (submitter.dataset.searchSubmitControl !== 'true') return true;
     if (form.dataset.searchSubmitting === 'true') return false;
     event.preventDefault();
     form.dataset.searchSubmitting = 'true';
@@ -248,6 +296,37 @@ function openDenyModal(requestId, redirectTo) {
     redirect.value = redirectTo || '/';
     reason.value = '';
     modal.classList.remove('hidden');
+
+    // Remove any old submit handler and attach a new one
+    form.removeEventListener('submit', handleDenyFormSubmit);
+    form.addEventListener('submit', handleDenyFormSubmit);
+}
+
+async function handleDenyFormSubmit(event) {
+    event.preventDefault();
+    const form = event.currentTarget;
+    const formData = new FormData(form);
+    const submitBtn = form.querySelector('button[type="submit"]');
+    if (submitBtn) submitBtn.disabled = true;
+
+    try {
+        const response = await fetch(form.action, {
+            method: 'POST',
+            headers: { 'Accept': 'application/json' },
+            body: formData,
+        });
+        if (!response.ok) {
+            const errorData = await response.json().catch(() => null);
+            throw new Error(errorData?.detail || `Server error: ${response.status}`);
+        }
+        closeDenyModal();
+        window.showToast('Request denied');
+        await window.refreshCurrentTabContent();
+    } catch (err) {
+        window.showToast('Error: ' + err.message);
+    } finally {
+        if (submitBtn) submitBtn.disabled = false;
+    }
 }
 
 function closeDenyModal() {

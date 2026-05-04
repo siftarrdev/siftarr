@@ -25,6 +25,7 @@ async def test_bulk_request_action_redirects_to_requested_tab(mock_db, monkeypat
     monkeypatch.setattr(dashboard_actions, "_process_request_search", process_request_search)
 
     response = await dashboard_actions.bulk_request_action(
+        http_request=MagicMock(headers={}),
         action="search",
         request_ids=[1],
         redirect_to="/?tab=active",
@@ -40,6 +41,7 @@ async def test_bulk_request_action_redirects_to_requested_tab(mock_db, monkeypat
 async def test_bulk_request_action_defaults_to_pending_tab(mock_db):
     """Bulk actions default back to the pending tab."""
     response = await dashboard_actions.bulk_request_action(
+        http_request=MagicMock(headers={}),
         action="search",
         request_ids=[],
         redirect_to=None,
@@ -64,6 +66,7 @@ async def test_bulk_request_action_searches_all_pending_requests(mock_db, monkey
     monkeypatch.setattr(dashboard_actions, "_process_request_search", process_request_search)
 
     response = await dashboard_actions.bulk_request_action(
+        http_request=MagicMock(headers={}),
         action="search_all_pending",
         request_ids=[],
         redirect_to="/?tab=pending",

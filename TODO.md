@@ -3,5 +3,4 @@
 - Add indexer and release-source preferences, including allow/deny lists and weighted priorities
 
 ## Bugs
-- make sure that the searched torrents details shows the number of files in the torrent for both tv shows or packs and movies.
 - make the qbittorrent state wrap around to multiple lines when the column isn't big enough. this should be the case for everything in all of the columns in the dashboards.
