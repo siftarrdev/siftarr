@@ -38,6 +38,16 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/requests", tags=["dashboard-actions"])
 
 
+async def _load_all_pending_search_requests(db: AsyncSession) -> list[RequestModel]:
+    """Load requests targeted by Search All bulk search actions."""
+    result = await db.execute(
+        select(RequestModel)
+        .where(RequestModel.status.in_([RequestStatus.PENDING, RequestStatus.SEARCHING]))
+        .order_by(RequestModel.created_at.desc())
+    )
+    return list(result.scalars().all())
+
+
 def _selection_success_message(result: dict[str, object]) -> str:
     """Return a clear response message for release-selection actions."""
     action = result.get("action")
@@ -183,12 +193,7 @@ async def bulk_request_action(
     """Apply a bulk action to selected requests."""
     redirect_url = bulk_redirect_url(redirect_to)
     if action == "search_all_pending":
-        result = await db.execute(
-            select(RequestModel)
-            .where(RequestModel.status.in_([RequestStatus.PENDING, RequestStatus.SEARCHING]))
-            .order_by(RequestModel.created_at.desc())
-        )
-        requests = list(result.scalars().all())
+        requests = await _load_all_pending_search_requests(db)
         for request in requests:
             await _process_request_search(request, db)
         return RedirectResponse(url=redirect_url, status_code=303)

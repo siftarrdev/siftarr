@@ -98,6 +98,66 @@ async def test_stream_bulk_search_yields_progress_and_results(mock_db, monkeypat
 
 
 @pytest.mark.asyncio
+async def test_stream_bulk_search_all_pending_loads_server_side(mock_db, monkeypatch):
+    request_records = [MagicMock(id=10, title="Hidden"), MagicMock(id=11, title="Visible")]
+
+    load_all_pending = AsyncMock(return_value=request_records)
+    monkeypatch.setattr(search_sse, "_load_all_pending_search_requests", load_all_pending)
+
+    load_request = AsyncMock()
+    monkeypatch.setattr(search_sse, "load_request_or_404", load_request)
+
+    process_search = AsyncMock(return_value={"status": "completed"})
+    monkeypatch.setattr(search_sse, "_process_request_search", process_search)
+
+    response = await search_sse.stream_bulk_search(
+        request_ids=[], search_all_pending=True, db=mock_db
+    )
+    chunks = []
+    async for chunk in response.body_iterator:
+        chunks.append(chunk)
+    body = "".join(chunks)
+
+    load_all_pending.assert_awaited_once_with(mock_db)
+    load_request.assert_not_awaited()
+    process_search.assert_any_await(request_records[0], mock_db)
+    process_search.assert_any_await(request_records[1], mock_db)
+    assert '"total": 2' in body
+    assert '"request_id": 10' in body
+    assert '"request_id": 11' in body
+
+
+@pytest.mark.asyncio
+async def test_stream_bulk_search_reports_request_failure_and_continues(mock_db, monkeypatch):
+    requests_by_id = {
+        1: MagicMock(id=1, title="Fails"),
+        2: MagicMock(id=2, title="Continues"),
+    }
+
+    async def fake_load(db, req_id):
+        return requests_by_id[req_id]
+
+    monkeypatch.setattr(search_sse, "load_request_or_404", fake_load)
+
+    process_search = AsyncMock(side_effect=[RuntimeError("Indexer down"), {"status": "completed"}])
+    monkeypatch.setattr(search_sse, "_process_request_search", process_search)
+
+    response = await search_sse.stream_bulk_search(request_ids=[1, 2], db=mock_db)
+    chunks = []
+    async for chunk in response.body_iterator:
+        chunks.append(chunk)
+    body = "".join(chunks)
+
+    assert '"phase": "error"' not in body
+    assert '"phase": "complete"' in body
+    assert '"request_id": 1' in body
+    assert '"status": "failed"' in body
+    assert '"message": "Indexer down"' in body
+    assert '"request_id": 2' in body
+    assert process_search.await_count == 2
+
+
+@pytest.mark.asyncio
 async def test_stream_tv_season_pack_search(mock_db, monkeypatch):
     request_record = MagicMock()
     request_record.media_type = MediaType.TV

@@ -7,7 +7,11 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.siftarr.database import get_db
-from app.siftarr.routers.dashboard_actions import _process_request_search
+from app.siftarr.models.request import Request as RequestModel
+from app.siftarr.routers.dashboard_actions import (
+    _load_all_pending_search_requests,
+    _process_request_search,
+)
 from app.siftarr.services.dashboard_service import (
     DashboardService,
     serialize_tv_search_response,
@@ -64,9 +68,19 @@ async def _search_request_generator(request_id: int, db: AsyncSession):
         )
 
 
-async def _bulk_search_generator(request_ids: list[int], db: AsyncSession):
+async def _bulk_search_generator(
+    request_ids: list[int], db: AsyncSession, *, search_all_pending: bool = False
+):
     try:
-        total = len(request_ids)
+        if search_all_pending is True:
+            requests = await _load_all_pending_search_requests(db)
+            request_items: list[tuple[int | None, RequestModel | None]] = [
+                (request.id, request) for request in requests
+            ]
+        else:
+            request_items = [(req_id, None) for req_id in request_ids]
+
+        total = len(request_items)
         yield serialize_sse(
             build_sse_progress(
                 "starting",
@@ -75,8 +89,21 @@ async def _bulk_search_generator(request_ids: list[int], db: AsyncSession):
             )
         )
         results: list[dict] = []
-        for index, req_id in enumerate(request_ids):
-            request = await load_request_or_404(db, req_id)
+        for index, (req_id, loaded_request) in enumerate(request_items):
+            try:
+                request = loaded_request or await load_request_or_404(db, req_id or 0)
+            except Exception as exc:
+                logger.exception("SSE bulk search failed to load request_id=%s", req_id)
+                results.append(
+                    {
+                        "request_id": req_id,
+                        "title": None,
+                        "status": "failed",
+                        "message": str(exc),
+                    }
+                )
+                continue
+
             percent = int(5 + ((index + 1) / total) * 90) if total else 5
             yield serialize_sse(
                 build_sse_progress(
@@ -87,7 +114,11 @@ async def _bulk_search_generator(request_ids: list[int], db: AsyncSession):
                     title=request.title,
                 )
             )
-            result = await _process_request_search(request, db)
+            try:
+                result = await _process_request_search(request, db)
+            except Exception as exc:
+                logger.exception("SSE bulk search failed for request_id=%s", request.id)
+                result = {"status": "failed", "message": str(exc)}
             results.append(
                 {
                     "request_id": request.id,
@@ -214,10 +245,11 @@ async def _tv_episode_generator(
 @router.get("/bulk/search/stream")
 async def stream_bulk_search(
     request_ids: list[int] = Query(default=[]),
+    search_all_pending: bool = Query(default=False),
     db: AsyncSession = Depends(get_db),
 ):
     return StreamingResponse(
-        _bulk_search_generator(request_ids, db),
+        _bulk_search_generator(request_ids, db, search_all_pending=search_all_pending),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",

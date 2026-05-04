@@ -55,6 +55,148 @@ async def test_use_releases_keeps_existing_staged_release(
 
 
 @pytest.mark.asyncio
+async def test_use_releases_movie_rule_selection_replaces_other_active_stage(
+    mock_db, request_record, selected_release
+):
+    settings = MagicMock(staging_mode_enabled=True)
+    queue_service = AsyncMock()
+    staging_service = AsyncMock()
+
+    existing_stage = StagedTorrent(
+        id=44,
+        request_id=request_record.id,
+        torrent_path="/tmp/existing.torrent",
+        json_path="/tmp/existing.json",
+        original_filename="existing",
+        title="Previous Auto Pick",
+        size=1,
+        indexer="Indexer A",
+        score=100,
+        status="approved",
+        selection_source="rule",
+    )
+    replacement_stage = StagedTorrent(
+        id=55,
+        request_id=request_record.id,
+        torrent_path="/tmp/replacement.torrent",
+        json_path="/tmp/replacement.json",
+        original_filename="replacement",
+        title=selected_release.title,
+        size=selected_release.size,
+        indexer=selected_release.indexer,
+        score=selected_release.score,
+        status="staged",
+        selection_source="rule",
+    )
+    staging_service.save_release.return_value = replacement_stage
+
+    active_result = MagicMock()
+    active_result.scalars.return_value.all.return_value = [existing_stage]
+    mock_db.execute.return_value = active_result
+
+    with pytest.MonkeyPatch.context() as monkeypatch:
+        monkeypatch.setattr(
+            staging_actions,
+            "get_settings",
+            MagicMock(return_value=settings),
+        )
+        monkeypatch.setattr(
+            staging_actions,
+            "PendingQueueService",
+            MagicMock(return_value=queue_service),
+        )
+        monkeypatch.setattr(
+            staging_actions,
+            "StagingService",
+            MagicMock(return_value=staging_service),
+        )
+
+        result = await staging_actions.use_releases(
+            mock_db,
+            request_record,
+            [selected_release],
+            selection_source="rule",
+        )
+
+    assert result["status"] == "staged"
+    assert result["action"] == "auto_staged"
+    assert result["staged_ids"] == [replacement_stage.id]
+    mock_db.delete.assert_awaited_once_with(existing_stage)
+    queue_service.remove_from_queue.assert_awaited_once_with(request_record.id)
+
+
+@pytest.mark.asyncio
+async def test_use_releases_movie_rule_reuses_same_release_and_deletes_other_active_stage(
+    mock_db, request_record, selected_release
+):
+    settings = MagicMock(staging_mode_enabled=True)
+    queue_service = AsyncMock()
+    staging_service = AsyncMock()
+
+    old_stage = StagedTorrent(
+        id=44,
+        request_id=request_record.id,
+        torrent_path="/tmp/old.torrent",
+        json_path="/tmp/old.json",
+        original_filename="old",
+        title="Old Pick",
+        size=1,
+        indexer="Indexer A",
+        score=100,
+        status="staged",
+        selection_source="manual",
+    )
+    matching_stage = StagedTorrent(
+        id=55,
+        request_id=request_record.id,
+        torrent_path="/tmp/matching.torrent",
+        json_path="/tmp/matching.json",
+        original_filename="matching",
+        title=selected_release.title,
+        size=selected_release.size,
+        indexer=selected_release.indexer,
+        score=selected_release.score,
+        status="approved",
+        selection_source="rule",
+    )
+
+    active_result = MagicMock()
+    active_result.scalars.return_value.all.return_value = [old_stage, matching_stage]
+    mock_db.execute.return_value = active_result
+
+    with pytest.MonkeyPatch.context() as monkeypatch:
+        monkeypatch.setattr(
+            staging_actions,
+            "get_settings",
+            MagicMock(return_value=settings),
+        )
+        monkeypatch.setattr(
+            staging_actions,
+            "PendingQueueService",
+            MagicMock(return_value=queue_service),
+        )
+        monkeypatch.setattr(
+            staging_actions,
+            "StagingService",
+            MagicMock(return_value=staging_service),
+        )
+
+        result = await staging_actions.use_releases(
+            mock_db,
+            request_record,
+            [selected_release],
+            selection_source="rule",
+        )
+
+    assert result["status"] == "staged"
+    assert result["action"] == "auto_staged"
+    assert result["staged_ids"] == [matching_stage.id]
+    staging_service.save_release.assert_not_awaited()
+    mock_db.delete.assert_awaited_once_with(old_stage)
+    assert matching_stage.status == "approved"
+
+
+@pytest.mark.asyncio
 async def test_use_releases_replaces_existing_active_stage_for_manual_selection(
     mock_db, request_record, selected_release
 ):

@@ -70,6 +70,16 @@ def _filter_active_staged_torrents_for_release(
     ]
 
 
+def _should_delete_superseded_staged_torrents(
+    request: Request,
+    selection_source: str,
+) -> bool:
+    """Return whether this selection must remove other active stages in scope."""
+    if request.media_type == MediaType.MOVIE:
+        return True
+    return selection_source == "manual"
+
+
 def _staged_selection_outcome(
     *,
     selection_source: str,
@@ -187,7 +197,7 @@ async def use_releases(
                 staged_ids.append(existing.id)
                 preserved_stage_id = existing.id
 
-            if selection_source == "manual":
+            if _should_delete_superseded_staged_torrents(request, selection_source):
                 superseded = [
                     current
                     for current in relevant_active_staged
