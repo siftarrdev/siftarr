@@ -145,23 +145,34 @@
         </div>
         <div class="card-body">
             {% if rules %}
+            <div class="mb-4 flex flex-wrap items-center gap-3">
+                <div class="flex rounded-lg border border-gray-700/60 bg-surface-850 overflow-hidden" role="group" aria-label="Media scope filter">
+                    <button type="button" class="rule-filter-btn px-3.5 py-1.5 text-xs font-medium transition-colors bg-brand-600 text-white" data-filter="all">All</button>
+                    <button type="button" class="rule-filter-btn px-3.5 py-1.5 text-xs font-medium transition-colors text-gray-400 hover:text-white" data-filter="movie">Movies</button>
+                    <button type="button" class="rule-filter-btn px-3.5 py-1.5 text-xs font-medium transition-colors text-gray-400 hover:text-white" data-filter="tv">TV</button>
+                </div>
+                <div class="relative flex-1 min-w-[180px] max-w-xs">
+                    <svg class="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-500 pointer-events-none" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path></svg>
+                    <input type="text" id="rule-search" class="form-input pl-9" placeholder="Search rules..." aria-label="Search rules">
+                </div>
+            </div>
             <div class="overflow-x-auto">
-                <table class="min-w-full divide-y divide-gray-700/60 text-left text-sm">
+                <table id="rules-table" class="min-w-full divide-y divide-gray-700/60 text-left text-sm">
                     <thead class="text-xs uppercase tracking-wider text-gray-500">
                         <tr>
-                            <th class="py-3 pr-4 font-medium">Priority</th>
-                            <th class="px-4 py-3 font-medium">Rule</th>
-                            <th class="px-4 py-3 font-medium">Type</th>
-                            <th class="px-4 py-3 font-medium">Scope</th>
-                            <th class="px-4 py-3 font-medium">Pattern / size range</th>
+                            <th class="py-3 pr-4 font-medium sortable cursor-pointer select-none hover:text-gray-300 transition-colors" data-sort="priority" aria-sort="ascending">Priority <span class="sort-indicator text-brand-400">&#9650;</span></th>
+                            <th class="px-4 py-3 font-medium sortable cursor-pointer select-none hover:text-gray-300 transition-colors" data-sort="name">Rule <span class="sort-indicator opacity-0">&#9650;&#9660;</span></th>
+                            <th class="px-4 py-3 font-medium sortable cursor-pointer select-none hover:text-gray-300 transition-colors" data-sort="type">Type <span class="sort-indicator opacity-0">&#9650;&#9660;</span></th>
+                            <th class="px-4 py-3 font-medium sortable cursor-pointer select-none hover:text-gray-300 transition-colors" data-sort="scope">Scope <span class="sort-indicator opacity-0">&#9650;&#9660;</span></th>
+                            <th class="px-4 py-3 font-medium sortable cursor-pointer select-none hover:text-gray-300 transition-colors" data-sort="pattern">Pattern / size range <span class="sort-indicator opacity-0">&#9650;&#9660;</span></th>
                             <th class="px-4 py-3 font-medium">Behavior</th>
                             <th class="px-4 py-3 font-medium text-right">Actions</th>
                         </tr>
                     </thead>
-                    <tbody class="divide-y divide-gray-800/80">
+                    <tbody class="divide-y divide-gray-800/80" id="rules-tbody">
                         {% for rule in rules %}
                         {% set rule_type = rule.rule_type.value %}
-                        <tr class="align-top {% if not rule.is_enabled %}opacity-50{% endif %}">
+                        <tr class="align-top {% if not rule.is_enabled %}opacity-50{% endif %}" data-scope="{{ rule.media_scope }}" data-name="{{ rule.name | lower }}" data-type="{{ rule_type }}" data-priority="{{ rule.priority }}" data-pattern="{% if rule_type == 'size_limit' %}{% if rule.min_size_gb is not none %}min {{ rule.min_size_gb }} gb{% endif %} {% if rule.max_size_gb is not none %}max {{ rule.max_size_gb }} gb{% endif %}{% else %}{{ rule.pattern }}{% endif %}">
                             <td class="whitespace-nowrap py-4 pr-4 text-gray-400 tabular-nums">{{ rule.priority }}</td>
                             <td class="px-4 py-4">
                                 <div class="font-medium text-white">{{ rule.name }}</div>
@@ -174,7 +185,6 @@
                                 <div class="flex flex-wrap gap-1.5">
                                     {% if rule.media_scope == 'movie' %}<span class="badge badge-purple">Movie</span>{% elif rule.media_scope == 'tv' %}<span class="badge badge-blue">TV</span>{% else %}<span class="badge badge-gray">All media</span>{% endif %}
                                     {% if rule.tv_target %}<span class="badge badge-cyan">{{ 'Episode' if rule.tv_target.value == 'episode' else 'Season Pack' }}</span>{% endif %}
-                                    {% if rule.is_enabled %}<span class="badge badge-green">Enabled</span>{% else %}<span class="badge badge-gray">Disabled</span>{% endif %}
                                 </div>
                             </td>
                             <td class="px-4 py-4">
@@ -607,6 +617,120 @@ function openRuleImportExportModal() {
 
 function closeRuleImportExportModal() {
     closeModal(getModal('rule-import-export-modal'));
+}
+
+// ── Sorting ──
+let sortColumn = 'priority';
+let sortAsc = true;
+
+document.querySelectorAll('#rules-table .sortable').forEach(function(header) {
+    header.addEventListener('click', function() {
+        const col = this.dataset.sort;
+        if (col === sortColumn) {
+            sortAsc = !sortAsc;
+        } else {
+            sortColumn = col;
+            sortAsc = true;
+        }
+        // Update indicator
+        document.querySelectorAll('#rules-table .sortable').forEach(function(h) {
+            const indicator = h.querySelector('.sort-indicator');
+            if (h.dataset.sort === sortColumn) {
+                h.setAttribute('aria-sort', sortAsc ? 'ascending' : 'descending');
+                indicator.innerHTML = sortAsc ? '&#9650;' : '&#9660;';
+                indicator.classList.remove('opacity-0');
+                indicator.classList.add('text-brand-400');
+            } else {
+                h.removeAttribute('aria-sort');
+                indicator.innerHTML = '&#9650;&#9660;';
+                indicator.classList.add('opacity-0');
+                indicator.classList.remove('text-brand-400');
+            }
+        });
+        sortRules();
+    });
+});
+
+function sortRules() {
+    const tbody = document.getElementById('rules-tbody');
+    const rows = Array.from(tbody.querySelectorAll('tr'));
+    const visibleRows = rows.filter(function(r) { return r.style.display !== 'none'; });
+
+    visibleRows.sort(function(a, b) {
+        let aVal, bVal;
+        switch (sortColumn) {
+            case 'priority':
+                aVal = parseInt(a.dataset.priority);
+                bVal = parseInt(b.dataset.priority);
+                break;
+            case 'name':
+                aVal = a.dataset.name;
+                bVal = b.dataset.name;
+                break;
+            case 'type':
+                aVal = a.dataset.type;
+                bVal = b.dataset.type;
+                break;
+            case 'scope':
+                aVal = a.dataset.scope;
+                bVal = b.dataset.scope;
+                break;
+            case 'pattern':
+                aVal = a.dataset.pattern;
+                bVal = b.dataset.pattern;
+                break;
+            default:
+                return 0;
+        }
+        if (aVal < bVal) return sortAsc ? -1 : 1;
+        if (aVal > bVal) return sortAsc ? 1 : -1;
+        return 0;
+    });
+
+    // Re-append in sorted order (only visible rows should be moved)
+    visibleRows.forEach(function(row) { tbody.appendChild(row); });
+}
+
+// ── Filtering ──
+let currentFilter = 'all';
+
+document.querySelectorAll('.rule-filter-btn').forEach(function(btn) {
+    btn.addEventListener('click', function() {
+        document.querySelectorAll('.rule-filter-btn').forEach(function(b) {
+            b.classList.remove('bg-brand-600', 'text-white');
+            b.classList.add('text-gray-400', 'hover:text-white');
+        });
+        this.classList.remove('text-gray-400', 'hover:text-white');
+        this.classList.add('bg-brand-600', 'text-white');
+        currentFilter = this.dataset.filter;
+        filterRules();
+    });
+});
+
+document.getElementById('rule-search').addEventListener('input', function() {
+    filterRules();
+});
+
+function filterRules() {
+    const tbody = document.getElementById('rules-tbody');
+    const rows = tbody.querySelectorAll('tr');
+    const searchText = document.getElementById('rule-search').value.toLowerCase().trim();
+
+    rows.forEach(function(row) {
+        const scope = row.dataset.scope;
+        const name = row.dataset.name;
+        const type = row.dataset.type;
+        const pattern = row.dataset.pattern;
+        const searchTarget = name + ' ' + type + ' ' + pattern;
+
+        const matchesScope = currentFilter === 'all' || scope === currentFilter;
+        const matchesSearch = !searchText || searchTarget.indexOf(searchText) !== -1;
+
+        row.style.display = (matchesScope && matchesSearch) ? '' : 'none';
+    });
+
+    // Re-sort since visibility changed
+    sortRules();
 }
 </script>
 {% endblock %}
