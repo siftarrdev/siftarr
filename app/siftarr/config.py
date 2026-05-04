@@ -49,6 +49,7 @@ class Settings(BaseSettings):
     plex_poll_interval_minutes: int = 360
     max_episode_discovery: int = 30
     plex_recent_scan_interval_minutes: int = 5
+    plex_full_sync_time: str = "03:00"
     overseerr_sync_concurrency: int = 16
     plex_sync_concurrency: int = 16
 

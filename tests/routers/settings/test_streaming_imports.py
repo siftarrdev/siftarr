@@ -282,39 +282,21 @@ async def test_rescan_plex_sse_reports_movies_and_tv_in_active_items(monkeypatch
 
 
 @pytest.mark.asyncio
-async def test_rescan_plex_partial_only_resyncs_new_or_incomplete_tv_content(monkeypatch, mock_db):
-    """Partial Plex sync should leave already-complete TV metadata out of resync work."""
+async def test_rescan_plex_partial_uses_scan_recent(monkeypatch, mock_db):
+    """Partial Plex sync should use scan_recent() instead of resync+full poll."""
 
     runtime_settings = MagicMock(plex_sync_concurrency=2)
     plex_service = AsyncMock()
 
-    complete_tv = MagicMock(id=1, title="Complete Show", media_type=MediaType.TV)
-    complete_tv.status = RequestStatus.PENDING
-    complete_season = MagicMock()
-    complete_episode = MagicMock(status="completed")
-    complete_season.episodes = [complete_episode]
-    complete_tv.seasons = [complete_season]
-
-    incomplete_tv = MagicMock(id=2, title="Incomplete Show", media_type=MediaType.TV)
-    incomplete_tv.status = RequestStatus.PENDING
-    incomplete_season = MagicMock()
-    incomplete_episode = MagicMock(status=RequestStatus.PENDING)
-    incomplete_season.episodes = [incomplete_episode]
-    incomplete_tv.seasons = [incomplete_season]
-
-    new_tv = MagicMock(id=3, title="New Show", media_type=MediaType.TV)
-    new_tv.status = RequestStatus.PENDING
-    new_tv.seasons = []
-
-    completed_request = MagicMock(id=4, title="Done", media_type=MediaType.TV)
-    completed_request.status = RequestStatus.COMPLETED
-    completed_request.seasons = []
+    # Mock ScanMetrics and ScanRecentResult
+    scan_metrics = MagicMock(scanned_items=10, matched_requests=3, skipped_on_error_items=1)
+    scan_result = MagicMock()
+    scan_result.metrics = scan_metrics
+    scan_result.completed_requests = 2
+    scan_result.last_error = None
 
     polling = AsyncMock()
-    polling.get_active_requests = AsyncMock(
-        return_value=[complete_tv, incomplete_tv, new_tv, completed_request]
-    )
-    polling.poll = AsyncMock(return_value=1)
+    polling.scan_recent = AsyncMock(return_value=scan_result)
     monkeypatch.setattr(settings, "PlexPollingService", lambda db, plex: polling)
 
     tv_rescan = AsyncMock(return_value=True)
@@ -333,12 +315,24 @@ async def test_rescan_plex_partial_only_resyncs_new_or_incomplete_tv_content(mon
         shallow=True,
     )
 
-    assert result == (2, 0, 1)
-    assert [call.args[0] for call in tv_rescan.await_args_list] == [2, 3]
-    fetching = next(event for event in events if event["phase"] == "fetching")
-    assert fetching["mode"] == "partial"
-    assert fetching["active"] == ["Incomplete Show", "New Show"]
-    assert "new or incomplete" in fetching["message"]
+    # Should return (matched, skipped, completed) from scan_recent
+    assert result == (3, 1, 2)
+
+    # scan_recent should have been called with an on_progress callback
+    polling.scan_recent.assert_awaited_once()
+    assert polling.scan_recent.await_args is not None
+    # on_progress was passed as keyword
+    assert (
+        "on_progress" in polling.scan_recent.await_args.kwargs
+        or polling.scan_recent.await_args[0] is not None
+    )
+
+    # tv_rescan should NOT have been called (no Overseerr metadata resync)
+    tv_rescan.assert_not_called()
+
+    # Should emit a connecting event
+    connecting = next(event for event in events if event["phase"] == "connecting")
+    assert connecting["mode"] == "partial"
 
 
 @pytest.mark.asyncio

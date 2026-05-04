@@ -58,6 +58,10 @@ uv run pytest
 Always use subagents where possible and practical.
 Always use feature branches and PRs — never push directly to `main`. All 4 quality gates must pass before merge.
 
+## GitHub CLI
+
+Before using `gh` commands (PRs, issues, etc.), verify the active account is correct with `gh auth status`. If the wrong account is active, switch with `gh auth switch -u <username>`.
+
 ## Database guidance
 
 - The database schema is currently in flux.

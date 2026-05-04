@@ -127,8 +127,8 @@ async def test_settings_page_includes_plex_sync_action(monkeypatch, mock_db):
     assert "Plex Sync" in body
     assert "Partial Sync" in body
     assert "Full Sync" in body
-    assert "new or incomplete TV content" in body
-    assert "active non-completed TV metadata" in body
+    assert "recently added Plex items" in body
+    assert "active TV metadata" in body
     assert "Deep Re-scan" not in body
     assert "Shallow Re-scan" not in body
 
