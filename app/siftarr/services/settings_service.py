@@ -391,9 +391,7 @@ async def rescan_plex_requests(
                     title=payload.get("title"),
                     active=payload.get("active", []),
                     mode=mode,
-                    message=(
-                        f"Checking recently added Plex items: {payload.get('title', '')}"
-                    ),
+                    message=(f"Checking recently added Plex items: {payload.get('title', '')}"),
                 )
             )
 

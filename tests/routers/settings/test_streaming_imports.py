@@ -322,7 +322,10 @@ async def test_rescan_plex_partial_uses_scan_recent(monkeypatch, mock_db):
     polling.scan_recent.assert_awaited_once()
     assert polling.scan_recent.await_args is not None
     # on_progress was passed as keyword
-    assert "on_progress" in polling.scan_recent.await_args.kwargs or polling.scan_recent.await_args[0] is not None
+    assert (
+        "on_progress" in polling.scan_recent.await_args.kwargs
+        or polling.scan_recent.await_args[0] is not None
+    )
 
     # tv_rescan should NOT have been called (no Overseerr metadata resync)
     tv_rescan.assert_not_called()
