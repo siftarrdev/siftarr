@@ -24,8 +24,8 @@ from app.siftarr.services.pending_queue_service import PendingQueueService
 from app.siftarr.services.prowlarr_service import ProwlarrRelease
 from app.siftarr.services.qbittorrent_service import MediaCategory, QbittorrentService
 from app.siftarr.services.release_parser import (
+    cached_parse_release_coverage,
     is_exact_single_episode_release,
-    parse_release_coverage,
 )
 from app.siftarr.services.release_storage import build_prowlarr_release
 
@@ -102,7 +102,7 @@ async def _get_active_staged_torrents(
 
 def _get_exact_single_episode_scope(title: str) -> tuple[int, int] | None:
     """Return exact episode scope for titles that target one TV episode."""
-    coverage = parse_release_coverage(title)
+    coverage = cached_parse_release_coverage(title)
     season_number = coverage.season_number
     episode_number = coverage.episode_number
     if season_number is None or episode_number is None:

@@ -9,7 +9,7 @@ from app.siftarr.models.release import Release
 from app.siftarr.models.request import Request
 from app.siftarr.services.prowlarr_service import ProwlarrRelease
 from app.siftarr.services.release_parser import (
-    parse_release_coverage,
+    cached_parse_release_coverage,
     parse_season_episode,
     serialize_release_coverage,
 )
@@ -108,7 +108,7 @@ async def store_search_results(
         seen_keys.add(dedupe_key)
 
         parsed = parse_season_episode(release.title)
-        coverage = parse_release_coverage(release.title)
+        coverage = cached_parse_release_coverage(release.title)
 
         existing = existing_by_key.get(dedupe_key)
         if existing is not None:
@@ -189,7 +189,7 @@ async def persist_manual_release(
         raise RuntimeError(f"Release '{release.title}' has no usable download source.")
 
     parsed = parse_season_episode(release.title)
-    coverage = parse_release_coverage(release.title)
+    coverage = cached_parse_release_coverage(release.title)
 
     if release.info_hash:
         filters = [Release.request_id == request.id, Release.info_hash == release.info_hash]

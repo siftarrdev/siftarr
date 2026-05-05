@@ -21,8 +21,8 @@ from app.siftarr.services.pending_queue_service import PendingQueueService
 from app.siftarr.services.prowlarr_service import ProwlarrRelease, ProwlarrService
 from app.siftarr.services.qbittorrent_service import QbittorrentService
 from app.siftarr.services.release_parser import (
+    cached_parse_release_coverage,
     is_exact_single_episode_release,
-    parse_release_coverage,
 )
 from app.siftarr.services.release_serializers import (
     finalize_releases,
@@ -144,7 +144,7 @@ class SearchService:
         engine = await self._build_rule_engine(media_type="tv")
         releases = []
         for release in result.releases:
-            coverage = parse_release_coverage(release.title)
+            coverage = cached_parse_release_coverage(release.title)
             if coverage.episode_number is not None:
                 continue
             if coverage.is_complete_series:
@@ -175,7 +175,7 @@ class SearchService:
         engine = await self._build_rule_engine(media_type="tv")
         releases = []
         for release in result.releases:
-            coverage = parse_release_coverage(release.title)
+            coverage = cached_parse_release_coverage(release.title)
             if coverage.episode_number is not None:
                 continue
             if not coverage.is_complete_series and len(coverage.season_numbers) <= 1:
@@ -217,7 +217,7 @@ class SearchService:
         engine = await self._build_rule_engine(media_type="tv")
         releases = []
         for release in result.releases:
-            coverage = parse_release_coverage(release.title)
+            coverage = cached_parse_release_coverage(release.title)
             if coverage.is_complete_series:
                 continue
             if coverage.season_numbers != (season_number,):

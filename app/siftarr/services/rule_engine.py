@@ -4,7 +4,7 @@ from dataclasses import dataclass
 
 from app.siftarr.models.rule import TVTarget
 from app.siftarr.services.prowlarr_service import ProwlarrRelease
-from app.siftarr.services.release_parser import parse_release_coverage
+from app.siftarr.services.release_parser import cached_parse_release_coverage
 
 # ── Rule version (cache invalidation) ─────────────────────────────────
 
@@ -156,7 +156,7 @@ class RuleEngine:
 
     @staticmethod
     def _size_rule_applies_to_release(rule: SizeLimitRule, release: ProwlarrRelease) -> bool:
-        coverage = parse_release_coverage(release.title)
+        coverage = cached_parse_release_coverage(release.title)
         is_tv_release = bool(
             coverage.season_numbers
             or coverage.is_complete_series

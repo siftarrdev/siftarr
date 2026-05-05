@@ -10,8 +10,8 @@ from app.siftarr.models.request import MediaType
 from app.siftarr.services.prowlarr_service import ProwlarrRelease
 from app.siftarr.services.release_parser import (
     ParsedReleaseCoverage,
+    cached_parse_release_coverage,
     is_exact_single_episode_release,
-    parse_release_coverage,
     parse_stored_release_coverage,
 )
 from app.siftarr.services.rule_engine import ReleaseEvaluation
@@ -216,7 +216,7 @@ def serialize_active_staged_torrent(
     media_type: MediaType,
 ) -> dict[str, object]:
     """Serialize staged-torrent metadata for dashboard selection state."""
-    coverage = parse_release_coverage(staged_torrent.title)
+    coverage = cached_parse_release_coverage(staged_torrent.title)
     return {
         "id": staged_torrent.id,
         "title": staged_torrent.title,

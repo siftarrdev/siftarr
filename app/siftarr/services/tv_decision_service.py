@@ -25,8 +25,8 @@ from app.siftarr.services.prowlarr_service import (
 )
 from app.siftarr.services.qbittorrent_service import QbittorrentService
 from app.siftarr.services.release_parser import (
+    cached_parse_release_coverage,
     is_exact_single_episode_release,
-    parse_release_coverage,
 )
 from app.siftarr.services.release_storage import get_release_persistence_key, store_search_results
 from app.siftarr.services.rule_engine import (
@@ -116,7 +116,7 @@ class TVDecisionService:
     def _get_multi_season_coverage(
         evaluation: ReleaseEvaluation, requested_seasons: set[int]
     ) -> set[int]:
-        coverage = parse_release_coverage(evaluation.release.title)
+        coverage = cached_parse_release_coverage(evaluation.release.title)
         if coverage.episode_number is not None:
             return set()
 
@@ -130,7 +130,7 @@ class TVDecisionService:
 
     @staticmethod
     def _is_exact_season_pack(evaluation: ReleaseEvaluation, requested_season: int) -> bool:
-        coverage = parse_release_coverage(evaluation.release.title)
+        coverage = cached_parse_release_coverage(evaluation.release.title)
         return (
             coverage.episode_number is None
             and not coverage.is_complete_series
