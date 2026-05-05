@@ -33,9 +33,6 @@ async def run_background_episode_refresh(request_id: int) -> None:
                 await episode_sync.sync_request(request_id)
             except Exception:
                 logger.exception("Background episode sync failed for request_id=%s", request_id)
-            finally:
-                if plex_service is not None:
-                    await plex_service.close()
     finally:
         DETAILS_SYNC_TASKS.discard(request_id)
 

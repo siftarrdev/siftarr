@@ -21,13 +21,17 @@ async def test_movie_identity_mismatch_is_persisted_and_not_selected(monkeypatch
 
     staged_calls = []
 
-    async def fake_use_releases(*args, **kwargs):
-        staged_calls.append((args, kwargs))
-        return {"status": "staged", "message": "staged"}
+    class FakeStaging:
+        def __init__(self, db):
+            self.db = db
+
+        async def use_releases(self, request, releases, *, selection_source="manual"):
+            staged_calls.append((request, releases, selection_source))
+            return {"status": "staged", "message": "staged"}
 
     monkeypatch.setattr(
-        "app.siftarr.services.movie_decision_service.use_releases",
-        fake_use_releases,
+        "app.siftarr.services.movie_decision_service.StagingService",
+        FakeStaging,
     )
 
     async with session_maker() as session:
@@ -87,13 +91,17 @@ async def test_movie_identity_filter_allows_exact_title_missing_release_year(mon
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
 
-    async def fake_use_releases(db, request, releases, selection_source):
-        assert releases[0].title == "The.Cheetah.Girls.1080p.WEB-DL"
-        return {"status": "staged", "message": "staged"}
+    class FakeStaging:
+        def __init__(self, db):
+            self.db = db
+
+        async def use_releases(self, request, releases, *, selection_source="manual"):
+            assert releases[0].title == "The.Cheetah.Girls.1080p.WEB-DL"
+            return {"status": "staged", "message": "staged"}
 
     monkeypatch.setattr(
-        "app.siftarr.services.movie_decision_service.use_releases",
-        fake_use_releases,
+        "app.siftarr.services.movie_decision_service.StagingService",
+        FakeStaging,
     )
 
     async with session_maker() as session:

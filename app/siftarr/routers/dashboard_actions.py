@@ -28,7 +28,7 @@ from app.siftarr.services.request_service import (
     selection_redirect_url,
 )
 from app.siftarr.services.search_service import SearchService
-from app.siftarr.services.staging_actions import use_releases
+from app.siftarr.services.staging_service import StagingService
 
 logger = logging.getLogger(__name__)
 
@@ -68,14 +68,11 @@ async def _deny_request_record(
     lifecycle_service = LifecycleService(db)
     queue_service = PendingQueueService(db)
 
-    try:
-        if request.overseerr_request_id:
-            await overseerr_service.decline_request(request.overseerr_request_id, reason=reason)
+    if request.overseerr_request_id:
+        await overseerr_service.decline_request(request.overseerr_request_id, reason=reason)
 
-        await queue_service.remove_from_queue(request.id)
-        await lifecycle_service.transition(request.id, RequestStatus.DENIED, reason=reason)
-    finally:
-        await overseerr_service.close()
+    await queue_service.remove_from_queue(request.id)
+    await lifecycle_service.transition(request.id, RequestStatus.DENIED, reason=reason)
 
 
 @router.post("/{request_id}/search")
@@ -156,7 +153,7 @@ async def use_request_release(
     if not release:
         raise HTTPException(status_code=404, detail="Release not found")
 
-    result = await use_releases(db, request, [release], selection_source="manual")
+    result = await StagingService(db).use_releases(request, [release], selection_source="manual")
     if "application/json" in http_request.headers.get("accept", ""):
         return JSONResponse(
             {

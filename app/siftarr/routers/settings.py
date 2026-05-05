@@ -375,14 +375,11 @@ async def rescan_plex(
     try:
         runtime_settings = get_settings()
         plex = PlexService(settings=runtime_settings)
-        try:
-            tv_resynced, tv_failed, completed = await _rescan_plex_requests(
-                db,
-                runtime_settings,
-                plex,
-            )
-        finally:
-            await plex.close()
+        tv_resynced, tv_failed, completed = await _rescan_plex_requests(
+            db,
+            runtime_settings,
+            plex,
+        )
 
         context["message"] = (
             "Manual Plex rescan completed. "

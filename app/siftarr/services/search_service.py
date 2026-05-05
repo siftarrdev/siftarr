@@ -31,7 +31,7 @@ from app.siftarr.services.release_serializers import (
 )
 from app.siftarr.services.release_storage import persist_manual_release
 from app.siftarr.services.rule_engine import ReleaseEvaluation, RuleEngine
-from app.siftarr.services.staging_actions import use_releases
+from app.siftarr.services.staging_service import StagingService
 from app.siftarr.services.tv_decision_service import TVDecisionService
 from app.siftarr.services.tv_enrichment_service import TVEnrichmentService
 
@@ -63,7 +63,9 @@ class SearchService:
         """Persist and use a manual-search release through the normal selection path."""
         evaluation = await self.evaluate_manual_release(request, release)
         stored_release = await persist_manual_release(self.db, request, release, evaluation)
-        return await use_releases(self.db, request, [stored_release], selection_source="manual")
+        return await StagingService(self.db).use_releases(
+            request, [stored_release], selection_source="manual"
+        )
 
     async def process_request_search(
         self,
@@ -96,8 +98,6 @@ class SearchService:
                     await self.db.refresh(request)
             except Exception:
                 pass
-            finally:
-                await overseerr.close()
 
         prowlarr_service = ProwlarrService(settings=runtime_settings)
         qbittorrent_service = QbittorrentService(settings=runtime_settings)
@@ -246,16 +246,13 @@ class SearchService:
         tvdb_id = ensure_tvdb_id(request)
         runtime_settings = get_settings()
         prowlarr = ProwlarrService(settings=runtime_settings)
-        try:
-            return await prowlarr.search_by_tvdbid(
-                tvdbid=tvdb_id,
-                title=request.title,
-                season=season,
-                episode=episode,
-                year=request.year,
-            )
-        finally:
-            await prowlarr.close()
+        return await prowlarr.search_by_tvdbid(
+            tvdbid=tvdb_id,
+            title=request.title,
+            season=season,
+            episode=episode,
+            year=request.year,
+        )
 
     async def _build_rule_engine(self, *, media_type: str) -> RuleEngine:
         """Load rules from DB and build a RuleEngine."""

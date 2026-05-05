@@ -494,8 +494,6 @@ async def rescan_plex_tv_request(
                 request_id,
             )
             return False
-        finally:
-            await overseerr.close()
 
     return True
 
@@ -652,73 +650,70 @@ async def rescan_plex_generator(
         async with async_session_maker() as db:
             runtime_settings = get_settings()
             plex = plex_service_cls(settings=runtime_settings)
-            try:
-                queue: asyncio.Queue[dict[str, Any] | None] = asyncio.Queue()
+            queue: asyncio.Queue[dict[str, Any] | None] = asyncio.Queue()
 
-                async def emit(payload: dict[str, Any]) -> None:
-                    await queue.put(payload)
+            async def emit(payload: dict[str, Any]) -> None:
+                await queue.put(payload)
 
-                task = asyncio.create_task(
-                    rescan_plex_requests_func(
-                        db,
-                        runtime_settings,
-                        plex,
-                        on_event=emit,
-                        shallow=shallow,
-                    )
+            task = asyncio.create_task(
+                rescan_plex_requests_func(
+                    db,
+                    runtime_settings,
+                    plex,
+                    on_event=emit,
+                    shallow=shallow,
                 )
-                get_task = asyncio.create_task(queue.get())
+            )
+            get_task = asyncio.create_task(queue.get())
 
-                while True:
-                    done, _pending = await asyncio.wait(
-                        {task, get_task}, return_when=asyncio.FIRST_COMPLETED
-                    )
-                    if get_task in done:
-                        payload = get_task.result()
+            while True:
+                done, _pending = await asyncio.wait(
+                    {task, get_task}, return_when=asyncio.FIRST_COMPLETED
+                )
+                if get_task in done:
+                    payload = get_task.result()
+                    if payload is not None:
+                        yield serialize_sse(payload)
+                    get_task = asyncio.create_task(queue.get())
+                    continue
+
+                if task in done:
+                    if not get_task.done():
+                        get_task.cancel()
+                        with contextlib.suppress(asyncio.CancelledError):
+                            await get_task
+                    while not queue.empty():
+                        payload = queue.get_nowait()
                         if payload is not None:
                             yield serialize_sse(payload)
-                        get_task = asyncio.create_task(queue.get())
-                        continue
+                    break
 
-                    if task in done:
-                        if not get_task.done():
-                            get_task.cancel()
-                            with contextlib.suppress(asyncio.CancelledError):
-                                await get_task
-                        while not queue.empty():
-                            payload = queue.get_nowait()
-                            if payload is not None:
-                                yield serialize_sse(payload)
-                        break
-
-                scanned, errors, completed = await task
-                if shallow:
-                    message = (
-                        f"Partial Plex sync completed. "
-                        f"Scanned {scanned} matching request(s), "
-                        f"{errors} error(s), "
-                        f"{completed} transitioned to completed."
-                    )
-                else:
-                    message = (
-                        f"Full Plex sync completed. "
-                        f"Re-synced {scanned} TV request(s), "
-                        f"{errors} failed, "
-                        f"{completed} transitioned to completed."
-                    )
-                yield serialize_sse(
-                    build_sse_progress_func(
-                        "complete",
-                        mode=mode,
-                        resynced=scanned,
-                        failed=errors,
-                        completed=completed,
-                        active=[],
-                        message=message,
-                    )
+            scanned, errors, completed = await task
+            if shallow:
+                message = (
+                    f"Partial Plex sync completed. "
+                    f"Scanned {scanned} matching request(s), "
+                    f"{errors} error(s), "
+                    f"{completed} transitioned to completed."
                 )
-            finally:
-                await plex.close()
+            else:
+                message = (
+                    f"Full Plex sync completed. "
+                    f"Re-synced {scanned} TV request(s), "
+                    f"{errors} failed, "
+                    f"{completed} transitioned to completed."
+                )
+            yield serialize_sse(
+                build_sse_progress_func(
+                    "complete",
+                    mode=mode,
+                    resynced=scanned,
+                    failed=errors,
+                    completed=completed,
+                    active=[],
+                    message=message,
+                )
+            )
 
     except Exception as exc:
         logger.exception("Plex SSE re-scan failed")
@@ -1047,11 +1042,11 @@ async def import_overseerr_requests(
                             )
                         )
             finally:
-                await plex_service.close()
+                pass
 
         return synced_count, skipped_count
     finally:
-        await overseerr_service.close()
+        pass
 
 
 async def sync_overseerr_generator(

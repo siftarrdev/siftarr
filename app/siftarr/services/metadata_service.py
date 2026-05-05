@@ -26,41 +26,34 @@ class MetadataService:
             return None
 
         overseerr_service = OverseerrService(settings=self.settings)
-        try:
-            ov_task = asyncio.create_task(
-                overseerr_service.get_request(request.overseerr_request_id)
+        ov_task = asyncio.create_task(overseerr_service.get_request(request.overseerr_request_id))
+        media_details_task = None
+        if request.media_type.value == "movie" and request.tmdb_id:
+            media_details_task = asyncio.create_task(
+                overseerr_service.get_media_details("movie", request.tmdb_id)
             )
-            media_details_task = None
-            if request.media_type.value == "movie" and request.tmdb_id:
-                media_details_task = asyncio.create_task(
-                    overseerr_service.get_media_details("movie", request.tmdb_id)
-                )
-            elif request.media_type.value == "tv" and request.tmdb_id:
-                media_details_task = asyncio.create_task(
-                    overseerr_service.get_media_details("tv", request.tmdb_id)
-                )
-
-            ov = await ov_task
-            media: dict[str, object] = {}
-            request_status = "unknown"
-            if ov:
-                media = ov.get("media") or {}
-                request_status = overseerr_service.normalize_media_status(media.get("status"))
-
-            media_details = await media_details_task if media_details_task else None
-            merged_media = {**media, **(media_details or {})}
-            overview_value = merged_media.get("overview") or merged_media.get("summary")
-            return DashboardOverseerrDetails(
-                overview=str(overview_value) if overview_value else "",
-                poster=build_poster_url(
-                    merged_media.get("posterPath") or merged_media.get("poster")
-                ),
-                status=request_status,
-                url=build_overseerr_media_url(
-                    self.settings.overseerr_url,
-                    request.media_type.value,
-                    request.tmdb_id,
-                ),
+        elif request.media_type.value == "tv" and request.tmdb_id:
+            media_details_task = asyncio.create_task(
+                overseerr_service.get_media_details("tv", request.tmdb_id)
             )
-        finally:
-            await overseerr_service.close()
+
+        ov = await ov_task
+        media: dict[str, object] = {}
+        request_status = "unknown"
+        if ov:
+            media = ov.get("media") or {}
+            request_status = overseerr_service.normalize_media_status(media.get("status"))
+
+        media_details = await media_details_task if media_details_task else None
+        merged_media = {**media, **(media_details or {})}
+        overview_value = merged_media.get("overview") or merged_media.get("summary")
+        return DashboardOverseerrDetails(
+            overview=str(overview_value) if overview_value else "",
+            poster=build_poster_url(merged_media.get("posterPath") or merged_media.get("poster")),
+            status=request_status,
+            url=build_overseerr_media_url(
+                self.settings.overseerr_url,
+                request.media_type.value,
+                request.tmdb_id,
+            ),
+        )

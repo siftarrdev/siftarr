@@ -1,45 +1,36 @@
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
 from app.siftarr.models.request import MediaType, RequestStatus
 from app.siftarr.models.staged_torrent import StagedTorrent
-from app.siftarr.services import staging_actions
+from app.siftarr.services import staging_service as svc
+from app.siftarr.services.staging_service import StagingService
 
 
+@patch.object(svc, "PendingQueueService")
+@patch.object(svc, "get_settings")
 @pytest.mark.asyncio
 async def test_use_releases_marks_manual_selection_source(
-    mock_db, request_record, selected_release
+    mock_get_settings, mock_pq_cls, mock_db, request_record, selected_release
 ):
     settings = MagicMock(staging_mode_enabled=True)
+    mock_get_settings.return_value = settings
     queue_service = AsyncMock()
-    staging_service = AsyncMock()
+    mock_pq_cls.return_value = queue_service
+
+    mock_db.execute.return_value = MagicMock(
+        scalar_one_or_none=MagicMock(return_value=None),
+        scalars=MagicMock(return_value=MagicMock(all=MagicMock(return_value=[]))),
+    )
+
+    # Mock save_release on the real StagingService
     staged_record = MagicMock(id=33)
-    staging_service.save_release.return_value = staged_record
-
-    existing_result = MagicMock()
-    existing_result.scalar_one_or_none.return_value = None
-    mock_db.execute.return_value = existing_result
-
-    with pytest.MonkeyPatch.context() as monkeypatch:
-        monkeypatch.setattr(
-            staging_actions,
-            "get_settings",
-            MagicMock(return_value=settings),
-        )
-        monkeypatch.setattr(
-            staging_actions,
-            "PendingQueueService",
-            MagicMock(return_value=queue_service),
-        )
-        monkeypatch.setattr(
-            staging_actions,
-            "StagingService",
-            MagicMock(return_value=staging_service),
-        )
-
-        result = await staging_actions.use_releases(
-            mock_db,
+    with patch.object(
+        StagingService, "save_release", new_callable=AsyncMock, return_value=staged_record
+    ) as mock_save:
+        staging = StagingService(mock_db)
+        result = await staging.use_releases(
             request_record,
             [selected_release],
             selection_source="manual",
@@ -48,44 +39,34 @@ async def test_use_releases_marks_manual_selection_source(
     assert result["status"] == "staged"
     assert result["action"] == "manual_staged"
     assert result["message"] == "Manually staged 1 release(s) for approval."
-    staging_service.save_release.assert_awaited_once()
-    assert staging_service.save_release.await_args.kwargs["selection_source"] == "manual"
+    mock_save.assert_awaited_once()
+    kwargs = mock_save.await_args.kwargs if mock_save.await_args else {}
+    assert kwargs.get("selection_source") == "manual"
     queue_service.remove_from_queue.assert_awaited_once_with(request_record.id)
 
 
+@patch.object(svc, "QbittorrentService")
+@patch.object(svc, "PendingQueueService")
+@patch.object(svc, "get_settings")
 @pytest.mark.asyncio
 async def test_use_releases_sends_direct_when_staging_disabled(
-    mock_db, request_record, selected_release
+    mock_get_settings, mock_pq_cls, mock_qb_cls, mock_db, request_record, selected_release
 ):
     settings = MagicMock(staging_mode_enabled=False)
+    mock_get_settings.return_value = settings
     queue_service = AsyncMock()
+    mock_pq_cls.return_value = queue_service
     qbittorrent_service = AsyncMock()
     qbittorrent_service.add_torrent.return_value = "abc123"
+    mock_qb_cls.return_value = qbittorrent_service
     mock_db.commit = AsyncMock()
 
-    with pytest.MonkeyPatch.context() as monkeypatch:
-        monkeypatch.setattr(
-            staging_actions,
-            "get_settings",
-            MagicMock(return_value=settings),
-        )
-        monkeypatch.setattr(
-            staging_actions,
-            "PendingQueueService",
-            MagicMock(return_value=queue_service),
-        )
-        monkeypatch.setattr(
-            staging_actions,
-            "QbittorrentService",
-            MagicMock(return_value=qbittorrent_service),
-        )
-
-        result = await staging_actions.use_releases(
-            mock_db,
-            request_record,
-            [selected_release],
-            selection_source="manual",
-        )
+    staging = StagingService(mock_db)
+    result = await staging.use_releases(
+        request_record,
+        [selected_release],
+        selection_source="manual",
+    )
 
     assert result["status"] == "downloading"
     assert result["torrent_hashes"] == ["abc123"]
@@ -93,11 +74,16 @@ async def test_use_releases_sends_direct_when_staging_disabled(
     queue_service.remove_from_queue.assert_awaited_once_with(request_record.id)
 
 
+@patch.object(svc, "PendingQueueService")
+@patch.object(svc, "get_settings")
 @pytest.mark.asyncio
-async def test_use_releases_tv_single_episode_selection_only_replaces_same_episode_stage(mock_db):
+async def test_use_releases_tv_single_episode_selection_only_replaces_same_episode_stage(
+    mock_get_settings, mock_pq_cls, mock_db
+):
     settings = MagicMock(staging_mode_enabled=True)
+    mock_get_settings.return_value = settings
     queue_service = AsyncMock()
-    staging_service = AsyncMock()
+    mock_pq_cls.return_value = queue_service
 
     request_record = MagicMock()
     request_record.id = 9
@@ -208,44 +194,29 @@ async def test_use_releases_tv_single_episode_selection_only_replaces_same_episo
         active_result_initial,
         active_result_after_episode_one,
         active_result_before_reselection,
-    ]
-    staging_service.save_release.side_effect = [
-        stage_episode_one,
-        stage_episode_two,
-        stage_episode_one_replacement,
+        active_result_after_episode_one,
     ]
 
-    with pytest.MonkeyPatch.context() as monkeypatch:
-        monkeypatch.setattr(
-            staging_actions,
-            "get_settings",
-            MagicMock(return_value=settings),
-        )
-        monkeypatch.setattr(
-            staging_actions,
-            "PendingQueueService",
-            MagicMock(return_value=queue_service),
-        )
-        monkeypatch.setattr(
-            staging_actions,
-            "StagingService",
-            MagicMock(return_value=staging_service),
-        )
+    with patch.object(StagingService, "save_release", new_callable=AsyncMock) as mock_save:
+        mock_save.side_effect = [
+            stage_episode_one,
+            stage_episode_two,
+            stage_episode_one_replacement,
+        ]
 
-        first_result = await staging_actions.use_releases(
-            mock_db,
+        staging = StagingService(mock_db)
+
+        first_result = await staging.use_releases(
             request_record,
             [episode_one_release],
             selection_source="manual",
         )
-        second_result = await staging_actions.use_releases(
-            mock_db,
+        second_result = await staging.use_releases(
             request_record,
             [episode_two_release],
             selection_source="manual",
         )
-        reselection_result = await staging_actions.use_releases(
-            mock_db,
+        reselection_result = await staging.use_releases(
             request_record,
             [reselection_release],
             selection_source="manual",
@@ -256,7 +227,7 @@ async def test_use_releases_tv_single_episode_selection_only_replaces_same_episo
     assert reselection_result["status"] == "staged"
     assert reselection_result["action"] == "replaced_active_selection"
     assert reselection_result["staged_ids"] == [stage_episode_one_replacement.id]
-    mock_db.delete.assert_awaited_once_with(stage_episode_one)
+    mock_db.delete.assert_awaited_with(stage_episode_one)
     assert stage_episode_two.status == "staged"
-    assert staging_service.save_release.await_count == 3
+    assert mock_save.await_count == 3
     queue_service.remove_from_queue.assert_awaited()

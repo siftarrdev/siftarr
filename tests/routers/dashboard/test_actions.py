@@ -124,8 +124,9 @@ async def test_use_request_release_redirects_pending_requests_to_pending_tab(moc
     release_result.scalar_one_or_none.return_value = release_record
     mock_db.execute.side_effect = [request_result, release_result]
 
-    use_releases = AsyncMock(return_value={"status": "staged"})
-    monkeypatch.setattr(dashboard_actions, "use_releases", use_releases)
+    mock_staging_instance = AsyncMock()
+    mock_staging_instance.use_releases = AsyncMock(return_value={"status": "staged"})
+    monkeypatch.setattr(dashboard_actions, "StagingService", lambda db: mock_staging_instance)
 
     response = await dashboard_actions.use_request_release(
         request_id=21,
@@ -137,8 +138,7 @@ async def test_use_request_release_redirects_pending_requests_to_pending_tab(moc
 
     assert response.status_code == 303
     assert response.headers["location"] == "/?tab=staged"
-    use_releases.assert_awaited_once_with(
-        mock_db,
+    mock_staging_instance.use_releases.assert_awaited_once_with(
         request_record,
         [release_record],
         selection_source="manual",
@@ -162,7 +162,8 @@ async def test_use_manual_release_persists_then_uses_release(mock_db, monkeypatc
     fake_engine = MagicMock()
     fake_engine.evaluate.return_value = MagicMock(total_score=55, passed=True, matches=[])
     persist_manual_release = AsyncMock(return_value=stored_release)
-    use_releases = AsyncMock(return_value={"status": "staged"})
+    staging_instance = AsyncMock()
+    staging_instance.use_releases = AsyncMock(return_value={"status": "staged"})
 
     monkeypatch.setattr(
         search_service_mod.RuleEngine,
@@ -170,7 +171,7 @@ async def test_use_manual_release_persists_then_uses_release(mock_db, monkeypatc
         MagicMock(return_value=fake_engine),
     )
     monkeypatch.setattr(search_service_mod, "persist_manual_release", persist_manual_release)
-    monkeypatch.setattr(search_service_mod, "use_releases", use_releases)
+    monkeypatch.setattr(search_service_mod, "StagingService", lambda db: staging_instance)
 
     response = await dashboard_actions.use_manual_release(
         request_id=21,
@@ -195,8 +196,7 @@ async def test_use_manual_release_persists_then_uses_release(mock_db, monkeypatc
     assert response.status_code == 303
     assert response.headers["location"] == "/?tab=staged"
     persist_manual_release.assert_awaited_once()
-    use_releases.assert_awaited_once_with(
-        mock_db,
+    staging_instance.use_releases.assert_awaited_once_with(
         request_record,
         [stored_release],
         selection_source="manual",
@@ -217,8 +217,11 @@ async def test_use_request_release_json_reports_auto_stage_outcome(mock_db, monk
     release_result.scalar_one_or_none.return_value = release_record
     mock_db.execute.side_effect = [request_result, release_result]
 
-    use_releases = AsyncMock(return_value={"status": "staged", "action": "auto_staged"})
-    monkeypatch.setattr(dashboard_actions, "use_releases", use_releases)
+    staging_instance = AsyncMock()
+    staging_instance.use_releases = AsyncMock(
+        return_value={"status": "staged", "action": "auto_staged"}
+    )
+    monkeypatch.setattr(dashboard_actions, "StagingService", lambda db: staging_instance)
 
     response = await dashboard_actions.use_request_release(
         request_id=21,
@@ -249,7 +252,8 @@ async def test_use_manual_release_json_reports_replacement_outcome(mock_db, monk
     fake_engine = MagicMock()
     fake_engine.evaluate.return_value = MagicMock(total_score=55, passed=True, matches=[])
     persist_manual_release = AsyncMock(return_value=stored_release)
-    use_releases = AsyncMock(
+    staging_instance = AsyncMock()
+    staging_instance.use_releases = AsyncMock(
         return_value={"status": "staged", "action": "replaced_active_selection"}
     )
 
@@ -259,7 +263,7 @@ async def test_use_manual_release_json_reports_replacement_outcome(mock_db, monk
         MagicMock(return_value=fake_engine),
     )
     monkeypatch.setattr(search_service_mod, "persist_manual_release", persist_manual_release)
-    monkeypatch.setattr(search_service_mod, "use_releases", use_releases)
+    monkeypatch.setattr(search_service_mod, "StagingService", lambda db: staging_instance)
 
     response = await dashboard_actions.use_manual_release(
         request_id=21,

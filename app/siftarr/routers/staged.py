@@ -271,22 +271,19 @@ async def _reconcile_request_via_plex(
     runtime_settings,
 ) -> CheckRequestResult:
     plex = PlexService(settings=runtime_settings)
-    try:
-        plex_polling = PlexPollingService(db, plex)
-        reconcile_result = await plex_polling.check_request(request_id)
+    plex_polling = PlexPollingService(db, plex)
+    reconcile_result = await plex_polling.check_request(request_id)
 
-        if reconcile_result.available:
-            activity_log = ActivityLogService(db)
-            await activity_log.log(
-                EventType.PLEX_AVAILABLE,
-                request_id=request_id,
-                details={"title": title, "reason": reconcile_result.reason},
-            )
-            await db.commit()
+    if reconcile_result.available:
+        activity_log = ActivityLogService(db)
+        await activity_log.log(
+            EventType.PLEX_AVAILABLE,
+            request_id=request_id,
+            details={"title": title, "reason": reconcile_result.reason},
+        )
+        await db.commit()
 
-        return reconcile_result
-    finally:
-        await plex.close()
+    return reconcile_result
 
 
 async def _resolve_download_completion(

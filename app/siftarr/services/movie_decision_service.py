@@ -3,17 +3,21 @@ import logging
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.siftarr.models.activity_log import EventType
 from app.siftarr.models.request import MediaType, Request, RequestStatus
-from app.siftarr.models.rule import Rule
-from app.siftarr.services.activity_log_service import ActivityLogService
-from app.siftarr.services.pending_queue_service import PendingQueueService
+from app.siftarr.services.decision_pipeline import (
+    add_to_pending_queue,
+    build_rule_engine,
+    collect_rejection_reasons,
+    get_best_passing,
+    log_release_staged,
+    log_rule_evaluation,
+)
 from app.siftarr.services.prowlarr_service import ProwlarrService
 from app.siftarr.services.qbittorrent_service import QbittorrentService
 from app.siftarr.services.release_parser import movie_release_identity_rejection_reason
 from app.siftarr.services.release_storage import get_release_persistence_key, store_search_results
 from app.siftarr.services.rule_engine import RuleEngine
-from app.siftarr.services.staging_actions import use_releases
+from app.siftarr.services.staging_service import StagingService
 
 logger = logging.getLogger(__name__)
 
@@ -42,10 +46,7 @@ class MovieDecisionService:
 
     async def _get_rule_engine(self) -> RuleEngine:
         """Get configured rule engine from database rules."""
-        result = await self.db.execute(select(Rule))
-        rules = list(result.scalars().all())
-
-        return RuleEngine.from_db_rules(rules=rules, media_type=MediaType.MOVIE.value)
+        return await build_rule_engine(self.db, MediaType.MOVIE.value)
 
     async def process_request(self, request_id: int) -> dict:
         """
@@ -103,8 +104,8 @@ class MovieDecisionService:
         if search_result.error:
             request.status = RequestStatus.PENDING
             await self.db.commit()
-            queue_service = PendingQueueService(self.db)
-            await queue_service.add_to_queue(
+            await add_to_pending_queue(
+                self.db,
                 request.id,
                 error_message=f"Prowlarr search failed: {search_result.error}",
             )
@@ -127,8 +128,7 @@ class MovieDecisionService:
             request.status = RequestStatus.PENDING
             await self.db.commit()
 
-            queue_service = PendingQueueService(self.db)
-            await queue_service.add_to_queue(request.id)
+            await add_to_pending_queue(self.db, request.id)
 
             logger.info(
                 "Movie search found no releases: request_id=%s added_to_pending_queue",
@@ -153,27 +153,21 @@ class MovieDecisionService:
             all_evaluated.append(evaluation)
         stored_releases_by_key = await store_search_results(self.db, request.id, all_evaluated)
 
-        passed_results = [evaluation for evaluation in all_evaluated if evaluation.passed]
-        if passed_results:
-            passed_results.sort(key=lambda e: e.total_score, reverse=True)
-        best = passed_results[0] if passed_results else None
+        best = get_best_passing(all_evaluated)
 
         logger.info(
             "Movie rule evaluation: request_id=%s evaluated=%s passed=%s",
             request_id,
             len(all_evaluated),
-            len(passed_results),
+            len([e for e in all_evaluated if e.passed]),
         )
 
-        activity_log = ActivityLogService(self.db)
-        await activity_log.log(
-            EventType.RULE_EVALUATION,
+        await log_rule_evaluation(
+            self.db,
             request_id=request_id,
-            details={
-                "evaluated": len(all_evaluated),
-                "passed": len(passed_results),
-                "best_score": best.total_score if best else None,
-            },
+            evaluated=len(all_evaluated),
+            passed=len([e for e in all_evaluated if e.passed]),
+            best_score=best.total_score if best else None,
         )
 
         if best:
@@ -192,24 +186,20 @@ class MovieDecisionService:
                     info_hash=best.release.info_hash,
                 )
             )
-            action_result = await use_releases(
-                self.db,
+            action_result = await StagingService(self.db).use_releases(
                 request,
                 [stored_release] if stored_release else [],
                 selection_source="rule",
             )
 
-            activity_log = ActivityLogService(self.db)
-            await activity_log.log(
-                EventType.RELEASE_STAGED,
+            await log_release_staged(
+                self.db,
                 request_id=request_id,
-                details={
-                    "title": best.release.title,
-                    "score": best.total_score,
-                    "indexer": best.release.indexer,
-                    "size": best.release.size,
-                    "action": action_result.get("status"),
-                },
+                title=best.release.title,
+                score=best.total_score,
+                indexer=best.release.indexer,
+                size=best.release.size,
+                action=action_result.get("status"),
             )
 
             return {
@@ -228,13 +218,10 @@ class MovieDecisionService:
         request.status = RequestStatus.PENDING
         await self.db.commit()
 
-        rejection_reasons = []
-        for e in all_evaluated:
-            if e.rejection_reason:
-                rejection_reasons.append(e.rejection_reason)
+        rejection_reasons = collect_rejection_reasons(all_evaluated)
 
-        queue_service = PendingQueueService(self.db)
-        await queue_service.add_to_queue(
+        await add_to_pending_queue(
+            self.db,
             request.id,
             error_message="; ".join(set(rejection_reasons))[:500]
             if rejection_reasons

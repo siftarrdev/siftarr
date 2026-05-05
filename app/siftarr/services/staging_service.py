@@ -1,4 +1,8 @@
-"""Service for managing staged torrents."""
+"""Service for managing staged torrents and release handoff.
+
+Consolidates staging, torrent download/validation, and the ``use_releases``
+handoff workflow into a single service boundary.
+"""
 
 import json
 import logging
@@ -11,18 +15,196 @@ import httpx
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.siftarr.models.request import Request
+from app.siftarr.config import get_settings
+from app.siftarr.models.release import Release
+from app.siftarr.models.request import MediaType, Request, RequestStatus
 from app.siftarr.models.staged_torrent import StagedTorrent
+from app.siftarr.services.pending_queue_service import PendingQueueService
 from app.siftarr.services.prowlarr_service import ProwlarrRelease
+from app.siftarr.services.qbittorrent_service import MediaCategory, QbittorrentService
+from app.siftarr.services.release_parser import (
+    is_exact_single_episode_release,
+    parse_release_coverage,
+)
+from app.siftarr.services.release_storage import build_prowlarr_release
 
 STAGING_DIR = Path("/data/staging")
 
 logger = logging.getLogger(__name__)
 
 
+# ── Torrent download / validation helpers (merged from torrent_service.py) ──
+
+
+async def download_torrent(url: str, save_path: Path) -> bool:
+    """
+    Download a torrent file from URL.
+
+    Args:
+        url: The URL to download from.
+        save_path: Where to save the file.
+
+    Returns:
+        True if successful, False otherwise.
+    """
+    if not url.startswith("http"):
+        return False
+
+    async with httpx.AsyncClient() as client:
+        try:
+            response = await client.get(url, timeout=60.0)
+            response.raise_for_status()
+
+            content = response.content
+            if not content.startswith(b"d8:"):
+                return False
+
+            with open(save_path, "wb") as f:
+                f.write(content)
+            return True
+        except (httpx.RequestError, httpx.HTTPStatusError):
+            return False
+
+
+def validate_torrent_file(path: Path) -> bool:
+    """
+    Validate that a file is a valid torrent.
+
+    Torrent files start with ``d8:`` (bencode dictionary).
+    """
+    try:
+        with open(path, "rb") as f:
+            header = f.read(10)
+            return header.startswith(b"d8:")
+    except OSError:
+        return False
+
+
+# ── Handoff helpers (moved from staging_actions.py) ──
+
+
+async def _get_active_staged_torrents(
+    db: AsyncSession,
+    request_id: int,
+) -> list[StagedTorrent]:
+    """Load currently active staging torrents for a request."""
+    result = await db.execute(
+        select(StagedTorrent)
+        .where(
+            StagedTorrent.request_id == request_id,
+            StagedTorrent.status.in_(("staged", "approved")),
+        )
+        .order_by(StagedTorrent.created_at.asc(), StagedTorrent.id.asc())
+    )
+    return list(result.scalars().all())
+
+
+def _get_exact_single_episode_scope(title: str) -> tuple[int, int] | None:
+    """Return exact episode scope for titles that target one TV episode."""
+    coverage = parse_release_coverage(title)
+    season_number = coverage.season_number
+    episode_number = coverage.episode_number
+    if season_number is None or episode_number is None:
+        return None
+    if not is_exact_single_episode_release(title, season_number, episode_number):
+        return None
+    return season_number, episode_number
+
+
+def _filter_active_staged_torrents_for_release(
+    request: Request,
+    release: Release,
+    active_staged: list[StagedTorrent],
+) -> list[StagedTorrent]:
+    """Scope active staged torrents to the release target when appropriate."""
+    if request.media_type != MediaType.TV:
+        return active_staged
+
+    release_scope = _get_exact_single_episode_scope(release.title)
+    if release_scope is None:
+        return active_staged
+
+    return [
+        staged
+        for staged in active_staged
+        if _get_exact_single_episode_scope(staged.title) == release_scope
+    ]
+
+
+def _should_delete_superseded_staged_torrents(
+    request: Request,
+    selection_source: str,
+) -> bool:
+    """Return whether this selection must remove other active stages in scope."""
+    if request.media_type == MediaType.MOVIE:
+        return True
+    return selection_source == "manual"
+
+
+def _staged_selection_outcome(
+    *,
+    selection_source: str,
+    staged_count: int,
+    replaced_active_selection: bool,
+) -> tuple[str, str]:
+    """Return a clear operator-facing action/message pair for staging mode."""
+    if selection_source == "rule":
+        return (
+            "auto_staged",
+            f"Auto-staged {staged_count} release(s) for approval.",
+        )
+    if replaced_active_selection:
+        return (
+            "replaced_active_selection",
+            f"Replaced the active staged selection with {staged_count} release(s).",
+        )
+    return (
+        "manual_staged",
+        f"Manually staged {staged_count} release(s) for approval.",
+    )
+
+
+async def _delete_superseded_staged_torrents(
+    db: AsyncSession,
+    staging_service: "StagingService",
+    torrents: list[StagedTorrent],
+) -> bool:
+    """Delete superseded staged rows and any local staging files."""
+    deleted_any = False
+    for torrent in torrents:
+        await staging_service.delete_staged_files(torrent)
+        await db.delete(torrent)
+        deleted_any = True
+    return deleted_any
+
+
+async def _set_request_status(
+    db: AsyncSession,
+    request: Request,
+    new_status: RequestStatus,
+) -> None:
+    """Persist the request status, even if an older bad state needs correcting."""
+    if request.status == new_status:
+        return
+
+    request.status = new_status
+    request.updated_at = datetime.now(UTC)
+    await db.commit()
+
+
+def _get_media_category(request: Request) -> MediaCategory:
+    """Map a request media type to a qBittorrent category."""
+    if request.media_type == MediaType.MOVIE:
+        return MediaCategory.MOVIES
+    return MediaCategory.TV
+
+
+# ── StagingService ──
+
+
 class StagingService:
     """
-    Service for managing staged torrents.
+    Service for managing staged torrents and the release handoff workflow.
 
     When staging mode is enabled, torrents are saved locally instead of
     being sent directly to qBittorrent.
@@ -35,18 +217,29 @@ class StagingService:
     def __init__(self, db: AsyncSession) -> None:
         self.db = db
 
+    # ── Torrent helpers (merged from TorrentService) ──
+
+    @staticmethod
+    async def download_torrent(url: str, save_path: Path) -> bool:
+        """Download a torrent file from URL (delegates to module-level helper)."""
+        return await download_torrent(url, save_path)
+
+    @staticmethod
+    def validate_torrent_file(path: Path) -> bool:
+        """Validate that a file is a valid torrent."""
+        return validate_torrent_file(path)
+
+    # ── Filename helpers ──
+
     def _sanitize_filename(self, title: str) -> str:
         """
         Sanitize a title for use in filenames.
 
         Removes/replaces characters that are problematic in filenames.
         """
-        # Replace problematic characters
         title = re.sub(r"[<>:\"/\\|?*]", "_", title)
-        # Replace multiple spaces/underscores with single underscore
         title = re.sub(r"\s+", "_", title)
         title = re.sub(r"_+", "_", title)
-        # Truncate to reasonable length
         return title[:100]
 
     def _generate_filename(
@@ -61,6 +254,8 @@ class StagingService:
             return f"{sanitized}_{release_group}_{request_id}"
         return f"{sanitized}_{request_id}"
 
+    # ── Stage release ──
+
     async def save_release(
         self,
         release: ProwlarrRelease,
@@ -74,11 +269,13 @@ class StagingService:
         Downloads the torrent file and creates a sidecar JSON with metadata.
 
         Args:
-            release: The Prowlarr release to stage
-            request: The associated request
+            release: The Prowlarr release to stage.
+            request: The associated request.
+            score: The evaluation score.
+            selection_source: ``"rule"`` or ``"manual"``.
 
         Returns:
-            The created StagedTorrent record
+            The created StagedTorrent record.
         """
         logger.info(
             "Saving release to staging: title=%s request_id=%s size=%s indexer=%s",
@@ -109,7 +306,6 @@ class StagingService:
         else:
             logger.debug("Using magnet URI (no torrent file download): %s", release.title)
 
-        # Create metadata JSON
         metadata = {
             "request": {
                 "id": request.id,
@@ -140,7 +336,6 @@ class StagingService:
         with open(json_path, "w") as f:
             json.dump(metadata, f, indent=2)
 
-        # Create database record
         staged = StagedTorrent(
             request_id=request.id,
             torrent_path=str(torrent_path),
@@ -161,6 +356,8 @@ class StagingService:
 
         return staged
 
+    # ── Staged torrent queries ──
+
     async def get_staged_torrent(self, torrent_id: int) -> StagedTorrent | None:
         """Get a staged torrent by ID."""
         result = await self.db.execute(select(StagedTorrent).where(StagedTorrent.id == torrent_id))
@@ -174,6 +371,8 @@ class StagingService:
             .order_by(StagedTorrent.created_at.desc())
         )
         return list(result.scalars().all())
+
+    # ── File management ──
 
     async def delete_staged_files(self, staged: StagedTorrent) -> bool:
         """
@@ -201,11 +400,9 @@ class StagingService:
         if not STAGING_DIR.exists():
             return orphaned
 
-        # Get all JSON files
         json_files = list(STAGING_DIR.glob("*.json"))
 
         for json_file in json_files:
-            # Check if we have a DB record
             result = await self.db.execute(
                 select(StagedTorrent).where(StagedTorrent.json_path == str(json_file))
             )
@@ -224,6 +421,151 @@ class StagingService:
     @staticmethod
     def is_staging_enabled(db: AsyncSession) -> bool:
         """Check if staging mode is enabled."""
-        # This would check the database setting
-        # For now, return False as default
         return False
+
+    # ── Release handoff (use_releases) ──
+
+    async def use_releases(
+        self,
+        request: Request,
+        releases: list[Release],
+        *,
+        selection_source: str = "manual",
+    ) -> dict[str, object]:
+        """Stage or send one or more stored releases for a request.
+
+        Args:
+            request: The request to associate releases with.
+            releases: Stored Release records to stage or send.
+            selection_source: ``"rule"`` or ``"manual"``.
+
+        Returns:
+            Dict with status, action, message, and relevant IDs.
+        """
+        logger.info(
+            "use_releases called: request_id=%s release_count=%s selection_source=%s",
+            request.id,
+            len(releases),
+            selection_source,
+        )
+
+        runtime_settings = get_settings()
+        queue_service = PendingQueueService(self.db)
+        usable_releases = [release for release in releases if release is not None]
+        if not usable_releases:
+            raise RuntimeError("No stored releases were available to use.")
+
+        if runtime_settings.staging_mode_enabled:
+            staged_ids: list[int] = []
+            replaced_active_selection = False
+            deleted_superseded = False
+
+            for release in usable_releases:
+                active_staged = await _get_active_staged_torrents(self.db, request.id)
+                relevant_active_staged = _filter_active_staged_torrents_for_release(
+                    request,
+                    release,
+                    active_staged,
+                )
+                existing = next(
+                    (stage for stage in relevant_active_staged if stage.title == release.title),
+                    None,
+                )
+
+                if existing is None:
+                    staged = await self.save_release(
+                        build_prowlarr_release(release),
+                        request,
+                        score=release.score,
+                        selection_source=selection_source,
+                    )
+                    staged_ids.append(staged.id)
+                    logger.info(
+                        "Release staged: request_id=%s title=%s staged_id=%s score=%s",
+                        request.id,
+                        release.title,
+                        staged.id,
+                        release.score,
+                    )
+                    preserved_stage_id = staged.id
+                else:
+                    staged_ids.append(existing.id)
+                    preserved_stage_id = existing.id
+
+                if _should_delete_superseded_staged_torrents(request, selection_source):
+                    superseded = [
+                        current
+                        for current in relevant_active_staged
+                        if current.id != preserved_stage_id
+                    ]
+                    if superseded:
+                        deleted_superseded = (
+                            await _delete_superseded_staged_torrents(
+                                self.db,
+                                self,
+                                superseded,
+                            )
+                            or deleted_superseded
+                        )
+                        replaced_active_selection = True
+
+            if deleted_superseded:
+                await self.db.commit()
+
+            await _set_request_status(self.db, request, RequestStatus.STAGED)
+            await queue_service.remove_from_queue(request.id)
+            action, message = _staged_selection_outcome(
+                selection_source=selection_source,
+                staged_count=len(staged_ids),
+                replaced_active_selection=replaced_active_selection,
+            )
+            logger.info(
+                "Request staged: request_id=%s staged_count=%s action=%s selection_source=%s",
+                request.id,
+                len(staged_ids),
+                action,
+                selection_source,
+            )
+            return {
+                "status": "staged",
+                "action": action,
+                "message": message,
+                "staged_ids": staged_ids,
+            }
+
+        qbittorrent = QbittorrentService(settings=runtime_settings)
+        added_hashes: list[str] = []
+        for release in usable_releases:
+            source = release.magnet_url or release.download_url
+            if not source:
+                raise RuntimeError(f"Release '{release.title}' has no usable download source.")
+
+            torrent_hash = await qbittorrent.add_torrent(
+                magnet_uri=source,
+                category=_get_media_category(request),
+            )
+            if torrent_hash is None:
+                raise RuntimeError(f"Failed to send '{release.title}' to qBittorrent.")
+
+            added_hashes.append(torrent_hash)
+            logger.info(
+                "Torrent sent to qBittorrent: request_id=%s title=%s hash=%s category=%s",
+                request.id,
+                release.title,
+                torrent_hash,
+                _get_media_category(request).value,
+            )
+
+        await self.db.commit()
+        await _set_request_status(self.db, request, RequestStatus.DOWNLOADING)
+        await queue_service.remove_from_queue(request.id)
+        logger.info(
+            "Request downloading: request_id=%s torrent_count=%s",
+            request.id,
+            len(added_hashes),
+        )
+        return {
+            "status": "downloading",
+            "message": f"Sent {len(added_hashes)} release(s) to qBittorrent.",
+            "torrent_hashes": added_hashes,
+        }

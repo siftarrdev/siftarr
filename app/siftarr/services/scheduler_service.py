@@ -271,8 +271,6 @@ class SchedulerService:
                         logger.info("Backfilled year=%s for request_id=%s", year, request.id)
                 except Exception:
                     pass
-                finally:
-                    await overseerr.close()
 
             if request.media_type == MediaType.TV:
                 decision_service = TVDecisionService(db, prowlarr, qbittorrent)
@@ -333,11 +331,8 @@ class SchedulerService:
             async with self.db_session_factory() as db:
                 runtime_settings = get_settings()
                 plex = PlexService(settings=runtime_settings)
-                try:
-                    polling_service = PlexPollingService(db, plex)
-                    return await polling_service.scan_recent()
-                finally:
-                    await plex.close()
+                polling_service = PlexPollingService(db, plex)
+                return await polling_service.scan_recent()
 
         return await self._run_guarded_plex_scan_job(
             job_name=PLEX_RECENT_SCAN_JOB_NAME,
@@ -353,12 +348,9 @@ class SchedulerService:
             async with self.db_session_factory() as db:
                 runtime_settings = get_settings()
                 plex = PlexService(settings=runtime_settings)
-                try:
-                    polling_service = PlexPollingService(db, plex)
-                    count = await polling_service.poll()
-                    return PlexPollResult(completed_requests=count)
-                finally:
-                    await plex.close()
+                polling_service = PlexPollingService(db, plex)
+                count = await polling_service.poll()
+                return PlexPollResult(completed_requests=count)
 
         return await self._run_guarded_plex_scan_job(
             job_name=PLEX_POLL_JOB_NAME,
@@ -379,16 +371,13 @@ class SchedulerService:
 
                 runtime_settings = get_settings()
                 overseerr = OverseerrService(settings=runtime_settings)
-                try:
-                    evaluator = UnreleasedEvaluator(db, overseerr)
-                    queue_service = PendingQueueService(db)
-                    for request in recheck_requests:
-                        new_status = await evaluator.evaluate_and_apply(request)
-                        if new_status == RequestStatus.PENDING:
-                            await queue_service.add_to_queue(request.id)
-                    logger.info("Rechecked %d TV release-state request(s)", len(recheck_requests))
-                finally:
-                    await overseerr.close()
+                evaluator = UnreleasedEvaluator(db, overseerr)
+                queue_service = PendingQueueService(db)
+                for request in recheck_requests:
+                    new_status = await evaluator.evaluate_and_apply(request)
+                    if new_status == RequestStatus.PENDING:
+                        await queue_service.add_to_queue(request.id)
+                logger.info("Rechecked %d TV release-state request(s)", len(recheck_requests))
         except Exception:
             logger.exception("Error during unreleased recheck")
 
@@ -403,18 +392,15 @@ class SchedulerService:
                 async with self.db_session_factory() as db:
                     runtime_settings = get_settings()
                     plex = PlexService(settings=runtime_settings)
-                    try:
-                        qbittorrent = QbittorrentService(settings=runtime_settings)
-                        plex_polling = PlexPollingService(db, plex)
-                        service = DownloadCompletionService(db, qbittorrent, plex_polling)
-                        completed = await service.check_downloading_requests()
-                        if completed:
-                            logger.info(
-                                "DownloadCompletionService: completed %d request(s) this cycle",
-                                completed,
-                            )
-                    finally:
-                        await plex.close()
+                    qbittorrent = QbittorrentService(settings=runtime_settings)
+                    plex_polling = PlexPollingService(db, plex)
+                    service = DownloadCompletionService(db, qbittorrent, plex_polling)
+                    completed = await service.check_downloading_requests()
+                    if completed:
+                        logger.info(
+                            "DownloadCompletionService: completed %d request(s) this cycle",
+                            completed,
+                        )
             except Exception:
                 logger.exception("Error during download completion check")
 

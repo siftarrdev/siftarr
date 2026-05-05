@@ -511,8 +511,6 @@ class TestDownloadStatusEndpoint:
                 runtime_settings=runtime_settings,
             )
 
-        plex_service.close.assert_awaited_once()
-
 
 class TestCheckNowEndpoint:
     @pytest.fixture

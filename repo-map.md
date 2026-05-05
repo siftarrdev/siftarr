@@ -135,16 +135,15 @@ Business logic and integrations.
 - `request_service.py` — request creation/update orchestration
 - `rule_service.py` — CRUD/order logic for rules
 - `rule_engine.py` — release filtering and scoring evaluation
-- `tv_decision_service.py` / `movie_decision_service.py` — media-type-specific decision flows
+- `decision_pipeline.py` — shared decision pipeline helpers (rule loading, activity logging, pending queue, best-release selection)
 - `release_storage.py` — release persistence and reconstruction helpers
-- `staging_actions.py` / `staging_service.py` — stage/send workflows and staged torrent handling
+- `staging_service.py` — stage/send workflows, staged torrent handling, torrent download/validation, and release handoff (`use_releases`)
 - `release_serializers.py` — API-facing serialization helpers
 - `scheduler_service.py` / `background_tasks.py` — recurring jobs and background orchestration
 - `pending_queue_service.py` / `lifecycle_service.py` / `download_completion_service.py` — retry, status transitions, and completion detection (unreleased detection moved to unreleased_service)
 - `episode_sync_service.py` / `tv_details_service.py` — TV metadata and episode synchronization helpers
 - `overseerr_service.py` / `prowlarr_service.py` / `qbittorrent_service.py` — external service integrations
 - `plex_service/` / `plex_polling_service.py` — Plex lookups, scans, and polling logic
-- `torrent_service.py` — torrent handoff behavior
 - `connection_tester.py` — external connectivity test helpers
 - `http_client.py` — shared HTTP client lifecycle
 - `release_parser.py`, `media_helpers.py`, `type_utils.py`, `async_utils.py` — shared parsing and utility helpers

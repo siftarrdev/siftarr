@@ -223,4 +223,3 @@ async def test_rescan_plex_route_reports_success(monkeypatch, mock_db, base_cont
     assert "transitioned 3 request(s) to completed" in context["message"]
     assert created_episode_sync["db"] is worker_db
     assert created_episode_sync["plex"] is plex_service
-    plex_service.close.assert_awaited_once()

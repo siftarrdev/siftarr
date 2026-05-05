@@ -198,5 +198,3 @@ async def refresh_plex(
     except Exception:
         logger.exception("Plex refresh failed for request_id=%s", request_id)
         return JSONResponse({"status": "error", "message": "Plex sync failed"}, status_code=500)
-    finally:
-        await plex_service.close()

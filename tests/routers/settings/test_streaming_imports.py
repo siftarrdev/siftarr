@@ -236,7 +236,6 @@ async def test_rescan_plex_sse_streams_partial_and_full_progress(monkeypatch, sh
     assert events[-2]["message"] == "Running Plex poll and metadata refresh..."
     assert events[-1]["phase"] == "complete"
     assert events[-1]["completed"] == 2
-    plex.close.assert_awaited_once()
 
 
 @pytest.mark.asyncio
@@ -551,7 +550,6 @@ async def test_rescan_plex_uses_bounded_parallel_workers_and_reports_counts(
     assert set(request_to_db) == {11, 12, 13, 14}
     assert all(worker_db is not mock_db for worker_db in worker_dbs)
     request_to_db[13].rollback.assert_awaited_once()
-    plex_service.close.assert_awaited_once()
 
 
 @pytest.mark.asyncio
@@ -758,7 +756,6 @@ async def test_sync_overseerr_prefetches_with_bounded_parallelism(monkeypatch, b
         MediaType.TV,
     ]
     mock_db.commit.assert_awaited_once()
-    plex_service.close.assert_awaited_once()
 
 
 @pytest.mark.asyncio
@@ -1011,7 +1008,6 @@ async def test_sync_overseerr_logs_request_level_degraded_tv_sync_once(
         "Plex episode availability was inconclusive, preserving existing episode/request state"
     ]
     mock_db.commit.assert_awaited_once()
-    plex_service.close.assert_awaited_once()
 
 
 @pytest.mark.asyncio
@@ -1224,10 +1220,8 @@ async def test_sync_overseerr_fresh_tv_import_bounds_work_and_preserves_state_on
 
     mock_client = AsyncMock()
     mock_client.get.side_effect = plex_get
-    close = AsyncMock()
     monkeypatch.setattr(plex_service, "lookup_show_by_tmdb", lookup_show_by_tmdb)
     monkeypatch.setattr(plex_service, "_get_client", AsyncMock(return_value=mock_client))
-    monkeypatch.setattr(plex_service, "close", close)
     monkeypatch.setattr(settings, "PlexService", lambda settings: plex_service)
 
     response = await settings.sync_overseerr(MagicMock(), db=cast(Any, mock_db))
@@ -1277,4 +1271,3 @@ async def test_sync_overseerr_fresh_tv_import_bounds_work_and_preserves_state_on
     ]
     assert spam_logs == []
     assert mock_db.commit.await_count == 2
-    close.assert_awaited_once()

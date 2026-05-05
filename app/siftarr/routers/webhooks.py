@@ -114,13 +114,10 @@ async def receive_overseerr_webhook(
     if media_external_id:
         settings = get_settings()
         overseerr_service = OverseerrService(settings=settings)
-        try:
-            media_type_for_api = "movie" if media_type == MediaType.MOVIE else "tv"
-            title, year = await extract_media_title_and_year(
-                overseerr_service, media_type_for_api, media_external_id
-            )
-        finally:
-            await overseerr_service.close()
+        media_type_for_api = "movie" if media_type == MediaType.MOVIE else "tv"
+        title, year = await extract_media_title_and_year(
+            overseerr_service, media_type_for_api, media_external_id
+        )
 
     # Create request record
     request = Request(
@@ -178,24 +175,19 @@ async def process_request_background(request_id: int) -> None:
                     await episode_sync.sync_request(request.id)
                 except Exception:
                     logger.exception("Episode sync failed for request_id=%s", request_id)
-                finally:
-                    await plex_service.close()
 
             settings = get_settings()
             overseerr = OverseerrService(settings=settings)
+            evaluator = UnreleasedEvaluator(db, overseerr)
             try:
-                evaluator = UnreleasedEvaluator(db, overseerr)
-                try:
-                    new_status = await evaluator.evaluate_and_apply(request)
-                except Exception:
-                    logger.exception("Unreleased evaluation failed for request_id=%s", request_id)
-                    new_status = None
-                if new_status == RequestStatus.UNRELEASED:
-                    logger.info("Request %s classified as unreleased; skipping search", request_id)
-                    return
-                await db.refresh(request)
-            finally:
-                await overseerr.close()
+                new_status = await evaluator.evaluate_and_apply(request)
+            except Exception:
+                logger.exception("Unreleased evaluation failed for request_id=%s", request_id)
+                new_status = None
+            if new_status == RequestStatus.UNRELEASED:
+                logger.info("Request %s classified as unreleased; skipping search", request_id)
+                return
+            await db.refresh(request)
 
             settings = get_settings()
             prowlarr = ProwlarrService(settings=settings)
