@@ -2,7 +2,7 @@
 
 from datetime import datetime
 
-from sqlalchemy import BigInteger, DateTime, ForeignKey, Integer, String, Text
+from sqlalchemy import BigInteger, DateTime, ForeignKey, Index, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.siftarr.models._base import Base, utc_now
@@ -10,6 +10,10 @@ from app.siftarr.models._base import Base, utc_now
 
 class StagedTorrent(Base):
     __tablename__ = "staged_torrents"
+    __table_args__ = (
+        Index("ix_staged_torrents_request_id", "request_id"),
+        Index("ix_staged_torrents_status", "status"),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     request_id: Mapped[int | None] = mapped_column(Integer, nullable=True)  # Can be null if manual
