@@ -105,8 +105,8 @@ Database entities and enums.
 - `release.py` — searched/candidate releases
 - `rule.py` — rule definitions for filtering/scoring
 - `season.py` / `episode.py` — TV coverage and availability tracking
-- `staged_torrent.py` — staged torrent persistence
-- `activity_log.py` — activity/audit history
+- `staged_torrent.py` — staged torrent persistence; indexed on `request_id` and `status`
+- `activity_log.py` — activity/audit history; indexed on `event_type`
 - `app_setting.py` — key-value store for runtime-configurable settings (persisted across restarts)
 - `_base.py` — declarative base
 
@@ -134,19 +134,19 @@ Business logic and integrations.
 - `settings_service.py` — SettingsStore (DB-backed settings persistence), SSE progress, scheduled job helpers, Plex rescan/Overseerr import orchestration
 - `request_service.py` — request creation/update orchestration
 - `rule_service.py` — CRUD/order logic for rules
-- `rule_engine.py` — release filtering and scoring evaluation
-- `decision_pipeline.py` — shared decision pipeline helpers (rule loading, activity logging, pending queue, best-release selection)
-- `release_storage.py` — release persistence and reconstruction helpers
-- `staging_service.py` — stage/send workflows, staged torrent handling, torrent download/validation, and release handoff (`use_releases`)
+- `rule_engine.py` — release filtering and scoring evaluation; includes module-level rule version cache (`_rule_version`) for rule engine reuse across requests, invalidated on rule mutations
+- `decision_pipeline.py` — shared decision pipeline helpers (rule loading, activity logging, pending queue, best-release selection); accepts optional cached `RuleEngine` to skip DB load
+- `release_storage.py` — release persistence and reconstruction helpers; now uses upsert/diff approach in `store_search_results()` to avoid full-table churn on re-search
+- `staging_service.py` — stage/send workflows, staged torrent handling, torrent download/validation, and release handoff (`use_releases`); uses shared HTTP client for torrent downloads
 - `release_serializers.py` — API-facing serialization helpers
 - `scheduler_service.py` / `background_tasks.py` — recurring jobs and background orchestration
-- `pending_queue_service.py` / `lifecycle_service.py` / `download_completion_service.py` — retry, status transitions, and completion detection (unreleased detection moved to unreleased_service)
+- `pending_queue_service.py` / `lifecycle_service.py` / `download_completion_service.py` — retry, status transitions, and completion detection (unreleased detection moved to unreleased_service); pending queue methods support optional `commit=False` for batched transactions; completion service fetches qBit torrent list once per cycle for local matching; lifecycle stats cached with 30s TTL
 - `episode_sync_service.py` / `tv_details_service.py` — TV metadata and episode synchronization helpers
-- `overseerr_service.py` / `prowlarr_service.py` / `qbittorrent_service.py` — external service integrations
-- `plex_service/` / `plex_polling_service.py` — Plex lookups, scans, and polling logic
+- `overseerr_service.py` / `prowlarr_service.py` / `qbittorrent_service.py` — external service integrations; Prowlarr service includes LRU search result cache (45s TTL, 50 entries, disable via `SIFTARR_DISABLE_SEARCH_CACHE`), concurrent broad TV searches via `asyncio.gather`, and cache invalidation on rule changes
+- `plex_service/` / `plex_polling_service.py` — Plex lookups, scans, and polling logic; polling prioritizes recent/downloading requests with periodic full reconcile every 20th poll cycle
 - `connection_tester.py` — external connectivity test helpers
 - `http_client.py` — shared HTTP client lifecycle
-- `release_parser.py`, `media_helpers.py`, `type_utils.py`, `async_utils.py` — shared parsing and utility helpers
+- `release_parser.py`, `media_helpers.py`, `type_utils.py`, `async_utils.py` — shared parsing and utility helpers; `release_parser` includes `cached_parse_release_coverage` (lru_cache, maxsize=4096) to avoid redundant coverage parsing
 - `activity_log_service.py` / `unreleased_service.py` — supporting domain workflows (unreleased detection moved here from lifecycle_service)
 - `search_service.py` — ad hoc release evaluation/selection, request search orchestration, and TV season-pack/episode ad hoc search
 
