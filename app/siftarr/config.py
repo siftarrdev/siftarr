@@ -59,6 +59,10 @@ class Settings(BaseSettings):
         )
     )
 
+    # Authentication settings
+    api_key: str = "dev-key-change-me"
+    auth_enabled: bool = True
+
     cache_static_assets: bool = True
 
 

@@ -90,23 +90,24 @@ class SettingsStore:
         return {str(row.key): str(row.value) for row in rows}
 
     async def get_effective_dict(self) -> dict[str, Any]:
-        """Build a flat dict of effective settings.
+        """Build a flat dict of effective settings (secrets masked).
 
         DB-stored values override env-var defaults.  The returned dict
         contains **every** key in :data:`SETTINGS_KEYS` so callers always
-        get a complete payload.
+        get a complete payload.  Secret values (API keys, tokens, passwords)
+        are masked via :func:`mask_secret`.
         """
         env_settings = get_settings()
         base: dict[str, Any] = {
             "overseerr_url": str(env_settings.overseerr_url or ""),
-            "overseerr_api_key": str(env_settings.overseerr_api_key or ""),
+            "overseerr_api_key": mask_secret(env_settings.overseerr_api_key) or "",
             "prowlarr_url": str(env_settings.prowlarr_url or ""),
-            "prowlarr_api_key": str(env_settings.prowlarr_api_key or ""),
+            "prowlarr_api_key": mask_secret(env_settings.prowlarr_api_key) or "",
             "qbittorrent_url": str(env_settings.qbittorrent_url or ""),
             "qbittorrent_username": env_settings.qbittorrent_username,
-            "qbittorrent_password": env_settings.qbittorrent_password,
+            "qbittorrent_password": mask_secret(env_settings.qbittorrent_password) or "",
             "plex_url": str(env_settings.plex_url or ""),
-            "plex_token": env_settings.plex_token or "",
+            "plex_token": mask_secret(env_settings.plex_token) or "",
             "tz": env_settings.tz,
         }
         db_overrides = await self.get_all()
@@ -141,6 +142,19 @@ class SettingsStore:
         get_settings.cache_clear()
 
 
+def mask_secret(value: str | None, visible_chars: int = 4) -> str | None:
+    """Mask a secret value, showing only the last *visible_chars* characters.
+
+    Returns ``None`` if *value* is ``None`` or empty.
+    Returns the original value unchanged if it is shorter than *visible_chars* + 1.
+    """
+    if not value:
+        return None
+    if len(value) <= visible_chars:
+        return value
+    return f"{'*' * (len(value) - visible_chars)}{value[-visible_chars:]}"
+
+
 def _coerce_setting_type(current: Any, raw: str) -> Any:
     """Coerce a string *raw* value to match the type of *current*."""
     if isinstance(current, bool):
@@ -154,18 +168,18 @@ def _coerce_setting_type(current: Any, raw: str) -> Any:
 
 
 async def build_effective_settings() -> dict[str, Any]:
-    """Build the effective flattened settings payload."""
+    """Build the effective flattened settings payload (secrets masked)."""
     effective = get_settings()
     return {
         "overseerr_url": str(effective.overseerr_url or ""),
-        "overseerr_api_key": str(effective.overseerr_api_key or ""),
+        "overseerr_api_key": mask_secret(effective.overseerr_api_key) or "",
         "prowlarr_url": str(effective.prowlarr_url or ""),
-        "prowlarr_api_key": str(effective.prowlarr_api_key or ""),
+        "prowlarr_api_key": mask_secret(effective.prowlarr_api_key) or "",
         "qbittorrent_url": str(effective.qbittorrent_url or ""),
         "qbittorrent_username": effective.qbittorrent_username,
-        "qbittorrent_password": effective.qbittorrent_password,
+        "qbittorrent_password": mask_secret(effective.qbittorrent_password) or "",
         "plex_url": str(effective.plex_url or ""),
-        "plex_token": effective.plex_token or "",
+        "plex_token": mask_secret(effective.plex_token) or "",
         "tz": effective.tz,
     }
 

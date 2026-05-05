@@ -6,7 +6,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from urllib.parse import urlparse
 
-from fastapi import FastAPI, Request
+from fastapi import Depends, FastAPI, Request
 from fastapi.responses import JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
@@ -22,6 +22,7 @@ from app.siftarr.routers import (
     staged,
     webhooks,
 )
+from app.siftarr.services.auth_service import verify_api_key
 from app.siftarr.services.http_client import close_shared_client
 from app.siftarr.services.scheduler_service import SchedulerService
 from app.siftarr.version import __version__
@@ -127,15 +128,19 @@ def create_app() -> FastAPI:
 
     app.mount("/static", StaticFiles(directory=Path(__file__).parent / "static"), name="static")
 
-    # Include routers
-    app.include_router(dashboard.router)
-    app.include_router(dashboard_api.router)
-    app.include_router(dashboard_actions.router)
-    app.include_router(webhooks.router)
-    app.include_router(rules.router)
-    app.include_router(search_sse.router)
-    app.include_router(settings.router)
-    app.include_router(staged.router)
+    # Authentication dependency applied to all routers.
+    # The root "/" and "/health" endpoints defined directly on the app are excluded.
+    auth = [Depends(verify_api_key)]
+
+    # Include routers with authentication
+    app.include_router(dashboard.router, dependencies=auth)
+    app.include_router(dashboard_api.router, dependencies=auth)
+    app.include_router(dashboard_actions.router, dependencies=auth)
+    app.include_router(webhooks.router, dependencies=auth)
+    app.include_router(rules.router, dependencies=auth)
+    app.include_router(search_sse.router, dependencies=auth)
+    app.include_router(settings.router, dependencies=auth)
+    app.include_router(staged.router, dependencies=auth)
 
     @app.get("/")
     async def root() -> RedirectResponse:
