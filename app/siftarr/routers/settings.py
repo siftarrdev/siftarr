@@ -557,6 +557,10 @@ async def sync_overseerr_stream() -> StreamingResponse:
             import_overseerr_requests_func=import_overseerr_requests_svc,
             build_sse_progress_func=build_sse_progress,
             logger=logger,
+            overseerr_service_cls=OverseerrService,
+            plex_service_cls=PlexService,
+            evaluate_imported_request_func=evaluate_imported_request,
+            prepare_overseerr_import_func=prepare_overseerr_import,
         ):
             yield event
 

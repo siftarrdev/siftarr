@@ -32,28 +32,5 @@
 15. **Fix `http_client.py` duplicate `DEFAULT_LIMITS` constant** — Lines 9 and 17 both define `DEFAULT_LIMITS` with different values; the second silently shadows the first. This is a bug causing unexpected connection limits. Consolidate to one definition.
 16. **Avoid full-table release churn on re-search** — `release_storage.store_search_results()` deletes all releases for a request then bulk-inserts. For frequent re-searches, this causes table-level churn. An upsert/diff approach (matching by `download_url` or `info_hash`) would reduce write amplification and preserve stable row IDs.
 
-## Areas for Simplification
-
-1.  **Extract shared decision pipeline steps carefully** — movie and TV decisions share rule loading, evaluation, release storage, pending handling, staging/handoff, and logging. Extract shared helpers or a small pipeline, but keep TV-specific season/episode selection out of a generic base class.
-2.  **Split `DashboardService` by responsibility** — it mixes request detail DTOs, stored-release loading, manual Prowlarr searches, TV enrichment, Overseerr details, and timeline loading. Split into detail, search, TV enrichment, and metadata/timeline services.
-3.  **Reduce settings-router wrapper bloat** — `routers/settings.py` contains many pass-through wrappers around `settings_service` to inject dependencies. Prefer direct service calls, smaller dependency objects, or focused orchestration classes.
-4.  **Move in-method imports to module scope where possible** — e.g. `MovieDecisionService` imports `EventType` inside `process_request`; `scheduler_service` imports `DownloadCompletionService` inside a method. Keep local imports only where needed to avoid cycles.
-5.  **Consolidate duplicated `_utc_now()` helpers** — the same timestamp helper appears in several model files (`request`, `release`, `season`, `activity_log`, `rule`, `staged_torrent`). Move to a shared model utility.
-6.  **Remove logging workarounds after fixing logging setup** — `_log()` helpers in `download_completion_service.py` and `episode_sync_service.py` duplicate logger fallback behavior. Standardize logging configuration and remove custom helpers.
-7.  **Replace `_maybe_await()` test accommodation with clearer interfaces** — `rules.py` supports sync test doubles in async paths. Prefer async protocols/mocks or explicit adapters.
-8.  **Use typed result objects for Plex scheduler metrics** — `scheduler_service` currently duck-types Plex job results in `_build_plex_job_metrics_payload()` and `_get_plex_completed_requests()`. A protocol or common result DTO would simplify this.
-9.  **Move release-state/unreleased responsibilities behind `unreleased_service`** — lifecycle state transitions and unreleased detection are spread across lifecycle/scheduler/unreleased services. Keep generic status transitions in lifecycle, and release-date/availability decisions in `unreleased_service`.
-10. **Make integration lifecycle management consistent** — many call sites instantiate services then manually `finally: await service.close()`, even when close is a no-op for shared clients. Use async context managers or dependency-injected service factories.
-11. **Make `StagingService` require a database session** — it accepts `AsyncSession | None` but most methods immediately raise if missing. Make `db` required and isolate any file-only/test helpers separately.
-12. **Consolidate release handoff boundaries** — `staging_service.py`, `staging_actions.py`, and `torrent_service.py` overlap around staged/download handoff. Define one orchestration boundary for “use selected release(s)”.
-
-13. **Simplify request status transition logic** — `LifecycleService.transition()` commits, logs, then commits again. Combine into one transaction; the double commit is unnecessary and risks inconsistency under load.
-14. **Simplify Plex polling abstraction stack** — `PlexPollingService`, `EpisodeSyncService`, and `PlexService` have overlapping responsibilities for lookup, availability, and reconciliation. Merge lookup into `PlexService` and make polling a thin state-machine wrapper.
-15. **Unify configuration mutation** — `_set_db_setting` mutates `os.environ` at runtime and clears an `lru_cache`. This is fragile and hard to trace. Use a proper settings store (database-backed with pydantic validation) rather than mutating the process environment.
-16. **Fix `activity_log_service.py` rollback risk** — `ActivityLogService.log()` calls `await self.db.rollback()` on failure (line 42), which rolls back the *entire* parent transaction, not just the log entry. Use a nested transaction (savepoint via `begin_nested()`) so that a logging failure doesn't destroy the caller's work.
-17. **Move `_process_request_search` from router to service** — This private function in `dashboard_actions.py` is imported by both `dashboard_api.py` and `search_sse.py`. Search orchestration is business logic, not routing logic; it belongs in a service (e.g., `search_service.py`).
-18. **Fix `database.py` module-level engine creation** — The engine is created at module import time (line 357) before the lifespan manager runs. This can cause race conditions with startup initialization. Defer engine creation to `init_db()` or use a lazy property.
-19. **Add authentication to all endpoints** — Zero auth on any endpoint today. Anyone with network access can trigger searches, deny requests, modify rules, clear caches, and read API keys. At minimum, add API-key header auth; ideally integrate with Overseerr's SSO or support basic auth.
-20. **Protect API key exposure in connections endpoint** — `/settings/api/connections` returns all API keys (Overseerr, Prowlarr, qBittorrent, Plex) in plaintext JSON. Combined with no authentication, this is a complete credential leak. Mask keys in responses; never return full secrets.
-
 ## Bugs
+- the requested on date seems to be the date the request was loaded from overseerr rather than the date the request was made.
