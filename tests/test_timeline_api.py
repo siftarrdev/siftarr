@@ -78,6 +78,8 @@ class TestTimelineInDetails:
         )
 
         # Mock db.execute for releases query (returns empty) and rules query (returns empty)
+        count_result = MagicMock()
+        count_result.scalar.return_value = 0
         release_result = MagicMock()
         release_result.scalars.return_value.all.return_value = []
         rules_result = MagicMock()
@@ -85,7 +87,9 @@ class TestTimelineInDetails:
         staged_result = MagicMock()
         staged_result.scalars.return_value.first.return_value = None
 
-        mock_db.execute = AsyncMock(side_effect=[release_result, rules_result, staged_result])
+        mock_db.execute = AsyncMock(
+            side_effect=[count_result, release_result, rules_result, staged_result]
+        )
 
         # Mock ActivityLogService.get_timeline to return entries newest-first (as the real service does)
         with patch.object(detail_service, "ActivityLogService") as MockService:
@@ -120,13 +124,17 @@ class TestTimelineInDetails:
             2, "search_completed", 1, created_at=datetime(2026, 4, 20, 11, 0, tzinfo=UTC)
         )
 
+        count_result = MagicMock()
+        count_result.scalar.return_value = 0
         release_result = MagicMock()
         release_result.scalars.return_value.all.return_value = []
         rules_result = MagicMock()
         rules_result.scalars.return_value.all.return_value = []
         staged_result = MagicMock()
         staged_result.scalars.return_value.first.return_value = None
-        mock_db.execute = AsyncMock(side_effect=[release_result, rules_result, staged_result])
+        mock_db.execute = AsyncMock(
+            side_effect=[count_result, release_result, rules_result, staged_result]
+        )
 
         with patch.object(detail_service, "ActivityLogService") as MockService:
             instance = MockService.return_value
@@ -154,13 +162,17 @@ class TestTimelineInDetails:
         mock_load.return_value = request
         mock_settings.return_value = MagicMock(overseerr_url="http://localhost")
 
+        count_result = MagicMock()
+        count_result.scalar.return_value = 0
         release_result = MagicMock()
         release_result.scalars.return_value.all.return_value = []
         rules_result = MagicMock()
         rules_result.scalars.return_value.all.return_value = []
         staged_result = MagicMock()
         staged_result.scalars.return_value.first.return_value = None
-        mock_db.execute = AsyncMock(side_effect=[release_result, rules_result, staged_result])
+        mock_db.execute = AsyncMock(
+            side_effect=[count_result, release_result, rules_result, staged_result]
+        )
 
         with patch.object(detail_service, "ActivityLogService") as MockService:
             instance = MockService.return_value

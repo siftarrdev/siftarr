@@ -6,7 +6,7 @@ import json
 from typing import Any
 
 from fastapi import BackgroundTasks
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.siftarr.config import Settings, get_settings
@@ -45,10 +45,12 @@ class DetailService:
         *,
         request_id: int,
         background_tasks: BackgroundTasks,
+        offset: int = 0,
+        limit: int = 100,
     ) -> RequestDetailsData:
         """Load full request detail payload including releases, TV info, and timeline."""
-        releases = await self._load_serialized_stored_releases(
-            request_id, media_type=request.media_type
+        releases, total_releases = await self._load_serialized_stored_releases(
+            request_id, media_type=request.media_type, offset=offset, limit=limit
         )
         active_staged_torrents = await self._load_active_staged_payloads(
             request_id,
@@ -79,6 +81,7 @@ class DetailService:
                 media_type=request.media_type.value,
             ),
             releases=releases,
+            total_releases=total_releases,
             active_staged_torrent=active_staged_torrents[0] if active_staged_torrents else None,
             active_staged_torrents=active_staged_torrents,
             overseerr=overseerr_details,
@@ -90,6 +93,9 @@ class DetailService:
         self, request: Any, *, request_id: int
     ) -> RequestSearchData:
         """Load stored releases for a movie request after a search."""
+        releases, _total = await self._load_serialized_stored_releases(
+            request_id, media_type=request.media_type
+        )
         return RequestSearchData(
             request=DashboardRequestSummary(
                 id=request.id,
@@ -97,9 +103,7 @@ class DetailService:
                 status=request.status.value,
                 media_type=request.media_type.value,
             ),
-            releases=await self._load_serialized_stored_releases(
-                request_id, media_type=request.media_type
-            ),
+            releases=releases,
         )
 
     async def _load_serialized_stored_releases(
@@ -107,9 +111,20 @@ class DetailService:
         request_id: int,
         *,
         media_type: MediaType,
-    ) -> list[dict[str, object]]:
-        """Load and serialize persisted releases with rule evaluation."""
+        offset: int = 0,
+        limit: int = 100,
+    ) -> tuple[list[dict[str, object]], int]:
+        """Load and serialize persisted releases with rule evaluation.
+
+        Returns (serialized_releases, total_count) for pagination UI.
+        """
         from app.siftarr.models.release import Release
+
+        # Get total count for pagination
+        count_result = await self.db.execute(
+            select(func.count()).select_from(Release).where(Release.request_id == request_id)
+        )
+        total_count = count_result.scalar() or 0
 
         release_result = await self.db.execute(
             select(Release)
@@ -120,18 +135,23 @@ class DetailService:
                 Release.seeders.desc(),
                 Release.created_at.desc(),
             )
+            .offset(offset)
+            .limit(limit)
         )
         releases = list(release_result.scalars().all())
         engine = await self._build_rule_engine(media_type=media_type.value)
-        return finalize_releases(
-            [
-                serialize_stored_evaluated_release(
-                    release,
-                    engine.evaluate(build_prowlarr_release(release)),
-                    media_type=media_type,
-                )
-                for release in releases
-            ]
+        return (
+            finalize_releases(
+                [
+                    serialize_stored_evaluated_release(
+                        release,
+                        engine.evaluate(build_prowlarr_release(release)),
+                        media_type=media_type,
+                    )
+                    for release in releases
+                ]
+            ),
+            total_count,
         )
 
     async def _load_active_staged_payloads(

@@ -52,6 +52,8 @@ async def test_request_details_reuses_persisted_multi_season_coverage(
 
     request_result = MagicMock()
     request_result.scalar_one_or_none.return_value = request_record
+    count_result = MagicMock()
+    count_result.scalar.return_value = 1
     release_result = MagicMock()
     release_result.scalars.return_value.all.return_value = [stored_release]
     rules_result = MagicMock()
@@ -64,6 +66,7 @@ async def test_request_details_reuses_persisted_multi_season_coverage(
     episodes_two_result.scalars.return_value.all.return_value = []
     mock_db.execute.side_effect = [
         request_result,
+        count_result,
         release_result,
         rules_result,
         seasons_result,
@@ -190,6 +193,8 @@ async def test_request_details_orders_stored_releases_by_score_then_size(
 
     request_result = MagicMock()
     request_result.scalar_one_or_none.return_value = request_record
+    count_result = MagicMock()
+    count_result.scalar.return_value = 3
     release_result = MagicMock()
     release_result.scalars.return_value.all.return_value = [
         larger_high_score,
@@ -206,6 +211,7 @@ async def test_request_details_orders_stored_releases_by_score_then_size(
     episodes_two_result.scalars.return_value.all.return_value = []
     mock_db.execute.side_effect = [
         request_result,
+        count_result,
         release_result,
         rules_result,
         seasons_result,
@@ -293,11 +299,13 @@ async def test_request_details_includes_release_status_reason_and_publish_date(
 
     request_result = MagicMock()
     request_result.scalar_one_or_none.return_value = request_record
+    count_result = MagicMock()
+    count_result.scalar.return_value = 1
     release_result = MagicMock()
     release_result.scalars.return_value.all.return_value = [stored_release]
     rules_result = MagicMock()
     rules_result.scalars.return_value.all.return_value = []
-    mock_db.execute.side_effect = [request_result, release_result, rules_result]
+    mock_db.execute.side_effect = [request_result, count_result, release_result, rules_result]
 
     monkeypatch.setattr(dashboard_api, "get_settings", lambda: MagicMock())
 

@@ -74,6 +74,8 @@ async def test_request_details_surfaces_active_staged_torrent_metadata(
 
     request_result = MagicMock()
     request_result.scalar_one_or_none.return_value = request_record
+    count_result = MagicMock()
+    count_result.scalar.return_value = 2
     release_result = MagicMock()
     release_result.scalars.return_value.all.return_value = [active_release, other_release]
     rules_result = MagicMock()
@@ -82,6 +84,7 @@ async def test_request_details_surfaces_active_staged_torrent_metadata(
     active_stage_result.scalars.return_value.all.return_value = [active_stage]
     mock_db.execute.side_effect = [
         request_result,
+        count_result,
         release_result,
         rules_result,
         active_stage_result,
@@ -212,6 +215,8 @@ async def test_request_details_tv_scopes_active_stage_to_matching_episode(
 
     request_result = MagicMock()
     request_result.scalar_one_or_none.return_value = request_record
+    count_result = MagicMock()
+    count_result.scalar.return_value = 2
     release_result = MagicMock()
     release_result.scalars.return_value.all.return_value = [
         episode_one_release,
@@ -227,6 +232,7 @@ async def test_request_details_tv_scopes_active_stage_to_matching_episode(
     episodes_result.scalars.return_value.all.return_value = [episode_one, episode_two]
     mock_db.execute.side_effect = [
         request_result,
+        count_result,
         release_result,
         rules_result,
         active_stage_result,
