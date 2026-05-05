@@ -167,8 +167,9 @@ def _coerce_setting_type(current: Any, raw: str) -> Any:
     return raw
 
 
-async def build_effective_settings() -> dict[str, Any]:
+async def build_effective_settings(db: AsyncSession | None = None) -> dict[str, Any]:
     """Build the effective flattened settings payload (secrets masked)."""
+    del db
     effective = get_settings()
     return {
         "overseerr_url": str(effective.overseerr_url or ""),
