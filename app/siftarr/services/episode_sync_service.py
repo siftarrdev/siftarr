@@ -18,15 +18,6 @@ from app.siftarr.services.plex_service import PlexLookupResult, PlexService
 logger = logging.getLogger(__name__)
 
 
-def _log(level: int, message: str, *args: object) -> None:
-    """Log via the service logger, falling back to root if needed."""
-    if not logger.disabled and logger.isEnabledFor(level) and (logger.handlers or logger.propagate):
-        logger.log(level, message, *args)
-        return
-
-    logging.getLogger().log(level, message, *args)
-
-
 def _episodes_are_unreleased(episodes: list[Episode]) -> bool:
     """Return whether any episode has a future air date."""
     today = datetime.now(UTC).date()
@@ -451,8 +442,7 @@ class EpisodeSyncService:
 
         rating_key, lookup_authoritative = await self._resolve_plex_rating_key(request)
         if not lookup_authoritative:
-            _log(
-                logging.WARNING,
+            logger.warning(
                 "EpisodeSyncService: degraded Plex sync for request %s (%s); "
                 "Plex lookup was inconclusive, preserving existing episode/request state",
                 request.id,
@@ -470,8 +460,7 @@ class EpisodeSyncService:
 
         availability_result = await self._plex.get_episode_availability_result(rating_key)
         if not availability_result.authoritative:
-            _log(
-                logging.WARNING,
+            logger.warning(
                 "EpisodeSyncService: degraded Plex sync for request %s (%s); "
                 "Plex episode availability was inconclusive, preserving existing episode/request state",
                 request.id,

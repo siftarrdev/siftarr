@@ -13,9 +13,14 @@ from app.siftarr.services.staging_service import StagingService
 class TestStagingServiceUnit:
     """Unit tests for StagingService."""
 
-    def test_sanitize_filename_special_chars(self):
+    @pytest.fixture
+    def mock_db(self):
+        """Create a mock database session."""
+        return MagicMock()
+
+    def test_sanitize_filename_special_chars(self, mock_db):
         """Test sanitizing filenames with special characters."""
-        service = StagingService(None)
+        service = StagingService(mock_db)
 
         assert service._sanitize_filename("Movie: Title 2019") == "Movie_Title_2019"
         assert service._sanitize_filename("Movie/Title") == "Movie_Title"
@@ -23,23 +28,23 @@ class TestStagingServiceUnit:
         assert service._sanitize_filename('Movie"Title"2019') == "Movie_Title_2019"
         assert service._sanitize_filename("Movie|Title") == "Movie_Title"
 
-    def test_sanitize_filename_spaces(self):
+    def test_sanitize_filename_spaces(self, mock_db):
         """Test sanitizing filenames with spaces."""
-        service = StagingService(None)
+        service = StagingService(mock_db)
 
         assert service._sanitize_filename("Movie  Title   2019") == "Movie_Title_2019"
 
-    def test_sanitize_filename_truncation(self):
+    def test_sanitize_filename_truncation(self, mock_db):
         """Test that long filenames are truncated."""
-        service = StagingService(None)
+        service = StagingService(mock_db)
 
         long_title = "A" * 200
         result = service._sanitize_filename(long_title)
         assert len(result) == 100
 
-    def test_generate_filename_with_group(self):
+    def test_generate_filename_with_group(self, mock_db):
         """Test filename generation with release group."""
-        service = StagingService(None)
+        service = StagingService(mock_db)
 
         result = service._generate_filename(
             title="My Movie 2019",
@@ -51,9 +56,9 @@ class TestStagingServiceUnit:
         assert "RARBG" in result
         assert "123" in result
 
-    def test_generate_filename_without_group(self):
+    def test_generate_filename_without_group(self, mock_db):
         """Test filename generation without release group."""
-        service = StagingService(None)
+        service = StagingService(mock_db)
 
         result = service._generate_filename(
             title="My Movie 2019",
@@ -84,41 +89,6 @@ class TestStagingServiceIntegration:
     def service(self, mock_db):
         """Create a StagingService instance."""
         return StagingService(mock_db)
-
-    @pytest.mark.asyncio
-    async def test_save_release_no_db(self):
-        """Test saving release without database session."""
-        service = StagingService(None)
-
-        mock_request = MagicMock(spec=Request)
-        mock_release = MagicMock(spec=ProwlarrRelease)
-
-        with pytest.raises(RuntimeError, match="Database session is required"):
-            await service.save_release(mock_release, mock_request)
-
-    @pytest.mark.asyncio
-    async def test_get_staged_torrent_no_db(self):
-        """Test getting staged torrent without database session."""
-        service = StagingService(None)
-
-        with pytest.raises(RuntimeError, match="Database session is required"):
-            await service.get_staged_torrent(1)
-
-    @pytest.mark.asyncio
-    async def test_get_all_staged_no_db(self):
-        """Test getting all staged torrents without database session."""
-        service = StagingService(None)
-
-        with pytest.raises(RuntimeError, match="Database session is required"):
-            await service.get_all_staged()
-
-    @pytest.mark.asyncio
-    async def test_scan_staging_directory_no_db(self):
-        """Test scanning staging directory without database session."""
-        service = StagingService(None)
-
-        with pytest.raises(RuntimeError, match="Database session is required"):
-            await service.scan_staging_directory()
 
     @pytest.mark.asyncio
     async def test_delete_staged_files_success(self, service, tmp_path):

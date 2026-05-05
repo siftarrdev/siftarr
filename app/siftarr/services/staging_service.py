@@ -32,7 +32,7 @@ class StagingService:
     - {sanitized_title}_{release_group}_{request_id}.json (metadata)
     """
 
-    def __init__(self, db: AsyncSession | None) -> None:
+    def __init__(self, db: AsyncSession) -> None:
         self.db = db
 
     def _sanitize_filename(self, title: str) -> str:
@@ -79,13 +79,7 @@ class StagingService:
 
         Returns:
             The created StagedTorrent record
-
-        Raises:
-            RuntimeError: If database session is not available
         """
-        if self.db is None:
-            raise RuntimeError("Database session is required for save_release")
-
         logger.info(
             "Saving release to staging: title=%s request_id=%s size=%s indexer=%s",
             release.title,
@@ -169,15 +163,11 @@ class StagingService:
 
     async def get_staged_torrent(self, torrent_id: int) -> StagedTorrent | None:
         """Get a staged torrent by ID."""
-        if self.db is None:
-            raise RuntimeError("Database session is required for get_staged_torrent")
         result = await self.db.execute(select(StagedTorrent).where(StagedTorrent.id == torrent_id))
         return result.scalar_one_or_none()
 
     async def get_all_staged(self) -> list[StagedTorrent]:
         """Get all staged torrents."""
-        if self.db is None:
-            raise RuntimeError("Database session is required for get_all_staged")
         result = await self.db.execute(
             select(StagedTorrent)
             .where(StagedTorrent.status == "staged")
@@ -206,9 +196,6 @@ class StagingService:
 
         Returns list of any orphaned files found.
         """
-        if self.db is None:
-            raise RuntimeError("Database session is required for scan_staging_directory")
-
         orphaned = []
 
         if not STAGING_DIR.exists():
