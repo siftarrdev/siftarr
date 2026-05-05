@@ -1,23 +1,18 @@
 """Request model for Overseerr requests."""
 
 import enum
-from datetime import UTC, datetime
+from datetime import datetime
 from typing import TYPE_CHECKING
 
 from sqlalchemy import DateTime, Index, Integer, String
 from sqlalchemy import Enum as SQLEnum
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from app.siftarr.models._base import Base  # noqa: PLC0414
+from app.siftarr.models._base import Base, utc_now  # noqa: PLC0414
 
 if TYPE_CHECKING:
     from app.siftarr.models.release import Release
     from app.siftarr.models.season import Season
-
-
-def _utc_now() -> datetime:
-    """Return current UTC time as timezone-aware datetime."""
-    return datetime.now(UTC)
 
 
 class MediaType(enum.StrEnum):
@@ -80,8 +75,8 @@ class Request(Base):
     )
     requester_username: Mapped[str | None] = mapped_column(String(255), nullable=True)
     requester_email: Mapped[str | None] = mapped_column(String(255), nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utc_now)
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=_utc_now, onupdate=_utc_now)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now, onupdate=utc_now)
     overseerr_request_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
     rejection_reason: Mapped[str | None] = mapped_column(String(500), nullable=True)
     plex_rating_key: Mapped[str | None] = mapped_column(String(100), nullable=True)

@@ -75,13 +75,12 @@ async def test_poll_tv_all_episodes_available(service, mock_db, mock_plex):
     mock_plex.get_show_by_tmdb.return_value = {"rating_key": "42"}
     mock_plex.get_episode_availability.return_value = {(1, 1): True, (1, 2): True}
 
-    async def reconcile_to_completed(request, seasons, availability):
+    async def reconcile_to_completed(db, request, seasons, availability):
         return await set_request_status(request, RequestStatus.COMPLETED, seasons, availability)
 
     with (
-        patch.object(
-            service.episode_sync,
-            "reconcile_existing_seasons_from_plex",
+        patch(
+            "app.siftarr.services.plex_polling_service.persist_episode_availability",
             new_callable=AsyncMock,
         ) as mock_reconcile,
         patch.object(service.lifecycle, "transition", new_callable=AsyncMock) as mock_transition,
@@ -90,7 +89,7 @@ async def test_poll_tv_all_episodes_available(service, mock_db, mock_plex):
         completed = await service.poll()
 
     assert completed == 1
-    mock_reconcile.assert_awaited_once_with(req, req.seasons, {(1, 1): True, (1, 2): True})
+    mock_reconcile.assert_awaited_once_with(mock_db, req, req.seasons, {(1, 1): True, (1, 2): True})
     mock_transition.assert_not_awaited()
 
 
@@ -132,13 +131,12 @@ async def test_poll_pending_request_can_complete(service, mock_db, mock_plex):
     mock_plex.get_show_by_tmdb.return_value = {"rating_key": "42"}
     mock_plex.get_episode_availability.return_value = {(1, 1): True, (1, 2): True}
 
-    async def reconcile_to_completed(request, seasons, availability):
+    async def reconcile_to_completed(db, request, seasons, availability):
         return await set_request_status(request, RequestStatus.COMPLETED, seasons, availability)
 
     with (
-        patch.object(
-            service.episode_sync,
-            "reconcile_existing_seasons_from_plex",
+        patch(
+            "app.siftarr.services.plex_polling_service.persist_episode_availability",
             new_callable=AsyncMock,
         ) as mock_reconcile,
         patch.object(service.lifecycle, "transition", new_callable=AsyncMock) as mock_transition,
@@ -147,7 +145,7 @@ async def test_poll_pending_request_can_complete(service, mock_db, mock_plex):
         completed = await service.poll()
 
     assert completed == 1
-    mock_reconcile.assert_awaited_once_with(req, req.seasons, {(1, 1): True, (1, 2): True})
+    mock_reconcile.assert_awaited_once_with(mock_db, req, req.seasons, {(1, 1): True, (1, 2): True})
     mock_transition.assert_not_awaited()
 
 
@@ -184,13 +182,12 @@ async def test_poll_tv_fallback_to_tvdb(service, mock_db, mock_plex):
     mock_plex.get_show_by_tvdb.return_value = {"rating_key": "55"}
     mock_plex.get_episode_availability.return_value = {(1, 1): True}
 
-    async def reconcile_to_completed(request, seasons, availability):
+    async def reconcile_to_completed(db, request, seasons, availability):
         return await set_request_status(request, RequestStatus.COMPLETED, seasons, availability)
 
     with (
-        patch.object(
-            service.episode_sync,
-            "reconcile_existing_seasons_from_plex",
+        patch(
+            "app.siftarr.services.plex_polling_service.persist_episode_availability",
             new_callable=AsyncMock,
         ) as mock_reconcile,
         patch.object(service.lifecycle, "transition", new_callable=AsyncMock) as mock_transition,
@@ -200,7 +197,7 @@ async def test_poll_tv_fallback_to_tvdb(service, mock_db, mock_plex):
 
     assert completed == 1
     mock_plex.get_show_by_tvdb.assert_called_once_with(888)
-    mock_reconcile.assert_awaited_once_with(req, req.seasons, {(1, 1): True})
+    mock_reconcile.assert_awaited_once_with(mock_db, req, req.seasons, {(1, 1): True})
     mock_transition.assert_not_awaited()
 
 
@@ -285,12 +282,11 @@ async def test_check_request_tv_partial_availability(service, mock_db, mock_plex
     mock_plex.get_show_by_tmdb.return_value = {"rating_key": "42"}
     mock_plex.get_episode_availability.return_value = {(1, 1): False, (1, 2): True}
 
-    async def reconcile_to_pending(request, seasons, availability):
+    async def reconcile_to_pending(db, request, seasons, availability):
         return await set_request_status(request, RequestStatus.PENDING, seasons, availability)
 
-    with patch.object(
-        service.episode_sync,
-        "reconcile_existing_seasons_from_plex",
+    with patch(
+        "app.siftarr.services.plex_polling_service.persist_episode_availability",
         new_callable=AsyncMock,
     ) as mock_reconcile:
         mock_reconcile.side_effect = reconcile_to_pending
@@ -302,4 +298,6 @@ async def test_check_request_tv_partial_availability(service, mock_db, mock_plex
     assert result.status_before == RequestStatus.PENDING
     assert result.status_after == RequestStatus.PENDING
     assert result.reason == "Some episodes found on Plex"
-    mock_reconcile.assert_awaited_once_with(req, req.seasons, {(1, 1): False, (1, 2): True})
+    mock_reconcile.assert_awaited_once_with(
+        mock_db, req, req.seasons, {(1, 1): False, (1, 2): True}
+    )

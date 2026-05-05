@@ -71,6 +71,15 @@ def _failing_eval(release):
     )
 
 
+def _mock_staging(return_value: dict | None = None):
+    """Create a mock StagingService instance with a use_releases AsyncMock."""
+    instance = AsyncMock()
+    instance.use_releases = AsyncMock(
+        return_value=return_value or {"status": "downloading", "message": "ok"}
+    )
+    return instance
+
+
 class TestProcessRequest:
     @pytest.fixture
     def mock_db(self):
@@ -149,6 +158,8 @@ class TestProcessRequest:
         rule_engine = MagicMock()
         rule_engine.evaluate.side_effect = [_passing_eval(pack_release, score=80)]
 
+        mock_staging = _mock_staging()
+
         with (
             patch.object(
                 service, "_get_rule_engine", new_callable=AsyncMock, return_value=rule_engine
@@ -159,10 +170,10 @@ class TestProcessRequest:
                 return_value={"Show.S01.1080p": stored_pack_release},
             ),
             patch(
-                "app.siftarr.services.tv_decision_service.use_releases", new_callable=AsyncMock
-            ) as mock_use,
+                "app.siftarr.services.tv_decision_service.StagingService",
+                return_value=mock_staging,
+            ),
         ):
-            mock_use.return_value = {"status": "downloading", "message": "ok"}
             await service.process_request(1)
 
         assert service.prowlarr.search_by_tvdbid.await_count == 1
@@ -193,7 +204,7 @@ class TestProcessRequest:
                 new_callable=AsyncMock,
             ),
             patch(
-                "app.siftarr.services.tv_decision_service.PendingQueueService",
+                "app.siftarr.services.decision_pipeline.PendingQueueService",
                 lambda db: MagicMock(add_to_queue=AsyncMock()),
             ),
         ):
@@ -233,7 +244,7 @@ class TestProcessRequest:
                 new_callable=AsyncMock,
             ),
             patch(
-                "app.siftarr.services.tv_decision_service.PendingQueueService",
+                "app.siftarr.services.decision_pipeline.PendingQueueService",
                 lambda db: MagicMock(add_to_queue=AsyncMock()),
             ),
         ):
@@ -267,6 +278,8 @@ class TestProcessRequest:
             _passing_eval(broad_pack, score=90),
         ]
 
+        mock_staging = _mock_staging()
+
         with (
             patch.object(
                 service, "_get_rule_engine", new_callable=AsyncMock, return_value=rule_engine
@@ -277,10 +290,10 @@ class TestProcessRequest:
                 return_value={"Show.S01-S02.1080p": stored_broad_pack},
             ),
             patch(
-                "app.siftarr.services.tv_decision_service.use_releases", new_callable=AsyncMock
-            ) as mock_use,
+                "app.siftarr.services.tv_decision_service.StagingService",
+                return_value=mock_staging,
+            ),
         ):
-            mock_use.return_value = {"status": "downloading", "message": "ok"}
             await service.process_request(1)
 
         first_call = service.prowlarr.search_by_tvdbid.await_args_list[0]
@@ -313,6 +326,8 @@ class TestProcessRequest:
         stored_pack_release = MagicMock()
         stored_pack_release.title = "Show.S01.1080p"
 
+        mock_staging = _mock_staging()
+
         with (
             patch.object(
                 service, "_get_rule_engine", new_callable=AsyncMock, return_value=rule_engine
@@ -323,10 +338,10 @@ class TestProcessRequest:
                 return_value={"Show.S01.1080p": stored_pack_release},
             ),
             patch(
-                "app.siftarr.services.tv_decision_service.use_releases", new_callable=AsyncMock
-            ) as mock_use,
+                "app.siftarr.services.tv_decision_service.StagingService",
+                return_value=mock_staging,
+            ),
         ):
-            mock_use.return_value = {"status": "downloading", "message": "ok"}
             result = await service.process_request(1)
 
         selected_titles = [r["title"] for r in result.get("selected_releases", [])]
@@ -362,6 +377,8 @@ class TestProcessRequest:
         stored_episode_release = MagicMock()
         stored_episode_release.title = "Show.S01E01.1080p"
 
+        mock_staging = _mock_staging()
+
         with (
             patch.object(
                 service, "_get_rule_engine", new_callable=AsyncMock, return_value=rule_engine
@@ -372,10 +389,10 @@ class TestProcessRequest:
                 return_value={"season-episode": stored_episode_release},
             ),
             patch(
-                "app.siftarr.services.tv_decision_service.use_releases", new_callable=AsyncMock
-            ) as mock_use,
+                "app.siftarr.services.tv_decision_service.StagingService",
+                return_value=mock_staging,
+            ),
         ):
-            mock_use.return_value = {"status": "downloading", "message": "ok"}
             result = await service.process_request(1)
 
         selected_titles = [r["title"] for r in result.get("selected_releases", [])]
@@ -418,6 +435,8 @@ class TestProcessRequest:
         stored_complete_series = MagicMock()
         stored_complete_series.title = "Show.Complete.Series.1080p"
 
+        mock_staging = _mock_staging()
+
         with (
             patch.object(
                 service, "_get_rule_engine", new_callable=AsyncMock, return_value=rule_engine
@@ -428,10 +447,10 @@ class TestProcessRequest:
                 return_value={"broad-complete-series": stored_complete_series},
             ),
             patch(
-                "app.siftarr.services.tv_decision_service.use_releases", new_callable=AsyncMock
-            ) as mock_use,
+                "app.siftarr.services.tv_decision_service.StagingService",
+                return_value=mock_staging,
+            ),
         ):
-            mock_use.return_value = {"status": "downloading", "message": "ok"}
             result = await service.process_request(1)
 
         selected_titles = [r["title"] for r in result.get("selected_releases", [])]
@@ -471,6 +490,8 @@ class TestProcessRequest:
         stored_season_two_episode = MagicMock()
         stored_season_two_episode.title = "Show.S02E01.1080p"
 
+        mock_staging = _mock_staging()
+
         with (
             patch.object(
                 service, "_get_rule_engine", new_callable=AsyncMock, return_value=rule_engine
@@ -484,10 +505,10 @@ class TestProcessRequest:
                 },
             ),
             patch(
-                "app.siftarr.services.tv_decision_service.use_releases", new_callable=AsyncMock
-            ) as mock_use,
+                "app.siftarr.services.tv_decision_service.StagingService",
+                return_value=mock_staging,
+            ),
         ):
-            mock_use.return_value = {"status": "downloading", "message": "ok"}
             result = await service.process_request(1)
 
         selected_titles = [r["title"] for r in result.get("selected_releases", [])]
@@ -525,6 +546,8 @@ class TestProcessRequest:
         stored_episode_release = MagicMock()
         stored_episode_release.title = "Show.S01E01.1080p"
 
+        mock_staging = _mock_staging()
+
         with (
             patch.object(
                 service, "_get_rule_engine", new_callable=AsyncMock, return_value=rule_engine
@@ -535,10 +558,10 @@ class TestProcessRequest:
                 return_value={"complete-fallback": stored_episode_release},
             ),
             patch(
-                "app.siftarr.services.tv_decision_service.use_releases", new_callable=AsyncMock
-            ) as mock_use,
+                "app.siftarr.services.tv_decision_service.StagingService",
+                return_value=mock_staging,
+            ),
         ):
-            mock_use.return_value = {"status": "downloading", "message": "ok"}
             result = await service.process_request(1)
 
         selected_titles = [r["title"] for r in result.get("selected_releases", [])]
@@ -568,7 +591,7 @@ class TestProcessRequest:
                     new_callable=AsyncMock,
                 ),
                 patch(
-                    "app.siftarr.services.tv_decision_service.PendingQueueService",
+                    "app.siftarr.services.decision_pipeline.PendingQueueService",
                     lambda db: MagicMock(add_to_queue=AsyncMock()),
                 ),
             ):
@@ -610,6 +633,8 @@ class TestProcessRequest:
         rule_engine = MagicMock()
         rule_engine.evaluate.return_value = _passing_eval(pack_release, score=80)
 
+        mock_staging = _mock_staging()
+
         with (
             patch.object(
                 service, "_get_rule_engine", new_callable=AsyncMock, return_value=rule_engine
@@ -620,8 +645,9 @@ class TestProcessRequest:
                 return_value={"Show.S01.1080p": stored_release},
             ),
             patch(
-                "app.siftarr.services.tv_decision_service.use_releases", new_callable=AsyncMock
-            ) as mock_use,
+                "app.siftarr.services.tv_decision_service.StagingService",
+                return_value=mock_staging,
+            ),
             patch.object(
                 service, "_update_episode_status", new_callable=AsyncMock
             ) as mock_update_episode,
@@ -629,7 +655,6 @@ class TestProcessRequest:
                 service, "_update_season_status", new_callable=AsyncMock
             ) as mock_update_season,
         ):
-            mock_use.return_value = {"status": "downloading", "message": "ok"}
             await service.process_request(1)
 
         assert mock_update_episode.await_args_list[0].args == (
@@ -675,6 +700,8 @@ class TestProcessRequest:
             _passing_eval(duplicate_title_other_hash, score=70),
         ]
 
+        mock_staging = _mock_staging()
+
         with (
             patch.object(
                 service, "_get_rule_engine", new_callable=AsyncMock, return_value=rule_engine
@@ -688,14 +715,14 @@ class TestProcessRequest:
                 },
             ),
             patch(
-                "app.siftarr.services.tv_decision_service.use_releases", new_callable=AsyncMock
-            ) as mock_use,
+                "app.siftarr.services.tv_decision_service.StagingService",
+                return_value=mock_staging,
+            ),
         ):
-            mock_use.return_value = {"status": "downloading", "message": "ok"}
             await service.process_request(1)
 
-        assert mock_use.await_args is not None
-        selected_releases = mock_use.await_args.args[2]
+        assert mock_staging.use_releases.await_args is not None
+        selected_releases = mock_staging.use_releases.await_args.args[1]
         assert selected_releases == [stored_release]
 
     @pytest.mark.asyncio
@@ -725,7 +752,7 @@ class TestProcessRequest:
                 new_callable=AsyncMock,
             ),
             patch(
-                "app.siftarr.services.tv_decision_service.PendingQueueService",
+                "app.siftarr.services.decision_pipeline.PendingQueueService",
                 lambda db: MagicMock(add_to_queue=AsyncMock()),
             ),
         ):
@@ -744,7 +771,6 @@ class TestProcessRequest:
         mock_db.commit = AsyncMock()
         mock_db.flush = AsyncMock()
 
-        # Both season pack searches return empty
         empty_result = ProwlarrSearchResult(releases=[], query_time_ms=100)
         service.prowlarr.search_by_tvdbid = AsyncMock(return_value=empty_result)
 
@@ -757,14 +783,12 @@ class TestProcessRequest:
                 new_callable=AsyncMock,
             ),
             patch(
-                "app.siftarr.services.tv_decision_service.PendingQueueService",
+                "app.siftarr.services.decision_pipeline.PendingQueueService",
                 lambda db: MagicMock(add_to_queue=AsyncMock()),
             ),
         ):
             await service.process_request(1, search_episodes=False)
 
-        # Only search calls should be for multi-season pack and season packs (1 broad + 2 seasonal)
-        # No episode searches
         episode_calls = [
             call
             for call in service.prowlarr.search_by_tvdbid.await_args_list
@@ -793,6 +817,8 @@ class TestProcessRequest:
         rule_engine = MagicMock()
         rule_engine.evaluate.side_effect = [_passing_eval(pack_release, score=80)]
 
+        mock_staging = _mock_staging()
+
         with (
             patch.object(
                 service, "_get_rule_engine", new_callable=AsyncMock, return_value=rule_engine
@@ -803,13 +829,12 @@ class TestProcessRequest:
                 return_value={"Show.S01.1080p": stored_pack_release},
             ),
             patch(
-                "app.siftarr.services.tv_decision_service.use_releases", new_callable=AsyncMock
-            ) as mock_use,
+                "app.siftarr.services.tv_decision_service.StagingService",
+                return_value=mock_staging,
+            ),
         ):
-            mock_use.return_value = {"status": "downloading", "message": "ok"}
             result = await service.process_request(1, search_episodes=False)
 
-        # Only one search call (season pack), no episode search
         assert service.prowlarr.search_by_tvdbid.await_count == 1
         selected_titles = [r["title"] for r in result.get("selected_releases", [])]
         assert "Show.S01.1080p" in selected_titles
@@ -838,7 +863,7 @@ class TestProcessRequest:
                 new_callable=AsyncMock,
             ),
             patch(
-                "app.siftarr.services.tv_decision_service.PendingQueueService",
+                "app.siftarr.services.decision_pipeline.PendingQueueService",
                 lambda db: MagicMock(add_to_queue=AsyncMock()),
             ),
         ):

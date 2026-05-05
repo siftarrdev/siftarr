@@ -59,6 +59,10 @@ class Settings(BaseSettings):
         )
     )
 
+    # Authentication settings
+    api_key: str = "dev-key-change-me"
+    auth_enabled: bool = True
+
     cache_static_assets: bool = True
 
 
@@ -66,6 +70,15 @@ class Settings(BaseSettings):
 def get_settings() -> Settings:
     """Get cached settings instance."""
     return Settings()
+
+
+def reload_settings() -> None:
+    """Invalidate the cached ``Settings`` singleton.
+
+    Call after modifying ``os.environ`` so the next caller of
+    :func:`get_settings` re-reads from the updated environment.
+    """
+    get_settings.cache_clear()
 
 
 def get_static_version(settings: Settings | None = None) -> str:

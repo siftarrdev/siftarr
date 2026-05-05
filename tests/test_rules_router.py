@@ -532,6 +532,7 @@ class TestRulesRouter:
         """Preview endpoint should render clear validation feedback."""
         service = MagicMock()
         service.ensure_default_rules = AsyncMock()
+        service.get_all_rules = AsyncMock(return_value=[])
         service.get_all_rules_by_type = AsyncMock(return_value=[])
         service.preview_import_rules.side_effect = ValueError("Invalid JSON: bad payload")
         monkeypatch.setattr(rules, "RuleService", lambda db: service)
@@ -559,6 +560,7 @@ class TestRulesRouter:
         """Preview should accept uploaded JSON files in addition to pasted payloads."""
         service = MagicMock()
         service.ensure_default_rules = AsyncMock()
+        service.get_all_rules = AsyncMock(return_value=[])
         service.get_all_rules_by_type = AsyncMock(return_value=[])
         preview = RuleImportPreview(version=1, replace_count=1, rules=[])
         service.preview_import_rules = MagicMock(return_value=preview)

@@ -82,8 +82,10 @@ The old duplicated developer guide and stale product specification under `docs/`
 
 ### `app/siftarr/config.py`
 
-- application settings loading
-- environment and runtime configuration access
+- `Settings` Pydantic model loaded from environment variables
+- `get_settings()` — cached singleton accessor
+- `reload_settings()` — invalidates the cached singleton (called after runtime setting changes)
+- `get_static_version()` — cache-busting value for static assets
 
 ### `app/siftarr/version.py`
 
@@ -105,6 +107,7 @@ Database entities and enums.
 - `season.py` / `episode.py` — TV coverage and availability tracking
 - `staged_torrent.py` — staged torrent persistence
 - `activity_log.py` — activity/audit history
+- `app_setting.py` — key-value store for runtime-configurable settings (persisted across restarts)
 - `_base.py` — declarative base
 
 ### `app/siftarr/routers/`
@@ -116,7 +119,7 @@ HTTP route layer.
 - `dashboard_actions.py` — dashboard-triggered actions and mutations
 - `search_sse.py` — SSE streaming endpoints for live search progress and TV inspect results
 - `rules.py` — rule management UI/API, including unified rule listing, multi-title testing, modal import/export, and create/edit actions
-- `settings.py` — settings UI, maintenance, jobs, and connection actions
+- `settings.py` — settings UI (connection test/save/reset, staging toggle, Plex rescan, Overseerr sync, cache/reseed actions, SSE progress streams), uses SettingsStore for DB-backed persistence
 - `staged.py` — staged torrent review/approval endpoints
 - `webhooks.py` — inbound webhook handling
 
@@ -124,25 +127,28 @@ HTTP route layer.
 
 Business logic and integrations.
 
-- `dashboard_service.py` — dashboard-oriented data loading and DTO assembly
-- `settings_service.py` — settings persistence, maintenance, connection, and job helpers
+- `dashboard_service.py` — dashboard DTOs and response serializers only (load/assembly logic moved to sub-services)
+- `detail_service.py` — request detail loading (releases, timeline, TV enrichment integration)
+- `tv_enrichment_service.py` — TV season/episode enrichment (season data, release grouping, metadata)
+- `metadata_service.py` — Overseerr metadata lookup for request details
+- `settings_service.py` — SettingsStore (DB-backed settings persistence), SSE progress, scheduled job helpers, Plex rescan/Overseerr import orchestration
 - `request_service.py` — request creation/update orchestration
 - `rule_service.py` — CRUD/order logic for rules
 - `rule_engine.py` — release filtering and scoring evaluation
-- `tv_decision_service.py` / `movie_decision_service.py` — media-type-specific decision flows
+- `decision_pipeline.py` — shared decision pipeline helpers (rule loading, activity logging, pending queue, best-release selection)
 - `release_storage.py` — release persistence and reconstruction helpers
-- `staging_actions.py` / `staging_service.py` — stage/send workflows and staged torrent handling
+- `staging_service.py` — stage/send workflows, staged torrent handling, torrent download/validation, and release handoff (`use_releases`)
 - `release_serializers.py` — API-facing serialization helpers
 - `scheduler_service.py` / `background_tasks.py` — recurring jobs and background orchestration
-- `pending_queue_service.py` / `lifecycle_service.py` / `download_completion_service.py` — retry, lifecycle, and completion transitions
+- `pending_queue_service.py` / `lifecycle_service.py` / `download_completion_service.py` — retry, status transitions, and completion detection (unreleased detection moved to unreleased_service)
 - `episode_sync_service.py` / `tv_details_service.py` — TV metadata and episode synchronization helpers
 - `overseerr_service.py` / `prowlarr_service.py` / `qbittorrent_service.py` — external service integrations
 - `plex_service/` / `plex_polling_service.py` — Plex lookups, scans, and polling logic
-- `torrent_service.py` — torrent handoff behavior
 - `connection_tester.py` — external connectivity test helpers
 - `http_client.py` — shared HTTP client lifecycle
 - `release_parser.py`, `media_helpers.py`, `type_utils.py`, `async_utils.py` — shared parsing and utility helpers
-- `activity_log_service.py` / `unreleased_service.py` — supporting domain workflows
+- `activity_log_service.py` / `unreleased_service.py` — supporting domain workflows (unreleased detection moved here from lifecycle_service)
+- `search_service.py` — ad hoc release evaluation/selection, request search orchestration, and TV season-pack/episode ad hoc search
 
 ### `app/siftarr/templates/`
 

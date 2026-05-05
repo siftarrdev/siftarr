@@ -5,11 +5,11 @@ from unittest.mock import AsyncMock, MagicMock, mock_open, patch
 
 import pytest
 
-from app.siftarr.services.torrent_service import TorrentService
+from app.siftarr.services.staging_service import StagingService
 
 
-class TestTorrentService:
-    """Test cases for TorrentService."""
+class TestStagingTorrentHelpers:
+    """Test cases for StagingService torrent helpers."""
 
     @pytest.mark.asyncio
     async def test_download_torrent_success(self):
@@ -29,7 +29,7 @@ class TestTorrentService:
 
             with patch("builtins.open", mock_open()) as mock_file:
                 save_path = Path("/tmp/test.torrent")
-                result = await TorrentService.download_torrent(
+                result = await StagingService.download_torrent(
                     "http://example.com/test.torrent", save_path
                 )
 
@@ -40,7 +40,7 @@ class TestTorrentService:
     async def test_download_torrent_invalid_url(self):
         """Test download with invalid URL."""
         save_path = Path("/tmp/test.torrent")
-        result = await TorrentService.download_torrent("not-a-url", save_path)
+        result = await StagingService.download_torrent("not-a-url", save_path)
 
         assert result is False
 
@@ -59,7 +59,7 @@ class TestTorrentService:
             mock_client_class.return_value = mock_client
 
             save_path = Path("/tmp/test.torrent")
-            result = await TorrentService.download_torrent(
+            result = await StagingService.download_torrent(
                 "http://example.com/test.torrent", save_path
             )
 
@@ -78,7 +78,7 @@ class TestTorrentService:
             mock_client_class.return_value = mock_client
 
             save_path = Path("/tmp/test.torrent")
-            result = await TorrentService.download_torrent(
+            result = await StagingService.download_torrent(
                 "http://example.com/test.torrent", save_path
             )
 
@@ -101,7 +101,7 @@ class TestTorrentService:
             mock_client_class.return_value = mock_client
 
             save_path = Path("/tmp/test.torrent")
-            result = await TorrentService.download_torrent(
+            result = await StagingService.download_torrent(
                 "http://example.com/test.torrent", save_path
             )
 
@@ -112,7 +112,7 @@ class TestTorrentService:
         torrent_file = tmp_path / "test.torrent"
         torrent_file.write_bytes(b"d8:announce0:7d20ed263cd6e3f7c6df7a72a6e153ac5e4ab604e")
 
-        result = TorrentService.validate_torrent_file(torrent_file)
+        result = StagingService.validate_torrent_file(torrent_file)
 
         assert result is True
 
@@ -121,7 +121,7 @@ class TestTorrentService:
         invalid_file = tmp_path / "test.txt"
         invalid_file.write_bytes(b"not a torrent file")
 
-        result = TorrentService.validate_torrent_file(invalid_file)
+        result = StagingService.validate_torrent_file(invalid_file)
 
         assert result is False
 
@@ -129,7 +129,7 @@ class TestTorrentService:
         """Test validating a missing file."""
         missing_file = tmp_path / "nonexistent.torrent"
 
-        result = TorrentService.validate_torrent_file(missing_file)
+        result = StagingService.validate_torrent_file(missing_file)
 
         assert result is False
 
@@ -138,7 +138,7 @@ class TestTorrentService:
         short_file = tmp_path / "test.torrent"
         short_file.write_bytes(b"d")
 
-        result = TorrentService.validate_torrent_file(short_file)
+        result = StagingService.validate_torrent_file(short_file)
 
         assert result is False
 
@@ -147,6 +147,6 @@ class TestTorrentService:
         empty_file = tmp_path / "test.torrent"
         empty_file.write_bytes(b"")
 
-        result = TorrentService.validate_torrent_file(empty_file)
+        result = StagingService.validate_torrent_file(empty_file)
 
         assert result is False

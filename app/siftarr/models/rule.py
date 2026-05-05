@@ -1,18 +1,13 @@
 """Rule model for filtering and scoring releases."""
 
 import enum
-from datetime import UTC, datetime
+from datetime import datetime
 
 from sqlalchemy import Boolean, DateTime, Float, Integer, String
 from sqlalchemy import Enum as SQLEnum
 from sqlalchemy.orm import Mapped, mapped_column
 
-from app.siftarr.models._base import Base  # noqa: PLC0414
-
-
-def _utc_now() -> datetime:
-    """Return current UTC time as timezone-aware datetime."""
-    return datetime.now(UTC)
+from app.siftarr.models._base import Base, utc_now  # noqa: PLC0414
 
 
 class RuleType(enum.StrEnum):
@@ -45,8 +40,8 @@ class Rule(Base):
     priority: Mapped[int] = mapped_column(Integer, default=0)  # Lower = checked first
     is_enabled: Mapped[bool] = mapped_column(Boolean, default=True)
     description: Mapped[str | None] = mapped_column(String(500), nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utc_now)
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=_utc_now, onupdate=_utc_now)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now, onupdate=utc_now)
 
     def __repr__(self) -> str:
         return f"<Rule(id={self.id}, name='{self.name}', type={self.rule_type})>"

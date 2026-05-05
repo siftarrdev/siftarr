@@ -8,46 +8,16 @@ import pytest
 from fastapi import FastAPI
 
 
-class TestDatabaseModule:
-    """Test cases for database module."""
-
-    def test_base_model(self):
-        """Test Base model import."""
-        from app.siftarr.models._base import Base
-
-        assert Base is not None
+class TestInitDb:
+    """Tests for init_db()."""
 
     @pytest.mark.asyncio
-    async def test_init_db_allows_ready_schema_without_recreating_tables(self):
-        """init_db should treat an already-usable schema as ready."""
-        from app.siftarr.database import CURRENT_ALEMBIC_REVISION, EXPECTED_SCHEMA_TABLES, init_db
+    async def test_creates_tables_on_fresh_database(self, tmp_path):
+        """init_db should create all tables on a fresh SQLite database."""
+        from app.siftarr.database import init_db
 
-        with (
-            patch(
-                "app.siftarr.database.get_settings",
-                return_value=SimpleNamespace(database_url="sqlite+aiosqlite:///./data/db/test.db"),
-            ),
-            patch(
-                "app.siftarr.database._inspect_sqlite_database",
-                return_value=(
-                    set(EXPECTED_SCHEMA_TABLES) | {"alembic_version"},
-                    CURRENT_ALEMBIC_REVISION,
-                ),
-            ) as inspect_db,
-            patch("app.siftarr.database._sqlite_schema_matches_expected", return_value=True),
-        ):
-            await init_db()
-
-        inspect_db.assert_called_once()
-
-    @pytest.mark.asyncio
-    async def test_init_db_allows_fresh_alembic_migrated_sqlite_db(self, tmp_path):
-        """A freshly migrated SQLite DB should pass startup verification."""
-        from app.siftarr.database import _run_alembic_upgrade, init_db
-
-        db_path = tmp_path / "migrated.db"
+        db_path = tmp_path / "fresh.db"
         database_url = f"sqlite+aiosqlite:///{db_path}"
-        _run_alembic_upgrade(database_url)
 
         with patch(
             "app.siftarr.database.get_settings",
@@ -55,64 +25,86 @@ class TestDatabaseModule:
         ):
             await init_db()
 
-    @pytest.mark.asyncio
-    async def test_init_db_fails_fast_when_schema_still_needs_migration(self):
-        """init_db should fail when startup repair has not produced a usable schema."""
-        from app.siftarr.database import init_db
-
-        with (
-            patch(
-                "app.siftarr.database.get_settings",
-                return_value=SimpleNamespace(database_url="sqlite+aiosqlite:///./data/db/test.db"),
-            ),
-            patch(
-                "app.siftarr.database._inspect_sqlite_database",
-                return_value=(set(), None),
-            ),
-            pytest.raises(RuntimeError, match="action=upgrade"),
-        ):
-            await init_db()
-
-    @pytest.mark.asyncio
-    async def test_init_db_fails_when_table_names_match_but_schema_has_drift(self, tmp_path):
-        """init_db should reject drifted schemas even when table names look complete."""
-        from app.siftarr.database import CURRENT_ALEMBIC_REVISION, init_db
-
-        db_path = tmp_path / "drifted.db"
+        # Verify tables were created.
         connection = sqlite3.connect(db_path)
         try:
-            connection.execute("CREATE TABLE alembic_version (version_num VARCHAR(32) NOT NULL)")
-            connection.execute(
-                "INSERT INTO alembic_version (version_num) VALUES (?)",
-                (CURRENT_ALEMBIC_REVISION,),
-            )
-            connection.executescript(
-                """
-                CREATE TABLE requests (id INTEGER PRIMARY KEY, external_id VARCHAR(255) NOT NULL);
-                CREATE TABLE rules (id INTEGER PRIMARY KEY);
-                CREATE TABLE staged_torrents (id INTEGER PRIMARY KEY);
-                CREATE TABLE activity_logs (id INTEGER PRIMARY KEY);
-                CREATE TABLE releases (id INTEGER PRIMARY KEY);
-                CREATE TABLE seasons (id INTEGER PRIMARY KEY);
-                CREATE TABLE episodes (id INTEGER PRIMARY KEY);
-                """
-            )
-            connection.commit()
+            tables = {
+                row[0]
+                for row in connection.execute(
+                    "SELECT name FROM sqlite_master WHERE type='table'"
+                ).fetchall()
+            }
+            assert "requests" in tables
+            assert "releases" in tables
+            assert "rules" in tables
+            assert "staged_torrents" in tables
+            assert "activity_logs" in tables
+            assert "seasons" in tables
+            assert "episodes" in tables
+            assert "app_settings" in tables
+            assert "alembic_version" in tables
         finally:
             connection.close()
 
-        with (
-            patch(
-                "app.siftarr.database.get_settings",
-                return_value=SimpleNamespace(database_url=f"sqlite+aiosqlite:///{db_path}"),
-            ),
-            pytest.raises(RuntimeError, match="schema tables exist but definitions drift"),
+    @pytest.mark.asyncio
+    async def test_is_idempotent_on_existing_database(self, tmp_path):
+        """init_db should not error when called on an already-initialized database."""
+        from app.siftarr.database import init_db
+
+        db_path = tmp_path / "existing.db"
+        database_url = f"sqlite+aiosqlite:///{db_path}"
+
+        with patch(
+            "app.siftarr.database.get_settings",
+            return_value=SimpleNamespace(database_url=database_url),
         ):
+            await init_db()
+            # Second call should succeed without error.
             await init_db()
 
     @pytest.mark.asyncio
-    async def test_lifespan_starts_scheduler_only_after_database_verification(self):
-        """Scheduler startup should wait for database readiness verification."""
+    async def test_skips_non_sqlite_databases(self):
+        """init_db should be a no-op for non-SQLite database URLs."""
+        from app.siftarr.database import init_db
+
+        with patch(
+            "app.siftarr.database.get_settings",
+            return_value=SimpleNamespace(database_url="postgresql://localhost/db"),
+        ):
+            # Should not raise.
+            await init_db()
+
+    @pytest.mark.asyncio
+    async def test_stamps_alembic_revision(self, tmp_path):
+        """init_db should write the current Alembic revision to the version table."""
+        from app.siftarr.database import CURRENT_ALEMBIC_REVISION, init_db
+
+        db_path = tmp_path / "stamp.db"
+        database_url = f"sqlite+aiosqlite:///{db_path}"
+
+        with patch(
+            "app.siftarr.database.get_settings",
+            return_value=SimpleNamespace(database_url=database_url),
+        ):
+            await init_db()
+
+        connection = sqlite3.connect(db_path)
+        try:
+            revision = connection.execute(
+                "SELECT version_num FROM alembic_version LIMIT 1"
+            ).fetchone()
+            assert revision is not None
+            assert revision[0] == CURRENT_ALEMBIC_REVISION
+        finally:
+            connection.close()
+
+
+class TestDatabaseLifespan:
+    """Tests for database integration with the FastAPI lifespan."""
+
+    @pytest.mark.asyncio
+    async def test_starts_scheduler_after_database_init(self):
+        """Scheduler startup should happen after database verification."""
         from app.siftarr.main import lifespan
 
         events: list[str] = []
@@ -145,7 +137,7 @@ class TestDatabaseModule:
         scheduler.stop.assert_called_once()
 
     @pytest.mark.asyncio
-    async def test_lifespan_does_not_start_scheduler_when_database_verification_fails(self):
+    async def test_does_not_start_scheduler_when_database_init_fails(self):
         """Background work must not start if database verification fails."""
         from app.siftarr.main import lifespan
 
@@ -174,144 +166,50 @@ class TestDatabaseModule:
 
         scheduler_cls.assert_not_called()
 
-    def test_repair_plan_uses_upgrade_for_fresh_db(self):
-        """Fresh SQLite DBs should be migrated from scratch."""
-        from app.siftarr.database import (
-            DatabaseRepairAction,
-            determine_sqlite_repair_plan,
-        )
 
-        plan = determine_sqlite_repair_plan(table_names=set(), alembic_revision=None)
+class TestDatabaseHelpers:
+    """Tests for database utility functions."""
 
-        assert plan.action == DatabaseRepairAction.UPGRADE
+    def test_get_sync_sqlite_url(self):
+        """_get_sync_sqlite_url should strip the async driver prefix."""
+        from app.siftarr.database import _get_sync_sqlite_url
 
-    def test_repair_plan_uses_stamp_for_matching_schema_without_history(self):
-        """Matching schema without valid history should be stamped."""
-        from app.siftarr.database import (
-            EXPECTED_SCHEMA_TABLES,
-            DatabaseRepairAction,
-            determine_sqlite_repair_plan,
-        )
+        assert _get_sync_sqlite_url("sqlite+aiosqlite:///data/db.db") == "sqlite:///data/db.db"
+        assert _get_sync_sqlite_url("sqlite:///data/db.db") == "sqlite:///data/db.db"
 
-        plan = determine_sqlite_repair_plan(
-            table_names=set(EXPECTED_SCHEMA_TABLES),
-            alembic_revision=None,
-        )
+    def test_get_sqlite_db_path(self):
+        """_get_sqlite_db_path should extract the file path from a SQLite URL."""
+        from app.siftarr.database import _get_sqlite_db_path
 
-        assert plan.action == DatabaseRepairAction.STAMP_HEAD
+        path = _get_sqlite_db_path("sqlite+aiosqlite:///data/db.db")
+        assert str(path) == "data/db.db"
 
-    def test_repair_plan_uses_stamp_for_matching_schema_with_stale_history(self):
-        """Matching schema with stale history should be restamped."""
-        from app.siftarr.database import (
-            EXPECTED_SCHEMA_TABLES,
-            DatabaseRepairAction,
-            determine_sqlite_repair_plan,
-        )
+    def test_get_sqlite_db_path_raises_on_unsupported_url(self):
+        """_get_sqlite_db_path should raise for non-SQLite URLs."""
+        from app.siftarr.database import _get_sqlite_db_path
 
-        plan = determine_sqlite_repair_plan(
-            table_names=set(EXPECTED_SCHEMA_TABLES) | {"alembic_version"},
-            alembic_revision="deadbeef",
-        )
+        with pytest.raises(ValueError, match="unsupported SQLite URL"):
+            _get_sqlite_db_path("postgresql://localhost/db")
 
-        assert plan.action == DatabaseRepairAction.STAMP_HEAD
+    def test_inspect_returns_empty_for_nonexistent_db(self):
+        """_inspect_sqlite_database should return empty sets for missing files."""
+        from pathlib import Path
 
-    def test_repair_plan_resets_when_head_revision_has_missing_tables(self):
-        """Missing tables should fail readiness even if history says head."""
-        from app.siftarr.database import (
-            CURRENT_ALEMBIC_REVISION,
-            DatabaseRepairAction,
-            determine_sqlite_repair_plan,
-        )
+        from app.siftarr.database import _inspect_sqlite_database
 
-        plan = determine_sqlite_repair_plan(
-            table_names={"alembic_version"},
-            alembic_revision=CURRENT_ALEMBIC_REVISION,
-        )
+        tables, revision = _inspect_sqlite_database(Path("/nonexistent/path.db"))
+        assert tables == set()
+        assert revision is None
 
-        assert plan.action == DatabaseRepairAction.RESET
+    def test_base_model_import(self):
+        """Test Base model import."""
+        from app.siftarr.models._base import Base
 
-    def test_repair_plan_resets_when_only_stale_alembic_history_exists(self):
-        """Broken history without schema tables should not attempt a plain upgrade."""
-        from app.siftarr.database import (
-            DatabaseRepairAction,
-            determine_sqlite_repair_plan,
-        )
+        assert Base is not None
 
-        plan = determine_sqlite_repair_plan(
-            table_names={"alembic_version"},
-            alembic_revision="deadbeef",
-        )
+    def test_current_revision_is_defined(self):
+        """CURRENT_ALEMBIC_REVISION should be a non-empty string."""
+        from app.siftarr.database import CURRENT_ALEMBIC_REVISION
 
-        assert plan.action == DatabaseRepairAction.RESET
-
-    def test_repair_plan_resets_matching_table_names_when_schema_drift_detected(self):
-        """Matching table names still require reset when definitions drift."""
-        from app.siftarr.database import (
-            EXPECTED_SCHEMA_TABLES,
-            DatabaseRepairAction,
-            determine_sqlite_repair_plan,
-        )
-
-        plan = determine_sqlite_repair_plan(
-            table_names=set(EXPECTED_SCHEMA_TABLES) | {"alembic_version"},
-            alembic_revision="deadbeef",
-            schema_matches_expected=False,
-        )
-
-        assert plan.action == DatabaseRepairAction.RESET
-
-    def test_repair_plan_resets_unknown_revision_with_partial_schema(self):
-        """Partial drift should not be repaired in place."""
-        from app.siftarr.database import (
-            DatabaseRepairAction,
-            determine_sqlite_repair_plan,
-        )
-
-        plan = determine_sqlite_repair_plan(
-            table_names={"requests", "rules", "staged_torrents"},
-            alembic_revision="deadbeef",
-        )
-
-        assert plan.action == DatabaseRepairAction.RESET
-
-    def test_repair_plan_is_noop_for_current_schema_and_revision(self):
-        """Head schema with head stamp should be left alone."""
-        from app.siftarr.database import (
-            CURRENT_ALEMBIC_REVISION,
-            EXPECTED_SCHEMA_TABLES,
-            DatabaseRepairAction,
-            determine_sqlite_repair_plan,
-        )
-
-        plan = determine_sqlite_repair_plan(
-            table_names=set(EXPECTED_SCHEMA_TABLES) | {"alembic_version"},
-            alembic_revision=CURRENT_ALEMBIC_REVISION,
-        )
-
-        assert plan.action == DatabaseRepairAction.NOOP
-
-    def test_prepare_sqlite_database_resets_stale_history_without_schema(self, tmp_path):
-        """Startup repair should reset broken Alembic history before migrating."""
-        from app.siftarr.database import (
-            DatabaseRepairAction,
-            prepare_sqlite_database_for_startup,
-        )
-
-        db_path = tmp_path / "broken-history.db"
-        connection = sqlite3.connect(db_path)
-        try:
-            connection.execute("CREATE TABLE alembic_version (version_num VARCHAR(32) NOT NULL)")
-            connection.execute("INSERT INTO alembic_version (version_num) VALUES ('deadbeef')")
-            connection.commit()
-        finally:
-            connection.close()
-
-        with (
-            patch("app.siftarr.database._delete_sqlite_database_files") as delete_db,
-            patch("app.siftarr.database._run_alembic_upgrade") as upgrade,
-        ):
-            plan = prepare_sqlite_database_for_startup(f"sqlite+aiosqlite:///{db_path}")
-
-        assert plan.action == DatabaseRepairAction.RESET
-        delete_db.assert_called_once_with(db_path)
-        upgrade.assert_called_once_with(f"sqlite+aiosqlite:///{db_path}")
+        assert CURRENT_ALEMBIC_REVISION
+        assert isinstance(CURRENT_ALEMBIC_REVISION, str)

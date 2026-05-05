@@ -11,7 +11,7 @@ from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.siftarr.config import get_settings
+from app.siftarr.config import get_settings, reload_settings
 from app.siftarr.database import async_session_maker, get_db
 from app.siftarr.models.request import Request as RequestModel
 from app.siftarr.models.request import RequestStatus
@@ -26,25 +26,49 @@ from app.siftarr.services.scheduler_service import (
     PLEX_RECENT_SCAN_JOB_NAME,
 )
 from app.siftarr.services.settings_service import (
+    ENV_KEY_MAP,
+    SettingsStore,
     build_effective_settings,
-    build_effective_settings_obj,
     build_manual_plex_job_message,
-    build_plex_job_statuses,
-    build_settings_page_context,
     build_sse_progress,
-    import_overseerr_requests,
     prepare_overseerr_import,
-    rescan_plex_generator,
-    rescan_plex_requests,
-    rescan_plex_tv_request,
-    run_bounded_with_progress,
-    sync_overseerr_generator,
+)
+from app.siftarr.services.settings_service import (
+    build_plex_job_statuses as build_plex_job_statuses_svc,
+)
+from app.siftarr.services.settings_service import (
+    build_settings_page_context as build_settings_page_context_svc,
+)
+from app.siftarr.services.settings_service import (
+    import_overseerr_requests as import_overseerr_requests_svc,
+)
+from app.siftarr.services.settings_service import (
+    rescan_plex_generator as rescan_plex_generator_svc,
+)
+from app.siftarr.services.settings_service import (
+    rescan_plex_requests as rescan_plex_requests_svc,
+)
+from app.siftarr.services.settings_service import (
+    rescan_plex_tv_request as rescan_plex_tv_request_svc,
+)
+from app.siftarr.services.settings_service import (
+    run_bounded_with_progress as run_bounded_with_progress_svc,
+)
+from app.siftarr.services.settings_service import (
+    sync_overseerr_generator as sync_overseerr_generator_svc,
 )
 from app.siftarr.services.unreleased_service import evaluate_imported_request
 
 router = APIRouter(prefix="/settings", tags=["settings"])
 templates = Jinja2Templates(directory="app/siftarr/templates")
 logger = logging.getLogger(__name__)
+
+
+def _get_scheduler_service():
+    """Late-binding accessor to avoid circular import with main.py."""
+    from app.siftarr.main import scheduler_service
+
+    return scheduler_service
 
 
 class ConnectionSettings(BaseModel):
@@ -69,103 +93,44 @@ class ConnectionTestResponse(BaseModel):
     details: str | None = None
 
 
-_RUNTIME_SETTINGS_ENV_KEYS = {
-    "overseerr_url": "OVERSEERR_URL",
-    "overseerr_api_key": "OVERSEERR_API_KEY",
-    "prowlarr_url": "PROWLARR_URL",
-    "prowlarr_api_key": "PROWLARR_API_KEY",
-    "qbittorrent_url": "QBITTORRENT_URL",
-    "qbittorrent_username": "QBITTORRENT_USERNAME",
-    "qbittorrent_password": "QBITTORRENT_PASSWORD",
-    "plex_url": "PLEX_URL",
-    "plex_token": "PLEX_TOKEN",
-    "tz": "TZ",
-    "staging_mode_enabled": "STAGING_MODE_ENABLED",
-}
-
-
-async def _set_db_setting(db, key: str, value: str, description: str | None = None) -> None:
-    del db, description
-    env_name = _RUNTIME_SETTINGS_ENV_KEYS.get(key, key.upper())
-    os.environ[env_name] = value
-    get_settings.cache_clear()
-
-
-def _clear_runtime_setting(*keys: str) -> None:
-    for key in keys:
-        env_name = _RUNTIME_SETTINGS_ENV_KEYS.get(key, key.upper())
-        os.environ.pop(env_name, None)
-    get_settings.cache_clear()
+# ── Convenience helpers (not pass-through; provide router-level defaults) ──
 
 
 async def _build_plex_job_statuses(db) -> list[dict[str, Any]]:
-    return await build_plex_job_statuses(
+    """Build Plex job statuses with router-scoped job name constants."""
+    return await build_plex_job_statuses_svc(
         db,
         recent_scan_job_name=PLEX_RECENT_SCAN_JOB_NAME,
         poll_job_name=PLEX_POLL_JOB_NAME,
     )
 
 
-async def _build_effective_settings(db) -> dict[str, Any]:
-    del db
-    return await build_effective_settings()
-
-
-async def _build_effective_settings_obj(db):
-    return await build_effective_settings_obj(db)
-
-
-async def _build_settings_page_context(request, db) -> dict[str, Any]:
-    return await build_settings_page_context(
+async def _build_settings_page_context(
+    request: Request,
+    db: AsyncSession,
+    *,
+    store: SettingsStore | None = None,
+) -> dict[str, Any]:
+    """Shortcut wrapper that injects effective settings into page context."""
+    if store is None:
+        store = SettingsStore(db)
+    effective_settings = await store.get_effective_dict()
+    return await build_settings_page_context_svc(
         request,
         db,
         request_model=RequestModel,
         request_status_enum=RequestStatus,
         build_plex_job_statuses_func=_build_plex_job_statuses,
+        effective_settings_override=effective_settings,
     )
 
 
-async def _prepare_overseerr_import(
-    ov_req: dict[str, Any],
-    overseerr_service,
-    semaphore,
-    media_details_tasks,
-    media_details_lock,
-):
-    return await prepare_overseerr_import(
-        ov_req,
-        overseerr_service,
-        semaphore,
-        media_details_tasks,
-        media_details_lock,
-    )
-
-
-async def _import_overseerr_requests(db, runtime_settings, *, on_event=None) -> tuple[int, int]:
-    return await import_overseerr_requests(
-        db,
-        runtime_settings,
-        on_event=on_event,
-        overseerr_service_cls=OverseerrService,
-        plex_service_cls=PlexService,
-        evaluate_imported_request_func=evaluate_imported_request,
-        prepare_overseerr_import_func=_prepare_overseerr_import,
-        logger=logger,
-    )
-
-
-async def _rescan_plex_tv_request(
-    request_id: int,
-    plex,
-    runtime_settings,
-) -> bool:
-    return await rescan_plex_tv_request(
-        request_id,
-        plex,
-        runtime_settings,
-        session_maker=async_session_maker,
-        logger=logger,
-    )
+async def _apply_runtime_setting(store: SettingsStore, key: str, value: str) -> None:
+    """Persist *value* for *key* and update the runtime environment."""
+    await store.set(key, value)
+    env_name = ENV_KEY_MAP.get(key, key.upper())
+    os.environ[env_name] = value
+    reload_settings()
 
 
 async def _run_bounded_with_progress(
@@ -176,13 +141,29 @@ async def _run_bounded_with_progress(
     on_event,
     phase: str,
 ) -> list[Any]:
-    return await run_bounded_with_progress(
+    """Thin wrapper that injects router-level SSE progress builder."""
+    return await run_bounded_with_progress_svc(
         items,
         limit,
         worker,
         on_event=on_event,
         phase=phase,
         build_sse_progress_func=build_sse_progress,
+    )
+
+
+async def _rescan_plex_tv_request(
+    request_id: int,
+    plex,
+    runtime_settings,
+) -> bool:
+    """Thin wrapper that injects router-level session maker and logger."""
+    return await rescan_plex_tv_request_svc(
+        request_id,
+        plex,
+        runtime_settings,
+        session_maker=async_session_maker,
+        logger=logger,
     )
 
 
@@ -194,7 +175,8 @@ async def _rescan_plex_requests(
     on_event=None,
     shallow: bool = False,
 ) -> tuple[int, int, int]:
-    return await rescan_plex_requests(
+    """Convenience wrapper that injects router-level service defaults."""
+    return await rescan_plex_requests_svc(
         db,
         runtime_settings,
         plex,
@@ -207,27 +189,16 @@ async def _rescan_plex_requests(
     )
 
 
-async def _sync_overseerr_generator() -> AsyncGenerator[str, None]:
-    async for event in sync_overseerr_generator(
-        async_session_maker=async_session_maker,
-        build_effective_settings_func=_build_effective_settings,
-        import_overseerr_requests_func=_import_overseerr_requests,
-        build_sse_progress_func=build_sse_progress,
-        logger=logger,
-    ):
-        yield event
+async def _clear_runtime_settings(store: SettingsStore, *keys: str) -> None:
+    """Remove *keys* from both DB and ``os.environ``."""
+    await store.delete(*keys)
+    for key in keys:
+        env_name = ENV_KEY_MAP.get(key, key.upper())
+        os.environ.pop(env_name, None)
+    reload_settings()
 
 
-async def _rescan_plex_generator(shallow: bool = False) -> AsyncGenerator[str, None]:
-    async for event in rescan_plex_generator(
-        shallow=shallow,
-        async_session_maker=async_session_maker,
-        plex_service_cls=PlexService,
-        rescan_plex_requests_func=_rescan_plex_requests,
-        build_sse_progress_func=build_sse_progress,
-        logger=logger,
-    ):
-        yield event
+# ── Page routes ────────────────────────────────────────────────────────────
 
 
 @router.get("")
@@ -259,36 +230,32 @@ async def save_connections(
 ) -> RedirectResponse:
     """Save connection settings as runtime environment overrides."""
     del request
-    await _set_db_setting(db, "overseerr_url", overseerr_url or "", "Overseerr URL")
-    await _set_db_setting(db, "overseerr_api_key", overseerr_api_key or "", "Overseerr API key")
-    await _set_db_setting(db, "prowlarr_url", prowlarr_url or "", "Prowlarr URL")
-    await _set_db_setting(db, "prowlarr_api_key", prowlarr_api_key or "", "Prowlarr API key")
-    await _set_db_setting(db, "qbittorrent_url", qbittorrent_url or "", "qBittorrent URL")
-    await _set_db_setting(
-        db,
-        "qbittorrent_username",
-        qbittorrent_username or "",
-        "qBittorrent username",
-    )
-    await _set_db_setting(
-        db,
-        "qbittorrent_password",
-        qbittorrent_password or "",
-        "qBittorrent password",
-    )
-    await _set_db_setting(db, "plex_url", plex_url or "", "Plex URL")
-    await _set_db_setting(db, "plex_token", plex_token or "", "Plex token")
+    store = SettingsStore(db)
+    await _apply_runtime_setting(store, "overseerr_url", overseerr_url or "")
+    await _apply_runtime_setting(store, "overseerr_api_key", overseerr_api_key or "")
+    await _apply_runtime_setting(store, "prowlarr_url", prowlarr_url or "")
+    await _apply_runtime_setting(store, "prowlarr_api_key", prowlarr_api_key or "")
+    await _apply_runtime_setting(store, "qbittorrent_url", qbittorrent_url or "")
+    await _apply_runtime_setting(store, "qbittorrent_username", qbittorrent_username or "")
+    await _apply_runtime_setting(store, "qbittorrent_password", qbittorrent_password or "")
+    await _apply_runtime_setting(store, "plex_url", plex_url or "")
+    await _apply_runtime_setting(store, "plex_token", plex_token or "")
     if tz:
-        await _set_db_setting(db, "tz", tz, "Timezone")
+        await _apply_runtime_setting(store, "tz", tz)
     await db.commit()
     return RedirectResponse(url="/settings?saved=true", status_code=303)
 
 
 @router.post("/connections/reset")
-async def reset_connections(request: Request) -> RedirectResponse:
+async def reset_connections(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+) -> RedirectResponse:
     """Reset connection settings by clearing runtime environment overrides."""
     del request
-    _clear_runtime_setting(
+    store = SettingsStore(db)
+    await _clear_runtime_settings(
+        store,
         "overseerr_url",
         "overseerr_api_key",
         "prowlarr_url",
@@ -300,13 +267,18 @@ async def reset_connections(request: Request) -> RedirectResponse:
         "plex_token",
         "tz",
     )
+    await db.commit()
     return RedirectResponse(url="/settings?reset=true", status_code=303)
+
+
+# ── Connection testing API routes ─────────────────────────────────────────
 
 
 @router.get("/api/connections", response_model=dict)
 async def get_connections_api(db: AsyncSession = Depends(get_db)) -> dict:
     """Get current connection settings (for API)."""
-    effective = await _build_effective_settings(db)
+    store = SettingsStore(db)
+    effective = await store.get_effective_dict()
     return {
         "overseerr_url": effective["overseerr_url"],
         "overseerr_api_key": effective["overseerr_api_key"],
@@ -322,8 +294,7 @@ async def get_connections_api(db: AsyncSession = Depends(get_db)) -> dict:
 @router.post("/api/test/overseerr", response_model=ConnectionTestResponse)
 async def test_overseerr_connection(db: AsyncSession = Depends(get_db)) -> ConnectionTestResponse:
     """Test connection to Overseerr."""
-    effective_settings = await _build_effective_settings_obj(db)
-    result: ConnectionTestResult = await ConnectionTester.test_overseerr(effective_settings)
+    result: ConnectionTestResult = await ConnectionTester.test_overseerr(get_settings())
     return ConnectionTestResponse(
         service="overseerr",
         success=result.success,
@@ -335,8 +306,7 @@ async def test_overseerr_connection(db: AsyncSession = Depends(get_db)) -> Conne
 @router.post("/api/test/prowlarr", response_model=ConnectionTestResponse)
 async def test_prowlarr_connection(db: AsyncSession = Depends(get_db)) -> ConnectionTestResponse:
     """Test connection to Prowlarr."""
-    effective_settings = await _build_effective_settings_obj(db)
-    result: ConnectionTestResult = await ConnectionTester.test_prowlarr(effective_settings)
+    result: ConnectionTestResult = await ConnectionTester.test_prowlarr(get_settings())
     return ConnectionTestResponse(
         service="prowlarr",
         success=result.success,
@@ -348,8 +318,7 @@ async def test_prowlarr_connection(db: AsyncSession = Depends(get_db)) -> Connec
 @router.post("/api/test/qbittorrent", response_model=ConnectionTestResponse)
 async def test_qbittorrent_connection(db: AsyncSession = Depends(get_db)) -> ConnectionTestResponse:
     """Test connection to qBittorrent."""
-    effective_settings = await _build_effective_settings_obj(db)
-    result: ConnectionTestResult = await ConnectionTester.test_qbittorrent(effective_settings)
+    result: ConnectionTestResult = await ConnectionTester.test_qbittorrent(get_settings())
     return ConnectionTestResponse(
         service="qbittorrent",
         success=result.success,
@@ -361,8 +330,7 @@ async def test_qbittorrent_connection(db: AsyncSession = Depends(get_db)) -> Con
 @router.post("/api/test/plex", response_model=ConnectionTestResponse)
 async def test_plex_connection(db: AsyncSession = Depends(get_db)) -> ConnectionTestResponse:
     """Test connection to Plex."""
-    effective_settings = await _build_effective_settings_obj(db)
-    result: ConnectionTestResult = await ConnectionTester.test_plex(effective_settings)
+    result: ConnectionTestResult = await ConnectionTester.test_plex(get_settings())
     return ConnectionTestResponse(
         service="plex",
         success=result.success,
@@ -374,7 +342,7 @@ async def test_plex_connection(db: AsyncSession = Depends(get_db)) -> Connection
 @router.post("/api/test/all", response_model=list[ConnectionTestResponse])
 async def test_all_connections(db: AsyncSession = Depends(get_db)) -> list[ConnectionTestResponse]:
     """Test connections to all services."""
-    effective_settings = await _build_effective_settings_obj(db)
+    effective_settings = get_settings()
     results = []
     for service_name, tester in [
         ("overseerr", ConnectionTester.test_overseerr),
@@ -394,6 +362,9 @@ async def test_all_connections(db: AsyncSession = Depends(get_db)) -> list[Conne
     return results
 
 
+# ── Plex rescan / sync routes ──────────────────────────────────────────────
+
+
 @router.post("/rescan-plex")
 async def rescan_plex(
     request: Request,
@@ -404,14 +375,11 @@ async def rescan_plex(
     try:
         runtime_settings = get_settings()
         plex = PlexService(settings=runtime_settings)
-        try:
-            tv_resynced, tv_failed, completed = await _rescan_plex_requests(
-                db,
-                runtime_settings,
-                plex,
-            )
-        finally:
-            await plex.close()
+        tv_resynced, tv_failed, completed = await _rescan_plex_requests(
+            db,
+            runtime_settings,
+            plex,
+        )
 
         context["message"] = (
             "Manual Plex rescan completed. "
@@ -429,14 +397,15 @@ async def rescan_plex(
 @router.post("/staging")
 async def toggle_staging_mode(db: AsyncSession = Depends(get_db)) -> RedirectResponse:
     """Toggle staging mode."""
-    del db
     staging_enabled = get_settings().staging_mode_enabled
-    await _set_db_setting(
-        None,
-        "staging_mode_enabled",
-        "false" if staging_enabled else "true",
-    )
+    new_value = "false" if staging_enabled else "true"
+    store = SettingsStore(db)
+    await _apply_runtime_setting(store, "staging_mode_enabled", new_value)
+    await db.commit()
     return RedirectResponse(url="/settings", status_code=303)
+
+
+# ── Scheduler trigger routes ───────────────────────────────────────────────
 
 
 @router.post("/retry-pending")
@@ -445,8 +414,7 @@ async def retry_pending(
     db: AsyncSession = Depends(get_db),
 ) -> HTMLResponse:
     """Manually trigger retry of pending items."""
-    from app.siftarr.main import scheduler_service
-
+    scheduler_service = _get_scheduler_service()
     context = await _build_settings_page_context(request, db)
     if scheduler_service:
         count = await scheduler_service.trigger_retry_now()
@@ -464,8 +432,7 @@ async def run_recent_plex_scan(
     db: AsyncSession = Depends(get_db),
 ) -> HTMLResponse:
     """Manually trigger the recent Plex scan scheduler job."""
-    from app.siftarr.main import scheduler_service
-
+    scheduler_service = _get_scheduler_service()
     context = await _build_settings_page_context(request, db)
     if scheduler_service is None:
         context["message"] = "Scheduler not available"
@@ -487,8 +454,7 @@ async def run_plex_poll(
     db: AsyncSession = Depends(get_db),
 ) -> HTMLResponse:
     """Manually trigger the Plex poll scheduler job."""
-    from app.siftarr.main import scheduler_service
-
+    scheduler_service = _get_scheduler_service()
     context = await _build_settings_page_context(request, db)
     if scheduler_service is None:
         context["message"] = "Scheduler not available"
@@ -502,6 +468,9 @@ async def run_plex_poll(
     )
     context["plex_jobs"] = await _build_plex_job_statuses(db)
     return templates.TemplateResponse(request, "settings.html", context)
+
+
+# ── Maintenance routes ─────────────────────────────────────────────────────
 
 
 @router.post("/clear-cache")
@@ -540,6 +509,9 @@ async def reseed_rules(
     return templates.TemplateResponse(request, "settings.html", context)
 
 
+# ── SSE streaming routes ───────────────────────────────────────────────────
+
+
 @router.get("/api/rescan-plex/stream")
 async def rescan_plex_stream(
     shallow: bool = False,
@@ -550,8 +522,20 @@ async def rescan_plex_stream(
     The legacy shallow=true query remains compatible and maps to partial sync.
     """
     partial = shallow or mode == "partial"
+
+    async def _inner() -> AsyncGenerator[str, None]:
+        async for event in rescan_plex_generator_svc(
+            shallow=partial,
+            async_session_maker=async_session_maker,
+            plex_service_cls=PlexService,
+            rescan_plex_requests_func=_rescan_plex_requests,
+            build_sse_progress_func=build_sse_progress,
+            logger=logger,
+        ):
+            yield event
+
     return StreamingResponse(
-        _rescan_plex_generator(shallow=partial),
+        _inner(),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",
@@ -564,8 +548,19 @@ async def rescan_plex_stream(
 @router.get("/api/sync-overseerr/stream")
 async def sync_overseerr_stream() -> StreamingResponse:
     """Stream Overseerr sync progress via SSE."""
+
+    async def _inner() -> AsyncGenerator[str, None]:
+        async for event in sync_overseerr_generator_svc(
+            async_session_maker=async_session_maker,
+            build_effective_settings_func=build_effective_settings,
+            import_overseerr_requests_func=import_overseerr_requests_svc,
+            build_sse_progress_func=build_sse_progress,
+            logger=logger,
+        ):
+            yield event
+
     return StreamingResponse(
-        _sync_overseerr_generator(),
+        _inner(),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",
@@ -581,8 +576,9 @@ async def sync_overseerr(
     db: AsyncSession = Depends(get_db),
 ) -> HTMLResponse:
     """Sync with Overseerr for new requests."""
-    context = await _build_settings_page_context(request, db)
-    effective_settings = context["env"]
+    store = SettingsStore(db)
+    effective_settings = await store.get_effective_dict()
+    context = await _build_settings_page_context(request, db, store=store)
 
     if not effective_settings.get("overseerr_url") or not effective_settings.get(
         "overseerr_api_key"
@@ -593,9 +589,14 @@ async def sync_overseerr(
 
     try:
         runtime_settings = get_settings()
-        synced_count, skipped_count = await _import_overseerr_requests(
+        synced_count, skipped_count = await import_overseerr_requests_svc(
             db,
             runtime_settings,
+            overseerr_service_cls=OverseerrService,
+            plex_service_cls=PlexService,
+            evaluate_imported_request_func=evaluate_imported_request,
+            prepare_overseerr_import_func=prepare_overseerr_import,
+            logger=logger,
         )
         if synced_count > 0:
             context["message"] = f"Synced {synced_count} new request(s) from Overseerr"

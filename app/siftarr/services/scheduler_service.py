@@ -17,12 +17,17 @@ from apscheduler.triggers.interval import IntervalTrigger
 from app.siftarr.config import get_settings
 from app.siftarr.models.request import MediaType, Request, RequestStatus
 from app.siftarr.services import settings_service
+from app.siftarr.services.download_completion_service import DownloadCompletionService
 from app.siftarr.services.lifecycle_service import LifecycleService
 from app.siftarr.services.media_helpers import extract_media_title_and_year
 from app.siftarr.services.movie_decision_service import MovieDecisionService
 from app.siftarr.services.overseerr_service import OverseerrService
 from app.siftarr.services.pending_queue_service import PendingQueueService
-from app.siftarr.services.plex_polling_service import PlexPollingService
+from app.siftarr.services.plex_polling_service import (
+    PlexJobResult,
+    PlexPollingService,
+    PlexPollResult,
+)
 from app.siftarr.services.plex_service import PlexService
 from app.siftarr.services.prowlarr_service import ProwlarrService
 from app.siftarr.services.qbittorrent_service import QbittorrentService
@@ -134,21 +139,15 @@ class SchedulerService:
             self._plex_job_state[job_name] = state
         return state
 
-    def _build_plex_job_metrics_payload(self, result: Any) -> dict[str, Any]:
-        if isinstance(result, int):
-            return {"completed_requests": result}
-
-        payload = {"completed_requests": int(getattr(result, "completed_requests", 0))}
-        metrics = getattr(result, "metrics", None)
-        if metrics is not None:
-            payload.update(metrics.as_dict())
+    def _build_plex_job_metrics_payload(self, result: PlexJobResult) -> dict[str, Any]:
+        payload: dict[str, Any] = {"completed_requests": result.completed_requests}
+        if result.metrics is not None:
+            payload.update(result.metrics.as_dict())
         return payload
 
     @staticmethod
-    def _get_plex_completed_requests(result: Any) -> int:
-        if isinstance(result, int):
-            return result
-        return int(getattr(result, "completed_requests", 0))
+    def _get_plex_completed_requests(result: PlexJobResult) -> int:
+        return result.completed_requests
 
     async def get_plex_job_state_snapshot(self) -> dict[str, dict[str, Any]]:
         """Return a copy of the in-memory Plex job state."""
@@ -194,7 +193,7 @@ class SchedulerService:
             result = await runner()
             metrics_payload = self._build_plex_job_metrics_payload(result)
             completed_requests = self._get_plex_completed_requests(result)
-            last_error = getattr(result, "last_error", None)
+            last_error = result.last_error
             finished_at = self._current_time()
 
             logger.info(
@@ -207,7 +206,7 @@ class SchedulerService:
             async with self._plex_job_state_guard:
                 state = self._get_plex_job_state(job_name)
                 state.last_run = finished_at
-                if getattr(result, "clean_run", True) and not last_error:
+                if result.clean_run and not last_error:
                     state.last_success = finished_at
                 state.locked = False
                 state.lock_owner = None
@@ -272,8 +271,6 @@ class SchedulerService:
                         logger.info("Backfilled year=%s for request_id=%s", year, request.id)
                 except Exception:
                     pass
-                finally:
-                    await overseerr.close()
 
             if request.media_type == MediaType.TV:
                 decision_service = TVDecisionService(db, prowlarr, qbittorrent)
@@ -334,11 +331,8 @@ class SchedulerService:
             async with self.db_session_factory() as db:
                 runtime_settings = get_settings()
                 plex = PlexService(settings=runtime_settings)
-                try:
-                    polling_service = PlexPollingService(db, plex)
-                    return await polling_service.scan_recent()
-                finally:
-                    await plex.close()
+                polling_service = PlexPollingService(db, plex)
+                return await polling_service.scan_recent()
 
         return await self._run_guarded_plex_scan_job(
             job_name=PLEX_RECENT_SCAN_JOB_NAME,
@@ -354,11 +348,9 @@ class SchedulerService:
             async with self.db_session_factory() as db:
                 runtime_settings = get_settings()
                 plex = PlexService(settings=runtime_settings)
-                try:
-                    polling_service = PlexPollingService(db, plex)
-                    return await polling_service.poll()
-                finally:
-                    await plex.close()
+                polling_service = PlexPollingService(db, plex)
+                count = await polling_service.poll()
+                return PlexPollResult(completed_requests=count)
 
         return await self._run_guarded_plex_scan_job(
             job_name=PLEX_POLL_JOB_NAME,
@@ -379,16 +371,13 @@ class SchedulerService:
 
                 runtime_settings = get_settings()
                 overseerr = OverseerrService(settings=runtime_settings)
-                try:
-                    evaluator = UnreleasedEvaluator(db, overseerr)
-                    queue_service = PendingQueueService(db)
-                    for request in recheck_requests:
-                        new_status = await evaluator.evaluate_and_apply(request)
-                        if new_status == RequestStatus.PENDING:
-                            await queue_service.add_to_queue(request.id)
-                    logger.info("Rechecked %d TV release-state request(s)", len(recheck_requests))
-                finally:
-                    await overseerr.close()
+                evaluator = UnreleasedEvaluator(db, overseerr)
+                queue_service = PendingQueueService(db)
+                for request in recheck_requests:
+                    new_status = await evaluator.evaluate_and_apply(request)
+                    if new_status == RequestStatus.PENDING:
+                        await queue_service.add_to_queue(request.id)
+                logger.info("Rechecked %d TV release-state request(s)", len(recheck_requests))
         except Exception:
             logger.exception("Error during unreleased recheck")
 
@@ -401,24 +390,17 @@ class SchedulerService:
         async with self._download_completion_lock:
             try:
                 async with self.db_session_factory() as db:
-                    from app.siftarr.services.download_completion_service import (
-                        DownloadCompletionService,
-                    )
-
                     runtime_settings = get_settings()
                     plex = PlexService(settings=runtime_settings)
-                    try:
-                        qbittorrent = QbittorrentService(settings=runtime_settings)
-                        plex_polling = PlexPollingService(db, plex)
-                        service = DownloadCompletionService(db, qbittorrent, plex_polling)
-                        completed = await service.check_downloading_requests()
-                        if completed:
-                            logger.info(
-                                "DownloadCompletionService: completed %d request(s) this cycle",
-                                completed,
-                            )
-                    finally:
-                        await plex.close()
+                    qbittorrent = QbittorrentService(settings=runtime_settings)
+                    plex_polling = PlexPollingService(db, plex)
+                    service = DownloadCompletionService(db, qbittorrent, plex_polling)
+                    completed = await service.check_downloading_requests()
+                    if completed:
+                        logger.info(
+                            "DownloadCompletionService: completed %d request(s) this cycle",
+                            completed,
+                        )
             except Exception:
                 logger.exception("Error during download completion check")
 

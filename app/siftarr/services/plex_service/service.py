@@ -240,6 +240,45 @@ class PlexService:
     async def get_episode_availability_result(self, rating_key: str):
         return await self._episodes.get_episode_availability_result(rating_key)
 
+    async def resolve_show_rating_key(
+        self,
+        tmdb_id: int | None = None,
+        tvdb_id: int | None = None,
+        title: str | None = None,
+    ) -> tuple[str | None, bool]:
+        """Resolve a show's Plex rating key via TMDB, TVDB, and title search fallback.
+
+        Returns:
+            (rating_key, authoritative) where authoritative is False when the
+            Plex lookup was inconclusive (e.g. a section scan failed).
+        """
+        if tmdb_id:
+            result = await self._lookup.lookup_show_by_tmdb(tmdb_id)
+            if result.item:
+                rk = result.item.get("rating_key")
+                if rk:
+                    return str(rk), True
+            if not result.authoritative:
+                return None, False
+
+        if tvdb_id:
+            result = await self._lookup.lookup_show_by_tvdb(tvdb_id)
+            if result.item:
+                rk = result.item.get("rating_key")
+                if rk:
+                    return str(rk), True
+            if not result.authoritative:
+                return None, False
+
+        if title:
+            results = await self._lookup.search_show(title)
+            if results:
+                rk = results[0].get("rating_key")
+                if rk:
+                    return str(rk), True
+
+        return None, True
+
     async def close(self) -> None:
         """Close the service (no-op since using shared client)."""
         pass

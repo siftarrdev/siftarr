@@ -2,15 +2,13 @@
 
 from datetime import date
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock, call
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
 from app.siftarr.models.request import Request, RequestStatus
-from app.siftarr.services.lifecycle_service import (
-    LifecycleService,
-    is_unreleased,
-)
+from app.siftarr.services.lifecycle_service import LifecycleService
+from app.siftarr.services.unreleased_service import is_unreleased
 
 
 class TestLifecycleService:
@@ -21,6 +19,14 @@ class TestLifecycleService:
         """Create a mock database session."""
         db = AsyncMock()
         db.add = MagicMock()
+
+        # Python 3.14: AsyncMock.__call__ returns a coroutine, so
+        # "async with mock.begin_nested():" needs a non-AsyncMock callable.
+        nested_context = AsyncMock()
+        nested_context.__aenter__.return_value = None
+        nested_context.__aexit__.return_value = None
+        db.begin_nested = MagicMock(return_value=nested_context)
+
         return db
 
     @pytest.fixture
@@ -56,9 +62,12 @@ class TestLifecycleService:
 
         assert result == mock_request
         assert result.status == RequestStatus.SEARCHING
-        assert mock_db.commit.call_count == 2
-        assert mock_db.commit.call_args_list == [call(), call()]
-        mock_db.refresh.assert_called_once()
+        # Single commit after both the status update (flush) and the log insert.
+        # flush is called twice: once from LifecycleService.transition() and
+        # once from ActivityLogService.log() (inside begin_nested/savepoint).
+        mock_db.commit.assert_awaited_once()
+        assert mock_db.flush.await_count == 2
+        mock_db.refresh.assert_awaited_once()
 
     @pytest.mark.asyncio
     async def test_transition_request_not_found(self, mock_db, service):

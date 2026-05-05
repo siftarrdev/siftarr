@@ -8,15 +8,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.siftarr.database import get_db
 from app.siftarr.models.request import Request as RequestModel
-from app.siftarr.routers.dashboard_actions import (
-    _load_all_pending_search_requests,
-    _process_request_search,
-)
+from app.siftarr.routers.dashboard_actions import _load_all_pending_search_requests
 from app.siftarr.services.dashboard_service import (
-    DashboardService,
     serialize_tv_search_response,
 )
 from app.siftarr.services.request_service import load_request_or_404, validate_tv_request
+from app.siftarr.services.search_service import SearchService
 from app.siftarr.services.settings_service import build_sse_progress, serialize_sse
 
 logger = logging.getLogger(__name__)
@@ -48,7 +45,8 @@ async def _search_request_generator(request_id: int, db: AsyncSession):
                 message="Querying indexers and evaluating releases…",
             )
         )
-        result = await _process_request_search(request, db)
+        service = SearchService(db)
+        result = await service.process_request_search(request)
         yield serialize_sse(
             build_sse_progress(
                 "complete",
@@ -115,7 +113,8 @@ async def _bulk_search_generator(
                 )
             )
             try:
-                result = await _process_request_search(request, db)
+                service = SearchService(db)
+                result = await service.process_request_search(request)
             except Exception as exc:
                 logger.exception("SSE bulk search failed for request_id=%s", request.id)
                 result = {"status": "failed", "message": str(exc)}
@@ -150,7 +149,7 @@ async def _tv_season_pack_generator(request_id: int, season_number: int, db: Asy
         request = await load_request_or_404(db, request_id)
         validate_tv_request(request)
         yield serialize_sse(build_sse_progress("searching", percent=50))
-        service = DashboardService(db)
+        service = SearchService(db)
         data = await service.search_season_packs(request, season_number=season_number)
         serialized = serialize_tv_search_response(data)
         yield serialize_sse(
@@ -182,7 +181,7 @@ async def _tv_multi_season_generator(request_id: int, db: AsyncSession):
         request = await load_request_or_404(db, request_id)
         validate_tv_request(request)
         yield serialize_sse(build_sse_progress("searching", percent=50))
-        service = DashboardService(db)
+        service = SearchService(db)
         data = await service.search_multi_season_packs(request, request_id=request_id)
         serialized = serialize_tv_search_response(data)
         yield serialize_sse(
@@ -213,7 +212,7 @@ async def _tv_episode_generator(
         request = await load_request_or_404(db, request_id)
         validate_tv_request(request)
         yield serialize_sse(build_sse_progress("searching", percent=50))
-        service = DashboardService(db)
+        service = SearchService(db)
         data = await service.search_episode(
             request, season_number=season_number, episode_number=episode_number
         )

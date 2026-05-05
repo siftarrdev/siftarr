@@ -11,10 +11,13 @@ from app.siftarr.config import get_settings
 from app.siftarr.models.episode import Episode
 from app.siftarr.models.release import Release
 from app.siftarr.models.request import MediaType, Request, RequestStatus
-from app.siftarr.models.rule import Rule
 from app.siftarr.models.season import Season
-from app.siftarr.services.activity_log_service import ActivityLogService
-from app.siftarr.services.pending_queue_service import PendingQueueService
+from app.siftarr.services.decision_pipeline import (
+    add_to_pending_queue,
+    build_rule_engine,
+    log_release_staged,
+    log_rule_evaluation,
+)
 from app.siftarr.services.prowlarr_service import ProwlarrSearchResult, ProwlarrService
 from app.siftarr.services.qbittorrent_service import QbittorrentService
 from app.siftarr.services.release_parser import (
@@ -23,7 +26,7 @@ from app.siftarr.services.release_parser import (
 )
 from app.siftarr.services.release_storage import get_release_persistence_key, store_search_results
 from app.siftarr.services.rule_engine import ReleaseEvaluation, RuleEngine
-from app.siftarr.services.staging_actions import use_releases
+from app.siftarr.services.staging_service import StagingService
 
 logger = logging.getLogger(__name__)
 
@@ -55,9 +58,7 @@ class TVDecisionService:
         self._settings = get_settings()
 
     async def _get_rule_engine(self) -> RuleEngine:
-        result = await self.db.execute(select(Rule))
-        rules = list(result.scalars().all())
-        return RuleEngine.from_db_rules(rules=rules, media_type=MediaType.TV.value)
+        return await build_rule_engine(self.db, MediaType.TV.value)
 
     def _get_requested_seasons(self, request: Request) -> list[int]:
         return sorted([s.season_number for s in request.seasons])
@@ -424,18 +425,13 @@ class TVDecisionService:
             len(all_search_errors),
         )
 
-        from app.siftarr.models.activity_log import EventType
-
-        activity_log = ActivityLogService(self.db)
-        await activity_log.log(
-            EventType.RULE_EVALUATION,
+        await log_rule_evaluation(
+            self.db,
             request_id=request_id,
-            details={
-                "evaluated": len(all_evaluated_releases),
-                "passed_packs": passing_pack_count,
-                "passed_episodes": len(episode_evaluations),
-                "search_errors": len(all_search_errors),
-            },
+            evaluated=len(all_evaluated_releases),
+            passed_packs=passing_pack_count,
+            passed_episodes=len(episode_evaluations),
+            search_errors=len(all_search_errors),
         )
 
         stored_releases_by_key = await store_search_results(
@@ -476,24 +472,18 @@ class TVDecisionService:
                 [e.release.title for e in all_selected_releases],
             )
 
-            action_result = await use_releases(
-                self.db,
+            action_result = await StagingService(self.db).use_releases(
                 request,
                 stored_releases,
                 selection_source="rule",
             )
 
-            from app.siftarr.models.activity_log import EventType
-
-            activity_log = ActivityLogService(self.db)
-            await activity_log.log(
-                EventType.RELEASE_STAGED,
+            await log_release_staged(
+                self.db,
                 request_id=request_id,
-                details={
-                    "release_count": len(all_selected_releases),
-                    "titles": [e.release.title for e in all_selected_releases[:5]],
-                    "action": action_result.get("status"),
-                },
+                release_count=len(all_selected_releases),
+                titles=[e.release.title for e in all_selected_releases[:5]],
+                action=action_result.get("status"),
             )
 
             if action_result.get("status") in ("completed", "downloading", "staged"):
@@ -551,8 +541,8 @@ class TVDecisionService:
             len(all_errors),
         )
 
-        queue_service = PendingQueueService(self.db)
-        await queue_service.add_to_queue(
+        await add_to_pending_queue(
+            self.db,
             request.id,
             error_message=error_msg,
         )

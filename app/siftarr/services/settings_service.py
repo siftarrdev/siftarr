@@ -4,31 +4,182 @@ import asyncio
 import contextlib
 import json
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any
 
+from sqlalchemy import delete as sa_delete
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.siftarr.config import Settings, get_settings
+from app.siftarr.models.app_setting import AppSetting
 from app.siftarr.models.request import MediaType, RequestStatus
 from app.siftarr.models.request import Request as RequestModel
 from app.siftarr.services.pending_queue_service import PendingQueueService
 
+# ── Runtime-to-environment key mapping ────────────────────────────────────
+
+ENV_KEY_MAP: dict[str, str] = {
+    "overseerr_url": "OVERSEERR_URL",
+    "overseerr_api_key": "OVERSEERR_API_KEY",
+    "prowlarr_url": "PROWLARR_URL",
+    "prowlarr_api_key": "PROWLARR_API_KEY",
+    "qbittorrent_url": "QBITTORRENT_URL",
+    "qbittorrent_username": "QBITTORRENT_USERNAME",
+    "qbittorrent_password": "QBITTORRENT_PASSWORD",
+    "plex_url": "PLEX_URL",
+    "plex_token": "PLEX_TOKEN",
+    "tz": "TZ",
+    "staging_mode_enabled": "STAGING_MODE_ENABLED",
+}
+
+# Keys that are persisted and used as runtime connection/scheduling settings.
+SETTINGS_KEYS = frozenset(ENV_KEY_MAP)
+
+
+class SettingsStore:
+    """Key-value settings persistence backed by the ``app_settings`` table.
+
+    Writes go to the database so they survive restarts.  Reads merge
+    DB-stored values on top of environment-variable defaults, with env
+    vars taking precedence for any key not present in the DB.
+
+    Usage (inside an async request handler)::
+
+        store = SettingsStore(db)
+        await store.set("overseerr_url", "http://…")
+        value = await store.get("overseerr_url")
+        all_settings = await store.get_effective_dict()
+    """
+
+    def __init__(self, db: AsyncSession) -> None:
+        self.db = db
+
+    async def get(self, key: str) -> str | None:
+        """Return the DB-stored value for *key*, or ``None``."""
+        result = await self.db.execute(select(AppSetting).where(AppSetting.key == key))
+        setting = result.scalar_one_or_none()
+        if setting is not None:
+            return str(setting.value)
+        return None
+
+    async def set(self, key: str, value: str) -> None:
+        """Upsert a single setting.
+
+        If *value* is empty the row is **not** deleted — callers that wish
+        to clear a setting should invoke :meth:`delete` explicitly.
+        """
+        result = await self.db.execute(select(AppSetting).where(AppSetting.key == key))
+        setting = result.scalar_one_or_none()
+        if setting is not None:
+            setting.value = value
+            setting.updated_at = datetime.now(UTC)
+        else:
+            self.db.add(AppSetting(key=key, value=value, updated_at=datetime.now(UTC)))
+
+    async def delete(self, *keys: str) -> None:
+        """Remove one or more settings from the database."""
+        if not keys:
+            return
+        await self.db.execute(sa_delete(AppSetting).where(AppSetting.key.in_(keys)))
+
+    async def get_all(self) -> dict[str, str]:
+        """Return **all** DB-stored settings as a plain dict."""
+        result = await self.db.execute(select(AppSetting))
+        rows = result.scalars().all()
+        return {str(row.key): str(row.value) for row in rows}
+
+    async def get_effective_dict(self) -> dict[str, Any]:
+        """Build a flat dict of effective settings (secrets masked).
+
+        DB-stored values override env-var defaults.  The returned dict
+        contains **every** key in :data:`SETTINGS_KEYS` so callers always
+        get a complete payload.  Secret values (API keys, tokens, passwords)
+        are masked via :func:`mask_secret`.
+        """
+        env_settings = get_settings()
+        base: dict[str, Any] = {
+            "overseerr_url": str(env_settings.overseerr_url or ""),
+            "overseerr_api_key": mask_secret(env_settings.overseerr_api_key) or "",
+            "prowlarr_url": str(env_settings.prowlarr_url or ""),
+            "prowlarr_api_key": mask_secret(env_settings.prowlarr_api_key) or "",
+            "qbittorrent_url": str(env_settings.qbittorrent_url or ""),
+            "qbittorrent_username": env_settings.qbittorrent_username,
+            "qbittorrent_password": mask_secret(env_settings.qbittorrent_password) or "",
+            "plex_url": str(env_settings.plex_url or ""),
+            "plex_token": mask_secret(env_settings.plex_token) or "",
+            "tz": env_settings.tz,
+        }
+        db_overrides = await self.get_all()
+        for key, value in db_overrides.items():
+            if key in base and value:
+                base[key] = value
+        return base
+
+    async def load_into_environ(self, clear_existing: bool = True) -> None:
+        """Load all DB-stored settings into ``os.environ``.
+
+        Call this once at startup so services that read from
+        ``os.environ`` / :func:`get_settings` see the persisted
+        values.  When *clear_existing* is ``True`` environment variables
+        for **all** known keys are removed first, so deleted DB rows
+        properly fall back to the image-level default.
+        """
+        import os
+
+        if clear_existing:
+            for env_name in ENV_KEY_MAP.values():
+                os.environ.pop(env_name, None)
+
+        db_values = await self.get_all()
+        for key, value in db_values.items():
+            env_name = ENV_KEY_MAP.get(key, key.upper())
+            if value:
+                os.environ[env_name] = value
+
+        # Invalidate the cached Settings singleton so the next caller of
+        # get_settings() re-reads from the updated environ.
+        get_settings.cache_clear()
+
+
+def mask_secret(value: str | None, visible_chars: int = 4) -> str | None:
+    """Mask a secret value, showing only the last *visible_chars* characters.
+
+    Returns ``None`` if *value* is ``None`` or empty.
+    Returns the original value unchanged if it is shorter than *visible_chars* + 1.
+    """
+    if not value:
+        return None
+    if len(value) <= visible_chars:
+        return value
+    return f"{'*' * (len(value) - visible_chars)}{value[-visible_chars:]}"
+
+
+def _coerce_setting_type(current: Any, raw: str) -> Any:
+    """Coerce a string *raw* value to match the type of *current*."""
+    if isinstance(current, bool):
+        return raw.lower() in ("true", "1", "yes")
+    if isinstance(current, int):
+        try:
+            return int(raw)
+        except (ValueError, TypeError):
+            return current
+    return raw
+
 
 async def build_effective_settings() -> dict[str, Any]:
-    """Build the effective flattened settings payload."""
+    """Build the effective flattened settings payload (secrets masked)."""
     effective = get_settings()
     return {
         "overseerr_url": str(effective.overseerr_url or ""),
-        "overseerr_api_key": str(effective.overseerr_api_key or ""),
+        "overseerr_api_key": mask_secret(effective.overseerr_api_key) or "",
         "prowlarr_url": str(effective.prowlarr_url or ""),
-        "prowlarr_api_key": str(effective.prowlarr_api_key or ""),
+        "prowlarr_api_key": mask_secret(effective.prowlarr_api_key) or "",
         "qbittorrent_url": str(effective.qbittorrent_url or ""),
         "qbittorrent_username": effective.qbittorrent_username,
-        "qbittorrent_password": effective.qbittorrent_password,
+        "qbittorrent_password": mask_secret(effective.qbittorrent_password) or "",
         "plex_url": str(effective.plex_url or ""),
-        "plex_token": effective.plex_token or "",
+        "plex_token": mask_secret(effective.plex_token) or "",
         "tz": effective.tz,
     }
 
@@ -46,9 +197,19 @@ async def build_settings_page_context(
     request_model,
     request_status_enum,
     build_plex_job_statuses_func,
+    effective_settings_override: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """Build the shared context required by the settings page."""
-    effective_settings = await build_effective_settings()
+    """Build the shared context required by the settings page.
+
+    When *effective_settings_override* is provided it is used directly
+    instead of calling :func:`build_effective_settings`.  Callers that
+    already have a merged dict (e.g. from :class:`SettingsStore`) should
+    pass it here to avoid a redundant round-trip.
+    """
+    if effective_settings_override is not None:
+        effective_settings = effective_settings_override
+    else:
+        effective_settings = await build_effective_settings()
 
     staging_enabled = get_settings().staging_mode_enabled
 
@@ -347,8 +508,6 @@ async def rescan_plex_tv_request(
                 request_id,
             )
             return False
-        finally:
-            await overseerr.close()
 
     return True
 
@@ -505,73 +664,70 @@ async def rescan_plex_generator(
         async with async_session_maker() as db:
             runtime_settings = get_settings()
             plex = plex_service_cls(settings=runtime_settings)
-            try:
-                queue: asyncio.Queue[dict[str, Any] | None] = asyncio.Queue()
+            queue: asyncio.Queue[dict[str, Any] | None] = asyncio.Queue()
 
-                async def emit(payload: dict[str, Any]) -> None:
-                    await queue.put(payload)
+            async def emit(payload: dict[str, Any]) -> None:
+                await queue.put(payload)
 
-                task = asyncio.create_task(
-                    rescan_plex_requests_func(
-                        db,
-                        runtime_settings,
-                        plex,
-                        on_event=emit,
-                        shallow=shallow,
-                    )
+            task = asyncio.create_task(
+                rescan_plex_requests_func(
+                    db,
+                    runtime_settings,
+                    plex,
+                    on_event=emit,
+                    shallow=shallow,
                 )
-                get_task = asyncio.create_task(queue.get())
+            )
+            get_task = asyncio.create_task(queue.get())
 
-                while True:
-                    done, _pending = await asyncio.wait(
-                        {task, get_task}, return_when=asyncio.FIRST_COMPLETED
-                    )
-                    if get_task in done:
-                        payload = get_task.result()
+            while True:
+                done, _pending = await asyncio.wait(
+                    {task, get_task}, return_when=asyncio.FIRST_COMPLETED
+                )
+                if get_task in done:
+                    payload = get_task.result()
+                    if payload is not None:
+                        yield serialize_sse(payload)
+                    get_task = asyncio.create_task(queue.get())
+                    continue
+
+                if task in done:
+                    if not get_task.done():
+                        get_task.cancel()
+                        with contextlib.suppress(asyncio.CancelledError):
+                            await get_task
+                    while not queue.empty():
+                        payload = queue.get_nowait()
                         if payload is not None:
                             yield serialize_sse(payload)
-                        get_task = asyncio.create_task(queue.get())
-                        continue
+                    break
 
-                    if task in done:
-                        if not get_task.done():
-                            get_task.cancel()
-                            with contextlib.suppress(asyncio.CancelledError):
-                                await get_task
-                        while not queue.empty():
-                            payload = queue.get_nowait()
-                            if payload is not None:
-                                yield serialize_sse(payload)
-                        break
-
-                scanned, errors, completed = await task
-                if shallow:
-                    message = (
-                        f"Partial Plex sync completed. "
-                        f"Scanned {scanned} matching request(s), "
-                        f"{errors} error(s), "
-                        f"{completed} transitioned to completed."
-                    )
-                else:
-                    message = (
-                        f"Full Plex sync completed. "
-                        f"Re-synced {scanned} TV request(s), "
-                        f"{errors} failed, "
-                        f"{completed} transitioned to completed."
-                    )
-                yield serialize_sse(
-                    build_sse_progress_func(
-                        "complete",
-                        mode=mode,
-                        resynced=scanned,
-                        failed=errors,
-                        completed=completed,
-                        active=[],
-                        message=message,
-                    )
+            scanned, errors, completed = await task
+            if shallow:
+                message = (
+                    f"Partial Plex sync completed. "
+                    f"Scanned {scanned} matching request(s), "
+                    f"{errors} error(s), "
+                    f"{completed} transitioned to completed."
                 )
-            finally:
-                await plex.close()
+            else:
+                message = (
+                    f"Full Plex sync completed. "
+                    f"Re-synced {scanned} TV request(s), "
+                    f"{errors} failed, "
+                    f"{completed} transitioned to completed."
+                )
+            yield serialize_sse(
+                build_sse_progress_func(
+                    "complete",
+                    mode=mode,
+                    resynced=scanned,
+                    failed=errors,
+                    completed=completed,
+                    active=[],
+                    message=message,
+                )
+            )
 
     except Exception as exc:
         logger.exception("Plex SSE re-scan failed")
@@ -900,11 +1056,11 @@ async def import_overseerr_requests(
                             )
                         )
             finally:
-                await plex_service.close()
+                pass
 
         return synced_count, skipped_count
     finally:
-        await overseerr_service.close()
+        pass
 
 
 async def sync_overseerr_generator(

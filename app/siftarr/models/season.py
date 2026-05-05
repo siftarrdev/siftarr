@@ -1,6 +1,6 @@
 """Season model for TV show tracking."""
 
-from datetime import UTC, datetime
+from datetime import datetime
 from typing import TYPE_CHECKING
 
 from sqlalchemy import DateTime, ForeignKey, Index, Integer, UniqueConstraint
@@ -13,10 +13,6 @@ from app.siftarr.models.request import RequestStatus
 if TYPE_CHECKING:
     from app.siftarr.models.episode import Episode
     from app.siftarr.models.request import Request
-
-
-def _utc_now() -> datetime:
-    return datetime.now(UTC)
 
 
 class Season(Base):

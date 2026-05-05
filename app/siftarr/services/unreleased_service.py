@@ -1,10 +1,14 @@
-"""Unreleased evaluator service."""
+"""Unreleased evaluator service.
+
+Includes release-state detection for movies and TV shows.
+"""
 
 from __future__ import annotations
 
 import logging
 from collections.abc import Iterable
-from typing import Literal
+from datetime import date, datetime
+from typing import Literal, Protocol
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -12,14 +16,147 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.siftarr.models.episode import Episode
 from app.siftarr.models.request import MediaType, Request, RequestStatus
 from app.siftarr.models.season import Season
-from app.siftarr.services.lifecycle_service import (
-    EpisodeLike,
-    LifecycleService,
-    is_unreleased,
-)
+from app.siftarr.services.lifecycle_service import LifecycleService
 from app.siftarr.services.overseerr_service import OverseerrService
 
 _logger = logging.getLogger(__name__)
+
+_RELEASE_TYPES_AVAILABLE = {3, 4, 5}
+_TV_UNAIRED_STATUSES = {"Planned", "In Production", "Pilot"}
+_AVAILABLE_EPISODE_STATUSES = {RequestStatus.COMPLETED}
+
+
+class EpisodeLike(Protocol):
+    air_date: date | None
+    status: RequestStatus
+
+
+class ReleaseCheckRequestLike(Protocol):
+    media_type: MediaType
+    tmdb_id: int | None
+
+
+def _parse_date(value: str | None) -> date | None:
+    if not value:
+        return None
+    try:
+        return date.fromisoformat(value)
+    except ValueError:
+        pass
+    try:
+        return datetime.fromisoformat(value).date()
+    except ValueError:
+        return None
+
+
+def _is_unreleased_movie(
+    details: dict | None,
+    *,
+    today: date | None = None,
+) -> bool:
+    if details is None:
+        return False
+
+    today = today or date.today()
+    status = details.get("status")
+    status_not_released = status != "Released"
+    release_date = _parse_date(details.get("releaseDate"))
+    release_date_missing_or_future = release_date is None or release_date > today
+
+    has_past_avail_release = False
+    releases_block = details.get("releases")
+    if isinstance(releases_block, dict):
+        results = releases_block.get("results")
+        if isinstance(results, list):
+            for country in results:
+                if not isinstance(country, dict):
+                    continue
+                dates = country.get("release_dates")
+                if not isinstance(dates, list):
+                    continue
+                for entry in dates:
+                    if not isinstance(entry, dict):
+                        continue
+                    if entry.get("type") not in _RELEASE_TYPES_AVAILABLE:
+                        continue
+                    parsed = _parse_date(entry.get("release_date"))
+                    if parsed is not None and parsed <= today:
+                        has_past_avail_release = True
+                        break
+                if has_past_avail_release:
+                    break
+
+    return status_not_released and release_date_missing_or_future and not has_past_avail_release
+
+
+def _is_unreleased_tv_request(
+    tv_details: dict | None,
+    local_episodes: Iterable[EpisodeLike],
+    *,
+    today: date | None = None,
+    has_empty_seasons: bool = False,
+) -> bool:
+    if tv_details is None:
+        return False
+
+    today = today or date.today()
+    episodes = list(local_episodes)
+    next_episode = tv_details.get("nextEpisodeToAir")
+    next_episode_air_date = None
+    if isinstance(next_episode, dict):
+        next_episode_air_date = _parse_date(
+            next_episode.get("airDate") or next_episode.get("airDateUtc")
+        )
+    has_future_signal = has_empty_seasons or (
+        next_episode_air_date is not None and next_episode_air_date > today
+    )
+
+    any_aired_locally = any(e.air_date is not None and e.air_date <= today for e in episodes)
+    first_air = _parse_date(tv_details.get("firstAirDate"))
+    first_air_missing_or_future = first_air is None or first_air > today
+    series_status = tv_details.get("status")
+    series_status_unaired = series_status in _TV_UNAIRED_STATUSES
+
+    if (first_air_missing_or_future or series_status_unaired) and not any_aired_locally:
+        return True
+
+    if any_aired_locally:
+        aired = [e for e in episodes if e.air_date is not None and e.air_date <= today]
+        all_aired_downloaded = all(e.status in _AVAILABLE_EPISODE_STATUSES for e in aired)
+        has_future_or_unknown = has_future_signal or any(
+            e.air_date is not None and e.air_date > today for e in episodes
+        )
+        has_unreleased_no_date_placeholder = any(
+            e.air_date is None and e.status == RequestStatus.UNRELEASED for e in episodes
+        )
+        return all_aired_downloaded and (
+            has_future_or_unknown or has_unreleased_no_date_placeholder
+        )
+
+    return False
+
+
+def is_unreleased(
+    request: ReleaseCheckRequestLike,
+    *,
+    media_details: dict | None,
+    local_episodes: Iterable[EpisodeLike] = (),
+    today: date | None = None,
+    has_empty_seasons: bool = False,
+) -> bool:
+    if request.tmdb_id is None:
+        return False
+
+    if request.media_type == MediaType.MOVIE:
+        return _is_unreleased_movie(media_details, today=today)
+
+    return _is_unreleased_tv_request(
+        media_details,
+        local_episodes,
+        today=today,
+        has_empty_seasons=has_empty_seasons,
+    )
+
 
 _REDIRECTABLE_STATUSES = {
     RequestStatus.PENDING,

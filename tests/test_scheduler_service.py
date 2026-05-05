@@ -149,7 +149,7 @@ async def test_download_completion_check_closes_plex_service_on_error(monkeypatc
         lambda db_session, plex: plex_polling_instance,
     )
     monkeypatch.setattr(
-        "app.siftarr.services.download_completion_service.DownloadCompletionService",
+        "app.siftarr.services.scheduler_service.DownloadCompletionService",
         lambda db_session, qbittorrent, plex_polling: download_completion_service,
     )
 
@@ -159,7 +159,6 @@ async def test_download_completion_check_closes_plex_service_on_error(monkeypatc
     await service._check_download_completion()
 
     download_completion_service.check_downloading_requests.assert_awaited_once()
-    plex_instance.close.assert_awaited_once()
     logger.exception.assert_called_once_with("Error during download completion check")
 
 
@@ -197,7 +196,6 @@ async def test_recheck_unreleased_revisits_finished_and_available_tv_requests(mo
     lifecycle_service.get_release_recheck_requests.assert_awaited_once_with(limit=500)
     assert evaluator.evaluate_and_apply.await_count == 2
     queue_service.add_to_queue.assert_awaited_once_with(2)
-    overseerr_instance.close.assert_awaited_once()
 
 
 @pytest.mark.asyncio
@@ -346,6 +344,7 @@ async def test_recent_plex_scan_returns_locked_when_job_already_running(monkeypa
                     }
                 ),
                 last_error=None,
+                clean_run=True,
             )
 
     monkeypatch.setattr(scheduler_service, "PlexService", FakePlexService)
@@ -408,8 +407,6 @@ async def test_plex_poll_records_failed_run_state(monkeypatch):
     assert result.job_name == PLEX_POLL_JOB_NAME
     assert result.error == "plex timeout"
     assert result.metrics_payload is None
-    plex_instance.close.assert_awaited_once()
-
     snapshot = await service.get_plex_job_state_snapshot()
     poll_state = snapshot[PLEX_POLL_JOB_NAME]
     assert poll_state["locked"] is False

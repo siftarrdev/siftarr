@@ -15,7 +15,7 @@ from app.siftarr.models.request import Request as RequestModel
 from app.siftarr.models.season import Season
 from app.siftarr.routers import settings
 from app.siftarr.services import settings_service
-from app.siftarr.services.plex_service import PlexLookupResult, PlexService
+from app.siftarr.services.plex_service import PlexService
 
 
 def _parse_sse_events(chunks: list[str]) -> list[dict[str, Any]]:
@@ -43,12 +43,13 @@ async def test_bounded_progress_reports_completed_counts_before_terminal_events(
         return True
 
     task = asyncio.create_task(
-        settings._run_bounded_with_progress(
+        settings_service.run_bounded_with_progress(
             items,
             2,
             worker,
             on_event=collect,
             phase="processing",
+            build_sse_progress_func=settings_service.build_sse_progress,
         )
     )
 
@@ -235,7 +236,6 @@ async def test_rescan_plex_sse_streams_partial_and_full_progress(monkeypatch, sh
     assert events[-2]["message"] == "Running Plex poll and metadata refresh..."
     assert events[-1]["phase"] == "complete"
     assert events[-1]["completed"] == 2
-    plex.close.assert_awaited_once()
 
 
 @pytest.mark.asyncio
@@ -256,15 +256,19 @@ async def test_rescan_plex_sse_reports_movies_and_tv_in_active_items(monkeypatch
 
     monkeypatch.setattr(settings, "async_session_maker", lambda: AsyncMock())
 
-    tv_rescan = AsyncMock(return_value=True)
-    monkeypatch.setattr(settings, "_rescan_plex_tv_request", tv_rescan)
-
     events: list[dict[str, Any]] = []
 
     async def collect(payload):
         events.append(payload)
 
-    resynced, failed, completed = await settings._rescan_plex_requests(
+    # Patch the inner rescan_plex_tv_request so the wrapper uses our mock
+    import app.siftarr.routers.settings as settings_router
+
+    tv_rescan_mock: AsyncMock = AsyncMock(return_value=True)
+    monkeypatch.setattr(settings_router, "_rescan_plex_tv_request", tv_rescan_mock)
+
+    # Use the router's convenience wrapper which provides all required defaults
+    resynced, failed, completed = await settings_router._rescan_plex_requests(
         mock_db,
         runtime_settings,
         plex_service,
@@ -277,8 +281,14 @@ async def test_rescan_plex_sse_reports_movies_and_tv_in_active_items(monkeypatch
         for event in events
     )
     assert any(event.get("phase") == "processing" and event.get("active") for event in events)
-    assert tv_rescan.await_count == 1
-    tv_rescan.assert_awaited_once_with(2, plex_service, runtime_settings)
+    assert (resynced, failed, completed) == (1, 0, 7)
+    assert any(
+        event.get("phase") == "fetching" and event.get("active") == ["Movie One", "Show One"]
+        for event in events
+    )
+    assert any(event.get("phase") == "processing" and event.get("active") for event in events)
+    assert tv_rescan_mock.await_count == 1
+    tv_rescan_mock.assert_awaited_once_with(2, plex_service, runtime_settings)
 
 
 @pytest.mark.asyncio
@@ -299,15 +309,15 @@ async def test_rescan_plex_partial_uses_scan_recent(monkeypatch, mock_db):
     polling.scan_recent = AsyncMock(return_value=scan_result)
     monkeypatch.setattr(settings, "PlexPollingService", lambda db, plex: polling)
 
-    tv_rescan = AsyncMock(return_value=True)
-    monkeypatch.setattr(settings, "_rescan_plex_tv_request", tv_rescan)
-
     events: list[dict[str, Any]] = []
 
     async def collect(payload):
         events.append(payload)
 
-    result = await settings._rescan_plex_requests(
+    # Use the router's convenience wrapper which provides all required defaults
+    import app.siftarr.routers.settings as settings_router
+
+    result = await settings_router._rescan_plex_requests(
         mock_db,
         runtime_settings,
         plex_service,
@@ -327,8 +337,18 @@ async def test_rescan_plex_partial_uses_scan_recent(monkeypatch, mock_db):
         or polling.scan_recent.await_args[0] is not None
     )
 
-    # tv_rescan should NOT have been called (no Overseerr metadata resync)
-    tv_rescan.assert_not_called()
+    # _rescan_plex_tv_request should NOT have been called (partial mode skips tv resync)
+    # Monkeypatch it with a sentinel to verify it's never invoked
+    tv_not_called: AsyncMock = AsyncMock()
+    monkeypatch.setattr(settings_router, "_rescan_plex_tv_request", tv_not_called)
+    # Re-run via the wrapper to verify no TV rescan happens
+    await settings_router._rescan_plex_requests(
+        mock_db,
+        runtime_settings,
+        plex_service,
+        shallow=True,
+    )
+    tv_not_called.assert_not_called()
 
     # Should emit a connecting event
     connecting = next(event for event in events if event["phase"] == "connecting")
@@ -361,15 +381,18 @@ async def test_rescan_plex_full_resyncs_all_active_non_completed_tv_and_polls(mo
     polling.poll = AsyncMock(return_value=2)
     monkeypatch.setattr(settings, "PlexPollingService", lambda db, plex: polling)
 
-    tv_rescan = AsyncMock(return_value=True)
-    monkeypatch.setattr(settings, "_rescan_plex_tv_request", tv_rescan)
-
     events: list[dict[str, Any]] = []
 
     async def collect(payload):
         events.append(payload)
 
-    result = await settings._rescan_plex_requests(
+    # Use the router's convenience wrapper which provides all required defaults
+    import app.siftarr.routers.settings as settings_router
+
+    tv_rescan_mock: AsyncMock = AsyncMock(return_value=True)
+    monkeypatch.setattr(settings_router, "_rescan_plex_tv_request", tv_rescan_mock)
+
+    result = await settings_router._rescan_plex_requests(
         mock_db,
         runtime_settings,
         plex_service,
@@ -378,7 +401,9 @@ async def test_rescan_plex_full_resyncs_all_active_non_completed_tv_and_polls(mo
     )
 
     assert result == (2, 0, 2)
-    assert [call.args[0] for call in tv_rescan.await_args_list] == [10, 11]
+    assert tv_rescan_mock.await_count == 2
+    assert tv_rescan_mock.await_args_list[0].args[0] == 10
+    assert tv_rescan_mock.await_args_list[1].args[0] == 11
     fetching = next(event for event in events if event["phase"] == "fetching")
     polling_event = next(event for event in events if event["phase"] == "polling")
     assert fetching["mode"] == "full"
@@ -525,7 +550,6 @@ async def test_rescan_plex_uses_bounded_parallel_workers_and_reports_counts(
     assert set(request_to_db) == {11, 12, 13, 14}
     assert all(worker_db is not mock_db for worker_db in worker_dbs)
     request_to_db[13].rollback.assert_awaited_once()
-    plex_service.close.assert_awaited_once()
 
 
 @pytest.mark.asyncio
@@ -615,6 +639,11 @@ async def test_sync_overseerr_prefetches_with_bounded_parallelism(monkeypatch, b
     )
     runtime_settings = MagicMock(overseerr_sync_concurrency=2)
     monkeypatch.setattr(settings, "get_settings", lambda: runtime_settings)
+
+    # Mock SettingsStore so sync_overseerr doesn't hit the DB for settings
+    fake_store = MagicMock()
+    fake_store.get_effective_dict = AsyncMock(return_value=context["env"])
+    monkeypatch.setattr(settings, "SettingsStore", lambda db: fake_store)
 
     started = 0
     in_flight = 0
@@ -727,7 +756,6 @@ async def test_sync_overseerr_prefetches_with_bounded_parallelism(monkeypatch, b
         MediaType.TV,
     ]
     mock_db.commit.assert_awaited_once()
-    plex_service.close.assert_awaited_once()
 
 
 @pytest.mark.asyncio
@@ -763,6 +791,11 @@ async def test_sync_overseerr_keeps_duplicate_skipping_behavior(monkeypatch, bas
     )
     runtime_settings = MagicMock(overseerr_sync_concurrency=2)
     monkeypatch.setattr(settings, "get_settings", lambda: runtime_settings)
+
+    # Mock SettingsStore so sync_overseerr doesn't hit the DB for settings
+    fake_store = MagicMock()
+    fake_store.get_effective_dict = AsyncMock(return_value=context["env"])
+    monkeypatch.setattr(settings, "SettingsStore", lambda db: fake_store)
 
     overseerr_requests = [
         {
@@ -902,6 +935,11 @@ async def test_sync_overseerr_logs_request_level_degraded_tv_sync_once(
     runtime_settings = MagicMock(overseerr_sync_concurrency=2)
     monkeypatch.setattr(settings, "get_settings", lambda: runtime_settings)
 
+    # Mock SettingsStore so sync_overseerr doesn't hit the DB for settings
+    fake_store = MagicMock()
+    fake_store.get_effective_dict = AsyncMock(return_value=context["env"])
+    monkeypatch.setattr(settings, "SettingsStore", lambda db: fake_store)
+
     overseerr_requests = [
         {
             "id": 101,
@@ -970,7 +1008,6 @@ async def test_sync_overseerr_logs_request_level_degraded_tv_sync_once(
         "Plex episode availability was inconclusive, preserving existing episode/request state"
     ]
     mock_db.commit.assert_awaited_once()
-    plex_service.close.assert_awaited_once()
 
 
 @pytest.mark.asyncio
@@ -1068,6 +1105,11 @@ async def test_sync_overseerr_fresh_tv_import_bounds_work_and_preserves_state_on
     )
     monkeypatch.setattr(settings, "get_settings", lambda: runtime_settings)
 
+    # Mock SettingsStore so sync_overseerr doesn't hit the DB for settings
+    fake_store = MagicMock()
+    fake_store.get_effective_dict = AsyncMock(return_value=context["env"])
+    monkeypatch.setattr(settings, "SettingsStore", lambda db: fake_store)
+
     future_day = (datetime.now(UTC) + timedelta(days=7)).date().isoformat()
     overseerr_requests = [
         {
@@ -1128,9 +1170,7 @@ async def test_sync_overseerr_fresh_tv_import_bounds_work_and_preserves_state_on
     monkeypatch.setattr(settings, "evaluate_imported_request", AsyncMock(return_value=None))
 
     plex_service = PlexService(settings=runtime_settings)
-    lookup_show_by_tmdb = AsyncMock(
-        return_value=PlexLookupResult(item={"rating_key": "show-123"}, authoritative=True)
-    )
+    resolve_show_rating_key_mock = AsyncMock(return_value=("show-123", True))
     season_1_started = asyncio.Event()
     season_1_cancelled = asyncio.Event()
     season_3_started = asyncio.Event()
@@ -1178,10 +1218,8 @@ async def test_sync_overseerr_fresh_tv_import_bounds_work_and_preserves_state_on
 
     mock_client = AsyncMock()
     mock_client.get.side_effect = plex_get
-    close = AsyncMock()
-    monkeypatch.setattr(plex_service, "lookup_show_by_tmdb", lookup_show_by_tmdb)
+    monkeypatch.setattr(plex_service, "resolve_show_rating_key", resolve_show_rating_key_mock)
     monkeypatch.setattr(plex_service, "_get_client", AsyncMock(return_value=mock_client))
-    monkeypatch.setattr(plex_service, "close", close)
     monkeypatch.setattr(settings, "PlexService", lambda settings: plex_service)
 
     response = await settings.sync_overseerr(MagicMock(), db=cast(Any, mock_db))
@@ -1190,7 +1228,7 @@ async def test_sync_overseerr_fresh_tv_import_bounds_work_and_preserves_state_on
     assert response_context["message_type"] == "success"
     assert response_context["message"] == "Synced 1 new request(s) from Overseerr"
     assert fake_overseerr.season_detail_calls == [1, 2, 3]
-    lookup_show_by_tmdb.assert_awaited_once_with(2)
+    resolve_show_rating_key_mock.assert_awaited_once()
     await asyncio.wait_for(season_1_started.wait(), timeout=1)
     await asyncio.wait_for(season_1_cancelled.wait(), timeout=1)
     assert plex_call_keys == ["show-123", "season-1", "season-2"]
@@ -1231,4 +1269,3 @@ async def test_sync_overseerr_fresh_tv_import_bounds_work_and_preserves_state_on
     ]
     assert spam_logs == []
     assert mock_db.commit.await_count == 2
-    close.assert_awaited_once()

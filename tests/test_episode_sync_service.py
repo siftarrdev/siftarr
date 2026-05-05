@@ -16,7 +16,7 @@ from app.siftarr.services.episode_sync_service import (
     _derive_request_status_from_seasons,
     _derive_season_status,
 )
-from app.siftarr.services.plex_service import PlexEpisodeAvailabilityResult, PlexLookupResult
+from app.siftarr.services.plex_service import PlexEpisodeAvailabilityResult
 
 
 def _make_request(**overrides):
@@ -534,7 +534,10 @@ class TestEpisodeSyncService:
 
         # Mock _load_season_episodes to return the test episodes directly
         # (avoids needing a full DB query setup for unit tests)
-        with patch.object(service, "_load_season_episodes", new_callable=AsyncMock) as mock_load:
+        with patch(
+            "app.siftarr.services.episode_sync_service._load_season_episodes",
+            new_callable=AsyncMock,
+        ) as mock_load:
             mock_load.return_value = [available_episode, pending_episode, future_episode]
 
             seasons = await service._apply_plex_availability(request, [season])
@@ -562,7 +565,10 @@ class TestEpisodeSyncService:
         mock_db.flush = AsyncMock()
         mock_db.commit = AsyncMock()
 
-        with patch.object(service, "_load_season_episodes", new_callable=AsyncMock) as mock_load:
+        with patch(
+            "app.siftarr.services.episode_sync_service._load_season_episodes",
+            new_callable=AsyncMock,
+        ) as mock_load:
             mock_load.return_value = [episode_one, episode_two]
 
             await service.reconcile_existing_seasons_from_plex(
@@ -595,7 +601,10 @@ class TestEpisodeSyncService:
         mock_db.flush = AsyncMock()
         mock_db.commit = AsyncMock()
 
-        with patch.object(service, "_load_season_episodes", new_callable=AsyncMock) as mock_load:
+        with patch(
+            "app.siftarr.services.episode_sync_service._load_season_episodes",
+            new_callable=AsyncMock,
+        ) as mock_load:
             mock_load.return_value = [aired_episode, future_episode]
 
             await service.reconcile_existing_seasons_from_plex(
@@ -630,7 +639,10 @@ class TestEpisodeSyncService:
         mock_db.flush = AsyncMock()
         mock_db.commit = AsyncMock()
 
-        with patch.object(service, "_load_season_episodes", new_callable=AsyncMock) as mock_load:
+        with patch(
+            "app.siftarr.services.episode_sync_service._load_season_episodes",
+            new_callable=AsyncMock,
+        ) as mock_load:
             mock_load.side_effect = [[available_episode], [future_episode]]
 
             await service.reconcile_existing_seasons_from_plex(
@@ -675,9 +687,7 @@ class TestEpisodeSyncService:
         }
 
         plex = AsyncMock()
-        plex.lookup_show_by_tmdb.return_value = PlexLookupResult(item=None, authoritative=True)
-        plex.lookup_show_by_tvdb.return_value = PlexLookupResult(item=None, authoritative=True)
-        plex.search_show.return_value = []
+        plex.resolve_show_rating_key.return_value = (None, True)
         service = EpisodeSyncService(mock_db, overseerr=mock_overseerr, plex=plex)
 
         seasons = await service.sync_request(1)
@@ -722,7 +732,7 @@ class TestEpisodeSyncService:
         }
 
         plex = AsyncMock()
-        plex.lookup_show_by_tmdb.return_value = PlexLookupResult(item=None, authoritative=False)
+        plex.resolve_show_rating_key.return_value = (None, False)
         service = EpisodeSyncService(mock_db, overseerr=mock_overseerr, plex=plex)
 
         seasons = await service.sync_request(1)
@@ -733,8 +743,6 @@ class TestEpisodeSyncService:
         )
         assert added_episode.status == RequestStatus.UNRELEASED
         assert request.status == RequestStatus.UNRELEASED
-        plex.lookup_show_by_tvdb.assert_not_awaited()
-        plex.search_show.assert_not_awaited()
         plex.get_episode_availability_result.assert_not_awaited()
         assert mock_db.commit.await_count == 1
 

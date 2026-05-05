@@ -7,7 +7,7 @@ import contextlib
 import logging
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
-from typing import TypeVar
+from typing import Protocol, TypeVar
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -17,7 +17,7 @@ from app.siftarr.config import get_settings
 from app.siftarr.models.request import MediaType, Request, RequestStatus
 from app.siftarr.models.season import Season
 from app.siftarr.services.async_utils import gather_limited
-from app.siftarr.services.episode_sync_service import EpisodeSyncService
+from app.siftarr.services.episode_sync_service import persist_episode_availability
 from app.siftarr.services.lifecycle_service import LifecycleService
 from app.siftarr.services.plex_service import PlexService, PlexTransientScanError
 
@@ -78,6 +78,31 @@ class _PollDecision:
     availability: dict[EpisodeKey, bool] | None = None
 
 
+class HasMetrics(Protocol):
+    """Protocol for objects with an ``as_dict()`` method returning int metrics."""
+
+    def as_dict(self) -> dict[str, int]: ...
+
+
+class PlexJobResult(Protocol):
+    """Protocol for Plex job runner results with typed attribute access."""
+
+    completed_requests: int
+    metrics: HasMetrics | None
+    clean_run: bool
+    last_error: str | None
+
+
+@dataclass(slots=True)
+class PlexPollResult:
+    """Wrapper for ``poll()`` integer results to conform to ``PlexJobResult``."""
+
+    completed_requests: int = 0
+    metrics: HasMetrics | None = None
+    clean_run: bool = True
+    last_error: str | None = None
+
+
 class PlexPollingService:
     """Poll Plex for active requests and recent additions."""
 
@@ -85,7 +110,6 @@ class PlexPollingService:
         self.db = db
         self.plex = plex
         self.lifecycle = LifecycleService(db)
-        self.episode_sync = EpisodeSyncService(db, plex=plex)
         self._write_lock = asyncio.Lock()
 
     async def get_active_requests(self) -> list[Request]:
@@ -538,7 +562,8 @@ class PlexPollingService:
 
     async def _apply_decision(self, req: Request, decision: _PollDecision) -> None:
         if req.media_type == MediaType.TV and decision.availability is not None:
-            await self.episode_sync.reconcile_existing_seasons_from_plex(
+            await persist_episode_availability(
+                self.db,
                 req,
                 req.seasons,
                 decision.availability,
@@ -550,8 +575,11 @@ class PlexPollingService:
 
 __all__ = [
     "CheckRequestResult",
+    "HasMetrics",
     "NON_TERMINAL_STATUSES",
+    "PlexJobResult",
     "PlexPollingService",
+    "PlexPollResult",
     "ProgressCallback",
     "ScanMetrics",
     "ScanRecentResult",

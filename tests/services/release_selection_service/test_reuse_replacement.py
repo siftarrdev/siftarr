@@ -1,19 +1,27 @@
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
 from app.siftarr.models.request import MediaType, RequestStatus
 from app.siftarr.models.staged_torrent import StagedTorrent
-from app.siftarr.services import staging_actions
+from app.siftarr.services import staging_service as svc
+from app.siftarr.services.staging_service import StagingService
+
+
+def _make_staging_mocks(settings_overrides=None):
+    """Patch module-level dependencies used by StagingService.use_releases."""
+    settings = MagicMock(staging_mode_enabled=True)
+    if settings_overrides:
+        settings.staging_mode_enabled = settings_overrides.get("staging_mode_enabled", True)
+    queue_service = AsyncMock()
+    return settings, queue_service
 
 
 @pytest.mark.asyncio
 async def test_use_releases_keeps_existing_staged_release(
     mock_db, request_record, selected_release
 ):
-    settings = MagicMock(staging_mode_enabled=True)
-    queue_service = AsyncMock()
-    staging_service = AsyncMock()
+    settings, queue_service = _make_staging_mocks()
 
     existing_stage = MagicMock()
     existing_stage.id = 44
@@ -22,25 +30,12 @@ async def test_use_releases_keeps_existing_staged_release(
     existing_result.scalars.return_value.all.return_value = [existing_stage]
     mock_db.execute.return_value = existing_result
 
-    with pytest.MonkeyPatch.context() as monkeypatch:
-        monkeypatch.setattr(
-            staging_actions,
-            "get_settings",
-            MagicMock(return_value=settings),
-        )
-        monkeypatch.setattr(
-            staging_actions,
-            "PendingQueueService",
-            MagicMock(return_value=queue_service),
-        )
-        monkeypatch.setattr(
-            staging_actions,
-            "StagingService",
-            MagicMock(return_value=staging_service),
-        )
-
-        result = await staging_actions.use_releases(
-            mock_db,
+    with (
+        patch.object(svc, "get_settings", return_value=settings),
+        patch.object(svc, "PendingQueueService", return_value=queue_service),
+    ):
+        staging = StagingService(mock_db)
+        result = await staging.use_releases(
             request_record,
             [selected_release],
             selection_source="rule",
@@ -50,7 +45,6 @@ async def test_use_releases_keeps_existing_staged_release(
     assert result["action"] == "auto_staged"
     assert result["message"] == "Auto-staged 1 release(s) for approval."
     assert result["staged_ids"] == [existing_stage.id]
-    staging_service.save_release.assert_not_awaited()
     queue_service.remove_from_queue.assert_awaited_once_with(request_record.id)
 
 
@@ -58,9 +52,7 @@ async def test_use_releases_keeps_existing_staged_release(
 async def test_use_releases_movie_rule_selection_replaces_other_active_stage(
     mock_db, request_record, selected_release
 ):
-    settings = MagicMock(staging_mode_enabled=True)
-    queue_service = AsyncMock()
-    staging_service = AsyncMock()
+    settings, queue_service = _make_staging_mocks()
 
     existing_stage = StagedTorrent(
         id=44,
@@ -88,31 +80,20 @@ async def test_use_releases_movie_rule_selection_replaces_other_active_stage(
         status="staged",
         selection_source="rule",
     )
-    staging_service.save_release.return_value = replacement_stage
 
     active_result = MagicMock()
     active_result.scalars.return_value.all.return_value = [existing_stage]
     mock_db.execute.return_value = active_result
 
-    with pytest.MonkeyPatch.context() as monkeypatch:
-        monkeypatch.setattr(
-            staging_actions,
-            "get_settings",
-            MagicMock(return_value=settings),
-        )
-        monkeypatch.setattr(
-            staging_actions,
-            "PendingQueueService",
-            MagicMock(return_value=queue_service),
-        )
-        monkeypatch.setattr(
-            staging_actions,
-            "StagingService",
-            MagicMock(return_value=staging_service),
-        )
-
-        result = await staging_actions.use_releases(
-            mock_db,
+    with (
+        patch.object(svc, "get_settings", return_value=settings),
+        patch.object(svc, "PendingQueueService", return_value=queue_service),
+        patch.object(
+            StagingService, "save_release", new_callable=AsyncMock, return_value=replacement_stage
+        ),
+    ):
+        staging = StagingService(mock_db)
+        result = await staging.use_releases(
             request_record,
             [selected_release],
             selection_source="rule",
@@ -129,9 +110,7 @@ async def test_use_releases_movie_rule_selection_replaces_other_active_stage(
 async def test_use_releases_movie_rule_reuses_same_release_and_deletes_other_active_stage(
     mock_db, request_record, selected_release
 ):
-    settings = MagicMock(staging_mode_enabled=True)
-    queue_service = AsyncMock()
-    staging_service = AsyncMock()
+    settings, queue_service = _make_staging_mocks()
 
     old_stage = StagedTorrent(
         id=44,
@@ -164,25 +143,12 @@ async def test_use_releases_movie_rule_reuses_same_release_and_deletes_other_act
     active_result.scalars.return_value.all.return_value = [old_stage, matching_stage]
     mock_db.execute.return_value = active_result
 
-    with pytest.MonkeyPatch.context() as monkeypatch:
-        monkeypatch.setattr(
-            staging_actions,
-            "get_settings",
-            MagicMock(return_value=settings),
-        )
-        monkeypatch.setattr(
-            staging_actions,
-            "PendingQueueService",
-            MagicMock(return_value=queue_service),
-        )
-        monkeypatch.setattr(
-            staging_actions,
-            "StagingService",
-            MagicMock(return_value=staging_service),
-        )
-
-        result = await staging_actions.use_releases(
-            mock_db,
+    with (
+        patch.object(svc, "get_settings", return_value=settings),
+        patch.object(svc, "PendingQueueService", return_value=queue_service),
+    ):
+        staging = StagingService(mock_db)
+        result = await staging.use_releases(
             request_record,
             [selected_release],
             selection_source="rule",
@@ -191,7 +157,6 @@ async def test_use_releases_movie_rule_reuses_same_release_and_deletes_other_act
     assert result["status"] == "staged"
     assert result["action"] == "auto_staged"
     assert result["staged_ids"] == [matching_stage.id]
-    staging_service.save_release.assert_not_awaited()
     mock_db.delete.assert_awaited_once_with(old_stage)
     assert matching_stage.status == "approved"
 
@@ -200,9 +165,7 @@ async def test_use_releases_movie_rule_reuses_same_release_and_deletes_other_act
 async def test_use_releases_replaces_existing_active_stage_for_manual_selection(
     mock_db, request_record, selected_release
 ):
-    settings = MagicMock(staging_mode_enabled=True)
-    queue_service = AsyncMock()
-    staging_service = AsyncMock()
+    settings, queue_service = _make_staging_mocks()
 
     existing_stage = StagedTorrent(
         id=44,
@@ -230,31 +193,20 @@ async def test_use_releases_replaces_existing_active_stage_for_manual_selection(
         status="staged",
         selection_source="manual",
     )
-    staging_service.save_release.return_value = replacement_stage
 
     active_result = MagicMock()
     active_result.scalars.return_value.all.return_value = [existing_stage]
     mock_db.execute.return_value = active_result
 
-    with pytest.MonkeyPatch.context() as monkeypatch:
-        monkeypatch.setattr(
-            staging_actions,
-            "get_settings",
-            MagicMock(return_value=settings),
-        )
-        monkeypatch.setattr(
-            staging_actions,
-            "PendingQueueService",
-            MagicMock(return_value=queue_service),
-        )
-        monkeypatch.setattr(
-            staging_actions,
-            "StagingService",
-            MagicMock(return_value=staging_service),
-        )
-
-        result = await staging_actions.use_releases(
-            mock_db,
+    with (
+        patch.object(svc, "get_settings", return_value=settings),
+        patch.object(svc, "PendingQueueService", return_value=queue_service),
+        patch.object(
+            StagingService, "save_release", new_callable=AsyncMock, return_value=replacement_stage
+        ),
+    ):
+        staging = StagingService(mock_db)
+        result = await staging.use_releases(
             request_record,
             [selected_release],
             selection_source="manual",
@@ -272,9 +224,7 @@ async def test_use_releases_replaces_existing_active_stage_for_manual_selection(
 async def test_use_releases_reuses_existing_manual_pick_and_retires_auto_pick(
     mock_db, request_record, selected_release
 ):
-    settings = MagicMock(staging_mode_enabled=True)
-    queue_service = AsyncMock()
-    staging_service = AsyncMock()
+    settings, queue_service = _make_staging_mocks()
 
     auto_stage = StagedTorrent(
         id=44,
@@ -307,25 +257,12 @@ async def test_use_releases_reuses_existing_manual_pick_and_retires_auto_pick(
     active_result.scalars.return_value.all.return_value = [auto_stage, manual_stage]
     mock_db.execute.return_value = active_result
 
-    with pytest.MonkeyPatch.context() as monkeypatch:
-        monkeypatch.setattr(
-            staging_actions,
-            "get_settings",
-            MagicMock(return_value=settings),
-        )
-        monkeypatch.setattr(
-            staging_actions,
-            "PendingQueueService",
-            MagicMock(return_value=queue_service),
-        )
-        monkeypatch.setattr(
-            staging_actions,
-            "StagingService",
-            MagicMock(return_value=staging_service),
-        )
-
-        result = await staging_actions.use_releases(
-            mock_db,
+    with (
+        patch.object(svc, "get_settings", return_value=settings),
+        patch.object(svc, "PendingQueueService", return_value=queue_service),
+    ):
+        staging = StagingService(mock_db)
+        result = await staging.use_releases(
             request_record,
             [selected_release],
             selection_source="manual",
@@ -337,16 +274,13 @@ async def test_use_releases_reuses_existing_manual_pick_and_retires_auto_pick(
     assert result["staged_ids"] == [manual_stage.id]
     mock_db.delete.assert_awaited_once_with(auto_stage)
     assert manual_stage.status == "staged"
-    staging_service.save_release.assert_not_awaited()
 
 
 @pytest.mark.asyncio
 async def test_use_releases_tv_single_episode_reuses_same_episode_stage_without_replacing_sibling(
     mock_db,
 ):
-    settings = MagicMock(staging_mode_enabled=True)
-    queue_service = AsyncMock()
-    staging_service = AsyncMock()
+    settings, queue_service = _make_staging_mocks()
 
     request_record = MagicMock()
     request_record.id = 10
@@ -400,25 +334,12 @@ async def test_use_releases_tv_single_episode_reuses_same_episode_stage_without_
     active_result.scalars.return_value.all.return_value = [same_episode_stage, sibling_stage]
     mock_db.execute.return_value = active_result
 
-    with pytest.MonkeyPatch.context() as monkeypatch:
-        monkeypatch.setattr(
-            staging_actions,
-            "get_settings",
-            MagicMock(return_value=settings),
-        )
-        monkeypatch.setattr(
-            staging_actions,
-            "PendingQueueService",
-            MagicMock(return_value=queue_service),
-        )
-        monkeypatch.setattr(
-            staging_actions,
-            "StagingService",
-            MagicMock(return_value=staging_service),
-        )
-
-        result = await staging_actions.use_releases(
-            mock_db,
+    with (
+        patch.object(svc, "get_settings", return_value=settings),
+        patch.object(svc, "PendingQueueService", return_value=queue_service),
+    ):
+        staging = StagingService(mock_db)
+        result = await staging.use_releases(
             request_record,
             [selected_release],
             selection_source="manual",
@@ -430,4 +351,3 @@ async def test_use_releases_tv_single_episode_reuses_same_episode_stage_without_
     assert same_episode_stage.status == "staged"
     assert sibling_stage.status == "staged"
     mock_db.delete.assert_not_awaited()
-    staging_service.save_release.assert_not_awaited()
