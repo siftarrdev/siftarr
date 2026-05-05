@@ -10,8 +10,8 @@ from fastapi import Depends, FastAPI, Request
 from fastapi.responses import JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
+from app.siftarr import database as db_mod
 from app.siftarr.config import get_settings
-from app.siftarr.database import async_session_maker, init_db
 from app.siftarr.routers import (
     dashboard,
     dashboard_actions,
@@ -106,9 +106,9 @@ async def lifespan(app: FastAPI):
     _ensure_db_directory()
 
     # Verify database readiness before starting background work.
-    await init_db()
+    await db_mod.init_db()
 
-    scheduler_service = SchedulerService(async_session_maker, logger=logger)
+    scheduler_service = SchedulerService(db_mod.async_session_maker, logger=logger)
     scheduler_service.start()
     yield
     await close_shared_client()

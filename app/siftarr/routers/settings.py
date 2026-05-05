@@ -11,8 +11,9 @@ from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.siftarr import database as db_mod
 from app.siftarr.config import get_settings, reload_settings
-from app.siftarr.database import async_session_maker, get_db
+from app.siftarr.database import get_db
 from app.siftarr.models.request import Request as RequestModel
 from app.siftarr.models.request import RequestStatus
 from app.siftarr.services.connection_tester import ConnectionTester, ConnectionTestResult
@@ -162,7 +163,7 @@ async def _rescan_plex_tv_request(
         request_id,
         plex,
         runtime_settings,
-        session_maker=async_session_maker,
+        session_maker=db_mod.async_session_maker,
         logger=logger,
     )
 
@@ -526,7 +527,7 @@ async def rescan_plex_stream(
     async def _inner() -> AsyncGenerator[str, None]:
         async for event in rescan_plex_generator_svc(
             shallow=partial,
-            async_session_maker=async_session_maker,
+            async_session_maker=db_mod.async_session_maker,
             plex_service_cls=PlexService,
             rescan_plex_requests_func=_rescan_plex_requests,
             build_sse_progress_func=build_sse_progress,
@@ -551,7 +552,7 @@ async def sync_overseerr_stream() -> StreamingResponse:
 
     async def _inner() -> AsyncGenerator[str, None]:
         async for event in sync_overseerr_generator_svc(
-            async_session_maker=async_session_maker,
+            async_session_maker=db_mod.async_session_maker,
             build_effective_settings_func=build_effective_settings,
             import_overseerr_requests_func=import_overseerr_requests_svc,
             build_sse_progress_func=build_sse_progress,

@@ -192,7 +192,9 @@ async def test_rescan_plex_route_reports_success(monkeypatch, mock_db, base_cont
         async def __aexit__(self, exc_type, exc, tb):
             return False
 
-    monkeypatch.setattr(settings, "async_session_maker", lambda: FakeWorkerSessionContext())
+    monkeypatch.setattr(
+        "app.siftarr.database.async_session_maker", lambda: FakeWorkerSessionContext()
+    )
 
     created_episode_sync = {}
 

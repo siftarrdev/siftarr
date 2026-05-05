@@ -254,7 +254,7 @@ async def test_rescan_plex_sse_reports_movies_and_tv_in_active_items(monkeypatch
     monkeypatch.setattr(settings, "PlexPollingService", lambda db, plex: polling)
     monkeypatch.setattr(settings, "PlexService", lambda settings: plex_service)
 
-    monkeypatch.setattr(settings, "async_session_maker", lambda: AsyncMock())
+    monkeypatch.setattr("app.siftarr.database.async_session_maker", lambda: AsyncMock())
 
     events: list[dict[str, Any]] = []
 
@@ -482,7 +482,7 @@ async def test_rescan_plex_uses_bounded_parallel_workers_and_reports_counts(
         worker_counter += 1
         return FakeWorkerSessionContext(FakeWorkerDB(worker_counter))
 
-    monkeypatch.setattr(settings, "async_session_maker", fake_async_session_maker)
+    monkeypatch.setattr("app.siftarr.database.async_session_maker", fake_async_session_maker)
 
     class FakeEpisodeSyncService:
         def __init__(self, db, overseerr=None, plex=None):
