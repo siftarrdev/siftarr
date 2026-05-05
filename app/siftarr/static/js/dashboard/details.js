@@ -91,6 +91,7 @@ async function openRequestDetails(requestId, explicitIndex = null) {
 
         window.currentReleases = data.releases || [];
         window.currentRequestId = data.request.id;
+        window.currentRequestMediaType = data.request.media_type || 'movie';
         window.updateActiveStageBanner(data);
 
         const cacheIndicator = document.getElementById('release-cache-indicator');

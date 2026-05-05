@@ -446,6 +446,7 @@ function updateActiveStageBanner(data) {
     const banner = document.getElementById('request-details-active-stage-banner');
     if (!banner) return;
     const active = data.active_staged_torrent;
+    const allActive = data.active_staged_torrents || [];
     window.currentActiveStagedTorrent = active || null;
     if (!window.siftarrStagingModeEnabled || !active) {
         banner.classList.add('hidden');
@@ -453,9 +454,20 @@ function updateActiveStageBanner(data) {
         return;
     }
 
+    // TV with multiple staged torrents: show more detail
+    if (window.currentRequestMediaType === 'tv' && allActive.length > 1) {
+        const seasonInfo = allActive.map(function(t) {
+            const match = t.title.match(/S(\d{1,2})/i);
+            return match ? 'S' + match[1].padStart(2, '0') : t.title;
+        }).join(', ');
+        banner.textContent = allActive.length + ' torrents already staged (' + seasonInfo + '). Selecting another season pack will replace overlapping seasons only.';
+        banner.classList.remove('hidden');
+        return;
+    }
+
     const sourceLabel = active.selection_source === 'rule' ? 'Auto-selected torrent' : 'Active staged torrent';
     const statusLabel = active.status === 'approved' ? 'sent to qBittorrent' : 'already staged';
-    banner.textContent = `${sourceLabel}: ${active.title} (${statusLabel}). Selecting another result will replace it.`;
+    banner.textContent = sourceLabel + ': ' + active.title + ' (' + statusLabel + '). Selecting another result will replace it.';
     banner.classList.remove('hidden');
 }
 

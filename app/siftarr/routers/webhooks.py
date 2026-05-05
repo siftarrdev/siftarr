@@ -1,6 +1,8 @@
 """Overseerr webhook handler for receiving media requests."""
 
+import contextlib
 import logging
+from datetime import datetime
 
 from fastapi import APIRouter, BackgroundTasks, Depends
 from pydantic import BaseModel, Field
@@ -47,6 +49,7 @@ class OverseerrRequest(BaseModel):
     """Request information from Overseerr webhook."""
 
     id: int = Field(description="Overseerr request ID")
+    created_at: str | None = None
 
 
 class OverseerrWebhookPayload(BaseModel):
@@ -120,6 +123,12 @@ async def receive_overseerr_webhook(
             overseerr_service, media_type_for_api, media_external_id
         )
 
+    # Parse created_at from Overseerr webhook
+    created_at = None
+    if payload.request and payload.request.created_at:
+        with contextlib.suppress(ValueError, TypeError):
+            created_at = datetime.fromisoformat(payload.request.created_at.replace("Z", "+00:00"))
+
     # Create request record
     request = Request(
         external_id=external_id,
@@ -132,6 +141,7 @@ async def receive_overseerr_webhook(
         requester_email=payload.requestedBy.email if payload.requestedBy else None,
         status=RequestStatus.PENDING,
         overseerr_request_id=payload.request.id if payload.request else None,
+        created_at=created_at,
     )
     db.add(request)
     await db.commit()

@@ -112,6 +112,16 @@ def _get_exact_single_episode_scope(title: str) -> tuple[int, int] | None:
     return season_number, episode_number
 
 
+def _has_overlapping_season(staged_title: str, release_seasons: set[int]) -> bool:
+    """Return True if staged torrent's coverage overlaps any of release_seasons."""
+    coverage = cached_parse_release_coverage(staged_title)
+    if coverage.is_complete_series:
+        return True
+    if coverage.season_numbers:
+        return bool(set(coverage.season_numbers) & release_seasons)
+    return True  # can't determine; be safe and treat as overlapping
+
+
 def _filter_active_staged_torrents_for_release(
     request: Request,
     release: Release,
@@ -121,22 +131,47 @@ def _filter_active_staged_torrents_for_release(
     if request.media_type != MediaType.TV:
         return active_staged
 
-    release_scope = _get_exact_single_episode_scope(release.title)
-    if release_scope is None:
+    release_coverage = cached_parse_release_coverage(release.title)
+
+    # Single episode: scope to exact same episode
+    if release_coverage.episode_number is not None:
+        release_scope = _get_exact_single_episode_scope(release.title)
+        if release_scope is not None:
+            return [
+                staged
+                for staged in active_staged
+                if _get_exact_single_episode_scope(staged.title) == release_scope
+            ]
+        return []  # shouldn't happen but be safe
+
+    # Complete series: replaces everything
+    if release_coverage.is_complete_series:
         return active_staged
 
-    return [
-        staged
-        for staged in active_staged
-        if _get_exact_single_episode_scope(staged.title) == release_scope
-    ]
+    # Season pack(s): scope to overlapping seasons
+    if release_coverage.season_numbers:
+        release_seasons = set(release_coverage.season_numbers)
+        return [
+            staged
+            for staged in active_staged
+            if _has_overlapping_season(staged.title, release_seasons)
+        ]
+
+    # Fallback: no coverage info, return all (conservative)
+    return active_staged
 
 
 def _should_delete_superseded_staged_torrents(
     request: Request,
     selection_source: str,
 ) -> bool:
-    """Return whether this selection must remove other active stages in scope."""
+    """Return whether this selection must remove other active stages in scope.
+
+    Note: The caller already filters active staged torrents via
+    ``_filter_active_staged_torrents_for_release()`` so only overlapping
+    (in-scope) torrents reach this function.  This guard just ensures we
+    don't delete for auto-staged selections on TV requests.
+    """
     if request.media_type == MediaType.MOVIE:
         return True
     return selection_source == "manual"
@@ -157,7 +192,7 @@ def _staged_selection_outcome(
     if replaced_active_selection:
         return (
             "replaced_active_selection",
-            f"Replaced the active staged selection with {staged_count} release(s).",
+            f"Replaced overlapping staged torrent(s) with {staged_count} release(s).",
         )
     return (
         "manual_staged",
