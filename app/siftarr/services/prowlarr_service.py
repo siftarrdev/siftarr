@@ -1,5 +1,10 @@
+import asyncio
+import hashlib
+import json
 import logging
 import re
+import time as time_module
+from collections import OrderedDict
 from datetime import datetime
 from typing import Any, cast
 
@@ -10,6 +15,42 @@ from app.siftarr.config import Settings, get_settings
 from app.siftarr.services.http_client import get_shared_client
 
 logger = logging.getLogger(__name__)
+
+# ── Search result cache ──────────────────────────────────────────────
+# LRU cache keyed by params hash, with TTL.  Only caches non-manual
+# (automatic decision pipeline) searches.
+_search_cache: OrderedDict[str, tuple[float, "ProwlarrSearchResult"]] = OrderedDict()
+_SEARCH_CACHE_MAX_SIZE = 50
+_SEARCH_CACHE_TTL = 45  # seconds
+
+
+def _search_cache_key(params: dict) -> str:
+    """Deterministic cache key from a search-params dict."""
+    raw = json.dumps(params, sort_keys=True, default=str)
+    return hashlib.md5(raw.encode()).hexdigest()
+
+
+def _cache_get(key: str) -> "ProwlarrSearchResult | None":
+    if key not in _search_cache:
+        return None
+    timestamp, result = _search_cache[key]
+    if time_module.monotonic() - timestamp > _SEARCH_CACHE_TTL:
+        del _search_cache[key]
+        return None
+    # Move to end (most-recently used)
+    _search_cache.move_to_end(key)
+    return result
+
+
+def _cache_set(key: str, result: "ProwlarrSearchResult") -> None:
+    if len(_search_cache) >= _SEARCH_CACHE_MAX_SIZE:
+        _search_cache.popitem(last=False)  # evict LRU
+    _search_cache[key] = (time_module.monotonic(), result)
+
+
+def clear_search_cache() -> None:
+    """Invalidate the entire search result cache."""
+    _search_cache.clear()
 
 
 class ProwlarrRelease(BaseModel):
@@ -147,13 +188,32 @@ class ProwlarrService:
     async def _search(
         self,
         params: dict,
+        cacheable: bool = True,
     ) -> ProwlarrSearchResult:
-        """Execute a Prowlarr search request and normalize results."""
-        import time
+        """Execute a Prowlarr search request and normalize results.
 
-        start_time = time.time()
+        Args:
+            params: Prowlarr API search parameters.
+            cacheable: If True (default), the result may be cached and
+                a cached response may be returned.  Manual/dashboard
+                searches should pass ``cacheable=False``.
+        """
+        start_time = time_module.time()
         endpoint = f"{self.base_url}/api/v1/search"
         headers = self._get_headers()
+
+        # ── Cache check ──────────────────────────────────────────────
+        if cacheable and not self.settings.siftarr_disable_search_cache:
+            cache_key = _search_cache_key(params)
+            cached = _cache_get(cache_key)
+            if cached is not None:
+                logger.info(
+                    "Prowlarr search cache hit: type=%s query=%s categories=%s",
+                    params.get("type"),
+                    params.get("query"),
+                    params.get("categories"),
+                )
+                return cached
 
         logger.info(
             "Prowlarr search request: type=%s query=%s categories=%s",
@@ -181,8 +241,17 @@ class ProwlarrService:
                     params.get("type"),
                     params.get("query"),
                     len(releases),
-                    int((time.time() - start_time) * 1000),
+                    int((time_module.time() - start_time) * 1000),
                 )
+
+                # ── Cache successful responses only ──────────────────
+                if cacheable and not self.settings.siftarr_disable_search_cache:
+                    result_to_cache = ProwlarrSearchResult(
+                        releases=releases,
+                        query_time_ms=int((time_module.time() - start_time) * 1000),
+                        error=None,
+                    )
+                    _cache_set(cache_key, result_to_cache)
             else:
                 error_message = f"HTTP {response.status_code}"
                 logger.warning(
@@ -201,7 +270,7 @@ class ProwlarrService:
 
         return ProwlarrSearchResult(
             releases=releases,
-            query_time_ms=int((time.time() - start_time) * 1000),
+            query_time_ms=int((time_module.time() - start_time) * 1000),
             error=error_message,
         )
 
@@ -281,6 +350,7 @@ class ProwlarrService:
         title: str | None = None,
         year: int | None = None,
         categories: list[int] | None = None,
+        cacheable: bool = True,
     ) -> ProwlarrSearchResult:
         """
         Search for movie releases by TMDB ID.
@@ -288,6 +358,8 @@ class ProwlarrService:
         Args:
             tmdbid: The TMDB ID to search for
             categories: Optional list of category IDs (default: [2000] for movies)
+            cacheable: Whether the result may be cached (default True).
+                Pass False for manual/dashboard searches.
 
         Returns:
             ProwlarrSearchResult with list of releases
@@ -300,7 +372,7 @@ class ProwlarrService:
             "query": self._build_movie_query(title, tmdbid, year),
             "categories": categories,
         }
-        metadata_result = await self._search(metadata_params)
+        metadata_result = await self._search(metadata_params, cacheable=cacheable)
         if metadata_result.releases or not title:
             return metadata_result
 
@@ -309,7 +381,7 @@ class ProwlarrService:
             "query": self._build_movie_title_query(title, year),
             "categories": categories,
         }
-        fallback_result = await self._search(fallback_params)
+        fallback_result = await self._search(fallback_params, cacheable=cacheable)
         fallback_result.query_time_ms += metadata_result.query_time_ms
         return fallback_result
 
@@ -321,6 +393,7 @@ class ProwlarrService:
         episode: int | None = None,
         year: int | None = None,
         categories: list[int] | None = None,
+        cacheable: bool = True,
     ) -> ProwlarrSearchResult:
         """
         Search for TV releases by TVDB ID.
@@ -330,6 +403,8 @@ class ProwlarrService:
             season: Optional season number (for season pack)
             episode: Optional episode number (for single episode)
             categories: Optional list of category IDs (default: [5000] for TV)
+            cacheable: Whether the result may be cached (default True).
+                Pass False for manual/dashboard searches.
 
         Returns:
             ProwlarrSearchResult with list of releases
@@ -342,14 +417,19 @@ class ProwlarrService:
             "query": self._build_tv_query(title, tvdbid, season, episode, year),
             "categories": categories,
         }
-        metadata_result = await self._search(metadata_params)
+        metadata_result = await self._search(metadata_params, cacheable=cacheable)
         if metadata_result.releases or not title:
             return metadata_result
 
         # Broad search (no season, no episode) requires multiple query strategies
         if season is None and episode is None:
             return await self._broad_tv_search(
-                title, tvdbid, year, categories, metadata_result.query_time_ms
+                title,
+                tvdbid,
+                year,
+                categories,
+                metadata_result.query_time_ms,
+                cacheable=cacheable,
             )
 
         fallback_params = {
@@ -357,7 +437,7 @@ class ProwlarrService:
             "query": self._build_tv_title_query(title, season, episode, year),
             "categories": categories,
         }
-        fallback_result = await self._search(fallback_params)
+        fallback_result = await self._search(fallback_params, cacheable=cacheable)
         fallback_result.query_time_ms += metadata_result.query_time_ms
         return fallback_result
 
@@ -368,8 +448,12 @@ class ProwlarrService:
         year: int | None,
         categories: list[int],
         metadata_query_time_ms: int,
+        cacheable: bool = True,
     ) -> ProwlarrSearchResult:
-        """Execute multiple query strategies for broad TV searches and aggregate results.
+        """Execute multiple query strategies concurrently and aggregate results.
+
+        Runs up to 3 title queries concurrently, deduplicates by
+        ``download_url``, and gracefully handles individual query failures.
 
         Args:
             title: Show title
@@ -377,15 +461,11 @@ class ProwlarrService:
             year: Optional year
             categories: Category IDs
             metadata_query_time_ms: Time spent on metadata query
+            cacheable: Whether individual searches may use cached results.
 
         Returns:
             ProwlarrSearchResult with all unique releases found
         """
-        # Track seen releases by download_url to avoid duplicates
-        seen_urls: set[str] = set()
-        all_releases: list[ProwlarrRelease] = []
-        total_query_time_ms = metadata_query_time_ms
-
         # Query strategies for broad TV searches
         title_queries = [
             f"{title} S01-".strip(),  # e.g. "The Mentalist S01-"
@@ -393,16 +473,31 @@ class ProwlarrService:
             f"{title} season 1-".strip(),  # e.g. "The Mentalist season 1-"
         ]
 
-        for query in title_queries:
-            params = {
-                "type": "search",
-                "query": query,
-                "categories": categories,
-            }
-            result = await self._search(params)
+        semaphore = asyncio.Semaphore(3)
+        seen_urls: set[str] = set()
+        all_releases: list[ProwlarrRelease] = []
+        total_query_time_ms = metadata_query_time_ms
+
+        async def _search_single(query: str) -> ProwlarrSearchResult:
+            async with semaphore:
+                params = {
+                    "type": "search",
+                    "query": query,
+                    "categories": categories,
+                }
+                return await self._search(params, cacheable=cacheable)
+
+        results = await asyncio.gather(
+            *(_search_single(q) for q in title_queries),
+            return_exceptions=True,
+        )
+
+        for result in results:
+            if not isinstance(result, ProwlarrSearchResult):
+                logger.warning("Broad TV search query failed: %s", result)
+                continue
             total_query_time_ms += result.query_time_ms
 
-            # Add unique releases
             for release in result.releases:
                 if release.download_url not in seen_urls:
                     seen_urls.add(release.download_url)

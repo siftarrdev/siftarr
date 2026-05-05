@@ -230,7 +230,7 @@ class TestProwlarrService:
         service = ProwlarrService()
         calls = []
 
-        async def fake_search(params):
+        async def fake_search(params, **kwargs):
             calls.append(params)
             if len(calls) == 1:
                 return ProwlarrSearchResult(releases=[], query_time_ms=10)
@@ -251,7 +251,7 @@ class TestProwlarrService:
         service = ProwlarrService()
         calls = []
 
-        async def fake_search(params):
+        async def fake_search(params, **kwargs):
             calls.append(params)
             if len(calls) == 1:
                 return ProwlarrSearchResult(releases=[], query_time_ms=10)
@@ -272,7 +272,7 @@ class TestProwlarrService:
         service = ProwlarrService()
         calls = []
 
-        async def fake_search(params):
+        async def fake_search(params, **kwargs):
             calls.append(params)
             return ProwlarrSearchResult(releases=[], query_time_ms=10)
 
@@ -310,7 +310,7 @@ class TestProwlarrService:
                 indexer="test",
             )
 
-        async def fake_search(params):
+        async def fake_search(params, **kwargs):
             call_count[0] += 1
             query = params.get("query", "")
             if "S01-" in query:
@@ -349,7 +349,7 @@ class TestProwlarrService:
             indexer="test",
         )
 
-        async def fake_search(params):
+        async def fake_search(params, **kwargs):
             # All queries return the same release (same URL)
             return ProwlarrSearchResult(releases=[shared_release], query_time_ms=10)
 

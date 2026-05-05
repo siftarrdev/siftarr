@@ -239,8 +239,18 @@ class SearchService:
         *,
         season: int | None = None,
         episode: int | None = None,
+        cacheable: bool = False,
     ) -> Any:
-        """Execute a Prowlarr TV search by TVDB ID."""
+        """Execute a Prowlarr TV search by TVDB ID.
+
+        Args:
+            request: The request model.
+            season: Optional season number.
+            episode: Optional episode number.
+            cacheable: Whether the result may be cached.  Dashboard-triggered
+                searches (the common case) pass ``False`` so the user always
+                sees fresh results.
+        """
         from app.siftarr.services.request_service import ensure_tvdb_id
 
         tvdb_id = ensure_tvdb_id(request)
@@ -252,6 +262,7 @@ class SearchService:
             season=season,
             episode=episode,
             year=request.year,
+            cacheable=cacheable,
         )
 
     async def _build_rule_engine(self, *, media_type: str) -> RuleEngine:

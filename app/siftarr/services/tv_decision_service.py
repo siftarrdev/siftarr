@@ -18,7 +18,11 @@ from app.siftarr.services.decision_pipeline import (
     log_release_staged,
     log_rule_evaluation,
 )
-from app.siftarr.services.prowlarr_service import ProwlarrSearchResult, ProwlarrService
+from app.siftarr.services.prowlarr_service import (
+    ProwlarrRelease,
+    ProwlarrSearchResult,
+    ProwlarrService,
+)
 from app.siftarr.services.qbittorrent_service import QbittorrentService
 from app.siftarr.services.release_parser import (
     is_exact_single_episode_release,
@@ -177,6 +181,9 @@ class TVDecisionService:
         passing_releases: list[tuple[int | None, int | None, ReleaseEvaluation]] = []
         errors: list[str] = []
 
+        # Dedup set keyed across all search results (6B)
+        seen_keys: set[str] = set()
+
         for (search_type, season, episode), search_result in zip(
             searches, search_results, strict=False
         ):
@@ -207,12 +214,30 @@ class TVDecisionService:
                 continue
 
             for release in search_result.releases:
+                # Dedup across broad / season / episode searches
+                dedup_key = self._release_dedup_key(release)
+                if dedup_key in seen_keys:
+                    continue
+                seen_keys.add(dedup_key)
+
                 evaluation = rule_engine.evaluate(release)
                 evaluated_releases.append(evaluation)
                 if evaluation.passed:
                     passing_releases.append((season, episode, evaluation))
 
         return evaluated_releases, passing_releases, errors
+
+    @staticmethod
+    def _release_dedup_key(release: ProwlarrRelease) -> str:
+        """Compute a deduplication key for a Prowlarr release.
+
+        Precedence: ``info_hash`` → ``download_url`` → ``(title, indexer)``.
+        """
+        if release.info_hash:
+            return f"ih:{release.info_hash.lower()}"
+        if release.download_url:
+            return f"url:{release.download_url.lower()}"
+        return f"t:{release.title.lower()}|i:{release.indexer.lower()}"
 
     async def _update_episode_status(
         self, request_id: int, season_number: int, episode_number: int | None, status: RequestStatus
