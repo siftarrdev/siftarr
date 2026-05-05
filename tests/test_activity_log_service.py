@@ -22,6 +22,16 @@ class TestActivityLogService:
         """Create a mock database session."""
         db = AsyncMock()
         db.add = MagicMock()
+
+        # Python 3.14: AsyncMock.__call__ returns a coroutine, not an
+        # AsyncMock instance, so "async with mock.begin_nested():" would
+        # fail.  Replace with a MagicMock that returns a proper async
+        # context manager.
+        nested_context = AsyncMock()
+        nested_context.__aenter__.return_value = None
+        nested_context.__aexit__.return_value = None
+        db.begin_nested = MagicMock(return_value=nested_context)
+
         return db
 
     @pytest.fixture

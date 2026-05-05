@@ -57,8 +57,7 @@ class LifecycleService:
         if reason is not None:
             request.rejection_reason = reason
         request.updated_at = datetime.now(UTC)
-        await self.db.commit()
-        await self.db.refresh(request)
+        await self.db.flush()
 
         logger.info(
             "Request state transition: request_id=%s %s -> %s%s",
@@ -79,6 +78,7 @@ class LifecycleService:
             },
         )
         await self.db.commit()
+        await self.db.refresh(request)
 
         return request
 

@@ -46,6 +46,13 @@ class TestDownloadCompletionService:
         db.add = MagicMock()
         db.flush = AsyncMock()
         db.commit = AsyncMock()
+
+        # Support async with db.begin_nested() (ActivityLogService uses savepoints).
+        nested_context = AsyncMock()
+        nested_context.__aenter__.return_value = None
+        nested_context.__aexit__.return_value = None
+        db.begin_nested = MagicMock(return_value=nested_context)
+
         return db
 
     @pytest.fixture

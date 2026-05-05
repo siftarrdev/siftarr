@@ -354,43 +354,61 @@ def determine_sqlite_repair_plan(
     )
 
 
-settings = get_settings()
-
-# Create async engine
-engine: AsyncEngine = create_async_engine(
-    settings.database_url,
-    echo=False,
-    future=True,
-)
-
-# Enable SQLite WAL mode and busy timeout for better concurrency.
-# WAL allows concurrent reads during writes; busy_timeout makes writers
-# wait for locks instead of immediately raising "database is locked".
-_IS_SQLITE = settings.database_url.startswith("sqlite")
+# Module-level sentinels — initialized lazily by init_engine().
+engine: AsyncEngine | None = None
+_IS_SQLITE: bool = False
+async_session_maker: async_sessionmaker[AsyncSession] | None = None
+_engine_initialized: bool = False
 
 
-@event.listens_for(engine.sync_engine, "connect")
-def _set_sqlite_pragma(dbapi_connection, _connection_record):
-    """Set SQLite pragmas on every new connection."""
-    if not _IS_SQLITE:
+def init_engine() -> None:
+    """Create the async engine, configure SQLite pragmas, and build the session factory.
+
+    Safe to call multiple times — subsequent calls are no-ops.
+    """
+    global engine, _IS_SQLITE, async_session_maker, _engine_initialized
+
+    if _engine_initialized:
         return
-    cursor = dbapi_connection.cursor()
-    cursor.execute("PRAGMA journal_mode=WAL")
-    cursor.execute("PRAGMA busy_timeout=5000")
-    cursor.execute("PRAGMA synchronous=NORMAL")
-    cursor.close()
 
+    settings = get_settings()
 
-# Create async session factory
-async_session_maker: async_sessionmaker[AsyncSession] = async_sessionmaker(
-    engine,
-    class_=AsyncSession,
-    expire_on_commit=False,
-)
+    engine = create_async_engine(
+        settings.database_url,
+        echo=False,
+        future=True,
+    )
+
+    # Enable SQLite WAL mode and busy timeout for better concurrency.
+    # WAL allows concurrent reads during writes; busy_timeout makes writers
+    # wait for locks instead of immediately raising "database is locked".
+    _IS_SQLITE = settings.database_url.startswith("sqlite")
+
+    @event.listens_for(engine.sync_engine, "connect")
+    def _set_sqlite_pragma(dbapi_connection, _connection_record):
+        """Set SQLite pragmas on every new connection."""
+        if not _IS_SQLITE:
+            return
+        cursor = dbapi_connection.cursor()
+        cursor.execute("PRAGMA journal_mode=WAL")
+        cursor.execute("PRAGMA busy_timeout=5000")
+        cursor.execute("PRAGMA synchronous=NORMAL")
+        cursor.close()
+
+    async_session_maker = async_sessionmaker(
+        engine,
+        class_=AsyncSession,
+        expire_on_commit=False,
+    )
+
+    _engine_initialized = True
 
 
 async def get_db() -> AsyncGenerator[AsyncSession, None]:
     """Dependency that provides a database session."""
+    if async_session_maker is None:
+        init_engine()
+    assert async_session_maker is not None  # Help type checker narrow after lazy init
     async with async_session_maker() as session:
         try:
             yield session
@@ -404,6 +422,7 @@ async def get_db() -> AsyncGenerator[AsyncSession, None]:
 
 async def init_db() -> None:
     """Verify database readiness before startup work begins."""
+    init_engine()
 
     database_url = get_settings().database_url
     if not database_url.startswith("sqlite"):

@@ -24,22 +24,26 @@ class ActivityLogService:
         request_id: int | None = None,
         details: dict | None = None,
     ) -> ActivityLog | None:
-        """Create an activity log entry and flush. Swallows exceptions internally."""
+        """Create an activity log entry within a savepoint.
+
+        Uses ``begin_nested()`` (savepoint) so that a logging failure
+        rolls back only the log entry, not the caller's transaction.
+        """
         try:
-            entry = ActivityLog(
-                event_type=event_type.value,
-                request_id=request_id,
-                details=json.dumps(details) if details is not None else None,
-            )
-            add_result = self.db.add(entry)
-            if inspect.isawaitable(add_result):
-                await add_result
-            await self.db.flush()
+            async with self.db.begin_nested():
+                entry = ActivityLog(
+                    event_type=event_type.value,
+                    request_id=request_id,
+                    details=json.dumps(details) if details is not None else None,
+                )
+                add_result = self.db.add(entry)
+                if inspect.isawaitable(add_result):
+                    await add_result
+                await self.db.flush()
             logger.debug("Logged %s for request_id=%s", event_type, request_id)
             return entry
         except Exception:
             logger.exception("Failed to log activity for request_id=%s", request_id)
-            await self.db.rollback()
             return None
 
     async def get_timeline(self, request_id: int, limit: int = 100) -> list[ActivityLog]:

@@ -5,7 +5,7 @@ import logging
 from fastapi import BackgroundTasks
 
 from app.siftarr.config import get_settings
-from app.siftarr.database import async_session_maker
+from app.siftarr.database import async_session_maker, init_engine
 
 logger = logging.getLogger(__name__)
 
@@ -18,6 +18,9 @@ async def run_background_episode_refresh(request_id: int) -> None:
     if request_id not in DETAILS_SYNC_TASKS:
         DETAILS_SYNC_TASKS.add(request_id)
     try:
+        if async_session_maker is None:
+            init_engine()
+        assert async_session_maker is not None
         async with async_session_maker() as db:
             effective_settings = get_settings()
             plex_service = None
