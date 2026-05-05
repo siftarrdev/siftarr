@@ -11,13 +11,14 @@ from app.siftarr.config import get_settings
 from app.siftarr.database import get_db
 from app.siftarr.models.request import MediaType
 from app.siftarr.services.dashboard_service import (
-    DashboardService,
     serialize_request_details_response,
     serialize_request_search_response,
     serialize_tv_search_response,
 )
+from app.siftarr.services.detail_service import DetailService
 from app.siftarr.services.plex_service import PlexService
 from app.siftarr.services.request_service import load_request_or_404, validate_tv_request
+from app.siftarr.services.search_service import SearchService
 from app.siftarr.services.tv_details_service import (
     compute_sync_metadata,
     count_season_episode_states,
@@ -36,7 +37,8 @@ async def request_details(
     db: AsyncSession = Depends(get_db),
 ) -> JSONResponse:
     request = await load_request_or_404(db, request_id)
-    details = await DashboardService(db, settings=get_settings()).load_request_details(
+    detail_service = DetailService(db, settings=get_settings())
+    details = await detail_service.load_request_details(
         request,
         request_id=request_id,
         background_tasks=background_tasks,
@@ -58,11 +60,10 @@ async def search_request_releases(
             status_code=400,
         )
 
-    from app.siftarr.services.search_service import SearchService
-
     service = SearchService(db)
     await service.process_request_search(request)
-    search_data = await DashboardService(db, settings=get_settings()).load_movie_search_results(
+    detail_service = DetailService(db, settings=get_settings())
+    search_data = await detail_service.load_movie_search_results(
         request,
         request_id=request_id,
     )
@@ -131,7 +132,8 @@ async def search_season_packs(
     """Search for season packs for a specific season."""
     request = await load_request_or_404(db, request_id)
     validate_tv_request(request)
-    search_data = await DashboardService(db, settings=get_settings()).search_season_packs(
+    service = SearchService(db)
+    search_data = await service.search_season_packs(
         request,
         season_number=season_number,
     )
@@ -146,7 +148,8 @@ async def search_multi_season_packs(
     """Search broadly for TV multi-season packs without downloading anything."""
     request = await load_request_or_404(db, request_id)
     validate_tv_request(request)
-    search_data = await DashboardService(db, settings=get_settings()).search_multi_season_packs(
+    service = SearchService(db)
+    search_data = await service.search_multi_season_packs(
         request,
         request_id=request_id,
     )
@@ -163,7 +166,8 @@ async def search_episode(
     """Search for a specific episode."""
     request = await load_request_or_404(db, request_id)
     validate_tv_request(request)
-    search_data = await DashboardService(db, settings=get_settings()).search_episode(
+    service = SearchService(db)
+    search_data = await service.search_episode(
         request,
         season_number=season_number,
         episode_number=episode_number,

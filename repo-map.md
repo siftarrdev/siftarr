@@ -127,7 +127,10 @@ HTTP route layer.
 
 Business logic and integrations.
 
-- `dashboard_service.py` — dashboard-oriented data loading and DTO assembly
+- `dashboard_service.py` — dashboard DTOs and response serializers only (load/assembly logic moved to sub-services)
+- `detail_service.py` — request detail loading (releases, timeline, TV enrichment integration)
+- `tv_enrichment_service.py` — TV season/episode enrichment (season data, release grouping, metadata)
+- `metadata_service.py` — Overseerr metadata lookup for request details
 - `settings_service.py` — SettingsStore (DB-backed settings persistence), SSE progress, scheduled job helpers, Plex rescan/Overseerr import orchestration
 - `request_service.py` — request creation/update orchestration
 - `rule_service.py` — CRUD/order logic for rules
@@ -137,7 +140,7 @@ Business logic and integrations.
 - `staging_actions.py` / `staging_service.py` — stage/send workflows and staged torrent handling
 - `release_serializers.py` — API-facing serialization helpers
 - `scheduler_service.py` / `background_tasks.py` — recurring jobs and background orchestration
-- `pending_queue_service.py` / `lifecycle_service.py` / `download_completion_service.py` — retry, lifecycle, and completion transitions
+- `pending_queue_service.py` / `lifecycle_service.py` / `download_completion_service.py` — retry, status transitions, and completion detection (unreleased detection moved to unreleased_service)
 - `episode_sync_service.py` / `tv_details_service.py` — TV metadata and episode synchronization helpers
 - `overseerr_service.py` / `prowlarr_service.py` / `qbittorrent_service.py` — external service integrations
 - `plex_service/` / `plex_polling_service.py` — Plex lookups, scans, and polling logic
@@ -145,7 +148,8 @@ Business logic and integrations.
 - `connection_tester.py` — external connectivity test helpers
 - `http_client.py` — shared HTTP client lifecycle
 - `release_parser.py`, `media_helpers.py`, `type_utils.py`, `async_utils.py` — shared parsing and utility helpers
-- `activity_log_service.py` / `unreleased_service.py` — supporting domain workflows
+- `activity_log_service.py` / `unreleased_service.py` — supporting domain workflows (unreleased detection moved here from lifecycle_service)
+- `search_service.py` — ad hoc release evaluation/selection, request search orchestration, and TV season-pack/episode ad hoc search
 
 ### `app/siftarr/templates/`
 

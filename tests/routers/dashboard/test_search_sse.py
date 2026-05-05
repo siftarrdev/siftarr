@@ -172,7 +172,7 @@ async def test_stream_tv_season_pack_search(mock_db, monkeypatch):
 
     fake_service = MagicMock()
     fake_service.search_season_packs = AsyncMock(return_value=MagicMock())
-    monkeypatch.setattr(search_sse, "DashboardService", lambda db: fake_service)
+    monkeypatch.setattr(search_sse, "SearchService", lambda db: fake_service)
     monkeypatch.setattr(
         search_sse,
         "serialize_tv_search_response",
@@ -211,7 +211,7 @@ async def test_stream_tv_multi_season_search(mock_db, monkeypatch):
 
     fake_service = MagicMock()
     fake_service.search_multi_season_packs = AsyncMock(return_value=MagicMock())
-    monkeypatch.setattr(search_sse, "DashboardService", lambda db: fake_service)
+    monkeypatch.setattr(search_sse, "SearchService", lambda db: fake_service)
     monkeypatch.setattr(
         search_sse,
         "serialize_tv_search_response",
@@ -250,7 +250,7 @@ async def test_stream_tv_episode_search(mock_db, monkeypatch):
 
     fake_service = MagicMock()
     fake_service.search_episode = AsyncMock(return_value=MagicMock())
-    monkeypatch.setattr(search_sse, "DashboardService", lambda db: fake_service)
+    monkeypatch.setattr(search_sse, "SearchService", lambda db: fake_service)
     monkeypatch.setattr(
         search_sse,
         "serialize_tv_search_response",

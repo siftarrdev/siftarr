@@ -1,6 +1,7 @@
 """Search service for request processing and manual release selection."""
 
 import logging
+from typing import Any
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -11,6 +12,7 @@ from app.siftarr.models.request import MediaType
 from app.siftarr.models.request import Request as RequestModel
 from app.siftarr.models.rule import Rule
 from app.siftarr.services.activity_log_service import ActivityLogService
+from app.siftarr.services.dashboard_service import TVSearchData
 from app.siftarr.services.lifecycle_service import LifecycleService
 from app.siftarr.services.media_helpers import extract_media_title_and_year
 from app.siftarr.services.movie_decision_service import MovieDecisionService
@@ -18,10 +20,20 @@ from app.siftarr.services.overseerr_service import OverseerrService
 from app.siftarr.services.pending_queue_service import PendingQueueService
 from app.siftarr.services.prowlarr_service import ProwlarrRelease, ProwlarrService
 from app.siftarr.services.qbittorrent_service import QbittorrentService
+from app.siftarr.services.release_parser import (
+    is_exact_single_episode_release,
+    parse_release_coverage,
+)
+from app.siftarr.services.release_serializers import (
+    finalize_releases,
+    season_pack_release_sort_key,
+    serialize_evaluated_release,
+)
 from app.siftarr.services.release_storage import persist_manual_release
 from app.siftarr.services.rule_engine import ReleaseEvaluation, RuleEngine
 from app.siftarr.services.staging_actions import use_releases
 from app.siftarr.services.tv_decision_service import TVDecisionService
+from app.siftarr.services.tv_enrichment_service import TVEnrichmentService
 
 logger = logging.getLogger(__name__)
 
@@ -115,3 +127,138 @@ class SearchService:
             await queue_service.remove_from_queue(request.id)
 
         return result
+
+    async def search_season_packs(self, request: Any, *, season_number: int) -> TVSearchData:
+        """Search for season packs covering exactly one season."""
+        result = await self._search_tv(request, season=season_number)
+        if result.error:
+            return TVSearchData(
+                releases=[],
+                scope={"type": "season_packs", "season_number": season_number},
+                error=result.error,
+            )
+
+        engine = await self._build_rule_engine(media_type="tv")
+        releases = []
+        for release in result.releases:
+            coverage = parse_release_coverage(release.title)
+            if coverage.episode_number is not None:
+                continue
+            if coverage.is_complete_series:
+                continue
+            if coverage.season_numbers != (season_number,):
+                continue
+            releases.append(
+                serialize_evaluated_release(release, engine.evaluate(release), coverage=coverage)
+            )
+        return TVSearchData(
+            releases=finalize_releases(releases, sort_key=season_pack_release_sort_key),
+            scope={"type": "season_packs", "season_number": season_number},
+        )
+
+    async def search_multi_season_packs(self, request: Any, *, request_id: int) -> TVSearchData:
+        """Search for multi-season packs covering 2+ seasons or complete series."""
+        tv_enrichment = TVEnrichmentService(self.db)
+        known_total_seasons = await tv_enrichment.known_total_seasons(request_id)
+        result = await self._search_tv(request)
+        if result.error:
+            return TVSearchData(
+                releases=[],
+                known_total_seasons=known_total_seasons,
+                scope={"type": "multi_season_packs"},
+                error=result.error,
+            )
+
+        engine = await self._build_rule_engine(media_type="tv")
+        releases = []
+        for release in result.releases:
+            coverage = parse_release_coverage(release.title)
+            if coverage.episode_number is not None:
+                continue
+            if not coverage.is_complete_series and len(coverage.season_numbers) <= 1:
+                continue
+            releases.append(
+                serialize_evaluated_release(
+                    release,
+                    engine.evaluate(release),
+                    coverage=coverage,
+                    known_total_seasons=known_total_seasons,
+                )
+            )
+        return TVSearchData(
+            releases=finalize_releases(releases, sort_key=season_pack_release_sort_key),
+            known_total_seasons=known_total_seasons,
+            scope={"type": "multi_season_packs"},
+        )
+
+    async def search_episode(
+        self,
+        request: Any,
+        *,
+        season_number: int,
+        episode_number: int,
+    ) -> TVSearchData:
+        """Search for a specific single-episode release."""
+        result = await self._search_tv(request, season=season_number, episode=episode_number)
+        if result.error:
+            return TVSearchData(
+                releases=[],
+                scope={
+                    "type": "single_episode",
+                    "season_number": season_number,
+                    "episode_number": episode_number,
+                },
+                error=result.error,
+            )
+
+        engine = await self._build_rule_engine(media_type="tv")
+        releases = []
+        for release in result.releases:
+            coverage = parse_release_coverage(release.title)
+            if coverage.is_complete_series:
+                continue
+            if coverage.season_numbers != (season_number,):
+                continue
+            if coverage.episode_number != episode_number:
+                continue
+            if not is_exact_single_episode_release(release.title, season_number, episode_number):
+                continue
+            releases.append(serialize_evaluated_release(release, engine.evaluate(release)))
+        return TVSearchData(
+            releases=finalize_releases(releases),
+            scope={
+                "type": "single_episode",
+                "season_number": season_number,
+                "episode_number": episode_number,
+            },
+        )
+
+    async def _search_tv(
+        self,
+        request: Any,
+        *,
+        season: int | None = None,
+        episode: int | None = None,
+    ) -> Any:
+        """Execute a Prowlarr TV search by TVDB ID."""
+        from app.siftarr.services.request_service import ensure_tvdb_id
+
+        tvdb_id = ensure_tvdb_id(request)
+        runtime_settings = get_settings()
+        prowlarr = ProwlarrService(settings=runtime_settings)
+        try:
+            return await prowlarr.search_by_tvdbid(
+                tvdbid=tvdb_id,
+                title=request.title,
+                season=season,
+                episode=episode,
+                year=request.year,
+            )
+        finally:
+            await prowlarr.close()
+
+    async def _build_rule_engine(self, *, media_type: str) -> RuleEngine:
+        """Load rules from DB and build a RuleEngine."""
+        rules_result = await self.db.execute(select(Rule))
+        rules = list(rules_result.scalars().all())
+        return RuleEngine.from_db_rules(rules=rules, media_type=media_type)

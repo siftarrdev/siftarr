@@ -10,7 +10,6 @@ from app.siftarr.database import get_db
 from app.siftarr.models.request import Request as RequestModel
 from app.siftarr.routers.dashboard_actions import _load_all_pending_search_requests
 from app.siftarr.services.dashboard_service import (
-    DashboardService,
     serialize_tv_search_response,
 )
 from app.siftarr.services.request_service import load_request_or_404, validate_tv_request
@@ -150,7 +149,7 @@ async def _tv_season_pack_generator(request_id: int, season_number: int, db: Asy
         request = await load_request_or_404(db, request_id)
         validate_tv_request(request)
         yield serialize_sse(build_sse_progress("searching", percent=50))
-        service = DashboardService(db)
+        service = SearchService(db)
         data = await service.search_season_packs(request, season_number=season_number)
         serialized = serialize_tv_search_response(data)
         yield serialize_sse(
@@ -182,7 +181,7 @@ async def _tv_multi_season_generator(request_id: int, db: AsyncSession):
         request = await load_request_or_404(db, request_id)
         validate_tv_request(request)
         yield serialize_sse(build_sse_progress("searching", percent=50))
-        service = DashboardService(db)
+        service = SearchService(db)
         data = await service.search_multi_season_packs(request, request_id=request_id)
         serialized = serialize_tv_search_response(data)
         yield serialize_sse(
@@ -213,7 +212,7 @@ async def _tv_episode_generator(
         request = await load_request_or_404(db, request_id)
         validate_tv_request(request)
         yield serialize_sse(build_sse_progress("searching", percent=50))
-        service = DashboardService(db)
+        service = SearchService(db)
         data = await service.search_episode(
             request, season_number=season_number, episode_number=episode_number
         )
