@@ -9,6 +9,7 @@ from fastapi import HTTPException
 
 from app.siftarr.models.request import RequestStatus
 from app.siftarr.routers import dashboard_actions
+from app.siftarr.services import search_service as search_service_mod
 
 
 @pytest.mark.asyncio
@@ -22,7 +23,9 @@ async def test_bulk_request_action_redirects_to_requested_tab(mock_db, monkeypat
     mock_db.execute.return_value = execute_result
 
     process_request_search = AsyncMock()
-    monkeypatch.setattr(dashboard_actions, "_process_request_search", process_request_search)
+    monkeypatch.setattr(
+        search_service_mod.SearchService, "process_request_search", process_request_search
+    )
 
     response = await dashboard_actions.bulk_request_action(
         http_request=MagicMock(headers={}),
@@ -34,7 +37,7 @@ async def test_bulk_request_action_redirects_to_requested_tab(mock_db, monkeypat
 
     assert response.status_code == 303
     assert response.headers["location"] == "/?tab=active"
-    process_request_search.assert_awaited_once_with(request_record, mock_db)
+    process_request_search.assert_awaited_once_with(request_record)
 
 
 @pytest.mark.asyncio
@@ -63,7 +66,9 @@ async def test_bulk_request_action_searches_all_pending_requests(mock_db, monkey
     mock_db.execute.return_value = execute_result
 
     process_request_search = AsyncMock()
-    monkeypatch.setattr(dashboard_actions, "_process_request_search", process_request_search)
+    monkeypatch.setattr(
+        search_service_mod.SearchService, "process_request_search", process_request_search
+    )
 
     response = await dashboard_actions.bulk_request_action(
         http_request=MagicMock(headers={}),
@@ -75,9 +80,7 @@ async def test_bulk_request_action_searches_all_pending_requests(mock_db, monkey
 
     assert response.status_code == 303
     assert response.headers["location"] == "/?tab=pending"
-    process_request_search.assert_has_awaits(
-        [call(pending_request, mock_db), call(searching_request, mock_db)]
-    )
+    process_request_search.assert_has_awaits([call(pending_request), call(searching_request)])
 
 
 @pytest.mark.asyncio
@@ -162,12 +165,12 @@ async def test_use_manual_release_persists_then_uses_release(mock_db, monkeypatc
     use_releases = AsyncMock(return_value={"status": "staged"})
 
     monkeypatch.setattr(
-        dashboard_actions.RuleEngine,
+        search_service_mod.RuleEngine,
         "from_db_rules",
         MagicMock(return_value=fake_engine),
     )
-    monkeypatch.setattr(dashboard_actions, "persist_manual_release", persist_manual_release)
-    monkeypatch.setattr(dashboard_actions, "use_releases", use_releases)
+    monkeypatch.setattr(search_service_mod, "persist_manual_release", persist_manual_release)
+    monkeypatch.setattr(search_service_mod, "use_releases", use_releases)
 
     response = await dashboard_actions.use_manual_release(
         request_id=21,
@@ -251,12 +254,12 @@ async def test_use_manual_release_json_reports_replacement_outcome(mock_db, monk
     )
 
     monkeypatch.setattr(
-        dashboard_actions.RuleEngine,
+        search_service_mod.RuleEngine,
         "from_db_rules",
         MagicMock(return_value=fake_engine),
     )
-    monkeypatch.setattr(dashboard_actions, "persist_manual_release", persist_manual_release)
-    monkeypatch.setattr(dashboard_actions, "use_releases", use_releases)
+    monkeypatch.setattr(search_service_mod, "persist_manual_release", persist_manual_release)
+    monkeypatch.setattr(search_service_mod, "use_releases", use_releases)
 
     response = await dashboard_actions.use_manual_release(
         request_id=21,

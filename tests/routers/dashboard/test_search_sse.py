@@ -6,6 +6,7 @@ import pytest
 
 from app.siftarr.models.request import MediaType
 from app.siftarr.routers import search_sse
+from app.siftarr.services import search_service as search_service_mod
 
 
 @pytest.mark.asyncio
@@ -22,7 +23,7 @@ async def test_stream_search_request_yields_phases_and_result(mock_db, monkeypat
     monkeypatch.setattr(search_sse, "load_request_or_404", fake_load)
 
     process_search = AsyncMock(return_value={"status": "completed", "message": "Found 5 releases"})
-    monkeypatch.setattr(search_sse, "_process_request_search", process_search)
+    monkeypatch.setattr(search_service_mod.SearchService, "process_request_search", process_search)
 
     response = await search_sse.stream_search_request(request_id=1, db=mock_db)
     chunks = []
@@ -76,7 +77,7 @@ async def test_stream_bulk_search_yields_progress_and_results(mock_db, monkeypat
     monkeypatch.setattr(search_sse, "load_request_or_404", fake_load)
 
     process_search = AsyncMock(return_value={"status": "completed"})
-    monkeypatch.setattr(search_sse, "_process_request_search", process_search)
+    monkeypatch.setattr(search_service_mod.SearchService, "process_request_search", process_search)
 
     response = await search_sse.stream_bulk_search(request_ids=[1, 2], db=mock_db)
     chunks = []
@@ -108,7 +109,7 @@ async def test_stream_bulk_search_all_pending_loads_server_side(mock_db, monkeyp
     monkeypatch.setattr(search_sse, "load_request_or_404", load_request)
 
     process_search = AsyncMock(return_value={"status": "completed"})
-    monkeypatch.setattr(search_sse, "_process_request_search", process_search)
+    monkeypatch.setattr(search_service_mod.SearchService, "process_request_search", process_search)
 
     response = await search_sse.stream_bulk_search(
         request_ids=[], search_all_pending=True, db=mock_db
@@ -120,8 +121,8 @@ async def test_stream_bulk_search_all_pending_loads_server_side(mock_db, monkeyp
 
     load_all_pending.assert_awaited_once_with(mock_db)
     load_request.assert_not_awaited()
-    process_search.assert_any_await(request_records[0], mock_db)
-    process_search.assert_any_await(request_records[1], mock_db)
+    process_search.assert_any_await(request_records[0])
+    process_search.assert_any_await(request_records[1])
     assert '"total": 2' in body
     assert '"request_id": 10' in body
     assert '"request_id": 11' in body
@@ -140,7 +141,7 @@ async def test_stream_bulk_search_reports_request_failure_and_continues(mock_db,
     monkeypatch.setattr(search_sse, "load_request_or_404", fake_load)
 
     process_search = AsyncMock(side_effect=[RuntimeError("Indexer down"), {"status": "completed"}])
-    monkeypatch.setattr(search_sse, "_process_request_search", process_search)
+    monkeypatch.setattr(search_service_mod.SearchService, "process_request_search", process_search)
 
     response = await search_sse.stream_bulk_search(request_ids=[1, 2], db=mock_db)
     chunks = []

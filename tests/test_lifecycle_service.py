@@ -7,10 +7,8 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from app.siftarr.models.request import Request, RequestStatus
-from app.siftarr.services.lifecycle_service import (
-    LifecycleService,
-    is_unreleased,
-)
+from app.siftarr.services.lifecycle_service import LifecycleService
+from app.siftarr.services.unreleased_service import is_unreleased
 
 
 class TestLifecycleService:

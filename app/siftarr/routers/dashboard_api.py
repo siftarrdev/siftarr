@@ -10,7 +10,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.siftarr.config import get_settings
 from app.siftarr.database import get_db
 from app.siftarr.models.request import MediaType
-from app.siftarr.routers.dashboard_actions import _process_request_search
 from app.siftarr.services.dashboard_service import (
     DashboardService,
     serialize_request_details_response,
@@ -59,7 +58,10 @@ async def search_request_releases(
             status_code=400,
         )
 
-    await _process_request_search(request, db)
+    from app.siftarr.services.search_service import SearchService
+
+    service = SearchService(db)
+    await service.process_request_search(request)
     search_data = await DashboardService(db, settings=get_settings()).load_movie_search_results(
         request,
         request_id=request_id,

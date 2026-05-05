@@ -14,27 +14,21 @@ from app.siftarr.database import get_db
 from app.siftarr.models import EventType
 from app.siftarr.models.episode import Episode
 from app.siftarr.models.release import Release
-from app.siftarr.models.request import MediaType, RequestStatus
 from app.siftarr.models.request import Request as RequestModel
-from app.siftarr.models.rule import Rule
+from app.siftarr.models.request import RequestStatus
 from app.siftarr.models.season import Season
 from app.siftarr.services.activity_log_service import ActivityLogService
 from app.siftarr.services.lifecycle_service import LifecycleService
-from app.siftarr.services.media_helpers import extract_media_title_and_year
-from app.siftarr.services.movie_decision_service import MovieDecisionService
 from app.siftarr.services.overseerr_service import OverseerrService
 from app.siftarr.services.pending_queue_service import PendingQueueService
-from app.siftarr.services.prowlarr_service import ProwlarrRelease, ProwlarrService
-from app.siftarr.services.qbittorrent_service import QbittorrentService
-from app.siftarr.services.release_storage import persist_manual_release
+from app.siftarr.services.prowlarr_service import ProwlarrRelease
 from app.siftarr.services.request_service import (
     bulk_redirect_url,
     load_request_or_404,
     selection_redirect_url,
 )
-from app.siftarr.services.rule_engine import ReleaseEvaluation, RuleEngine
+from app.siftarr.services.search_service import SearchService
 from app.siftarr.services.staging_actions import use_releases
-from app.siftarr.services.tv_decision_service import TVDecisionService
 
 logger = logging.getLogger(__name__)
 
@@ -61,91 +55,6 @@ def _selection_success_message(result: dict[str, object]) -> str:
     if action == "manual_staged":
         return "Request manually staged successfully"
     return str(result.get("message") or "Torrent sent successfully")
-
-
-async def _evaluate_manual_release_for_request(
-    db: AsyncSession,
-    request: RequestModel,
-    release: ProwlarrRelease,
-) -> ReleaseEvaluation:
-    """Evaluate an ad hoc release using the request media type rules."""
-    rules_result = await db.execute(select(Rule))
-    rules = list(rules_result.scalars().all())
-    engine = RuleEngine.from_db_rules(rules=rules, media_type=request.media_type.value)
-    return engine.evaluate(release)
-
-
-async def _select_manual_release_for_request(
-    db: AsyncSession,
-    request: RequestModel,
-    release: ProwlarrRelease,
-) -> dict[str, object]:
-    """Persist and use a manual-search release through the normal selection path."""
-    evaluation = await _evaluate_manual_release_for_request(db, request, release)
-    stored_release = await persist_manual_release(db, request, release, evaluation)
-    return await use_releases(db, request, [stored_release], selection_source="manual")
-
-
-async def _process_request_search(
-    request: RequestModel,
-    db: AsyncSession,
-) -> dict:
-    """Run torrent search for a request and clean up queue state on success."""
-    activity_log = ActivityLogService(db)
-    await activity_log.log(
-        EventType.SEARCH_STARTED,
-        request_id=request.id,
-        details={"title": request.title, "media_type": request.media_type.value},
-    )
-
-    runtime_settings = get_settings()
-
-    # Backfill year if missing (e.g. Overseerr was unreachable at creation time)
-    if request.year is None and (request.tmdb_id or request.tvdb_id):
-        overseerr = OverseerrService(settings=runtime_settings)
-        try:
-            media_type_for_api = "movie" if request.media_type == MediaType.MOVIE else "tv"
-            media_id = request.tmdb_id or request.tvdb_id
-            if media_id is None:
-                return {}
-            _, year = await extract_media_title_and_year(overseerr, media_type_for_api, media_id)
-            if year is not None:
-                lifecycle = LifecycleService(db)
-                await lifecycle.update_request_metadata(request.id, year=year)
-                await db.refresh(request)
-        except Exception:
-            pass
-        finally:
-            await overseerr.close()
-
-    prowlarr_service = ProwlarrService(settings=runtime_settings)
-    qbittorrent_service = QbittorrentService(settings=runtime_settings)
-    queue_service = PendingQueueService(db)
-
-    if request.media_type.value == "movie":
-        decision_service = MovieDecisionService(db, prowlarr_service, qbittorrent_service)
-        result = await decision_service.process_request(request.id)
-    else:
-        decision_service = TVDecisionService(db, prowlarr_service, qbittorrent_service)
-        # Dashboard-triggered searches for TV shows should only search for
-        # season packs and multi-season packs, not individual episodes.
-        # Individual episode searching is done from the details modal.
-        result = await decision_service.process_request(request.id, search_episodes=False)
-
-    activity_log = ActivityLogService(db)
-    await activity_log.log(
-        EventType.SEARCH_COMPLETED,
-        request_id=request.id,
-        details={
-            "status": result.get("status"),
-            "message": result.get("message"),
-        },
-    )
-
-    if result.get("status") == "completed":
-        await queue_service.remove_from_queue(request.id)
-
-    return result
 
 
 async def _deny_request_record(
@@ -178,7 +87,8 @@ async def search_request_now(
     """Trigger a manual torrent search for a request."""
     request = await load_request_or_404(db, request_id)
 
-    await _process_request_search(request, db)
+    service = SearchService(db)
+    await service.process_request_search(request)
     return RedirectResponse(url=redirect_to or "/?tab=pending", status_code=303)
 
 
@@ -195,8 +105,9 @@ async def bulk_request_action(
     redirect_url = bulk_redirect_url(redirect_to)
     if action == "search_all_pending":
         requests = await _load_all_pending_search_requests(db)
+        search_service = SearchService(db)
         for request in requests:
-            await _process_request_search(request, db)
+            await search_service.process_request_search(request)
         if wants_json:
             return JSONResponse({"status": "ok", "message": "Search started"})
         return RedirectResponse(url=redirect_url, status_code=303)
@@ -214,9 +125,10 @@ async def bulk_request_action(
     requests = list(result.scalars().all())
 
     count = 0
+    search_service = SearchService(db)
     for request in requests:
         if action == "search":
-            await _process_request_search(request, db)
+            await search_service.process_request_search(request)
         elif action == "deny":
             await _deny_request_record(request, db, reason="Bulk denied")
             count += 1
@@ -308,7 +220,8 @@ async def use_manual_release(
         uploaded_by=uploaded_by,
     )
 
-    result = await _select_manual_release_for_request(db, request, release)
+    service = SearchService(db)
+    result = await service.select_manual_release(request, release)
     if "application/json" in http_request.headers.get("accept", ""):
         return JSONResponse(
             {
