@@ -333,12 +333,21 @@ class StagingService:
         STAGING_DIR.mkdir(parents=True, exist_ok=True)
 
         if release.download_url.startswith("http"):
-            client = await get_shared_client()
-            response = await client.get(release.download_url, timeout=60.0)
-            response.raise_for_status()
-            with open(torrent_path, "wb") as f:
-                f.write(response.content)
-            logger.debug("Downloaded torrent file: %s", torrent_path)
+            try:
+                client = await get_shared_client()
+                response = await client.get(release.download_url, timeout=60.0)
+                response.raise_for_status()
+                with open(torrent_path, "wb") as f:
+                    f.write(response.content)
+                logger.debug("Downloaded torrent file: %s", torrent_path)
+            except Exception:
+                logger.warning(
+                    "Failed to download torrent file from %s for %s — staging without local file; "
+                    "approval will use magnet URL if available",
+                    release.download_url,
+                    release.title,
+                    exc_info=True,
+                )
         else:
             logger.debug("Using magnet URI (no torrent file download): %s", release.title)
 
