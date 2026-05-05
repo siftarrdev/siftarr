@@ -149,7 +149,7 @@ async def test_download_completion_check_closes_plex_service_on_error(monkeypatc
         lambda db_session, plex: plex_polling_instance,
     )
     monkeypatch.setattr(
-        "app.siftarr.services.download_completion_service.DownloadCompletionService",
+        "app.siftarr.services.scheduler_service.DownloadCompletionService",
         lambda db_session, qbittorrent, plex_polling: download_completion_service,
     )
 

@@ -3,6 +3,7 @@ import logging
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.siftarr.models.activity_log import EventType
 from app.siftarr.models.request import MediaType, Request, RequestStatus
 from app.siftarr.models.rule import Rule
 from app.siftarr.services.activity_log_service import ActivityLogService
@@ -164,8 +165,6 @@ class MovieDecisionService:
             len(passed_results),
         )
 
-        from app.siftarr.models.activity_log import EventType
-
         activity_log = ActivityLogService(self.db)
         await activity_log.log(
             EventType.RULE_EVALUATION,
@@ -199,8 +198,6 @@ class MovieDecisionService:
                 [stored_release] if stored_release else [],
                 selection_source="rule",
             )
-
-            from app.siftarr.models.activity_log import EventType
 
             activity_log = ActivityLogService(self.db)
             await activity_log.log(

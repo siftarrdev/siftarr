@@ -1,20 +1,15 @@
 """Release model for Prowlarr results."""
 
-from datetime import UTC, datetime
+from datetime import datetime
 from typing import TYPE_CHECKING
 
 from sqlalchemy import BigInteger, Boolean, DateTime, ForeignKey, Index, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from app.siftarr.models._base import Base  # noqa: PLC0414
+from app.siftarr.models._base import Base, utc_now  # noqa: PLC0414
 
 if TYPE_CHECKING:
     from app.siftarr.models.request import Request
-
-
-def _utc_now() -> datetime:
-    """Return current UTC time as timezone-aware datetime."""
-    return datetime.now(UTC)
 
 
 class Release(Base):
@@ -58,7 +53,7 @@ class Release(Base):
     passed_rules: Mapped[bool] = mapped_column(Boolean, default=False)
     rejection_reason: Mapped[str | None] = mapped_column(String(500), nullable=True)
 
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utc_now)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now)
 
     # Relationships
     request: Mapped["Request"] = relationship("Request", back_populates="releases")

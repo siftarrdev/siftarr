@@ -17,6 +17,7 @@ from apscheduler.triggers.interval import IntervalTrigger
 from app.siftarr.config import get_settings
 from app.siftarr.models.request import MediaType, Request, RequestStatus
 from app.siftarr.services import settings_service
+from app.siftarr.services.download_completion_service import DownloadCompletionService
 from app.siftarr.services.lifecycle_service import LifecycleService
 from app.siftarr.services.media_helpers import extract_media_title_and_year
 from app.siftarr.services.movie_decision_service import MovieDecisionService
@@ -401,10 +402,6 @@ class SchedulerService:
         async with self._download_completion_lock:
             try:
                 async with self.db_session_factory() as db:
-                    from app.siftarr.services.download_completion_service import (
-                        DownloadCompletionService,
-                    )
-
                     runtime_settings = get_settings()
                     plex = PlexService(settings=runtime_settings)
                     try:

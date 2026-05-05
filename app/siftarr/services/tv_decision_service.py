@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.siftarr.config import get_settings
+from app.siftarr.models.activity_log import EventType
 from app.siftarr.models.episode import Episode
 from app.siftarr.models.release import Release
 from app.siftarr.models.request import MediaType, Request, RequestStatus
@@ -424,8 +425,6 @@ class TVDecisionService:
             len(all_search_errors),
         )
 
-        from app.siftarr.models.activity_log import EventType
-
         activity_log = ActivityLogService(self.db)
         await activity_log.log(
             EventType.RULE_EVALUATION,
@@ -482,8 +481,6 @@ class TVDecisionService:
                 stored_releases,
                 selection_source="rule",
             )
-
-            from app.siftarr.models.activity_log import EventType
 
             activity_log = ActivityLogService(self.db)
             await activity_log.log(

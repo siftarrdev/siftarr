@@ -13,6 +13,7 @@ from app.siftarr.config import get_settings
 from app.siftarr.database import get_db
 from app.siftarr.models import EventType
 from app.siftarr.models.episode import Episode
+from app.siftarr.models.release import Release
 from app.siftarr.models.request import MediaType, RequestStatus
 from app.siftarr.models.request import Request as RequestModel
 from app.siftarr.models.rule import Rule
@@ -20,6 +21,7 @@ from app.siftarr.models.season import Season
 from app.siftarr.services.activity_log_service import ActivityLogService
 from app.siftarr.services.lifecycle_service import LifecycleService
 from app.siftarr.services.media_helpers import extract_media_title_and_year
+from app.siftarr.services.movie_decision_service import MovieDecisionService
 from app.siftarr.services.overseerr_service import OverseerrService
 from app.siftarr.services.pending_queue_service import PendingQueueService
 from app.siftarr.services.prowlarr_service import ProwlarrRelease, ProwlarrService
@@ -32,6 +34,7 @@ from app.siftarr.services.request_service import (
 )
 from app.siftarr.services.rule_engine import ReleaseEvaluation, RuleEngine
 from app.siftarr.services.staging_actions import use_releases
+from app.siftarr.services.tv_decision_service import TVDecisionService
 
 logger = logging.getLogger(__name__)
 
@@ -120,13 +123,9 @@ async def _process_request_search(
     queue_service = PendingQueueService(db)
 
     if request.media_type.value == "movie":
-        from app.siftarr.services.movie_decision_service import MovieDecisionService
-
         decision_service = MovieDecisionService(db, prowlarr_service, qbittorrent_service)
         result = await decision_service.process_request(request.id)
     else:
-        from app.siftarr.services.tv_decision_service import TVDecisionService
-
         decision_service = TVDecisionService(db, prowlarr_service, qbittorrent_service)
         # Dashboard-triggered searches for TV shows should only search for
         # season packs and multi-season packs, not individual episodes.
@@ -237,8 +236,6 @@ async def use_request_release(
 ) -> RedirectResponse | JSONResponse:
     """Stage or send a selected stored release for a request."""
     request = await load_request_or_404(db, request_id)
-
-    from app.siftarr.models.release import Release
 
     release_result = await db.execute(
         select(Release).where(Release.id == release_id, Release.request_id == request_id)

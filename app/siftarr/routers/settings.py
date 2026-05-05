@@ -47,6 +47,13 @@ templates = Jinja2Templates(directory="app/siftarr/templates")
 logger = logging.getLogger(__name__)
 
 
+def _get_scheduler_service():
+    """Late-binding accessor to avoid circular import with main.py."""
+    from app.siftarr.main import scheduler_service
+
+    return scheduler_service
+
+
 class ConnectionSettings(BaseModel):
     """Connection settings model."""
 
@@ -445,7 +452,7 @@ async def retry_pending(
     db: AsyncSession = Depends(get_db),
 ) -> HTMLResponse:
     """Manually trigger retry of pending items."""
-    from app.siftarr.main import scheduler_service
+    scheduler_service = _get_scheduler_service()
 
     context = await _build_settings_page_context(request, db)
     if scheduler_service:
@@ -464,7 +471,7 @@ async def run_recent_plex_scan(
     db: AsyncSession = Depends(get_db),
 ) -> HTMLResponse:
     """Manually trigger the recent Plex scan scheduler job."""
-    from app.siftarr.main import scheduler_service
+    scheduler_service = _get_scheduler_service()
 
     context = await _build_settings_page_context(request, db)
     if scheduler_service is None:
@@ -487,7 +494,7 @@ async def run_plex_poll(
     db: AsyncSession = Depends(get_db),
 ) -> HTMLResponse:
     """Manually trigger the Plex poll scheduler job."""
-    from app.siftarr.main import scheduler_service
+    scheduler_service = _get_scheduler_service()
 
     context = await _build_settings_page_context(request, db)
     if scheduler_service is None:

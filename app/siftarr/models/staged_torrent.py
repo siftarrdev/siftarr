@@ -1,16 +1,11 @@
 """Staged torrent metadata model."""
 
-from datetime import UTC, datetime
+from datetime import datetime
 
 from sqlalchemy import BigInteger, DateTime, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
-from app.siftarr.models._base import Base
-
-
-def _utc_now() -> datetime:
-    """Return current UTC time as timezone-aware datetime."""
-    return datetime.now(UTC)
+from app.siftarr.models._base import Base, utc_now
 
 
 class StagedTorrent(Base):
@@ -36,8 +31,8 @@ class StagedTorrent(Base):
     status: Mapped[str] = mapped_column(
         String(50), default="staged"
     )  # staged, approved, discarded, replaced
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utc_now)
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=_utc_now, onupdate=_utc_now)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now, onupdate=utc_now)
 
     # Replacement tracking (self-referential)
     replaced_by_id: Mapped[int | None] = mapped_column(
