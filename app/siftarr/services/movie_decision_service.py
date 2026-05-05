@@ -16,7 +16,7 @@ from app.siftarr.services.prowlarr_service import ProwlarrService
 from app.siftarr.services.qbittorrent_service import QbittorrentService
 from app.siftarr.services.release_parser import movie_release_identity_rejection_reason
 from app.siftarr.services.release_storage import get_release_persistence_key, store_search_results
-from app.siftarr.services.rule_engine import RuleEngine
+from app.siftarr.services.rule_engine import RuleEngine, get_cached_engine, set_cached_engine
 from app.siftarr.services.staging_service import StagingService
 
 logger = logging.getLogger(__name__)
@@ -45,8 +45,15 @@ class MovieDecisionService:
         self.qbittorrent = qbittorrent
 
     async def _get_rule_engine(self) -> RuleEngine:
-        """Get configured rule engine from database rules."""
-        return await build_rule_engine(self.db, MediaType.MOVIE.value)
+        """Get configured rule engine from database rules (cached per media type)."""
+        media_type = MediaType.MOVIE.value
+        cached = get_cached_engine(media_type)
+        if cached is not None:
+            return cached
+
+        engine = await build_rule_engine(self.db, media_type)
+        set_cached_engine(media_type, engine)
+        return engine
 
     async def process_request(self, request_id: int) -> dict:
         """

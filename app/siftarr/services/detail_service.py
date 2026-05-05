@@ -28,7 +28,7 @@ from app.siftarr.services.release_serializers import (
     serialize_stored_evaluated_release,
 )
 from app.siftarr.services.release_storage import build_prowlarr_release
-from app.siftarr.services.rule_engine import RuleEngine
+from app.siftarr.services.rule_engine import RuleEngine, get_cached_engine, set_cached_engine
 from app.siftarr.services.tv_enrichment_service import TVEnrichmentService
 
 
@@ -174,7 +174,13 @@ class DetailService:
         ]
 
     async def _build_rule_engine(self, *, media_type: str) -> RuleEngine:
-        """Load rules from DB and build a RuleEngine for evaluation."""
+        """Load rules from DB and build a RuleEngine for evaluation (cached)."""
+        cached = get_cached_engine(media_type)
+        if cached is not None:
+            return cached
+
         rules_result = await self.db.execute(select(Rule))
         rules = list(rules_result.scalars().all())
-        return RuleEngine.from_db_rules(rules=rules, media_type=media_type)
+        engine = RuleEngine.from_db_rules(rules=rules, media_type=media_type)
+        set_cached_engine(media_type, engine)
+        return engine

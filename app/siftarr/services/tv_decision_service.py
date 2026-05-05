@@ -29,7 +29,12 @@ from app.siftarr.services.release_parser import (
     parse_release_coverage,
 )
 from app.siftarr.services.release_storage import get_release_persistence_key, store_search_results
-from app.siftarr.services.rule_engine import ReleaseEvaluation, RuleEngine
+from app.siftarr.services.rule_engine import (
+    ReleaseEvaluation,
+    RuleEngine,
+    get_cached_engine,
+    set_cached_engine,
+)
 from app.siftarr.services.staging_service import StagingService
 
 logger = logging.getLogger(__name__)
@@ -62,7 +67,15 @@ class TVDecisionService:
         self._settings = get_settings()
 
     async def _get_rule_engine(self) -> RuleEngine:
-        return await build_rule_engine(self.db, MediaType.TV.value)
+        """Get configured rule engine from database rules (cached per media type)."""
+        media_type = MediaType.TV.value
+        cached = get_cached_engine(media_type)
+        if cached is not None:
+            return cached
+
+        engine = await build_rule_engine(self.db, media_type)
+        set_cached_engine(media_type, engine)
+        return engine
 
     def _get_requested_seasons(self, request: Request) -> list[int]:
         return sorted([s.season_number for s in request.seasons])
