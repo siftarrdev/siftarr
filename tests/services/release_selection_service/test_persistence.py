@@ -83,7 +83,12 @@ async def test_persist_manual_release_requires_download_source(mock_db, request_
 async def test_store_search_results_persists_multi_season_coverage(mock_db):
     mock_db.add = MagicMock()
     mock_db.commit = AsyncMock()
-    mock_db.refresh = AsyncMock()
+    # Set up execute to return no existing records (upsert path)
+    scalars_mock = MagicMock()
+    scalars_mock.all.return_value = []
+    mock_db.execute = AsyncMock(
+        return_value=MagicMock(scalars=MagicMock(return_value=scalars_mock))
+    )
 
     release = ProwlarrRelease(
         title="Show.S01-S03.2160p.WEB-DL",
@@ -103,14 +108,18 @@ async def test_store_search_results_persists_multi_season_coverage(mock_db):
     assert stored_record.episode_number is None
     assert stored_record.season_coverage == "1,2,3"
     mock_db.commit.assert_awaited_once()
-    mock_db.refresh.assert_awaited_once_with(stored_record)
 
 
 @pytest.mark.asyncio
 async def test_store_search_results_persists_complete_series_marker(mock_db):
     mock_db.add = MagicMock()
     mock_db.commit = AsyncMock()
-    mock_db.refresh = AsyncMock()
+    # Set up execute to return no existing records (upsert path)
+    scalars_mock = MagicMock()
+    scalars_mock.all.return_value = []
+    mock_db.execute = AsyncMock(
+        return_value=MagicMock(scalars=MagicMock(return_value=scalars_mock))
+    )
 
     release = ProwlarrRelease(
         title="Show.Complete.Series.1080p.BluRay",

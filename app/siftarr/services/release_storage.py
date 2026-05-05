@@ -82,10 +82,24 @@ async def store_search_results(
     evaluations: list[ReleaseEvaluation],
 ) -> dict[str, Release]:
     """Replace stored search results for a request with the latest evaluations."""
-    await _purge_releases(db, request_id=request_id, commit=False)
+    # 1. Load existing releases for this request
+    existing_result = await db.execute(select(Release).where(Release.request_id == request_id))
+    existing_records = list(existing_result.scalars().all())
+
+    # Build lookup keyed by persistence key, handle duplicate keys
+    existing_by_key: dict[str, Release] = {}
+    extra_records: list[Release] = []
+    for record in existing_records:
+        key = get_release_persistence_key(title=record.title, info_hash=record.info_hash)
+        if key in existing_by_key:
+            extra_records.append(record)
+        else:
+            existing_by_key[key] = record
 
     records_by_key: dict[str, Release] = {}
     seen_keys: set[str] = set()
+    matched_keys: set[str] = set()
+
     for evaluation in evaluations:
         release = evaluation.release
         dedupe_key = get_release_persistence_key(title=release.title, info_hash=release.info_hash)
@@ -95,37 +109,72 @@ async def store_search_results(
 
         parsed = parse_season_episode(release.title)
         coverage = parse_release_coverage(release.title)
-        record = Release(
-            request_id=request_id,
-            title=release.title,
-            size=release.size,
-            seeders=release.seeders,
-            leechers=release.leechers,
-            download_url=release.download_url,
-            magnet_url=release.magnet_url,
-            info_hash=release.info_hash,
-            indexer=release.indexer,
-            publish_date=release.publish_date,
-            resolution=release.resolution,
-            codec=release.codec,
-            release_group=release.release_group,
-            files=release.files,
-            uploaded_by=release.uploaded_by,
-            season_number=parsed.season_number,
-            episode_number=parsed.episode_number,
-            season_coverage=serialize_release_coverage(coverage),
-            score=evaluation.total_score,
-            passed_rules=evaluation.passed,
-            rejection_reason=evaluation.rejection_reason[:500]
-            if evaluation.rejection_reason
-            else None,
-        )
-        db.add(record)
-        records_by_key[dedupe_key] = record
+
+        existing = existing_by_key.get(dedupe_key)
+        if existing is not None:
+            # UPDATE existing record
+            existing.size = release.size
+            existing.seeders = release.seeders
+            existing.leechers = release.leechers
+            existing.download_url = release.download_url
+            existing.magnet_url = release.magnet_url
+            existing.info_hash = release.info_hash
+            existing.indexer = release.indexer
+            existing.publish_date = release.publish_date
+            existing.resolution = release.resolution
+            existing.codec = release.codec
+            existing.release_group = release.release_group
+            existing.files = release.files
+            existing.uploaded_by = release.uploaded_by
+            existing.season_number = parsed.season_number
+            existing.episode_number = parsed.episode_number
+            existing.season_coverage = serialize_release_coverage(coverage)
+            existing.score = evaluation.total_score
+            existing.passed_rules = evaluation.passed
+            existing.rejection_reason = (
+                evaluation.rejection_reason[:500] if evaluation.rejection_reason else None
+            )
+            records_by_key[dedupe_key] = existing
+            matched_keys.add(dedupe_key)
+        else:
+            # INSERT new record
+            record = Release(
+                request_id=request_id,
+                title=release.title,
+                size=release.size,
+                seeders=release.seeders,
+                leechers=release.leechers,
+                download_url=release.download_url,
+                magnet_url=release.magnet_url,
+                info_hash=release.info_hash,
+                indexer=release.indexer,
+                publish_date=release.publish_date,
+                resolution=release.resolution,
+                codec=release.codec,
+                release_group=release.release_group,
+                files=release.files,
+                uploaded_by=release.uploaded_by,
+                season_number=parsed.season_number,
+                episode_number=parsed.episode_number,
+                season_coverage=serialize_release_coverage(coverage),
+                score=evaluation.total_score,
+                passed_rules=evaluation.passed,
+                rejection_reason=evaluation.rejection_reason[:500]
+                if evaluation.rejection_reason
+                else None,
+            )
+            db.add(record)
+            records_by_key[dedupe_key] = record
+            matched_keys.add(dedupe_key)
+
+    # Delete existing records not matched by any new evaluation
+    for key, record in existing_by_key.items():
+        if key not in matched_keys:
+            await db.delete(record)
+    for record in extra_records:
+        await db.delete(record)
 
     await db.commit()
-    for record in records_by_key.values():
-        await db.refresh(record)
     return records_by_key
 
 

@@ -92,8 +92,8 @@ class TestDownloadCompletionService:
         request.media_type = MediaType.MOVIE
         request.status = RequestStatus.DOWNLOADING
 
-        # qBit returns None (not found)
-        mock_qbit.get_torrent_info = AsyncMock(return_value=None)
+        # Batch-fetch returns empty (torrent not found in qBit)
+        mock_qbit.get_all_active_torrents = AsyncMock(return_value=[])
 
         # Plex not found either
         mock_plex_polling.check_request = AsyncMock(
@@ -136,10 +136,11 @@ class TestDownloadCompletionService:
         request.media_type = MediaType.MOVIE
         request.status = RequestStatus.DOWNLOADING
 
-        mock_qbit.get_torrent_info_by_name = AsyncMock(
-            return_value={"name": torrent.title, "progress": 1.0, "state": "stalledUP"}
+        mock_qbit.get_all_active_torrents = AsyncMock(
+            return_value=[
+                {"hash": None, "name": torrent.title, "progress": 1.0, "state": "stalledUP"}
+            ]
         )
-        mock_qbit.get_torrent_progress_by_name = AsyncMock()
         mock_plex_polling.check_request = AsyncMock(
             return_value=CheckRequestResult(
                 request_id=40,
@@ -158,8 +159,6 @@ class TestDownloadCompletionService:
         result = await service.check_downloading_requests()
 
         assert result == 0
-        mock_qbit.get_torrent_info_by_name.assert_awaited_once_with(torrent.title)
-        mock_qbit.get_torrent_progress_by_name.assert_not_called()
         added_log = mock_db.add.call_args.args[0]
         details = json.loads(added_log.details)
         assert details["done_torrents"] == [
@@ -201,7 +200,7 @@ class TestDownloadCompletionService:
                 reason="Found on Plex",
             )
         )
-        mock_qbit.get_torrent_info = AsyncMock(return_value=None)
+        mock_qbit.get_all_active_torrents = AsyncMock(return_value=[])
 
         mock_db.execute.side_effect = [
             _rows_result([(torrent, request)]),
@@ -244,7 +243,7 @@ class TestDownloadCompletionService:
                 reason="All episodes found on Plex",
             )
         )
-        mock_qbit.get_torrent_info = AsyncMock(return_value=None)
+        mock_qbit.get_all_active_torrents = AsyncMock(return_value=[])
 
         mock_db.execute.side_effect = [
             _rows_result([(torrent, request)]),
@@ -287,7 +286,7 @@ class TestDownloadCompletionService:
                 reason="All episodes found on Plex",
             )
         )
-        mock_qbit.get_torrent_info = AsyncMock(return_value=None)
+        mock_qbit.get_all_active_torrents = AsyncMock(return_value=[])
 
         mock_db.execute.side_effect = [
             _rows_result([(torrent, request)]),
@@ -349,7 +348,7 @@ class TestDownloadCompletionService:
         result = await service.check_downloading_requests()
 
         assert result == 0
-        mock_qbit.get_torrent_info.assert_not_called()
+        mock_qbit.get_all_active_torrents.assert_not_called()
         mock_plex_polling.check_request.assert_not_called()
 
     @pytest.mark.asyncio
@@ -371,8 +370,15 @@ class TestDownloadCompletionService:
         request.media_type = MediaType.TV
         request.status = RequestStatus.DOWNLOADING
 
-        mock_qbit.get_torrent_info = AsyncMock(
-            return_value={"progress": 0.4, "state": "downloading"}
+        mock_qbit.get_all_active_torrents = AsyncMock(
+            return_value=[
+                {
+                    "hash": "da39a3ee5e6b4b0d3255bfef95601890afd80709",
+                    "name": "Test Show S01E01",
+                    "progress": 0.4,
+                    "state": "downloading",
+                }
+            ]
         )
         mock_db.execute.side_effect = [_rows_result([(torrent, request)])]
 
@@ -412,10 +418,20 @@ class TestDownloadCompletionService:
         request.media_type = MediaType.TV
         request.status = RequestStatus.DOWNLOADING
 
-        mock_qbit.get_torrent_info = AsyncMock(
-            side_effect=[
-                {"progress": 1.0, "state": "uploading"},
-                {"progress": 0.5, "state": "downloading"},
+        mock_qbit.get_all_active_torrents = AsyncMock(
+            return_value=[
+                {
+                    "hash": "da39a3ee5e6b4b0d3255bfef95601890afd80709",
+                    "name": "Test Show S01E01",
+                    "progress": 1.0,
+                    "state": "uploading",
+                },
+                {
+                    "hash": "ea39a3ee5e6b4b0d3255bfef95601890afd80709",
+                    "name": "Test Show S01E02",
+                    "progress": 0.5,
+                    "state": "downloading",
+                },
             ]
         )
         mock_plex_polling.check_request = AsyncMock(
@@ -459,7 +475,16 @@ class TestDownloadCompletionService:
         request.media_type = MediaType.TV
         request.status = RequestStatus.DOWNLOADING
 
-        mock_qbit.get_torrent_info = AsyncMock(return_value={"progress": 1.0, "state": "uploading"})
+        mock_qbit.get_all_active_torrents = AsyncMock(
+            return_value=[
+                {
+                    "hash": "da39a3ee5e6b4b0d3255bfef95601890afd80709",
+                    "name": "Test Show S01E01",
+                    "progress": 1.0,
+                    "state": "uploading",
+                }
+            ]
+        )
         mock_plex_polling.check_request = AsyncMock(
             return_value=CheckRequestResult(
                 request_id=10,
@@ -499,7 +524,16 @@ class TestDownloadCompletionService:
         request.media_type = MediaType.MOVIE
         request.status = RequestStatus.DOWNLOADING
 
-        mock_qbit.get_torrent_info = AsyncMock(return_value={"progress": 1.0, "state": "stalledUP"})
+        mock_qbit.get_all_active_torrents = AsyncMock(
+            return_value=[
+                {
+                    "hash": "da39a3ee5e6b4b0d3255bfef95601890afd80709",
+                    "name": "Test Movie 2020",
+                    "progress": 1.0,
+                    "state": "stalledUP",
+                }
+            ]
+        )
         mock_plex_polling.check_request = AsyncMock(
             return_value=CheckRequestResult(
                 request_id=10,
