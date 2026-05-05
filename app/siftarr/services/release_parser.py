@@ -1,5 +1,6 @@
 """Parse season and episode information from release titles."""
 
+import functools
 import re
 from dataclasses import dataclass
 
@@ -329,6 +330,10 @@ def parse_release_coverage(title: str) -> ParsedReleaseCoverage:
     )
 
 
+cached_parse_release_coverage = functools.lru_cache(maxsize=4096)(parse_release_coverage)
+"""Cached wrapper to avoid repeated parsing of identical release titles."""
+
+
 def parse_season_episode(title: str) -> ParsedSeasonEpisode:
     """Parse a release title to extract season and episode numbers.
 
@@ -338,7 +343,7 @@ def parse_season_episode(title: str) -> ParsedSeasonEpisode:
         - season_number=N, episode_number=None — season pack for season N
         - season_number=N, episode_number=M — specific episode SNE M
     """
-    coverage = parse_release_coverage(title)
+    coverage = cached_parse_release_coverage(title)
     return ParsedSeasonEpisode(
         season_number=coverage.season_number,
         episode_number=coverage.episode_number,

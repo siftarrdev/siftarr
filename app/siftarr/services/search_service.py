@@ -21,8 +21,8 @@ from app.siftarr.services.pending_queue_service import PendingQueueService
 from app.siftarr.services.prowlarr_service import ProwlarrRelease, ProwlarrService
 from app.siftarr.services.qbittorrent_service import QbittorrentService
 from app.siftarr.services.release_parser import (
+    cached_parse_release_coverage,
     is_exact_single_episode_release,
-    parse_release_coverage,
 )
 from app.siftarr.services.release_serializers import (
     finalize_releases,
@@ -30,7 +30,12 @@ from app.siftarr.services.release_serializers import (
     serialize_evaluated_release,
 )
 from app.siftarr.services.release_storage import persist_manual_release
-from app.siftarr.services.rule_engine import ReleaseEvaluation, RuleEngine
+from app.siftarr.services.rule_engine import (
+    ReleaseEvaluation,
+    RuleEngine,
+    get_cached_engine,
+    set_cached_engine,
+)
 from app.siftarr.services.staging_service import StagingService
 from app.siftarr.services.tv_decision_service import TVDecisionService
 from app.siftarr.services.tv_enrichment_service import TVEnrichmentService
@@ -50,9 +55,7 @@ class SearchService:
         release: ProwlarrRelease,
     ) -> ReleaseEvaluation:
         """Evaluate an ad hoc release using the request media type rules."""
-        rules_result = await self.db.execute(select(Rule))
-        rules = list(rules_result.scalars().all())
-        engine = RuleEngine.from_db_rules(rules=rules, media_type=request.media_type.value)
+        engine = await self._build_rule_engine(media_type=request.media_type.value)
         return engine.evaluate(release)
 
     async def select_manual_release(
@@ -141,7 +144,7 @@ class SearchService:
         engine = await self._build_rule_engine(media_type="tv")
         releases = []
         for release in result.releases:
-            coverage = parse_release_coverage(release.title)
+            coverage = cached_parse_release_coverage(release.title)
             if coverage.episode_number is not None:
                 continue
             if coverage.is_complete_series:
@@ -172,7 +175,7 @@ class SearchService:
         engine = await self._build_rule_engine(media_type="tv")
         releases = []
         for release in result.releases:
-            coverage = parse_release_coverage(release.title)
+            coverage = cached_parse_release_coverage(release.title)
             if coverage.episode_number is not None:
                 continue
             if not coverage.is_complete_series and len(coverage.season_numbers) <= 1:
@@ -214,7 +217,7 @@ class SearchService:
         engine = await self._build_rule_engine(media_type="tv")
         releases = []
         for release in result.releases:
-            coverage = parse_release_coverage(release.title)
+            coverage = cached_parse_release_coverage(release.title)
             if coverage.is_complete_series:
                 continue
             if coverage.season_numbers != (season_number,):
@@ -239,8 +242,18 @@ class SearchService:
         *,
         season: int | None = None,
         episode: int | None = None,
+        cacheable: bool = False,
     ) -> Any:
-        """Execute a Prowlarr TV search by TVDB ID."""
+        """Execute a Prowlarr TV search by TVDB ID.
+
+        Args:
+            request: The request model.
+            season: Optional season number.
+            episode: Optional episode number.
+            cacheable: Whether the result may be cached.  Dashboard-triggered
+                searches (the common case) pass ``False`` so the user always
+                sees fresh results.
+        """
         from app.siftarr.services.request_service import ensure_tvdb_id
 
         tvdb_id = ensure_tvdb_id(request)
@@ -252,10 +265,17 @@ class SearchService:
             season=season,
             episode=episode,
             year=request.year,
+            cacheable=cacheable,
         )
 
     async def _build_rule_engine(self, *, media_type: str) -> RuleEngine:
-        """Load rules from DB and build a RuleEngine."""
+        """Load rules from DB and build a RuleEngine (cached)."""
+        cached = get_cached_engine(media_type)
+        if cached is not None:
+            return cached
+
         rules_result = await self.db.execute(select(Rule))
         rules = list(rules_result.scalars().all())
-        return RuleEngine.from_db_rules(rules=rules, media_type=media_type)
+        engine = RuleEngine.from_db_rules(rules=rules, media_type=media_type)
+        set_cached_engine(media_type, engine)
+        return engine

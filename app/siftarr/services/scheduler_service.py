@@ -110,7 +110,7 @@ class SchedulerService:
         error_message: str,
         runtime_settings: Any,
     ) -> None:
-        await queue_service.update_error(request_id, error_message)
+        await queue_service.update_error(request_id, error_message, commit=False)
         _, max_exceeded = await queue_service.mark_retry_failed(
             request_id,
             retry_interval_hours=max(
@@ -118,7 +118,9 @@ class SchedulerService:
                 1,
             ),
             max_retries=self._get_max_retry_attempts(runtime_settings),
+            commit=False,
         )
+        await queue_service.db.commit()
 
         if max_exceeded:
             self._logger.warning(
@@ -282,7 +284,8 @@ class SchedulerService:
                 queue_service = PendingQueueService(db)
 
                 if result["status"] in {"completed", "downloading", "staged"}:
-                    await queue_service.remove_from_queue(request.id)
+                    await queue_service.remove_from_queue(request.id, commit=False)
+                    await db.commit()
                     logger.info(
                         "Request %s completed retry successfully with status=%s",
                         request.id,

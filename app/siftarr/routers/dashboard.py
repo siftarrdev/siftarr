@@ -27,7 +27,7 @@ from app.siftarr.services.http_client import get_shared_client
 from app.siftarr.services.lifecycle_service import LifecycleService
 from app.siftarr.services.overseerr_service import OverseerrService
 from app.siftarr.services.release_parser import movie_release_identity_rejection_reason
-from app.siftarr.services.tv_details_service import load_tv_seasons_with_episodes
+from app.siftarr.services.tv_details_service import load_tv_seasons_with_episodes_bulk
 
 logger = logging.getLogger(__name__)
 
@@ -46,28 +46,6 @@ async def dashboard(
 
     # Get active requests
     active_requests = await lifecycle_service.get_active_requests(limit=500)
-
-    async def _tv_has_pending_episodes(request_id: int) -> bool:
-        seasons, episodes = await load_tv_seasons_with_episodes(db, request_id)
-        if not seasons or not episodes:
-            return False
-        return any(episode.status == RequestStatus.PENDING for episode in episodes)
-
-    async def _should_show_in_unreleased(req: RequestModel) -> bool:
-        if req.status == RequestStatus.UNRELEASED:
-            return True
-        if req.media_type != MediaType.TV or req.status not in {
-            RequestStatus.PENDING,
-            RequestStatus.COMPLETED,
-        }:
-            return False
-
-        seasons, episodes = await load_tv_seasons_with_episodes(db, req.id)
-        if not seasons or not episodes:
-            return False
-
-        statuses = {episode.status for episode in episodes}
-        return RequestStatus.UNRELEASED in statuses and RequestStatus.PENDING not in statuses
 
     # Get selected torrents that are either waiting in staging or already sent to qBittorrent.
     result = await db.execute(
@@ -179,8 +157,51 @@ async def dashboard(
     unreleased_candidate_by_id = {
         req.id: req for req in [*active_requests, *completed_requests, *unreleased_candidates]
     }
+
+    # Pre-fetch episodes for all TV requests that need season/episode data
+    # rather than querying per-request (N+1 fix).
+    # UNRELEASED requests short-circuit in _should_show_in_unreleased so
+    # they don't need episodes pre-fetched.
+    tv_ids_needing_episodes = {
+        req.id
+        for req in unreleased_candidate_by_id.values()
+        if req.media_type == MediaType.TV
+        and req.status in {RequestStatus.PENDING, RequestStatus.COMPLETED}
+    }
+    # Also include TV PENDING requests that may be checked by _tv_has_pending_episodes
+    tv_ids_needing_episodes.update(
+        req.id
+        for req in active_requests
+        if req.media_type == MediaType.TV and req.status == RequestStatus.PENDING
+    )
+    episodes_map: dict[int, tuple[list, list]] = {}
+    if tv_ids_needing_episodes:
+        episodes_map = await load_tv_seasons_with_episodes_bulk(db, tv_ids_needing_episodes)
+
+    def _should_show_in_unreleased(req: RequestModel) -> bool:
+        if req.status == RequestStatus.UNRELEASED:
+            return True
+        if req.media_type != MediaType.TV or req.status not in {
+            RequestStatus.PENDING,
+            RequestStatus.COMPLETED,
+        }:
+            return False
+
+        seasons, episodes = episodes_map.get(req.id, ([], []))
+        if not seasons or not episodes:
+            return False
+
+        statuses = {episode.status for episode in episodes}
+        return RequestStatus.UNRELEASED in statuses and RequestStatus.PENDING not in statuses
+
+    def _tv_has_pending_episodes(request_id: int) -> bool:
+        seasons, episodes = episodes_map.get(request_id, ([], []))
+        if not seasons or not episodes:
+            return False
+        return any(episode.status == RequestStatus.PENDING for episode in episodes)
+
     unreleased_requests = [
-        req for req in unreleased_candidate_by_id.values() if await _should_show_in_unreleased(req)
+        req for req in unreleased_candidate_by_id.values() if _should_show_in_unreleased(req)
     ]
     unreleased_request_ids = {req.id for req in unreleased_requests}
     filtered_requests = [req for req in active_requests if req.id not in unreleased_request_ids]
@@ -196,7 +217,7 @@ async def dashboard(
         if (
             req.status == RequestStatus.PENDING
             and req.media_type == MediaType.TV
-            and await _tv_has_pending_episodes(req.id)
+            and _tv_has_pending_episodes(req.id)
         ):
             pending_requests.append(req)
     overseerr_service = OverseerrService(settings=effective_settings)

@@ -50,11 +50,12 @@ class DashboardTimelineEntry:
 class RequestDetailsData:
     request: DashboardRequestSummary
     releases: list[dict[str, object]]
-    active_staged_torrent: dict[str, object] | None
-    active_staged_torrents: list[dict[str, object]]
-    overseerr: DashboardOverseerrDetails | None
-    tv_info: DashboardTVDetails | None
-    timeline: list[DashboardTimelineEntry]
+    total_releases: int = 0
+    active_staged_torrent: dict[str, object] | None = None
+    active_staged_torrents: list[dict[str, object]] | None = None
+    overseerr: DashboardOverseerrDetails | None = None
+    tv_info: DashboardTVDetails | None = None
+    timeline: list[DashboardTimelineEntry] | None = None
 
 
 @dataclass(slots=True)
@@ -81,6 +82,7 @@ def serialize_request_details_response(data: RequestDetailsData) -> dict[str, ob
             "media_type": data.request.media_type,
         },
         "releases": data.releases,
+        "total_releases": data.total_releases,
         "active_staged_torrent": data.active_staged_torrent,
         "active_staged_torrents": data.active_staged_torrents,
         "timeline": [
@@ -90,7 +92,7 @@ def serialize_request_details_response(data: RequestDetailsData) -> dict[str, ob
                 "details": entry.details,
                 "created_at": entry.created_at,
             }
-            for entry in data.timeline
+            for entry in (data.timeline or [])
         ],
     }
     if data.overseerr is not None:

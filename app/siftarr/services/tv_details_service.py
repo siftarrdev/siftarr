@@ -108,3 +108,56 @@ async def load_tv_seasons_with_episodes(
     )
     episodes = list(episodes_result.scalars().all())
     return seasons, episodes
+
+
+async def load_tv_seasons_with_episodes_bulk(
+    db: AsyncSession,
+    request_ids: set[int],
+) -> dict[int, tuple[list[Any], list[Any]]]:
+    """Load seasons and episodes for multiple requests in one bulk query.
+
+    Returns a dict mapping each request_id to (seasons, episodes).
+    Requests with no seasons get ([], []).
+    """
+    from app.siftarr.models.episode import Episode
+    from app.siftarr.models.season import Season
+
+    if not request_ids:
+        return {}
+
+    seasons_result = await db.execute(
+        select(Season).where(Season.request_id.in_(request_ids)).order_by(Season.season_number)
+    )
+    all_seasons = list(seasons_result.scalars().all())
+
+    if not all_seasons:
+        return {rid: ([], []) for rid in request_ids}
+
+    season_ids = [s.id for s in all_seasons]
+    episodes_result = await db.execute(
+        select(Episode)
+        .where(Episode.season_id.in_(season_ids))
+        .order_by(Episode.season_id, Episode.episode_number)
+    )
+    all_episodes = list(episodes_result.scalars().all())
+
+    # Group episodes by season_id
+    episodes_by_season: dict[int, list[Any]] = {}
+    for ep in all_episodes:
+        episodes_by_season.setdefault(ep.season_id, []).append(ep)
+
+    # Group seasons by request_id
+    seasons_by_request: dict[int, list[Any]] = {}
+    for season in all_seasons:
+        seasons_by_request.setdefault(season.request_id, []).append(season)
+
+    # Build result dict
+    result: dict[int, tuple[list[Any], list[Any]]] = {}
+    for rid in request_ids:
+        seasons = seasons_by_request.get(rid, [])
+        episodes: list[Any] = []
+        for season in seasons:
+            episodes.extend(episodes_by_season.get(season.id, []))
+        result[rid] = (seasons, episodes)
+
+    return result

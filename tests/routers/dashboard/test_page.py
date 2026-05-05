@@ -382,8 +382,8 @@ async def test_dashboard_separates_mixed_pending_from_true_unreleased(mock_db, m
     ]
     monkeypatch.setattr(
         dashboard,
-        "load_tv_seasons_with_episodes",
-        AsyncMock(side_effect=[(seasons, episodes), (seasons, episodes)]),
+        "load_tv_seasons_with_episodes_bulk",
+        AsyncMock(return_value={mixed_request.id: (seasons, episodes)}),
     )
 
     response = await dashboard.dashboard(MagicMock(), db=mock_db)
@@ -452,15 +452,17 @@ async def test_dashboard_hides_completed_ongoing_tv_from_finished_when_unrelease
     ]
     monkeypatch.setattr(
         dashboard,
-        "load_tv_seasons_with_episodes",
+        "load_tv_seasons_with_episodes_bulk",
         AsyncMock(
-            return_value=(
-                [MagicMock(id=1, season_number=8, synced_at=None)],
-                [
-                    MagicMock(status=RequestStatus.COMPLETED),
-                    MagicMock(status=RequestStatus.UNRELEASED),
-                ],
-            )
+            return_value={
+                completed_tv.id: (
+                    [MagicMock(id=1, season_number=8, synced_at=None)],
+                    [
+                        MagicMock(status=RequestStatus.COMPLETED),
+                        MagicMock(status=RequestStatus.UNRELEASED),
+                    ],
+                )
+            }
         ),
     )
 

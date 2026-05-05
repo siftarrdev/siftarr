@@ -7,6 +7,8 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.siftarr.models.rule import Rule, RuleType, TVTarget
+from app.siftarr.services.prowlarr_service import clear_search_cache
+from app.siftarr.services.rule_engine import increment_rule_version
 
 
 class RuleData(TypedDict):
@@ -268,6 +270,8 @@ class RuleService:
         self.db.add(rule)
         await self.db.commit()
         await self.db.refresh(rule)
+        clear_search_cache()
+        increment_rule_version()
         return rule
 
     async def update_rule(
@@ -308,6 +312,8 @@ class RuleService:
 
         await self.db.commit()
         await self.db.refresh(rule)
+        clear_search_cache()
+        increment_rule_version()
         return rule
 
     async def delete_rule(self, rule_id: int) -> bool:
@@ -316,6 +322,8 @@ class RuleService:
             return False
         await self.db.delete(rule)
         await self.db.commit()
+        clear_search_cache()
+        increment_rule_version()
         return True
 
     async def seed_default_rules(self) -> list[Rule]:
@@ -342,6 +350,8 @@ class RuleService:
         rule.is_enabled = not rule.is_enabled
         await self.db.commit()
         await self.db.refresh(rule)
+        clear_search_cache()
+        increment_rule_version()
         return rule
 
     async def get_all_size_limit_rules(self) -> list[Rule]:
@@ -388,6 +398,8 @@ class RuleService:
             rule.description = description
             await self.db.commit()
             await self.db.refresh(rule)
+            clear_search_cache()
+            increment_rule_version()
             return rule
 
         return await self.create_rule(
@@ -633,4 +645,6 @@ class RuleService:
         await self.db.commit()
         for rule in created:
             await self.db.refresh(rule)
+        clear_search_cache()
+        increment_rule_version()
         return created

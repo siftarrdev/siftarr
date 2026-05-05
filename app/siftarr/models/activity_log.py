@@ -28,6 +28,7 @@ class ActivityLog(Base):
     __table_args__ = (
         Index("ix_activity_logs_request_id", "request_id"),
         Index("ix_activity_logs_created_at", "created_at"),
+        Index("ix_activity_logs_event_type", "event_type"),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)

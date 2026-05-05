@@ -65,6 +65,9 @@ class Settings(BaseSettings):
 
     cache_static_assets: bool = True
 
+    # Search result caching (Prowlarr)
+    siftarr_disable_search_cache: bool = False
+
 
 @lru_cache
 def get_settings() -> Settings:

@@ -31,16 +31,20 @@ logger = logging.getLogger(__name__)
 async def build_rule_engine(
     db: AsyncSession,
     media_type: str,
+    cached_engine: RuleEngine | None = None,
 ) -> RuleEngine:
     """Load rules from the database and build a :class:`RuleEngine`.
 
     Args:
         db: Active database session.
         media_type: ``"movie"`` or ``"tv"`` — used to scope rules.
+        cached_engine: If provided, returned directly without a DB query.
 
     Returns:
         A configured :class:`RuleEngine`.
     """
+    if cached_engine is not None:
+        return cached_engine
     result = await db.execute(select(Rule))
     rules = list(result.scalars().all())
     return RuleEngine.from_db_rules(rules=rules, media_type=media_type)

@@ -7,6 +7,7 @@ import contextlib
 import logging
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
+from datetime import UTC, datetime, timedelta
 from typing import Protocol, TypeVar
 
 from sqlalchemy import select
@@ -111,6 +112,7 @@ class PlexPollingService:
         self.plex = plex
         self.lifecycle = LifecycleService(db)
         self._write_lock = asyncio.Lock()
+        self._reconcile_counter: int = 0
 
     async def get_active_requests(self) -> list[Request]:
         result = await self.db.execute(
@@ -120,8 +122,37 @@ class PlexPollingService:
         )
         return list(result.scalars().all())
 
-    async def poll(self, on_progress: ProgressCallback | None = None) -> int:
-        requests = await self.get_active_requests()
+    async def get_priority_requests(self) -> list[Request]:
+        """Return recently active requests for faster polling cycles.
+
+        Returns requests that are DOWNLOADING or were updated within the last 24 hours,
+        limited to 50 ordered by most recently updated.
+        """
+        cutoff = datetime.now(UTC) - timedelta(hours=24)
+        result = await self.db.execute(
+            select(Request)
+            .where(
+                Request.status.in_(NON_TERMINAL_STATUSES),
+                (Request.status == RequestStatus.DOWNLOADING) | (Request.updated_at >= cutoff),
+            )
+            .order_by(Request.updated_at.desc())
+            .limit(50)
+            .options(selectinload(Request.seasons).selectinload(Season.episodes))
+        )
+        return list(result.scalars().all())
+
+    async def poll(
+        self, on_progress: ProgressCallback | None = None, priority_only: bool = True
+    ) -> int:
+        if priority_only:
+            self._reconcile_counter += 1
+            if self._reconcile_counter >= 20:
+                self._reconcile_counter = 0
+                requests = await self.get_active_requests()
+            else:
+                requests = await self.get_priority_requests()
+        else:
+            requests = await self.get_active_requests()
         if not requests:
             return 0
 

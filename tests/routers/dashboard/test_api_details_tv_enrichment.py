@@ -52,6 +52,8 @@ async def test_request_details_serializes_unreleased_and_pending_tv_counts(
 
     request_result = MagicMock()
     request_result.scalar_one_or_none.return_value = request_record
+    count_result = MagicMock()
+    count_result.scalar.return_value = 0
     release_result = MagicMock()
     release_result.scalars.return_value.all.return_value = []
     rules_result = MagicMock()
@@ -62,6 +64,7 @@ async def test_request_details_serializes_unreleased_and_pending_tv_counts(
     episodes_result.scalars.return_value.all.return_value = [available_episode, future_episode]
     mock_db.execute.side_effect = [
         request_result,
+        count_result,
         release_result,
         rules_result,
         seasons_result,
@@ -142,6 +145,8 @@ async def test_request_details_flags_fresh_pending_tv_data_for_plex_enrichment(
 
     request_result = MagicMock()
     request_result.scalar_one_or_none.return_value = request_record
+    count_result = MagicMock()
+    count_result.scalar.return_value = 0
     release_result = MagicMock()
     release_result.scalars.return_value.all.return_value = []
     rules_result = MagicMock()
@@ -152,6 +157,7 @@ async def test_request_details_flags_fresh_pending_tv_data_for_plex_enrichment(
     episodes_result.scalars.return_value.all.return_value = [pending_episode, unreleased_episode]
     mock_db.execute.side_effect = [
         request_result,
+        count_result,
         release_result,
         rules_result,
         seasons_result,
@@ -239,6 +245,8 @@ async def test_request_details_flags_pending_unreleased_tv_data_for_plex_enrichm
 
     request_result = MagicMock()
     request_result.scalar_one_or_none.return_value = request_record
+    count_result = MagicMock()
+    count_result.scalar.return_value = 0
     release_result = MagicMock()
     release_result.scalars.return_value.all.return_value = []
     rules_result = MagicMock()
@@ -249,6 +257,7 @@ async def test_request_details_flags_pending_unreleased_tv_data_for_plex_enrichm
     episodes_result.scalars.return_value.all.return_value = [pending_episode, unreleased_episode]
     mock_db.execute.side_effect = [
         request_result,
+        count_result,
         release_result,
         rules_result,
         seasons_result,
@@ -331,6 +340,8 @@ async def test_request_details_surfaces_request_level_tv_aggregate_counts(
 
     request_result = MagicMock()
     request_result.scalar_one_or_none.return_value = request_record
+    count_result = MagicMock()
+    count_result.scalar.return_value = 0
     release_result = MagicMock()
     release_result.scalars.return_value.all.return_value = []
     rules_result = MagicMock()
@@ -345,6 +356,7 @@ async def test_request_details_surfaces_request_level_tv_aggregate_counts(
     ]
     mock_db.execute.side_effect = [
         request_result,
+        count_result,
         release_result,
         rules_result,
         seasons_result,

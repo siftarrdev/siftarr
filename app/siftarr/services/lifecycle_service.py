@@ -1,4 +1,5 @@
 import logging
+import time
 from datetime import UTC, datetime
 
 from sqlalchemy import and_, func, or_, select
@@ -23,6 +24,9 @@ class LifecycleService:
     - completed: Confirmed in qBittorrent
     - failed: Max retries exceeded or error
     """
+
+    _stats_cache: tuple[dict | None, float] = (None, 0.0)
+    _STATS_CACHE_TTL = 30  # seconds
 
     def __init__(self, db: AsyncSession):
         self.db = db
@@ -123,7 +127,15 @@ class LifecycleService:
         return list(result.scalars().all())
 
     async def get_requests_stats(self) -> dict:
-        """Get statistics about all requests using SQL aggregates."""
+        """Get statistics about all requests using SQL aggregates.
+
+        Results are cached in-memory for 30 seconds to avoid repeated
+        aggregate queries on every settings page load.
+        """
+        cached, timestamp = self.__class__._stats_cache
+        if cached is not None and time.monotonic() - timestamp < self.__class__._STATS_CACHE_TTL:
+            return cached
+
         result = await self.db.execute(
             select(Request.status, func.count()).group_by(Request.status)
         )
@@ -134,10 +146,12 @@ class LifecycleService:
             by_status[status.value] = count
             total += count
 
-        return {
+        stats = {
             "total": total,
             "by_status": by_status,
         }
+        self.__class__._stats_cache = (stats, time.monotonic())
+        return stats
 
     async def update_request_metadata(
         self,

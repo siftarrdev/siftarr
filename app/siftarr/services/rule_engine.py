@@ -4,7 +4,48 @@ from dataclasses import dataclass
 
 from app.siftarr.models.rule import TVTarget
 from app.siftarr.services.prowlarr_service import ProwlarrRelease
-from app.siftarr.services.release_parser import parse_release_coverage
+from app.siftarr.services.release_parser import cached_parse_release_coverage
+
+# ── Rule version (cache invalidation) ─────────────────────────────────
+
+_rule_version: int = 0
+
+# Centralised rule engine cache shared by all services.
+# Key is media_type ("movie" | "tv"), value is (engine, version_at_cache_time).
+_engine_cache: dict[str, tuple["RuleEngine", int]] = {}
+
+
+def get_rule_version() -> int:
+    """Return the current rule version.
+
+    Incrementing this version signals that in-memory :class:`RuleEngine`
+    caches should be rebuilt.
+    """
+    return _rule_version
+
+
+def increment_rule_version() -> None:
+    """Mark the rule set as changed so cached engines are invalidated."""
+    global _rule_version  # noqa: PLW0603
+    _rule_version += 1
+
+
+def get_cached_engine(media_type: str) -> "RuleEngine | None":
+    """Return a cached :class:`RuleEngine` for *media_type* if still fresh, or *None*."""
+    entry = _engine_cache.get(media_type)
+    if entry is not None and entry[1] == _rule_version:
+        return entry[0]
+    return None
+
+
+def set_cached_engine(media_type: str, engine: "RuleEngine") -> None:
+    """Store a :class:`RuleEngine` for *media_type* at the current rule version."""
+    _engine_cache[media_type] = (engine, _rule_version)
+
+
+def clear_engine_caches() -> None:
+    """Purge all cached rule engines (used in tests)."""
+    _engine_cache.clear()
 
 
 @dataclass
@@ -115,7 +156,7 @@ class RuleEngine:
 
     @staticmethod
     def _size_rule_applies_to_release(rule: SizeLimitRule, release: ProwlarrRelease) -> bool:
-        coverage = parse_release_coverage(release.title)
+        coverage = cached_parse_release_coverage(release.title)
         is_tv_release = bool(
             coverage.season_numbers
             or coverage.is_complete_series

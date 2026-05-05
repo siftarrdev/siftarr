@@ -3,7 +3,7 @@
 import enum
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, Float, Integer, String
+from sqlalchemy import Boolean, DateTime, Float, Index, Integer, String
 from sqlalchemy import Enum as SQLEnum
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -24,6 +24,10 @@ class TVTarget(enum.StrEnum):
 
 class Rule(Base):
     __tablename__ = "rules"
+    __table_args__ = (
+        Index("ix_rules_type", "rule_type"),
+        Index("ix_rules_enabled", "is_enabled"),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     name: Mapped[str] = mapped_column(String(255), nullable=False)

@@ -19,12 +19,13 @@ from app.siftarr.config import get_settings
 from app.siftarr.models.release import Release
 from app.siftarr.models.request import MediaType, Request, RequestStatus
 from app.siftarr.models.staged_torrent import StagedTorrent
+from app.siftarr.services.http_client import get_shared_client
 from app.siftarr.services.pending_queue_service import PendingQueueService
 from app.siftarr.services.prowlarr_service import ProwlarrRelease
 from app.siftarr.services.qbittorrent_service import MediaCategory, QbittorrentService
 from app.siftarr.services.release_parser import (
+    cached_parse_release_coverage,
     is_exact_single_episode_release,
-    parse_release_coverage,
 )
 from app.siftarr.services.release_storage import build_prowlarr_release
 
@@ -50,20 +51,20 @@ async def download_torrent(url: str, save_path: Path) -> bool:
     if not url.startswith("http"):
         return False
 
-    async with httpx.AsyncClient() as client:
-        try:
-            response = await client.get(url, timeout=60.0)
-            response.raise_for_status()
+    client = await get_shared_client()
+    try:
+        response = await client.get(url, timeout=60.0)
+        response.raise_for_status()
 
-            content = response.content
-            if not content.startswith(b"d8:"):
-                return False
-
-            with open(save_path, "wb") as f:
-                f.write(content)
-            return True
-        except (httpx.RequestError, httpx.HTTPStatusError):
+        content = response.content
+        if not content.startswith(b"d8:"):
             return False
+
+        with open(save_path, "wb") as f:
+            f.write(content)
+        return True
+    except (httpx.RequestError, httpx.HTTPStatusError):
+        return False
 
 
 def validate_torrent_file(path: Path) -> bool:
@@ -101,7 +102,7 @@ async def _get_active_staged_torrents(
 
 def _get_exact_single_episode_scope(title: str) -> tuple[int, int] | None:
     """Return exact episode scope for titles that target one TV episode."""
-    coverage = parse_release_coverage(title)
+    coverage = cached_parse_release_coverage(title)
     season_number = coverage.season_number
     episode_number = coverage.episode_number
     if season_number is None or episode_number is None:
@@ -297,11 +298,11 @@ class StagingService:
         STAGING_DIR.mkdir(parents=True, exist_ok=True)
 
         if release.download_url.startswith("http"):
-            async with httpx.AsyncClient() as client:
-                response = await client.get(release.download_url, timeout=60.0)
-                response.raise_for_status()
-                with open(torrent_path, "wb") as f:
-                    f.write(response.content)
+            client = await get_shared_client()
+            response = await client.get(release.download_url, timeout=60.0)
+            response.raise_for_status()
+            with open(torrent_path, "wb") as f:
+                f.write(response.content)
             logger.debug("Downloaded torrent file: %s", torrent_path)
         else:
             logger.debug("Using magnet URI (no torrent file download): %s", release.title)

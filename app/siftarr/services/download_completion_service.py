@@ -82,6 +82,18 @@ class DownloadCompletionService:
         logger.info("DownloadCompletionService: checking %d approved torrent(s)", len(rows))
 
         # 2 & 3. Determine per-torrent qBit progress and which are "done"
+        # Batch-fetch all qBittorrent torrents once for local matching
+        all_torrents = await self.qbittorrent.get_all_active_torrents()
+        by_hash: dict[str, dict[str, Any]] = {}
+        by_name: dict[str, dict[str, Any]] = {}
+        for t in all_torrents:
+            h = t.get("hash")
+            if h:
+                by_hash[h.lower()] = t
+            n = t.get("name")
+            if n:
+                by_name[n.lower()] = t
+
         done_torrent_ids: set[int] = set()
         qbit_evidence_by_torrent_id: dict[int, dict[str, Any]] = {}
         for torrent, _request in rows:
@@ -90,16 +102,19 @@ class DownloadCompletionService:
             progress: float | None = None
 
             if torrent_hash:
-                info = await self.qbittorrent.get_torrent_info(torrent_hash)
+                info = by_hash.get(torrent_hash.lower())
                 if info is not None:
                     progress = info.get("progress")
                 # If info is None, torrent not found in qBit → treat as done
             else:
-                info = await self.qbittorrent.get_torrent_info_by_name(torrent.title)
-                if info is not None:
+                title_lower = torrent.title.lower()
+                matched = next(
+                    (t for qname, t in by_name.items() if title_lower in qname),
+                    None,
+                )
+                if matched is not None:
+                    info = matched
                     progress = info.get("progress")
-                else:
-                    progress = await self.qbittorrent.get_torrent_progress_by_name(torrent.title)
 
             qbit_done = (progress is None) or (progress >= 1.0)
             qbit_evidence_by_torrent_id[torrent.id] = {

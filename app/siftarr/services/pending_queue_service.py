@@ -22,6 +22,7 @@ class PendingQueueService:
         request_id: int,
         retry_interval_hours: int = 24,
         error_message: str | None = None,
+        commit: bool = True,
     ) -> Request | None:
         """
         Add a request to the pending queue.
@@ -30,6 +31,7 @@ class PendingQueueService:
             request_id: The ID of the request to add
             retry_interval_hours: Hours until next retry attempt
             error_message: Optional error message from last attempt
+            commit: Whether to commit the transaction (caller may batch)
 
         Returns:
             The updated Request or None if not found
@@ -41,8 +43,9 @@ class PendingQueueService:
 
         request.next_retry_at = datetime.now(UTC) + timedelta(hours=retry_interval_hours)
         request.rejection_reason = error_message[:500] if error_message else None
-        await self.db.commit()
-        await self.db.refresh(request)
+        if commit:
+            await self.db.commit()
+            await self.db.refresh(request)
         return request
 
     async def get_by_request_id(self, request_id: int) -> Request | None:
@@ -78,11 +81,15 @@ class PendingQueueService:
         )
         return list(result.scalars().all())
 
-    async def remove_from_queue(self, request_id: int) -> bool:
+    async def remove_from_queue(self, request_id: int, commit: bool = True) -> bool:
         """
         Remove a request from the pending queue.
 
         Call this when a request has been successfully processed.
+
+        Args:
+            request_id: The request ID to remove
+            commit: Whether to commit the transaction (caller may batch)
         """
         result = await self.db.execute(select(Request).where(Request.id == request_id))
         request = result.scalar_one_or_none()
@@ -91,7 +98,8 @@ class PendingQueueService:
 
         request.next_retry_at = None
         request.retry_count = 0
-        await self.db.commit()
+        if commit:
+            await self.db.commit()
         return True
 
     async def mark_retry_failed(
@@ -99,6 +107,7 @@ class PendingQueueService:
         request_id: int,
         retry_interval_hours: int = 24,
         max_retries: int = 7,
+        commit: bool = True,
     ) -> tuple[bool, bool]:
         """
         Mark a retry as failed and check if max retries exceeded.
@@ -106,6 +115,7 @@ class PendingQueueService:
         Args:
             request_id: The request ID
             max_retries: Maximum number of retries before marking as failed
+            commit: Whether to commit the transaction (caller may batch)
 
         Returns:
             Tuple of (updated, max_exceeded)
@@ -125,15 +135,23 @@ class PendingQueueService:
             request.status = RequestStatus.FAILED
             request.next_retry_at = None
             request.retry_count = 0
-            await self.db.commit()
+            if commit:
+                await self.db.commit()
             return True, True
 
         request.next_retry_at = datetime.now(UTC) + timedelta(hours=retry_interval_hours)
-        await self.db.commit()
+        if commit:
+            await self.db.commit()
         return True, False
 
-    async def update_error(self, request_id: int, error_message: str) -> bool:
-        """Update the last error message for a pending item."""
+    async def update_error(self, request_id: int, error_message: str, commit: bool = True) -> bool:
+        """Update the last error message for a pending item.
+
+        Args:
+            request_id: The request ID
+            error_message: Error message to store
+            commit: Whether to commit the transaction (caller may batch)
+        """
         result = await self.db.execute(
             select(Request)
             .where(Request.id == request_id)
@@ -144,7 +162,8 @@ class PendingQueueService:
             return False
 
         request.rejection_reason = error_message[:500]
-        await self.db.commit()
+        if commit:
+            await self.db.commit()
         return True
 
     async def get_queue_stats(self) -> dict:
