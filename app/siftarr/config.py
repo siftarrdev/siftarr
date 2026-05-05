@@ -68,6 +68,15 @@ def get_settings() -> Settings:
     return Settings()
 
 
+def reload_settings() -> None:
+    """Invalidate the cached ``Settings`` singleton.
+
+    Call after modifying ``os.environ`` so the next caller of
+    :func:`get_settings` re-reads from the updated environment.
+    """
+    get_settings.cache_clear()
+
+
 def get_static_version(settings: Settings | None = None) -> str:
     """Return a cache-busting query-string value for static assets.
 

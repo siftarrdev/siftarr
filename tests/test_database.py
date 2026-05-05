@@ -95,6 +95,7 @@ class TestDatabaseModule:
                 CREATE TABLE releases (id INTEGER PRIMARY KEY);
                 CREATE TABLE seasons (id INTEGER PRIMARY KEY);
                 CREATE TABLE episodes (id INTEGER PRIMARY KEY);
+                CREATE TABLE app_settings (key VARCHAR(255) PRIMARY KEY, value TEXT NOT NULL DEFAULT '', updated_at DATETIME NOT NULL);
                 """
             )
             connection.commit()

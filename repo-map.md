@@ -82,8 +82,10 @@ The old duplicated developer guide and stale product specification under `docs/`
 
 ### `app/siftarr/config.py`
 
-- application settings loading
-- environment and runtime configuration access
+- `Settings` Pydantic model loaded from environment variables
+- `get_settings()` — cached singleton accessor
+- `reload_settings()` — invalidates the cached singleton (called after runtime setting changes)
+- `get_static_version()` — cache-busting value for static assets
 
 ### `app/siftarr/version.py`
 
@@ -105,6 +107,7 @@ Database entities and enums.
 - `season.py` / `episode.py` — TV coverage and availability tracking
 - `staged_torrent.py` — staged torrent persistence
 - `activity_log.py` — activity/audit history
+- `app_setting.py` — key-value store for runtime-configurable settings (persisted across restarts)
 - `_base.py` — declarative base
 
 ### `app/siftarr/routers/`
@@ -116,7 +119,7 @@ HTTP route layer.
 - `dashboard_actions.py` — dashboard-triggered actions and mutations
 - `search_sse.py` — SSE streaming endpoints for live search progress and TV inspect results
 - `rules.py` — rule management UI/API, including unified rule listing, multi-title testing, modal import/export, and create/edit actions
-- `settings.py` — settings UI, maintenance, jobs, and connection actions
+- `settings.py` — settings UI (connection test/save/reset, staging toggle, Plex rescan, Overseerr sync, cache/reseed actions, SSE progress streams), uses SettingsStore for DB-backed persistence
 - `staged.py` — staged torrent review/approval endpoints
 - `webhooks.py` — inbound webhook handling
 
@@ -125,7 +128,7 @@ HTTP route layer.
 Business logic and integrations.
 
 - `dashboard_service.py` — dashboard-oriented data loading and DTO assembly
-- `settings_service.py` — settings persistence, maintenance, connection, and job helpers
+- `settings_service.py` — SettingsStore (DB-backed settings persistence), SSE progress, scheduled job helpers, Plex rescan/Overseerr import orchestration
 - `request_service.py` — request creation/update orchestration
 - `rule_service.py` — CRUD/order logic for rules
 - `rule_engine.py` — release filtering and scoring evaluation

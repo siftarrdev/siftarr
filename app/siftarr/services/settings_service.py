@@ -4,16 +4,153 @@ import asyncio
 import contextlib
 import json
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any
 
+from sqlalchemy import delete as sa_delete
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.siftarr.config import Settings, get_settings
+from app.siftarr.models.app_setting import AppSetting
 from app.siftarr.models.request import MediaType, RequestStatus
 from app.siftarr.models.request import Request as RequestModel
 from app.siftarr.services.pending_queue_service import PendingQueueService
+
+# ── Runtime-to-environment key mapping ────────────────────────────────────
+
+ENV_KEY_MAP: dict[str, str] = {
+    "overseerr_url": "OVERSEERR_URL",
+    "overseerr_api_key": "OVERSEERR_API_KEY",
+    "prowlarr_url": "PROWLARR_URL",
+    "prowlarr_api_key": "PROWLARR_API_KEY",
+    "qbittorrent_url": "QBITTORRENT_URL",
+    "qbittorrent_username": "QBITTORRENT_USERNAME",
+    "qbittorrent_password": "QBITTORRENT_PASSWORD",
+    "plex_url": "PLEX_URL",
+    "plex_token": "PLEX_TOKEN",
+    "tz": "TZ",
+    "staging_mode_enabled": "STAGING_MODE_ENABLED",
+}
+
+# Keys that are persisted and used as runtime connection/scheduling settings.
+SETTINGS_KEYS = frozenset(ENV_KEY_MAP)
+
+
+class SettingsStore:
+    """Key-value settings persistence backed by the ``app_settings`` table.
+
+    Writes go to the database so they survive restarts.  Reads merge
+    DB-stored values on top of environment-variable defaults, with env
+    vars taking precedence for any key not present in the DB.
+
+    Usage (inside an async request handler)::
+
+        store = SettingsStore(db)
+        await store.set("overseerr_url", "http://…")
+        value = await store.get("overseerr_url")
+        all_settings = await store.get_effective_dict()
+    """
+
+    def __init__(self, db: AsyncSession) -> None:
+        self.db = db
+
+    async def get(self, key: str) -> str | None:
+        """Return the DB-stored value for *key*, or ``None``."""
+        result = await self.db.execute(select(AppSetting).where(AppSetting.key == key))
+        setting = result.scalar_one_or_none()
+        if setting is not None:
+            return str(setting.value)
+        return None
+
+    async def set(self, key: str, value: str) -> None:
+        """Upsert a single setting.
+
+        If *value* is empty the row is **not** deleted — callers that wish
+        to clear a setting should invoke :meth:`delete` explicitly.
+        """
+        result = await self.db.execute(select(AppSetting).where(AppSetting.key == key))
+        setting = result.scalar_one_or_none()
+        if setting is not None:
+            setting.value = value
+            setting.updated_at = datetime.now(UTC)
+        else:
+            self.db.add(AppSetting(key=key, value=value, updated_at=datetime.now(UTC)))
+
+    async def delete(self, *keys: str) -> None:
+        """Remove one or more settings from the database."""
+        if not keys:
+            return
+        await self.db.execute(sa_delete(AppSetting).where(AppSetting.key.in_(keys)))
+
+    async def get_all(self) -> dict[str, str]:
+        """Return **all** DB-stored settings as a plain dict."""
+        result = await self.db.execute(select(AppSetting))
+        rows = result.scalars().all()
+        return {str(row.key): str(row.value) for row in rows}
+
+    async def get_effective_dict(self) -> dict[str, Any]:
+        """Build a flat dict of effective settings.
+
+        DB-stored values override env-var defaults.  The returned dict
+        contains **every** key in :data:`SETTINGS_KEYS` so callers always
+        get a complete payload.
+        """
+        env_settings = get_settings()
+        base: dict[str, Any] = {
+            "overseerr_url": str(env_settings.overseerr_url or ""),
+            "overseerr_api_key": str(env_settings.overseerr_api_key or ""),
+            "prowlarr_url": str(env_settings.prowlarr_url or ""),
+            "prowlarr_api_key": str(env_settings.prowlarr_api_key or ""),
+            "qbittorrent_url": str(env_settings.qbittorrent_url or ""),
+            "qbittorrent_username": env_settings.qbittorrent_username,
+            "qbittorrent_password": env_settings.qbittorrent_password,
+            "plex_url": str(env_settings.plex_url or ""),
+            "plex_token": env_settings.plex_token or "",
+            "tz": env_settings.tz,
+        }
+        db_overrides = await self.get_all()
+        for key, value in db_overrides.items():
+            if key in base and value:
+                base[key] = value
+        return base
+
+    async def load_into_environ(self, clear_existing: bool = True) -> None:
+        """Load all DB-stored settings into ``os.environ``.
+
+        Call this once at startup so services that read from
+        ``os.environ`` / :func:`get_settings` see the persisted
+        values.  When *clear_existing* is ``True`` environment variables
+        for **all** known keys are removed first, so deleted DB rows
+        properly fall back to the image-level default.
+        """
+        import os
+
+        if clear_existing:
+            for env_name in ENV_KEY_MAP.values():
+                os.environ.pop(env_name, None)
+
+        db_values = await self.get_all()
+        for key, value in db_values.items():
+            env_name = ENV_KEY_MAP.get(key, key.upper())
+            if value:
+                os.environ[env_name] = value
+
+        # Invalidate the cached Settings singleton so the next caller of
+        # get_settings() re-reads from the updated environ.
+        get_settings.cache_clear()
+
+
+def _coerce_setting_type(current: Any, raw: str) -> Any:
+    """Coerce a string *raw* value to match the type of *current*."""
+    if isinstance(current, bool):
+        return raw.lower() in ("true", "1", "yes")
+    if isinstance(current, int):
+        try:
+            return int(raw)
+        except (ValueError, TypeError):
+            return current
+    return raw
 
 
 async def build_effective_settings() -> dict[str, Any]:
@@ -46,9 +183,19 @@ async def build_settings_page_context(
     request_model,
     request_status_enum,
     build_plex_job_statuses_func,
+    effective_settings_override: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """Build the shared context required by the settings page."""
-    effective_settings = await build_effective_settings()
+    """Build the shared context required by the settings page.
+
+    When *effective_settings_override* is provided it is used directly
+    instead of calling :func:`build_effective_settings`.  Callers that
+    already have a merged dict (e.g. from :class:`SettingsStore`) should
+    pass it here to avoid a redundant round-trip.
+    """
+    if effective_settings_override is not None:
+        effective_settings = effective_settings_override
+    else:
+        effective_settings = await build_effective_settings()
 
     staging_enabled = get_settings().staging_mode_enabled
 

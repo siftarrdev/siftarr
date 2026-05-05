@@ -2,6 +2,7 @@
 
 from app.siftarr.models._base import Base
 from app.siftarr.models.activity_log import ActivityLog, EventType
+from app.siftarr.models.app_setting import AppSetting
 from app.siftarr.models.episode import Episode
 from app.siftarr.models.release import Release
 from app.siftarr.models.request import MediaType, Request, RequestStatus
@@ -11,6 +12,7 @@ from app.siftarr.models.staged_torrent import StagedTorrent
 
 __all__ = [
     "ActivityLog",
+    "AppSetting",
     "Base",
     "Episode",
     "EventType",

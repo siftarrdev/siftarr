@@ -2,7 +2,7 @@
 
 import os
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock, call
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -14,8 +14,8 @@ from app.siftarr.services.connection_tester import ConnectionTestResult
 async def test_save_connections_persists_values_and_redirects(monkeypatch, mock_db):
     """Saving connection settings should write each field and redirect back."""
 
-    set_db_setting = AsyncMock()
-    monkeypatch.setattr(settings, "_set_db_setting", set_db_setting)
+    set_runtime = AsyncMock()
+    monkeypatch.setattr(settings, "_apply_runtime_setting", set_runtime)
 
     response = await settings.save_connections(
         MagicMock(),
@@ -32,17 +32,19 @@ async def test_save_connections_persists_values_and_redirects(monkeypatch, mock_
         tz="America/New_York",
     )
 
-    assert set_db_setting.await_args_list == [
-        call(mock_db, "overseerr_url", "https://overseerr", "Overseerr URL"),
-        call(mock_db, "overseerr_api_key", "ov-key", "Overseerr API key"),
-        call(mock_db, "prowlarr_url", "https://prowlarr", "Prowlarr URL"),
-        call(mock_db, "prowlarr_api_key", "pr-key", "Prowlarr API key"),
-        call(mock_db, "qbittorrent_url", "https://qb", "qBittorrent URL"),
-        call(mock_db, "qbittorrent_username", "qb-user", "qBittorrent username"),
-        call(mock_db, "qbittorrent_password", "qb-pass", "qBittorrent password"),
-        call(mock_db, "plex_url", "https://plex", "Plex URL"),
-        call(mock_db, "plex_token", "plex-token", "Plex token"),
-        call(mock_db, "tz", "America/New_York", "Timezone"),
+    # Verify each key was persisted — ignore the store instance identity
+    saved_pairs = [(c.args[1], c.args[2]) for c in set_runtime.await_args_list]
+    assert saved_pairs == [
+        ("overseerr_url", "https://overseerr"),
+        ("overseerr_api_key", "ov-key"),
+        ("prowlarr_url", "https://prowlarr"),
+        ("prowlarr_api_key", "pr-key"),
+        ("qbittorrent_url", "https://qb"),
+        ("qbittorrent_username", "qb-user"),
+        ("qbittorrent_password", "qb-pass"),
+        ("plex_url", "https://plex"),
+        ("plex_token", "plex-token"),
+        ("tz", "America/New_York"),
     ]
     mock_db.commit.assert_awaited_once()
     assert response.status_code == 303
@@ -53,45 +55,45 @@ async def test_save_connections_persists_values_and_redirects(monkeypatch, mock_
 async def test_save_connections_skips_timezone_when_not_provided(monkeypatch, mock_db):
     """Saving connections should leave timezone untouched when omitted."""
 
-    set_db_setting = AsyncMock()
-    monkeypatch.setattr(settings, "_set_db_setting", set_db_setting)
+    set_runtime = AsyncMock()
+    monkeypatch.setattr(settings, "_apply_runtime_setting", set_runtime)
 
     await settings.save_connections(MagicMock(), db=mock_db, tz=None)
 
-    saved_keys = [saved_call.args[1] for saved_call in set_db_setting.await_args_list]
+    saved_keys = [saved_call.args[1] for saved_call in set_runtime.await_args_list]
     assert "tz" not in saved_keys
     mock_db.commit.assert_awaited_once()
 
 
 @pytest.mark.asyncio
-async def test_reset_connections_redirects_back_to_settings():
+async def test_reset_connections_redirects_back_to_settings(monkeypatch, mock_db):
     """Reset route should clear runtime overrides and preserve redirect behavior."""
 
-    settings.get_settings.cache_clear()
-    os.environ["OVERSEERR_URL"] = "https://overseerr"
-    os.environ["PLEX_TOKEN"] = "plex-token"
-    os.environ["TZ"] = "America/New_York"
+    clear_runtime = AsyncMock()
+    monkeypatch.setattr(settings, "_clear_runtime_settings", clear_runtime)
 
-    response = await settings.reset_connections(MagicMock())
+    response = await settings.reset_connections(MagicMock(), db=mock_db)
 
-    assert "OVERSEERR_URL" not in os.environ
-    assert "PLEX_TOKEN" not in os.environ
-    assert "TZ" not in os.environ
+    clear_runtime.assert_awaited_once()
+    mock_db.commit.assert_awaited_once()
     assert response.status_code == 303
     assert response.headers["location"] == "/settings?reset=true"
-    settings.get_settings.cache_clear()
 
 
 @pytest.mark.asyncio
-async def test_set_db_setting_updates_runtime_env_and_clears_cache(monkeypatch):
-    """Compatibility settings writes should update runtime env-backed settings."""
+async def test_apply_runtime_setting_updates_env_and_clears_cache(monkeypatch):
+    """Runtime setting writes should update env and refresh the cache."""
 
     cache_clear = MagicMock()
-    monkeypatch.setattr(settings.get_settings, "cache_clear", cache_clear)
+    monkeypatch.setattr(settings, "reload_settings", cache_clear)
     monkeypatch.delenv("OVERSEERR_URL", raising=False)
 
-    await settings._set_db_setting(MagicMock(), "overseerr_url", "https://overseerr")
+    store = MagicMock()
+    store.set = AsyncMock()
 
+    await settings._apply_runtime_setting(store, "overseerr_url", "https://overseerr")
+
+    store.set.assert_awaited_once_with("overseerr_url", "https://overseerr")
     assert os.environ["OVERSEERR_URL"] == "https://overseerr"
     cache_clear.assert_called_once_with()
 
@@ -100,8 +102,8 @@ async def test_set_db_setting_updates_runtime_env_and_clears_cache(monkeypatch):
 async def test_toggle_staging_mode_flips_runtime_setting(monkeypatch, mock_db):
     """Staging mode toggle should write the inverted runtime setting value."""
 
-    set_db_setting = AsyncMock()
-    monkeypatch.setattr(settings, "_set_db_setting", set_db_setting)
+    set_runtime = AsyncMock()
+    monkeypatch.setattr(settings, "_apply_runtime_setting", set_runtime)
     monkeypatch.setattr(
         settings,
         "get_settings",
@@ -110,7 +112,10 @@ async def test_toggle_staging_mode_flips_runtime_setting(monkeypatch, mock_db):
 
     response = await settings.toggle_staging_mode(db=mock_db)
 
-    set_db_setting.assert_awaited_once_with(None, "staging_mode_enabled", "false")
+    # Verify key/value, ignore store instance identity
+    assert set_runtime.await_args_list[0].args[1] == "staging_mode_enabled"
+    assert set_runtime.await_args_list[0].args[2] == "false"
+    mock_db.commit.assert_awaited_once()
     assert response.status_code == 303
     assert response.headers["location"] == "/settings"
 
@@ -119,24 +124,22 @@ async def test_toggle_staging_mode_flips_runtime_setting(monkeypatch, mock_db):
 async def test_get_connections_api_returns_effective_connection_settings(monkeypatch, mock_db):
     """Connections API should expose the effective settings subset."""
 
-    monkeypatch.setattr(
-        settings,
-        "_build_effective_settings",
-        AsyncMock(
-            return_value={
-                "overseerr_url": "https://overseerr",
-                "overseerr_api_key": "ov-key",
-                "prowlarr_url": "https://prowlarr",
-                "prowlarr_api_key": "pr-key",
-                "qbittorrent_url": "https://qb",
-                "qbittorrent_username": "qb-user",
-                "qbittorrent_password": "qb-pass",
-                "plex_url": "https://plex",
-                "plex_token": "plex-token",
-                "tz": "UTC",
-            }
-        ),
-    )
+    # Mock SettingsStore.get_effective_dict to return test data
+    expected = {
+        "overseerr_url": "https://overseerr",
+        "overseerr_api_key": "ov-key",
+        "prowlarr_url": "https://prowlarr",
+        "prowlarr_api_key": "pr-key",
+        "qbittorrent_url": "https://qb",
+        "qbittorrent_username": "qb-user",
+        "qbittorrent_password": "qb-pass",
+        "plex_url": "https://plex",
+        "plex_token": "plex-token",
+        "tz": "UTC",
+    }
+    store = AsyncMock()
+    store.get_effective_dict.return_value = expected
+    monkeypatch.setattr(settings, "SettingsStore", lambda db: store)
 
     payload = await settings.get_connections_api(db=mock_db)
 
@@ -168,16 +171,14 @@ async def test_individual_connection_test_routes_return_service_results(
     """Each connection test route should wrap its service result consistently."""
 
     effective_settings = MagicMock()
-    build_effective_settings_obj = AsyncMock(return_value=effective_settings)
+    monkeypatch.setattr(settings, "get_settings", lambda: effective_settings)
     tester = AsyncMock(
         return_value=ConnectionTestResult(True, f"{service_name} ok", details="detail")
     )
-    monkeypatch.setattr(settings, "_build_effective_settings_obj", build_effective_settings_obj)
     monkeypatch.setattr(settings.ConnectionTester, tester_name, tester)
 
     response = await getattr(settings, route_name)(db=mock_db)
 
-    build_effective_settings_obj.assert_awaited_once_with(mock_db)
     tester.assert_awaited_once_with(effective_settings)
     assert response.service == service_name
     assert response.success is True
@@ -190,13 +191,12 @@ async def test_test_all_connections_runs_each_tester_in_order(monkeypatch, mock_
     """Bulk connection testing should reuse one settings object and preserve service order."""
 
     effective_settings = MagicMock()
-    build_effective_settings_obj = AsyncMock(return_value=effective_settings)
+    monkeypatch.setattr(settings, "get_settings", lambda: effective_settings)
     overseerr = AsyncMock(return_value=ConnectionTestResult(True, "overseerr ok", "ov"))
     prowlarr = AsyncMock(return_value=ConnectionTestResult(False, "prowlarr bad", "pr"))
     qbittorrent = AsyncMock(return_value=ConnectionTestResult(True, "qb ok", "qb"))
     plex = AsyncMock(return_value=ConnectionTestResult(True, "plex ok", None))
 
-    monkeypatch.setattr(settings, "_build_effective_settings_obj", build_effective_settings_obj)
     monkeypatch.setattr(settings.ConnectionTester, "test_overseerr", overseerr)
     monkeypatch.setattr(settings.ConnectionTester, "test_prowlarr", prowlarr)
     monkeypatch.setattr(settings.ConnectionTester, "test_qbittorrent", qbittorrent)
@@ -204,7 +204,6 @@ async def test_test_all_connections_runs_each_tester_in_order(monkeypatch, mock_
 
     response = await settings.test_all_connections(db=mock_db)
 
-    build_effective_settings_obj.assert_awaited_once_with(mock_db)
     overseerr.assert_awaited_once_with(effective_settings)
     prowlarr.assert_awaited_once_with(effective_settings)
     qbittorrent.assert_awaited_once_with(effective_settings)
