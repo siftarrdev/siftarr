@@ -13,7 +13,7 @@ from app.siftarr.models.request import Request, RequestStatus
 from app.siftarr.models.season import Season
 from app.siftarr.services.async_utils import gather_limited
 from app.siftarr.services.overseerr_service import OverseerrService
-from app.siftarr.services.plex_service import PlexLookupResult, PlexService
+from app.siftarr.services.plex_service import PlexService
 
 logger = logging.getLogger(__name__)
 
@@ -87,6 +87,50 @@ def _derive_request_status_from_seasons(seasons: list[Season]) -> RequestStatus:
     return RequestStatus.PENDING
 
 
+async def _load_season_episodes(db: AsyncSession, season: Season) -> list[Episode]:
+    """Load episodes for a season via explicit async query (avoids lazy-load in async context)."""
+    loaded_episodes = getattr(season, "__dict__", {}).get("episodes")
+    if loaded_episodes is not None:
+        return list(loaded_episodes)
+
+    episodes_result = await db.execute(select(Episode).where(Episode.season_id == season.id))
+    return list(episodes_result.scalars().all())
+
+
+async def persist_episode_availability(
+    db: AsyncSession,
+    request: Request,
+    seasons: list[Season],
+    availability: dict[tuple[int, int], bool],
+) -> list[Season]:
+    """Persist Plex episode availability for a request's seasons and episodes.
+
+    Sets per-episode status based on Plex availability, derives aggregate
+    season/request statuses, and commits the transaction.
+    """
+    request_episodes: list[Episode] = []
+    for season in seasons:
+        episodes = sorted(
+            await _load_season_episodes(db, season),
+            key=lambda episode: episode.episode_number,
+        )
+        request_episodes.extend(episodes)
+
+        for episode in episodes:
+            is_on_plex = availability.get((season.season_number, episode.episode_number), False)
+            episode.status = _derive_episode_status(
+                is_on_plex=is_on_plex,
+                air_date=episode.air_date,
+            )
+
+        await db.flush()
+        season.status = _derive_season_status(episodes)
+
+    request.status = _derive_request_status_from_episodes(request_episodes)
+    await db.commit()
+    return seasons
+
+
 class EpisodeSyncService:
     """Sync seasons and episodes from Overseerr into local DB, with per-episode Plex availability."""
 
@@ -126,27 +170,7 @@ class EpisodeSyncService:
         availability: dict[tuple[int, int], bool],
     ) -> list[Season]:
         """Persist season/request aggregates from authoritative Plex availability."""
-        request_episodes: list[Episode] = []
-        for season in seasons:
-            episodes = sorted(
-                await self._load_season_episodes(season),
-                key=lambda episode: episode.episode_number,
-            )
-            request_episodes.extend(episodes)
-
-            for episode in episodes:
-                is_on_plex = availability.get((season.season_number, episode.episode_number), False)
-                episode.status = _derive_episode_status(
-                    is_on_plex=is_on_plex,
-                    air_date=episode.air_date,
-                )
-
-            await self.db.flush()
-            season.status = _derive_season_status(episodes)
-
-        await self._update_request_status(request, request_episodes)
-        await self.db.commit()
-        return seasons
+        return await persist_episode_availability(self.db, request, seasons, availability)
 
     async def reconcile_existing_seasons_from_plex(
         self,
@@ -343,9 +367,8 @@ class EpisodeSyncService:
     async def _resolve_plex_rating_key(self, request: Request) -> tuple[str | None, bool]:
         """Try to find and persist the Plex rating key for a request.
 
-        Looks up the show by TMDB ID, then TVDB ID, then falls back to
-        title search. Saves the result on the request so future syncs
-        skip the lookup.
+        Delegates to PlexService which handles TMDB → TVDB → title search.
+        Saves the result on the request so future syncs skip the lookup.
         """
         if self._plex is None:
             return None, True
@@ -353,52 +376,11 @@ class EpisodeSyncService:
         if request.plex_rating_key:
             return request.plex_rating_key, True
 
-        rating_key: str | None = None
-        authoritative = True
-
-        def resolve_lookup(result: PlexLookupResult | None) -> str | None:
-            if result is None:
-                return None
-            if result.item is None:
-                return None
-            raw_rating_key = result.item.get("rating_key")
-            return str(raw_rating_key) if raw_rating_key else None
-
-        if request.tmdb_id:
-            result = await self._plex.lookup_show_by_tmdb(request.tmdb_id)
-            rating_key = resolve_lookup(result)
-            authoritative = authoritative and result.authoritative
-            if not result.authoritative and not rating_key:
-                return None, False
-            if rating_key:
-                logger.info(
-                    "EpisodeSyncService: resolved Plex rating key via TMDB ID %s: %s",
-                    request.tmdb_id,
-                    rating_key,
-                )
-
-        if not rating_key and request.tvdb_id:
-            result = await self._plex.lookup_show_by_tvdb(request.tvdb_id)
-            rating_key = resolve_lookup(result)
-            authoritative = authoritative and result.authoritative
-            if not result.authoritative and not rating_key:
-                return None, False
-            if rating_key:
-                logger.info(
-                    "EpisodeSyncService: resolved Plex rating key via TVDB ID %s: %s",
-                    request.tvdb_id,
-                    rating_key,
-                )
-
-        if not rating_key and authoritative and request.title:
-            results = await self._plex.search_show(request.title)
-            if results:
-                rating_key = str(results[0]["rating_key"])
-                logger.info(
-                    "EpisodeSyncService: resolved Plex rating key via title search (%s): %s",
-                    request.title,
-                    rating_key,
-                )
+        rating_key, authoritative = await self._plex.resolve_show_rating_key(
+            tmdb_id=request.tmdb_id,
+            tvdb_id=request.tvdb_id,
+            title=request.title,
+        )
 
         if rating_key:
             request.plex_rating_key = rating_key
@@ -410,7 +392,6 @@ class EpisodeSyncService:
                 request.title,
             )
         else:
-            # Not a warning - show simply doesn't exist in Plex yet (expected for new requests)
             logger.debug(
                 "EpisodeSyncService: could not resolve Plex rating key for request %s "
                 "(tmdb_id=%s, tvdb_id=%s, title=%s) - show not in Plex yet",
@@ -421,17 +402,6 @@ class EpisodeSyncService:
             )
 
         return rating_key, authoritative
-
-    async def _load_season_episodes(self, season: Season) -> list[Episode]:
-        """Load episodes for a season via explicit async query (avoids lazy-load in async context)."""
-        loaded_episodes = getattr(season, "__dict__", {}).get("episodes")
-        if loaded_episodes is not None:
-            return list(loaded_episodes)
-
-        episodes_result = await self.db.execute(
-            select(Episode).where(Episode.season_id == season.id)
-        )
-        return list(episodes_result.scalars().all())
 
     async def _apply_plex_availability(
         self, request: Request, seasons: list[Season]

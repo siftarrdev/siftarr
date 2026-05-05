@@ -15,7 +15,7 @@ from app.siftarr.models.request import Request as RequestModel
 from app.siftarr.models.season import Season
 from app.siftarr.routers import settings
 from app.siftarr.services import settings_service
-from app.siftarr.services.plex_service import PlexLookupResult, PlexService
+from app.siftarr.services.plex_service import PlexService
 
 
 def _parse_sse_events(chunks: list[str]) -> list[dict[str, Any]]:
@@ -1170,9 +1170,7 @@ async def test_sync_overseerr_fresh_tv_import_bounds_work_and_preserves_state_on
     monkeypatch.setattr(settings, "evaluate_imported_request", AsyncMock(return_value=None))
 
     plex_service = PlexService(settings=runtime_settings)
-    lookup_show_by_tmdb = AsyncMock(
-        return_value=PlexLookupResult(item={"rating_key": "show-123"}, authoritative=True)
-    )
+    resolve_show_rating_key_mock = AsyncMock(return_value=("show-123", True))
     season_1_started = asyncio.Event()
     season_1_cancelled = asyncio.Event()
     season_3_started = asyncio.Event()
@@ -1220,7 +1218,7 @@ async def test_sync_overseerr_fresh_tv_import_bounds_work_and_preserves_state_on
 
     mock_client = AsyncMock()
     mock_client.get.side_effect = plex_get
-    monkeypatch.setattr(plex_service, "lookup_show_by_tmdb", lookup_show_by_tmdb)
+    monkeypatch.setattr(plex_service, "resolve_show_rating_key", resolve_show_rating_key_mock)
     monkeypatch.setattr(plex_service, "_get_client", AsyncMock(return_value=mock_client))
     monkeypatch.setattr(settings, "PlexService", lambda settings: plex_service)
 
@@ -1230,7 +1228,7 @@ async def test_sync_overseerr_fresh_tv_import_bounds_work_and_preserves_state_on
     assert response_context["message_type"] == "success"
     assert response_context["message"] == "Synced 1 new request(s) from Overseerr"
     assert fake_overseerr.season_detail_calls == [1, 2, 3]
-    lookup_show_by_tmdb.assert_awaited_once_with(2)
+    resolve_show_rating_key_mock.assert_awaited_once()
     await asyncio.wait_for(season_1_started.wait(), timeout=1)
     await asyncio.wait_for(season_1_cancelled.wait(), timeout=1)
     assert plex_call_keys == ["show-123", "season-1", "season-2"]

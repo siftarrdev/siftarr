@@ -17,7 +17,7 @@ from app.siftarr.config import get_settings
 from app.siftarr.models.request import MediaType, Request, RequestStatus
 from app.siftarr.models.season import Season
 from app.siftarr.services.async_utils import gather_limited
-from app.siftarr.services.episode_sync_service import EpisodeSyncService
+from app.siftarr.services.episode_sync_service import persist_episode_availability
 from app.siftarr.services.lifecycle_service import LifecycleService
 from app.siftarr.services.plex_service import PlexService, PlexTransientScanError
 
@@ -110,7 +110,6 @@ class PlexPollingService:
         self.db = db
         self.plex = plex
         self.lifecycle = LifecycleService(db)
-        self.episode_sync = EpisodeSyncService(db, plex=plex)
         self._write_lock = asyncio.Lock()
 
     async def get_active_requests(self) -> list[Request]:
@@ -563,7 +562,8 @@ class PlexPollingService:
 
     async def _apply_decision(self, req: Request, decision: _PollDecision) -> None:
         if req.media_type == MediaType.TV and decision.availability is not None:
-            await self.episode_sync.reconcile_existing_seasons_from_plex(
+            await persist_episode_availability(
+                self.db,
                 req,
                 req.seasons,
                 decision.availability,
