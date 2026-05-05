@@ -125,7 +125,7 @@ class TestDatabaseLifespan:
         with (
             patch("app.siftarr.main.get_settings", return_value=settings),
             patch("app.siftarr.main._ensure_db_directory"),
-            patch("app.siftarr.main.init_db", init_db),
+            patch("app.siftarr.database.init_db", init_db),
             patch("app.siftarr.main.SchedulerService", return_value=scheduler) as scheduler_cls,
             patch("app.siftarr.main.close_shared_client", AsyncMock()),
         ):
@@ -154,7 +154,7 @@ class TestDatabaseLifespan:
             patch("app.siftarr.main.get_settings", return_value=settings),
             patch("app.siftarr.main._ensure_db_directory"),
             patch(
-                "app.siftarr.main.init_db",
+                "app.siftarr.database.init_db",
                 AsyncMock(side_effect=RuntimeError("db not ready")),
             ),
             patch("app.siftarr.main.SchedulerService") as scheduler_cls,

@@ -167,8 +167,9 @@ def _coerce_setting_type(current: Any, raw: str) -> Any:
     return raw
 
 
-async def build_effective_settings() -> dict[str, Any]:
+async def build_effective_settings(db: AsyncSession | None = None) -> dict[str, Any]:
     """Build the effective flattened settings payload (secrets masked)."""
+    del db
     effective = get_settings()
     return {
         "overseerr_url": str(effective.overseerr_url or ""),
@@ -1070,6 +1071,10 @@ async def sync_overseerr_generator(
     import_overseerr_requests_func,
     build_sse_progress_func,
     logger,
+    overseerr_service_cls=None,
+    plex_service_cls=None,
+    evaluate_imported_request_func=None,
+    prepare_overseerr_import_func=None,
 ):
     """Yield SSE events for Overseerr sync progress."""
     try:
@@ -1094,8 +1099,21 @@ async def sync_overseerr_generator(
             async def emit(payload: dict[str, Any]) -> None:
                 await queue.put(payload)
 
+            # Collect kwargs that the import function may require
+            import_kwargs: dict[str, Any] = {"on_event": emit}
+            if overseerr_service_cls is not None:
+                import_kwargs["overseerr_service_cls"] = overseerr_service_cls
+            if plex_service_cls is not None:
+                import_kwargs["plex_service_cls"] = plex_service_cls
+            if evaluate_imported_request_func is not None:
+                import_kwargs["evaluate_imported_request_func"] = evaluate_imported_request_func
+            if prepare_overseerr_import_func is not None:
+                import_kwargs["prepare_overseerr_import_func"] = prepare_overseerr_import_func
+            if logger is not None:
+                import_kwargs["logger"] = logger
+
             task = asyncio.create_task(
-                import_overseerr_requests_func(db, runtime_settings, on_event=emit)
+                import_overseerr_requests_func(db, runtime_settings, **import_kwargs)
             )
             get_task = asyncio.create_task(queue.get())
 

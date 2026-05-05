@@ -7,8 +7,9 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.siftarr import database as db_mod
 from app.siftarr.config import get_settings
-from app.siftarr.database import async_session_maker, get_db, init_engine
+from app.siftarr.database import get_db, init_engine
 from app.siftarr.models import MediaType, Request, RequestStatus
 from app.siftarr.services.episode_sync_service import EpisodeSyncService
 from app.siftarr.services.media_helpers import extract_media_title_and_year
@@ -148,10 +149,10 @@ async def process_request_background(request_id: int) -> None:
     Args:
         request_id: The ID of the request to process.
     """
-    if async_session_maker is None:
+    if db_mod.async_session_maker is None:
         init_engine()
-    assert async_session_maker is not None
-    async with async_session_maker() as db:
+    assert db_mod.async_session_maker is not None
+    async with db_mod.async_session_maker() as db:
         try:
             result = await db.execute(select(Request).where(Request.id == request_id))
             request = result.scalar_one_or_none()

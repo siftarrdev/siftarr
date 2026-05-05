@@ -24,6 +24,10 @@ fi
 export SIFTARR_DB_PATH="$DB_PATH"
 
 printf '[entrypoint] preparing sqlite database at %s\n' "$SIFTARR_DB_PATH"
-runuser -u appuser -- /app/.venv/bin/python -c "from app.siftarr.database import prepare_sqlite_database_for_startup; prepare_sqlite_database_for_startup()"
+runuser -u appuser -- /app/.venv/bin/python -c "
+import asyncio
+from app.siftarr.database import init_db
+asyncio.run(init_db())
+"
 
 exec runuser -u appuser -- "$@"
