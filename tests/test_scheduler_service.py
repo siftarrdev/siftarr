@@ -346,6 +346,7 @@ async def test_recent_plex_scan_returns_locked_when_job_already_running(monkeypa
                     }
                 ),
                 last_error=None,
+                clean_run=True,
             )
 
     monkeypatch.setattr(scheduler_service, "PlexService", FakePlexService)

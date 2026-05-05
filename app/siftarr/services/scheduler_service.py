@@ -23,7 +23,11 @@ from app.siftarr.services.media_helpers import extract_media_title_and_year
 from app.siftarr.services.movie_decision_service import MovieDecisionService
 from app.siftarr.services.overseerr_service import OverseerrService
 from app.siftarr.services.pending_queue_service import PendingQueueService
-from app.siftarr.services.plex_polling_service import PlexPollingService
+from app.siftarr.services.plex_polling_service import (
+    PlexJobResult,
+    PlexPollingService,
+    PlexPollResult,
+)
 from app.siftarr.services.plex_service import PlexService
 from app.siftarr.services.prowlarr_service import ProwlarrService
 from app.siftarr.services.qbittorrent_service import QbittorrentService
@@ -135,21 +139,15 @@ class SchedulerService:
             self._plex_job_state[job_name] = state
         return state
 
-    def _build_plex_job_metrics_payload(self, result: Any) -> dict[str, Any]:
-        if isinstance(result, int):
-            return {"completed_requests": result}
-
-        payload = {"completed_requests": int(getattr(result, "completed_requests", 0))}
-        metrics = getattr(result, "metrics", None)
-        if metrics is not None:
-            payload.update(metrics.as_dict())
+    def _build_plex_job_metrics_payload(self, result: PlexJobResult) -> dict[str, Any]:
+        payload: dict[str, Any] = {"completed_requests": result.completed_requests}
+        if result.metrics is not None:
+            payload.update(result.metrics.as_dict())
         return payload
 
     @staticmethod
-    def _get_plex_completed_requests(result: Any) -> int:
-        if isinstance(result, int):
-            return result
-        return int(getattr(result, "completed_requests", 0))
+    def _get_plex_completed_requests(result: PlexJobResult) -> int:
+        return result.completed_requests
 
     async def get_plex_job_state_snapshot(self) -> dict[str, dict[str, Any]]:
         """Return a copy of the in-memory Plex job state."""
@@ -195,7 +193,7 @@ class SchedulerService:
             result = await runner()
             metrics_payload = self._build_plex_job_metrics_payload(result)
             completed_requests = self._get_plex_completed_requests(result)
-            last_error = getattr(result, "last_error", None)
+            last_error = result.last_error
             finished_at = self._current_time()
 
             logger.info(
@@ -208,7 +206,7 @@ class SchedulerService:
             async with self._plex_job_state_guard:
                 state = self._get_plex_job_state(job_name)
                 state.last_run = finished_at
-                if getattr(result, "clean_run", True) and not last_error:
+                if result.clean_run and not last_error:
                     state.last_success = finished_at
                 state.locked = False
                 state.lock_owner = None
@@ -357,7 +355,8 @@ class SchedulerService:
                 plex = PlexService(settings=runtime_settings)
                 try:
                     polling_service = PlexPollingService(db, plex)
-                    return await polling_service.poll()
+                    count = await polling_service.poll()
+                    return PlexPollResult(completed_requests=count)
                 finally:
                     await plex.close()
 

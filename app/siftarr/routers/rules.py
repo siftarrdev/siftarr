@@ -1,8 +1,6 @@
 """Router for rules management pages."""
 
 import re
-from collections.abc import Awaitable
-from inspect import isawaitable
 from typing import Annotated, cast
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, UploadFile
@@ -93,34 +91,17 @@ async def _rules_page_context(
 ) -> dict[str, object]:
     """Build the shared rules page context."""
     rules_override = overrides.pop("rules", None)
-    all_rules = (
-        rules_override
-        if rules_override is not None
-        else await _maybe_await(rule_service.get_all_rules())
-    )
+    all_rules = rules_override if rules_override is not None else await rule_service.get_all_rules()
     context: dict[str, object] = {
         "request": request,
         "rules": all_rules,
-        "exclusion_rules": await _maybe_await(
-            rule_service.get_all_rules_by_type(RuleType.EXCLUSION)
-        ),
-        "requirement_rules": await _maybe_await(
-            rule_service.get_all_rules_by_type(RuleType.REQUIREMENT)
-        ),
-        "scorer_rules": await _maybe_await(rule_service.get_all_rules_by_type(RuleType.SCORER)),
-        "size_limit_rules": await _maybe_await(
-            rule_service.get_all_rules_by_type(RuleType.SIZE_LIMIT)
-        ),
+        "exclusion_rules": await rule_service.get_all_rules_by_type(RuleType.EXCLUSION),
+        "requirement_rules": await rule_service.get_all_rules_by_type(RuleType.REQUIREMENT),
+        "scorer_rules": await rule_service.get_all_rules_by_type(RuleType.SCORER),
+        "size_limit_rules": await rule_service.get_all_rules_by_type(RuleType.SIZE_LIMIT),
     }
     context.update(overrides)
     return context
-
-
-async def _maybe_await[T](value: T | Awaitable[T]) -> T:
-    """Return awaited service results while tolerating simple test doubles."""
-    if isawaitable(value):
-        return await cast(Awaitable[T], value)
-    return cast(T, value)
 
 
 @router.get("")

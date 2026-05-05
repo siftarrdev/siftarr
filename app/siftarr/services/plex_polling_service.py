@@ -7,7 +7,7 @@ import contextlib
 import logging
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
-from typing import TypeVar
+from typing import Protocol, TypeVar
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -76,6 +76,31 @@ class _PollDecision:
     request_id: int
     reason: str
     availability: dict[EpisodeKey, bool] | None = None
+
+
+class HasMetrics(Protocol):
+    """Protocol for objects with an ``as_dict()`` method returning int metrics."""
+
+    def as_dict(self) -> dict[str, int]: ...
+
+
+class PlexJobResult(Protocol):
+    """Protocol for Plex job runner results with typed attribute access."""
+
+    completed_requests: int
+    metrics: HasMetrics | None
+    clean_run: bool
+    last_error: str | None
+
+
+@dataclass(slots=True)
+class PlexPollResult:
+    """Wrapper for ``poll()`` integer results to conform to ``PlexJobResult``."""
+
+    completed_requests: int = 0
+    metrics: HasMetrics | None = None
+    clean_run: bool = True
+    last_error: str | None = None
 
 
 class PlexPollingService:
@@ -550,8 +575,11 @@ class PlexPollingService:
 
 __all__ = [
     "CheckRequestResult",
+    "HasMetrics",
     "NON_TERMINAL_STATUSES",
+    "PlexJobResult",
     "PlexPollingService",
+    "PlexPollResult",
     "ProgressCallback",
     "ScanMetrics",
     "ScanRecentResult",
