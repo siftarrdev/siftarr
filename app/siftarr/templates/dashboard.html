@@ -662,14 +662,11 @@
     <div class="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-full max-w-md bg-surface-900 border border-gray-700/60 rounded-2xl shadow-2xl p-6">
         <h3 class="text-lg font-semibold text-white mb-2">Deny Request</h3>
         <p class="text-sm text-gray-400 mb-5">Are you sure you want to deny this request? You can optionally provide a reason.</p>
-        <form id="deny-form" method="post">
-            <input type="hidden" name="redirect_to" id="deny-redirect" value="/">
-            <textarea name="reason" id="deny-reason" rows="3" placeholder="Reason for rejection (optional)" class="form-input mb-5"></textarea>
-            <div class="flex justify-end gap-3">
-                <button type="button" onclick="closeDenyModal()" class="btn-ghost">Cancel</button>
-                <button type="submit" class="btn-danger">Deny Request</button>
-            </div>
-        </form>
+        <textarea name="reason" id="deny-reason" rows="3" placeholder="Reason for rejection (optional)" class="form-input mb-5"></textarea>
+        <div class="flex justify-end gap-3">
+            <button type="button" onclick="closeDenyModal()" class="btn-ghost">Cancel</button>
+            <button type="button" id="deny-submit-btn" onclick="submitDenyRequest()" class="btn-danger">Deny Request</button>
+        </div>
     </div>
 </div>
 

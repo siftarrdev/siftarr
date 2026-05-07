@@ -290,30 +290,30 @@ function handleBulkRequestActionSubmit(event, form) {
     return false;
 }
 
+let _denyRequestId = null;
+let _denyRedirectTo = null;
+
 function openDenyModal(requestId, redirectTo) {
+    _denyRequestId = requestId;
+    _denyRedirectTo = redirectTo || '/';
     const modal = document.getElementById('deny-modal');
-    const form = document.getElementById('deny-form');
-    const redirect = document.getElementById('deny-redirect');
     const reason = document.getElementById('deny-reason');
-    form.action = '/requests/' + requestId + '/deny';
-    redirect.value = redirectTo || '/';
     reason.value = '';
     modal.classList.remove('hidden');
-
-    // Remove any old submit handler and attach a new one
-    form.removeEventListener('submit', handleDenyFormSubmit);
-    form.addEventListener('submit', handleDenyFormSubmit);
 }
 
-async function handleDenyFormSubmit(event) {
-    event.preventDefault();
-    const form = event.currentTarget;
-    const formData = new FormData(form);
-    const submitBtn = form.querySelector('button[type="submit"]');
-    if (submitBtn) submitBtn.disabled = true;
+async function submitDenyRequest() {
+    if (!_denyRequestId) return;
+    const btn = document.getElementById('deny-submit-btn');
+    if (btn) btn.disabled = true;
+    const reason = document.getElementById('deny-reason');
 
     try {
-        const response = await fetch(form.action, {
+        const formData = new FormData();
+        formData.append('redirect_to', _denyRedirectTo);
+        if (reason.value) formData.append('reason', reason.value);
+
+        const response = await fetch('/requests/' + _denyRequestId + '/deny', {
             method: 'POST',
             headers: { 'Accept': 'application/json' },
             body: formData,
@@ -328,12 +328,14 @@ async function handleDenyFormSubmit(event) {
     } catch (err) {
         window.showToast('Error: ' + err.message);
     } finally {
-        if (submitBtn) submitBtn.disabled = false;
+        if (btn) btn.disabled = false;
     }
 }
 
 function closeDenyModal() {
     document.getElementById('deny-modal').classList.add('hidden');
+    _denyRequestId = null;
+    _denyRedirectTo = null;
 }
 
 function openReplaceModal(torrentId, requestId, torrentTitle, redirectTo) {
@@ -369,6 +371,7 @@ window.setSearchActionLoading = setSearchActionLoading;
 window.showBulkSearchStatus = showBulkSearchStatus;
 window.handleBulkRequestActionSubmit = handleBulkRequestActionSubmit;
 window.openDenyModal = openDenyModal;
+window.submitDenyRequest = submitDenyRequest;
 window.closeDenyModal = closeDenyModal;
 window.openReplaceModal = openReplaceModal;
 window.closeReplaceModal = closeReplaceModal;
