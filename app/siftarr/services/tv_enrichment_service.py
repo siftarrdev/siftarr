@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from typing import Any, cast
+from typing import Any
 
 from fastapi import BackgroundTasks
 from sqlalchemy import select
@@ -13,6 +13,7 @@ from app.siftarr.models.request import RequestStatus
 from app.siftarr.services.dashboard_service import DashboardTVDetails
 from app.siftarr.services.release_serializers import (
     apply_release_size_per_season_metadata,
+    scope_to_episode_set,
 )
 from app.siftarr.services.tv_details_service import (
     compute_sync_metadata,
@@ -68,13 +69,16 @@ class TVEnrichmentService:
             )
             state_counts = count_season_episode_states(season_episodes)
             season_staged = self._season_has_staged_scope(
-                season.season_number, active_staged_torrents
+                season.season_number, active_staged_torrents, known_season_numbers
             )
             staged_episode_numbers = {
                 ep.episode_number
                 for ep in season_episodes
                 if self._episode_has_staged_scope(
-                    season.season_number, ep.episode_number, active_staged_torrents
+                    season.season_number,
+                    ep.episode_number,
+                    active_staged_torrents,
+                    known_season_numbers,
                 )
             }
             staged_count = len(staged_episode_numbers)
@@ -117,20 +121,22 @@ class TVEnrichmentService:
         )
 
     def _season_has_staged_scope(
-        self, season_number: int, active_staged_torrents: list[dict[str, object]]
+        self,
+        season_number: int,
+        active_staged_torrents: list[dict[str, object]],
+        known_season_numbers: list[int] | None = None,
     ) -> bool:
         for staged in active_staged_torrents:
             scope = staged.get("target_scope")
             if not isinstance(scope, Mapping):
                 continue
-            scope = cast(Mapping[str, object], scope)
-            scope_type = scope.get("type")
-            if scope_type == "complete_series":
+            episode_set = scope_to_episode_set(scope, known_season_numbers)
+            if not episode_set:
+                return (
+                    True  # Conservative: unresolved scope (e.g. complete_series) covers everything
+                )
+            if any(s == season_number for (s, e) in episode_set):
                 return True
-            if scope_type in {"season_pack", "multi_season_pack"}:
-                seasons = scope.get("season_numbers")
-                if isinstance(seasons, list) and season_number in seasons:
-                    return True
         return False
 
     def _episode_has_staged_scope(
@@ -138,25 +144,20 @@ class TVEnrichmentService:
         season_number: int,
         episode_number: int,
         active_staged_torrents: list[dict[str, object]],
+        known_season_numbers: list[int] | None = None,
     ) -> bool:
         for staged in active_staged_torrents:
             scope = staged.get("target_scope")
             if not isinstance(scope, Mapping):
                 continue
-            scope = cast(Mapping[str, object], scope)
-            scope_type = scope.get("type")
-            if scope_type == "single_episode":
-                if (
-                    scope.get("season_number") == season_number
-                    and scope.get("episode_number") == episode_number
-                ):
-                    return True
-            elif scope_type == "complete_series":
+            episode_set = scope_to_episode_set(scope, known_season_numbers)
+            if not episode_set:
+                return True  # Conservative: unresolved scope covers everything
+            # Match exact episode or full-season coverage (None wildcard)
+            if (season_number, episode_number) in episode_set:
                 return True
-            elif scope_type in {"season_pack", "multi_season_pack"}:
-                seasons = scope.get("season_numbers")
-                if isinstance(seasons, list) and season_number in seasons:
-                    return True
+            if (season_number, None) in episode_set:
+                return True
         return False
 
     def _apply_known_tv_release_metadata(
