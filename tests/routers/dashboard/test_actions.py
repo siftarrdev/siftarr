@@ -56,6 +56,113 @@ async def test_bulk_request_action_defaults_to_pending_tab(mock_db):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("tab", ["active", "pending"])
+async def test_deny_request_json_preserves_redirect_and_denies_record(mock_db, monkeypatch, tab):
+    """Single-row deny fetches should return JSON and keep the originating tab."""
+    request_record = MagicMock(id=7)
+    load_request = AsyncMock(return_value=request_record)
+    deny_record = AsyncMock()
+    monkeypatch.setattr(dashboard_actions, "load_request_or_404", load_request)
+    monkeypatch.setattr(dashboard_actions, "_deny_request_record", deny_record)
+
+    response = await dashboard_actions.deny_request(
+        request_id=7,
+        http_request=MagicMock(headers={"accept": "application/json"}),
+        redirect_to=f"/?tab={tab}",
+        reason="Not wanted",
+        db=mock_db,
+    )
+
+    body = json.loads(cast(bytes, response.body))
+    assert body == {
+        "status": "ok",
+        "message": "Request denied",
+        "redirect_to": f"/?tab={tab}",
+    }
+    load_request.assert_awaited_once_with(mock_db, 7)
+    deny_record.assert_awaited_once_with(request_record, mock_db, reason="Not wanted")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("tab", ["active", "pending"])
+async def test_deny_request_redirect_preserves_tab(mock_db, monkeypatch, tab):
+    """Non-fetch single deny should still redirect back to the originating tab."""
+    request_record = MagicMock(id=8)
+    monkeypatch.setattr(
+        dashboard_actions, "load_request_or_404", AsyncMock(return_value=request_record)
+    )
+    deny_record = AsyncMock()
+    monkeypatch.setattr(dashboard_actions, "_deny_request_record", deny_record)
+
+    response = await dashboard_actions.deny_request(
+        request_id=8,
+        http_request=MagicMock(headers={}),
+        redirect_to=f"/?tab={tab}",
+        reason=None,
+        db=mock_db,
+    )
+
+    assert response.status_code == 303
+    assert response.headers["location"] == f"/?tab={tab}"
+    deny_record.assert_awaited_once_with(request_record, mock_db, reason=None)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("tab", ["active", "pending"])
+async def test_bulk_deny_json_preserves_redirect_and_denies_selected(mock_db, monkeypatch, tab):
+    """Bulk deny fetches should deny selected rows from both shared tabs."""
+    request_a = MagicMock(id=1)
+    request_b = MagicMock(id=2)
+    execute_result = MagicMock()
+    execute_result.scalars.return_value.all.return_value = [request_a, request_b]
+    mock_db.execute.return_value = execute_result
+    deny_record = AsyncMock()
+    monkeypatch.setattr(dashboard_actions, "_deny_request_record", deny_record)
+
+    response = await dashboard_actions.bulk_request_action(
+        http_request=MagicMock(headers={"accept": "application/json"}),
+        action="deny",
+        request_ids=[1, 2],
+        redirect_to=f"/?tab={tab}",
+        db=mock_db,
+    )
+
+    body = json.loads(cast(bytes, response.body))
+    assert body == {
+        "status": "ok",
+        "message": "Denied 2 request(s)",
+        "redirect_to": f"/?tab={tab}",
+    }
+    deny_record.assert_has_awaits(
+        [
+            call(request_a, mock_db, reason="Bulk denied"),
+            call(request_b, mock_db, reason="Bulk denied"),
+        ]
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("tab", ["active", "pending"])
+async def test_bulk_deny_json_no_selected_is_noop(mock_db, tab):
+    """Bulk deny with no selected rows should be a JSON no-op for fetch callers."""
+    response = await dashboard_actions.bulk_request_action(
+        http_request=MagicMock(headers={"accept": "application/json"}),
+        action="deny",
+        request_ids=[],
+        redirect_to=f"/?tab={tab}",
+        db=mock_db,
+    )
+
+    body = json.loads(cast(bytes, response.body))
+    assert body == {
+        "status": "ok",
+        "message": "No items selected",
+        "redirect_to": f"/?tab={tab}",
+    }
+    mock_db.execute.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_bulk_request_action_searches_all_pending_requests(mock_db, monkeypatch):
     """Search All should load pending/searching requests without selected IDs."""
     pending_request = MagicMock()
@@ -108,6 +215,54 @@ async def test_deny_request_not_found():
             raise HTTPException(status_code=404, detail="Request not found")
 
     assert exc_info.value.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_deny_request_record_declines_overseerr_removes_queue_and_transitions(
+    mock_db, monkeypatch
+):
+    """Denying any request should notify Overseerr, clear pending state, and transition denied."""
+    request_record = MagicMock(id=42, overseerr_request_id=1234)
+    overseerr_instance = MagicMock()
+    overseerr_instance.decline_request = AsyncMock()
+    queue_instance = MagicMock()
+    queue_instance.remove_from_queue = AsyncMock()
+    lifecycle_instance = MagicMock()
+    lifecycle_instance.transition = AsyncMock()
+
+    monkeypatch.setattr(dashboard_actions, "OverseerrService", lambda settings: overseerr_instance)
+    monkeypatch.setattr(dashboard_actions, "PendingQueueService", lambda db: queue_instance)
+    monkeypatch.setattr(dashboard_actions, "LifecycleService", lambda db: lifecycle_instance)
+
+    await dashboard_actions._deny_request_record(request_record, mock_db, reason="No thanks")
+
+    overseerr_instance.decline_request.assert_awaited_once_with(1234, reason="No thanks")
+    queue_instance.remove_from_queue.assert_awaited_once_with(42)
+    lifecycle_instance.transition.assert_awaited_once_with(
+        42, RequestStatus.DENIED, reason="No thanks"
+    )
+
+
+@pytest.mark.asyncio
+async def test_deny_request_record_skips_overseerr_when_not_linked(mock_db, monkeypatch):
+    """Local-only denied transitions should still clear queue and transition state."""
+    request_record = MagicMock(id=43, overseerr_request_id=None)
+    overseerr_instance = MagicMock()
+    overseerr_instance.decline_request = AsyncMock()
+    queue_instance = MagicMock()
+    queue_instance.remove_from_queue = AsyncMock()
+    lifecycle_instance = MagicMock()
+    lifecycle_instance.transition = AsyncMock()
+
+    monkeypatch.setattr(dashboard_actions, "OverseerrService", lambda settings: overseerr_instance)
+    monkeypatch.setattr(dashboard_actions, "PendingQueueService", lambda db: queue_instance)
+    monkeypatch.setattr(dashboard_actions, "LifecycleService", lambda db: lifecycle_instance)
+
+    await dashboard_actions._deny_request_record(request_record, mock_db, reason=None)
+
+    overseerr_instance.decline_request.assert_not_awaited()
+    queue_instance.remove_from_queue.assert_awaited_once_with(43)
+    lifecycle_instance.transition.assert_awaited_once_with(43, RequestStatus.DENIED, reason=None)
 
 
 @pytest.mark.asyncio

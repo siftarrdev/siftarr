@@ -171,6 +171,43 @@ def test_dashboard_template_search_actions_use_progress_helpers(dashboard_templa
     assert "disableSearchControls(form);" in js
 
 
+def test_dashboard_template_deny_actions_use_modal_and_bulk_path(dashboard_template_path):
+    """All/Pending single deny uses the modal while bulk deny stays separate."""
+    with open(dashboard_template_path, encoding="utf-8") as handle:
+        template = handle.read()
+    js = _read_dashboard_js()
+
+    assert "openDenyModal({{ req.id }}, '/?tab=active')" in template
+    assert "openDenyModal({{ req.id }}, '/?tab=pending')" in template
+    assert 'id="deny-submit-btn" onclick="submitDenyRequest()"' in template
+    assert 'name="action" value="deny" class="btn-danger btn-sm"' in template
+    assert "if (submitter.value === 'deny')" in js
+    assert "return handleBulkDenyAction(event, form);" in js
+    assert "submitter.dataset.searchSubmitControl !== 'true'" in js
+    assert "window.startBulkSearchProgress(" in js
+    assert (
+        'data-search-submit-control="true"'
+        not in template.split('name="action" value="deny"', 1)[1].split(">", 1)[0]
+    )
+
+
+def test_dashboard_modals_exports_inline_handler_names():
+    """Inline deny handlers should match exported modal functions."""
+    js_path = os.path.join(
+        os.path.dirname(__file__), "../../../app/siftarr/static/js/dashboard/modals.js"
+    )
+    with open(js_path, encoding="utf-8") as handle:
+        js = handle.read()
+
+    for name in ("openDenyModal", "submitDenyRequest", "closeDenyModal"):
+        assert f"function {name}(" in js
+        assert f"window.{name} = {name};" in js
+    assert "headers: { 'Accept': 'application/json' }" in js
+    assert "await window.refreshCurrentTabContent();" in js
+    assert "window.bindDenyModalHandlers = bindDenyModalHandlers;" in js
+    assert "toggle.dataset.selectAllBound === 'true'" in js
+
+
 def test_dashboard_js_uses_collapsible_episode_results():
     """Episode search results should live in their own collapsible sections."""
     js = _read_dashboard_js()

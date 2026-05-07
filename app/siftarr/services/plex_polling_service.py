@@ -584,7 +584,11 @@ class PlexPollingService:
             if req is None:
                 continue
             await self._run_serialized_write(self._apply_decision(req, decision))
-            completed += 1
+            if req.media_type == MediaType.TV and decision.availability is not None:
+                if req.status == RequestStatus.COMPLETED:
+                    completed += 1
+            else:
+                completed += 1
         return completed
 
     async def _run_serialized_write(self, operation: Awaitable[T]) -> T:
