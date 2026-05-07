@@ -131,14 +131,14 @@
                     </thead>
                     <tbody class="divide-y divide-gray-700/40" id="active-requests-body">
                         {% for req in active_requests %}
-                        <tr class="hover:bg-surface-850/80 cursor-pointer transition-colors" onclick="openRequestDetails({{ req.id }})" data-request-id="{{ req.id }}" data-overseerr="{{ 'true' if req.overseerr_request_id else 'false' }}" data-status="{{ req.status.value }}" data-title="{{ req.title|lower }}" data-type="{{ req.media_type.value|lower }}" data-status-low="{{ req.status.value|lower }}" data-requestedby="{{ req.requester_username|default('Unknown')|lower }}" data-requested="{{ req.created_at.strftime('%Y-%m-%d %H:%M') }}" data-year="{{ req.year or 0 }}">
+                        <tr class="hover:bg-surface-850/80 cursor-pointer transition-colors" onclick="openRequestDetails({{ req.id }})" data-request-id="{{ req.id }}" data-overseerr="{{ 'true' if req.overseerr_request_id else 'false' }}" data-status="{{ req.display_label }}" data-title="{{ req.title|lower }}" data-type="{{ req.media_type.value|lower }}" data-status-low="{{ req.display_label|lower }}" data-requestedby="{{ req.requester_username|default('Unknown')|lower }}" data-requested="{{ req.created_at.strftime('%Y-%m-%d %H:%M') }}" data-year="{{ req.year or 0 }}">
                             <td class="px-5 py-3.5  text-sm" onclick="event.stopPropagation()">
                                 <input name="request_ids" value="{{ req.id }}" type="checkbox" class="active-request-checkbox rounded border-gray-600 bg-surface-900 text-brand-500 focus:ring-brand-500">
                             </td>
                             <td class="px-5 py-3.5  text-sm font-medium text-white">{{ req.title }}</td>
                             <td class="px-5 py-3.5  text-sm text-gray-400 tabular-nums" data-sort-value="{{ req.year or 0 }}">{{ req.year or '-' }}</td>
                             <td class="px-5 py-3.5  text-sm capitalize text-gray-400">{{ req.media_type.value }}</td>
-                            <td class="px-5 py-3.5  text-sm"><span class="badge {% if req.status.value == 'searching' %}badge-yellow{% elif req.status.value == 'downloading' %}badge-blue{% else %}badge-gray{% endif %}">{{ req.status.value }}</span></td>
+                            <td class="px-5 py-3.5  text-sm"><span class="badge {% if req.display_label == 'searching' %}badge-yellow{% elif req.display_label == 'downloading' %}badge-blue{% elif req.display_label == 'staged' %}badge-cyan{% elif req.display_label == 'partial' %}badge-yellow{% else %}badge-gray{% endif %}">{{ req.display_label }}</span></td>
                             <td class="px-5 py-3.5  text-sm text-gray-500 tabular-nums" data-sort-value="{{ req.created_at.strftime('%Y-%m-%d %H:%M') }}">{{ req.created_at.strftime('%Y-%m-%d %H:%M') }}</td>
                             <td class="px-5 py-3.5  text-sm text-gray-400">{{ req.requester_username or 'Unknown' }}</td>
                             <td class="px-5 py-3.5  text-sm" onclick="event.stopPropagation()">
@@ -214,7 +214,7 @@
                         </thead>
                         <tbody class="divide-y divide-gray-700/40" id="pending-requests-body">
                             {% for req in pending_requests %}
-                            <tr class="hover:bg-surface-850/80 cursor-pointer transition-colors" onclick="openRequestDetails({{ req.id }})" data-request-id="{{ req.id }}" data-title="{{ req.title|lower }}" data-type="{{ req.media_type.value|lower }}" data-requestedby="{{ req.requester_username|default('Unknown')|lower }}" data-requested="{{ req.created_at.strftime('%Y-%m-%d %H:%M') }}" data-status="{{ req.status.value|lower }}" data-year="{{ req.year or 0 }}">
+                            <tr class="hover:bg-surface-850/80 cursor-pointer transition-colors" onclick="openRequestDetails({{ req.id }})" data-request-id="{{ req.id }}" data-title="{{ req.title|lower }}" data-type="{{ req.media_type.value|lower }}" data-requestedby="{{ req.requester_username|default('Unknown')|lower }}" data-requested="{{ req.created_at.strftime('%Y-%m-%d %H:%M') }}" data-status="{{ req.display_label|lower }}" data-year="{{ req.year or 0 }}">
                                 <td class="px-4 py-3.5  text-sm" onclick="event.stopPropagation()">
                                     <input name="request_ids" value="{{ req.id }}" type="checkbox" class="pending-request-checkbox rounded border-gray-600 bg-surface-900 text-brand-500 focus:ring-brand-500">
                                 </td>
@@ -223,7 +223,7 @@
                                 <td class="px-4 py-3.5  text-sm capitalize text-gray-400">{{ req.media_type.value }}</td>
                                 <td class="px-4 py-3.5  text-sm text-gray-500 tabular-nums">{{ req.created_at.strftime('%Y-%m-%d %H:%M') }}</td>
                                 <td class="px-4 py-3.5  text-sm text-gray-400">{{ req.requester_username or 'Unknown' }}</td>
-                                <td class="px-4 py-3.5  text-sm"><span class="badge {% if req.status.value == 'searching' %}badge-blue{% elif req.status.value == 'pending' %}badge-yellow{% else %}badge-gray{% endif %}">{{ req.status.value }}</span></td>
+                                <td class="px-4 py-3.5  text-sm"><span class="badge {% if req.display_label == 'searching' %}badge-blue{% elif req.display_label in ('pending', 'partial') %}badge-yellow{% elif req.display_label == 'staged' %}badge-cyan{% else %}badge-gray{% endif %}">{{ req.display_label }}</span></td>
                                 <td class="px-4 py-3.5  text-sm" onclick="event.stopPropagation()">
                                     <div class="flex items-center gap-3">
                                         <button type="button" onclick="openRequestDetails({{ req.id }})" class="text-brand-400 hover:text-brand-300 font-medium">Details</button>

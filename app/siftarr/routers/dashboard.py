@@ -24,6 +24,7 @@ from app.siftarr.models.request import (
 from app.siftarr.models.request import Request as RequestModel
 from app.siftarr.models.season import Season
 from app.siftarr.models.staged_torrent import StagedTorrent
+from app.siftarr.services.episode_derive import derive_tv_display_label
 from app.siftarr.services.http_client import get_shared_client
 from app.siftarr.services.lifecycle_service import LifecycleService
 from app.siftarr.services.overseerr_service import OverseerrService
@@ -197,17 +198,16 @@ async def dashboard(
         req.id: req for req in [*active_requests, *completed_requests, *unreleased_candidates]
     }
 
-    # Pre-fetch episodes for all TV requests that need season/episode data
-    # rather than querying per-request (N+1 fix).
-    # UNRELEASED requests short-circuit in _should_show_in_unreleased so
-    # they don't need episodes pre-fetched.
+    # Pre-fetch episodes for TV requests that need episode data for
+    # unreleased detection and pending-episode checks (N+1 fix).
+    # UNRELEASED requests short-circuit in _should_show_in_unreleased
+    # so they don't need episodes pre-fetched.
     tv_ids_needing_episodes = {
         req.id
         for req in unreleased_candidate_by_id.values()
         if req.media_type == MediaType.TV
         and req.status in {RequestStatus.PENDING, RequestStatus.COMPLETED}
     }
-    # Also include TV PENDING requests that may be checked by _tv_has_pending_episodes
     tv_ids_needing_episodes.update(
         req.id
         for req in active_requests
@@ -253,11 +253,7 @@ async def dashboard(
         if req.status in (RequestStatus.PENDING, RequestStatus.SEARCHING):
             pending_requests.append(req)
             continue
-        if (
-            req.status == RequestStatus.PENDING
-            and req.media_type == MediaType.TV
-            and _tv_has_pending_episodes(req.id)
-        ):
+        if req.media_type == MediaType.TV and _tv_has_pending_episodes(req.id):
             pending_requests.append(req)
     overseerr_service = OverseerrService(settings=effective_settings)
 
@@ -348,6 +344,30 @@ async def dashboard(
         .limit(500)
     )
     denied_requests = list(denied_result.scalars().all())
+
+    # Attach display_label to every request passed to the template.
+    # For TV, derive from episode data when available (safety net against
+    # stale cached status); fall back to the DB-level status otherwise.
+    # For movies, use the ground-truth status directly.
+    def _attach_display_label(req):
+        if req.media_type == MediaType.TV and req.id in episodes_map:
+            _, episodes = episodes_map[req.id]
+            if episodes:
+                req.display_label = derive_tv_display_label(episodes)
+            else:
+                req.display_label = req.status.value
+        else:
+            req.display_label = req.status.value
+
+    for req_list in (
+        filtered_requests,
+        pending_requests,
+        unreleased_requests,
+        completed_requests,
+        denied_requests,
+    ):
+        for req in req_list:
+            _attach_display_label(req)
 
     return templates.TemplateResponse(
         request,
