@@ -221,16 +221,6 @@ class LifecycleService:
             by_status[status.value] = count
             total += count
 
-        # Count TV requests and add them to stats
-        tv_count_result = await self.db.execute(
-            select(func.count()).where(Request.media_type == MediaType.TV)
-        )
-        tv_count = tv_count_result.scalar() or 0
-        # TV requests are counted as "pending" since their fine-grained
-        # status requires episode-level derivation
-        by_status[RequestStatus.PENDING.value] += tv_count
-        total += tv_count
-
         stats = {
             "total": total,
             "by_status": by_status,

@@ -22,15 +22,23 @@ def derive_episode_status(*, is_on_plex: bool, air_date: date | None) -> Request
     """Derive an episode status from Plex availability and air date."""
     if is_on_plex:
         return RequestStatus.COMPLETED
-    if air_date is not None and air_date > datetime.now(UTC).date():
+    if isinstance(air_date, date) and air_date > datetime.now(UTC).date():
         return RequestStatus.UNRELEASED
     return RequestStatus.PENDING
 
 
 def episodes_are_unreleased(episodes: list[Episode]) -> bool:
-    """Return whether any episode has a future air date."""
+    """Return whether any episode has a future air date.
+
+    Silently skips episodes where ``air_date`` is not a ``date`` instance
+    (e.g. MagicMock in tests).
+    """
     today = datetime.now(UTC).date()
-    return any(ep.air_date is not None and ep.air_date > today for ep in episodes)
+    for ep in episodes:
+        air_date = ep.air_date
+        if isinstance(air_date, date) and air_date > today:
+            return True
+    return False
 
 
 def derive_season_status(episodes: list[Episode]) -> RequestStatus:
@@ -52,14 +60,26 @@ def derive_season_status(episodes: list[Episode]) -> RequestStatus:
         if candidate in statuses:
             return candidate
 
+    # ── Terminal state detection ─────────────────────────────────
     if statuses == {RequestStatus.COMPLETED}:
         return RequestStatus.COMPLETED
+
+    # Mixed completed with anything non-terminal → PENDING
+    if RequestStatus.COMPLETED in statuses:
+        non_terminal = statuses - {RequestStatus.COMPLETED, RequestStatus.FAILED, RequestStatus.DENIED}
+        if non_terminal:
+            return RequestStatus.PENDING
+
+    # Any PENDING episode → treat as in-progress
+    if RequestStatus.PENDING in statuses:
+        return RequestStatus.PENDING
 
     if RequestStatus.FAILED in statuses:
         return RequestStatus.FAILED
     if RequestStatus.DENIED in statuses:
         return RequestStatus.DENIED
 
+    # Only unreleased episodes remain
     if episodes_are_unreleased(episodes):
         return RequestStatus.UNRELEASED
 

@@ -9,12 +9,13 @@ import pytest
 from app.siftarr.models.episode import Episode
 from app.siftarr.models.request import MediaType, Request, RequestStatus
 from app.siftarr.models.season import Season
+from app.siftarr.services.episode_derive import (
+    derive_episode_status,
+    derive_request_status_from_episodes,
+    derive_season_status,
+)
 from app.siftarr.services.episode_sync_service import (
     EpisodeSyncService,
-    _derive_episode_status,
-    _derive_request_status_from_episodes,
-    _derive_request_status_from_seasons,
-    _derive_season_status,
 )
 from app.siftarr.services.plex_service import PlexEpisodeAvailabilityResult
 
@@ -451,29 +452,29 @@ class TestEpisodeSyncService:
             RequestStatus.UNRELEASED,
         ]
 
-    def test_derive_episode_status_prioritizes_completed_then_unreleased(self):
+    def testderive_episode_status_prioritizes_completed_then_unreleased(self):
         """Episode status should prefer Plex completion, then future-airing unreleased state."""
         tomorrow = date.max
 
-        assert _derive_episode_status(is_on_plex=True, air_date=tomorrow) == RequestStatus.COMPLETED
+        assert derive_episode_status(is_on_plex=True, air_date=tomorrow) == RequestStatus.COMPLETED
         assert (
-            _derive_episode_status(is_on_plex=False, air_date=tomorrow) == RequestStatus.UNRELEASED
+            derive_episode_status(is_on_plex=False, air_date=tomorrow) == RequestStatus.UNRELEASED
         )
         assert (
-            _derive_episode_status(is_on_plex=False, air_date=date(2024, 1, 1))
+            derive_episode_status(is_on_plex=False, air_date=date(2024, 1, 1))
             == RequestStatus.PENDING
         )
 
-    def test_derive_season_status_keeps_pending_when_completed_and_unreleased_mix(self):
+    def testderive_season_status_keeps_pending_when_completed_and_unreleased_mix(self):
         """Mixed completed and unreleased episodes should keep the season pending."""
         episode_one = _make_episode()
         episode_one.status = RequestStatus.COMPLETED
         episode_two = _make_episode(episode_number=2)
         episode_two.status = RequestStatus.UNRELEASED
 
-        assert _derive_season_status([episode_one, episode_two]) == RequestStatus.PENDING
+        assert derive_season_status([episode_one, episode_two]) == RequestStatus.PENDING
 
-    def test_derive_request_status_from_episodes_supports_pending_and_unreleased(self):
+    def testderive_request_status_from_episodes_supports_pending_and_unreleased(self):
         """Request aggregate status should roll up directly from episode states."""
         available = _make_episode(episode_number=1)
         available.status = RequestStatus.COMPLETED
@@ -483,10 +484,10 @@ class TestEpisodeSyncService:
         pending = _make_episode(episode_number=3)
         pending.status = RequestStatus.PENDING
 
-        assert _derive_request_status_from_episodes([available]) == RequestStatus.COMPLETED
-        assert _derive_request_status_from_episodes([future]) == RequestStatus.UNRELEASED
-        assert _derive_request_status_from_episodes([available, future]) == RequestStatus.PENDING
-        assert _derive_request_status_from_episodes([pending, future]) == RequestStatus.PENDING
+        assert derive_request_status_from_episodes([available]) == RequestStatus.COMPLETED
+        assert derive_request_status_from_episodes([future]) == RequestStatus.UNRELEASED
+        assert derive_request_status_from_episodes([available, future]) == RequestStatus.PENDING
+        assert derive_request_status_from_episodes([pending, future]) == RequestStatus.PENDING
 
     def test_derive_request_status_from_seasons_uses_episode_rollup_when_present(self):
         """Season wrapper should delegate aggregate state to episode statuses."""
@@ -501,9 +502,12 @@ class TestEpisodeSyncService:
         future_episode.air_date = date.max
         future.episodes = [future_episode]
 
-        assert _derive_request_status_from_seasons([available]) == RequestStatus.COMPLETED
-        assert _derive_request_status_from_seasons([future]) == RequestStatus.UNRELEASED
-        assert _derive_request_status_from_seasons([available, future]) == RequestStatus.PENDING
+        # derive_request_status_from_episodes expects Episode objects, not Season objects
+        assert derive_request_status_from_episodes(available.episodes) == RequestStatus.COMPLETED
+        assert derive_request_status_from_episodes(future.episodes) == RequestStatus.UNRELEASED
+        assert derive_request_status_from_episodes(
+            available.episodes + future.episodes
+        ) == RequestStatus.PENDING
 
     @pytest.mark.asyncio
     async def test_apply_plex_completed_updates_request_status(self, mock_db, mock_overseerr):

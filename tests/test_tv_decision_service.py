@@ -649,26 +649,18 @@ class TestProcessRequest:
                 return_value=mock_staging,
             ),
             patch.object(
-                service, "_update_episode_status", new_callable=AsyncMock
-            ) as mock_update_episode,
-            patch.object(
-                service, "_update_season_status", new_callable=AsyncMock
-            ) as mock_update_season,
+                service, "_set_episodes_for_season", new_callable=AsyncMock
+            ) as mock_set_episodes,
         ):
             await service.process_request(1)
 
-        assert mock_update_episode.await_args_list[0].args == (
+        assert mock_set_episodes.await_args_list[0].args == (
             1,
             1,
-            None,
             RequestStatus.DOWNLOADING,
         )
-        assert mock_update_season.await_args_list[0].args == (1, 1, RequestStatus.DOWNLOADING)
         assert all(
-            call.args[-1] != RequestStatus.SEARCHING for call in mock_update_episode.await_args_list
-        )
-        assert all(
-            call.args[-1] != RequestStatus.SEARCHING for call in mock_update_season.await_args_list
+            call.args[-1] != RequestStatus.SEARCHING for call in mock_set_episodes.await_args_list
         )
 
     @pytest.mark.asyncio

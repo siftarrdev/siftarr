@@ -239,6 +239,9 @@ class EpisodeSyncService:
 
             season_episodes.append(episode)
 
+        # Derive season status from episode states (cached summary)
+        season.status = derive_season_status(season_episodes)
+
         return season, season_episodes
 
     async def _sync_from_overseerr(self, request: Request) -> list[Season]:
@@ -274,6 +277,7 @@ class EpisodeSyncService:
             seasons_data,
         )
         synced_seasons: list[Season] = []
+        synced_episodes: list[Episode] = []
 
         for season_info in seasons_data:
             episodes_data = self._get_season_episodes_payload(season_info, fetched_season_details)
@@ -284,6 +288,10 @@ class EpisodeSyncService:
             )
             if season is not None:
                 synced_seasons.append(season)
+                synced_episodes.extend(season_episodes)
+
+        # Derive request-level status from episode states (cached summary)
+        request.status = derive_request_status_from_episodes(synced_episodes)
 
         await self.db.commit()
 

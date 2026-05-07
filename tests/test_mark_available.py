@@ -9,9 +9,9 @@ if sys.version_info < (3, 11):  # noqa: UP036
     pytest.skip("Requires Python 3.11+ for StrEnum", allow_module_level=True)
 
 from app.siftarr.models.request import RequestStatus
-from app.siftarr.routers.dashboard_actions import (
-    _recalculate_request_status,
-    _recalculate_season_status,
+from app.siftarr.services.episode_derive import (
+    derive_request_status_from_episodes,
+    derive_season_status,
 )
 
 
@@ -46,49 +46,71 @@ def _make_request(
     return r
 
 
-class TestRecalculateSeasonStatus:
+class TestDeriveSeasonStatus:
     def test_all_completed(self):
         eps = [_make_episode(RequestStatus.COMPLETED), _make_episode(RequestStatus.COMPLETED, 2)]
-        season = _make_season(eps)
-        assert _recalculate_season_status(season) == RequestStatus.COMPLETED
+        assert derive_season_status(eps) == RequestStatus.COMPLETED
 
     def test_mixed_completed_and_pending(self):
         eps = [_make_episode(RequestStatus.COMPLETED), _make_episode(RequestStatus.PENDING, 2)]
-        season = _make_season(eps)
-        assert _recalculate_season_status(season) == RequestStatus.PENDING
+        assert derive_season_status(eps) == RequestStatus.PENDING
 
-    def test_none_completed_keeps_status(self):
-        eps = [_make_episode(RequestStatus.PENDING), _make_episode(RequestStatus.PENDING, 2)]
-        season = _make_season(eps, status=RequestStatus.DOWNLOADING)
-        assert _recalculate_season_status(season) == RequestStatus.DOWNLOADING
+    def test_downloading_takes_precedence(self):
+        eps = [
+            _make_episode(RequestStatus.COMPLETED),
+            _make_episode(RequestStatus.DOWNLOADING, 2),
+        ]
+        assert derive_season_status(eps) == RequestStatus.DOWNLOADING
 
-    def test_no_episodes_keeps_existing_status(self):
-        season = _make_season([], status=RequestStatus.PENDING)
-        assert _recalculate_season_status(season) == RequestStatus.PENDING
+    def test_staged_takes_precedence_over_completed(self):
+        eps = [
+            _make_episode(RequestStatus.COMPLETED),
+            _make_episode(RequestStatus.STAGED, 2),
+        ]
+        assert derive_season_status(eps) == RequestStatus.STAGED
+
+    def test_no_episodes_returns_pending(self):
+        assert derive_season_status([]) == RequestStatus.PENDING
+
+    def test_unreleased_episodes(self):
+        from datetime import date, timedelta
+
+        ep1 = _make_episode(RequestStatus.UNRELEASED)
+        ep1.air_date = date.today() + timedelta(days=30)
+        ep2 = _make_episode(RequestStatus.UNRELEASED, 2)
+        ep2.air_date = date.today() + timedelta(days=60)
+        assert derive_season_status([ep1, ep2]) == RequestStatus.UNRELEASED
 
 
-class TestRecalculateRequestStatus:
+class TestDeriveRequestStatusFromEpisodes:
     def test_all_seasons_completed(self):
-        s1 = _make_season([], status=RequestStatus.COMPLETED)
-        s2 = _make_season([], status=RequestStatus.COMPLETED, season_id=2)
-        req = _make_request([s1, s2])
-        assert _recalculate_request_status(req) == RequestStatus.COMPLETED
+        eps = [_make_episode(RequestStatus.COMPLETED), _make_episode(RequestStatus.COMPLETED, 2)]
+        assert derive_request_status_from_episodes(eps) == RequestStatus.COMPLETED
 
-    def test_mixed_seasons(self):
-        s1 = _make_season([], status=RequestStatus.COMPLETED)
-        s2 = _make_season([], status=RequestStatus.PENDING, season_id=2)
-        req = _make_request([s1, s2])
-        assert _recalculate_request_status(req) == RequestStatus.PENDING
+    def test_mixed_episodes(self):
+        eps = [_make_episode(RequestStatus.COMPLETED), _make_episode(RequestStatus.PENDING, 2)]
+        assert derive_request_status_from_episodes(eps) == RequestStatus.PENDING
 
-    def test_no_seasons(self):
-        req = _make_request([], status=RequestStatus.PENDING)
-        assert _recalculate_request_status(req) == RequestStatus.PENDING
+    def test_no_episodes(self):
+        assert derive_request_status_from_episodes([]) == RequestStatus.PENDING
 
-    def test_pending_season(self):
-        s1 = _make_season([], status=RequestStatus.PENDING)
-        s2 = _make_season([], status=RequestStatus.PENDING, season_id=2)
-        req = _make_request([s1, s2])
-        assert _recalculate_request_status(req) == RequestStatus.PENDING
+    def test_pending_episodes(self):
+        eps = [_make_episode(RequestStatus.PENDING), _make_episode(RequestStatus.PENDING, 2)]
+        assert derive_request_status_from_episodes(eps) == RequestStatus.PENDING
+
+    def test_downloading_takes_precedence(self):
+        eps = [
+            _make_episode(RequestStatus.COMPLETED),
+            _make_episode(RequestStatus.DOWNLOADING, 2),
+        ]
+        assert derive_request_status_from_episodes(eps) == RequestStatus.DOWNLOADING
+
+    def test_staged_takes_precedence(self):
+        eps = [
+            _make_episode(RequestStatus.COMPLETED),
+            _make_episode(RequestStatus.STAGED, 2),
+        ]
+        assert derive_request_status_from_episodes(eps) == RequestStatus.STAGED
 
 
 class TestMarkEpisodeAvailableEndpoint:

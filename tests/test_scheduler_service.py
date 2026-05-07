@@ -286,7 +286,8 @@ async def test_recheck_unreleased_persists_tv_unreleased_and_pending_transitions
     async with session_maker() as session:
         refreshed = await session.get(Request, request_id)
         assert refreshed is not None
-        assert refreshed.status == RequestStatus.UNRELEASED
+        # Episode-centric: {COMPLETED, UNRELEASED} → PENDING (mixed state)
+        assert refreshed.status == RequestStatus.PENDING
 
         future_episode = await session.scalar(
             select(Episode)
@@ -306,7 +307,8 @@ async def test_recheck_unreleased_persists_tv_unreleased_and_pending_transitions
     async with session_maker() as session:
         refreshed = await session.get(Request, request_id)
         assert refreshed is not None
-        assert refreshed.status == RequestStatus.PENDING
+        # Episode-centric: all COMPLETED → COMPLETED
+        assert refreshed.status == RequestStatus.COMPLETED
 
     assert queued_request_ids == [request_id]
     await engine.dispose()
