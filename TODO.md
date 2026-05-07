@@ -9,5 +9,4 @@
 ## Bugs
 - fix the search all pending requests button. it seems to be broken and only searching the last episode and staging only one release. i seem to have to manually search and stage each episode in a season pack which is a pain.
 
-
-- staged episodes are not being marked as finished whent he download completes. so i have a few episodes that are now available in plex, but are still marked as staged in siftarr, which is confusing.
+- clicking deny on a request in teh active requests, or pending requests. doesnt seem to do anything. and it doesnt seem to be denying the request in overseerr either. it just seems to be a no-op. the request is still there and still pending in overseerr. It should deny the request in overseerr and remove it from the pending requests list in siftarr.

@@ -135,7 +135,10 @@ def test_dashboard_details_search_sets_progress_and_restores_button():
     assert "/requests/' + window.currentRequestId + '/search/results" in js
     assert "btn.innerHTML = originalText || 'Refresh Search';" in js
     assert "cacheInd.classList.add('hidden');" in js
-    assert "window.startSearchProgress(window.currentRequestId, detailsTitle, async function(data)" in js
+    assert (
+        "window.startSearchProgress(window.currentRequestId, detailsTitle, async function(data)"
+        in js
+    )
 
 
 def test_dashboard_template_search_actions_use_progress_helpers(dashboard_template_path):
