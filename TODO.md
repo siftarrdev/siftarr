@@ -8,3 +8,6 @@
 
 ## Bugs
 - fix the search all pending requests button. it seems to be broken and only searching the last episode and staging only one release. i seem to have to manually search and stage each episode in a season pack which is a pain.
+
+
+- staged episodes are not being marked as finished whent he download completes. so i have a few episodes that are now available in plex, but are still marked as staged in siftarr, which is confusing.
