@@ -5,13 +5,3 @@ services:
       - ../db/alembic:/app/alembic
       - ../db/alembic.ini:/app/alembic.ini
     command: ["/app/.venv/bin/python", "-m", "uvicorn", "app.siftarr.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
-
-  tailwind-watcher:
-    image: node:20-slim
-    working_dir: /build
-    command: >
-      sh -c "npm install && npx tailwindcss -i ./app/siftarr/static/css/tailwind-input.css -o ./app/siftarr/static/css/tailwind.css --watch"
-    volumes:
-      - ../package.json:/build/package.json
-      - ../tailwind.config.js:/build/tailwind.config.js
-      - ../app:/build/app
