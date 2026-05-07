@@ -351,8 +351,10 @@ async function searchEpisode(requestId, seasonNumber, episodeNumber) {
     if (details) details.open = true;
     container.innerHTML = renderSearchLoadingState('Searching episode...');
     const episodeLabel = 'S' + String(seasonNumber).padStart(2, '0') + 'E' + String(episodeNumber).padStart(2, '0');
-    window.startTvSearchProgress('/requests/' + requestId + '/seasons/' + seasonNumber + '/episodes/' + episodeNumber + '/search/stream', episodeLabel, function(data) {
+    window.startTvSearchProgress('/requests/' + requestId + '/seasons/' + seasonNumber + '/episodes/' + episodeNumber + '/search/stream', episodeLabel, async function(data) {
         container.innerHTML = (data.releases || []).map(function(r) { return renderReleaseCard(r, requestId); }).join('') || '<div class="text-gray-500 text-sm py-2">No results found for this episode.</div>';
+        // Refresh the details modal to update episode status badge, season counts, and active stage banner
+        await window.openRequestDetails(requestId, window.currentDetailsIndex, { preserveUiState: true });
     });
 }
 
