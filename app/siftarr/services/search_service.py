@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.siftarr.config import get_settings
 from app.siftarr.models import EventType
+from app.siftarr.models.release import Release
 from app.siftarr.models.request import MediaType
 from app.siftarr.models.request import Request as RequestModel
 from app.siftarr.models.rule import Rule
@@ -215,7 +216,11 @@ class SearchService:
         season_number: int,
         episode_number: int,
     ) -> TVSearchData:
-        """Search for a specific single-episode release."""
+        """Search for a specific single-episode release.
+
+        Passing releases are automatically staged via the rule engine
+        selection (``selection_source="rule"``).
+        """
         result = await self._search_tv(request, season=season_number, episode=episode_number)
         if result.error:
             return TVSearchData(
@@ -251,10 +256,67 @@ class SearchService:
         releases = await self._persist_and_serialize_tv_evaluations(
             request.id, evaluations, scope=scope, coverages=coverages
         )
+
+        # ── Auto-stage the best passing release ────────────────────────
+        passing_evals = [e for e in evaluations if e.passed]
+        if passing_evals:
+            best_eval = max(passing_evals, key=lambda e: e.total_score)
+            stored_release = await self._find_stored_release(request.id, best_eval)
+            if stored_release is not None:
+                try:
+                    await StagingService(self.db).use_releases(
+                        request,
+                        [stored_release],
+                        selection_source="rule",
+                    )
+                    logger.info(
+                        "Auto-staged episode release: request_id=%s season=%s episode=%s title=%s",
+                        request.id,
+                        season_number,
+                        episode_number,
+                        best_eval.release.title,
+                    )
+                except Exception:
+                    logger.exception(
+                        "Failed to auto-stage episode release: request_id=%s season=%s "
+                        "episode=%s title=%s",
+                        request.id,
+                        season_number,
+                        episode_number,
+                        best_eval.release.title,
+                    )
+
         return TVSearchData(
             releases=finalize_releases(releases),
             scope=scope,
         )
+
+    async def _find_stored_release(
+        self,
+        request_id: int,
+        evaluation: ReleaseEvaluation,
+    ) -> Release | None:
+        """Look up the stored :class:`Release` record for an evaluation.
+
+        Returns *None* when the record is not found or the query fails
+        (caller degrades gracefully).
+        """
+        try:
+            result = await self.db.execute(
+                select(Release).where(
+                    Release.request_id == request_id,
+                    Release.title == evaluation.release.title,
+                )
+            )
+            return result.scalar_one_or_none()
+        except Exception:
+            logger.warning(
+                "Could not find stored release for auto-stage: request_id=%s title=%s",
+                request_id,
+                evaluation.release.title,
+                exc_info=True,
+            )
+            return None
 
     async def _persist_and_serialize_tv_evaluations(
         self,
