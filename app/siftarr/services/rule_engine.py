@@ -4,7 +4,10 @@ from dataclasses import dataclass
 
 from app.siftarr.models.rule import TVTarget
 from app.siftarr.services.prowlarr_service import ProwlarrRelease
-from app.siftarr.services.release_parser import cached_parse_release_coverage
+from app.siftarr.services.release_parser import (
+    cached_parse_release_coverage,
+    is_exact_single_episode_release,
+)
 
 # ── Rule version (cache invalidation) ─────────────────────────────────
 
@@ -162,10 +165,29 @@ class RuleEngine:
             or coverage.is_complete_series
             or coverage.episode_number is not None
         )
-        return not (
-            (rule.media_scope == "movie" and is_tv_release)
-            or (rule.media_scope == "tv" and not is_tv_release)
+        if (rule.media_scope == "movie" and is_tv_release) or (
+            rule.media_scope == "tv" and not is_tv_release
+        ):
+            return False
+        if not is_tv_release or rule.tv_target is None:
+            return True
+
+        is_single_episode = (
+            coverage.season_number is not None
+            and coverage.episode_number is not None
+            and is_exact_single_episode_release(
+                release.title,
+                coverage.season_number,
+                coverage.episode_number,
+            )
         )
+        if rule.tv_target == TVTarget.EPISODE:
+            return is_single_episode
+        if rule.tv_target == TVTarget.SEASON_PACK:
+            return not is_single_episode and bool(
+                coverage.season_numbers or coverage.is_complete_series
+            )
+        return True
 
     @classmethod
     def from_db_rules(

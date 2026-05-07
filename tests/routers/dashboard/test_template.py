@@ -219,16 +219,37 @@ def test_dashboard_js_includes_active_stage_replacement_copy():
     assert "text-red-400" in js
 
 
-def test_dashboard_js_scopes_episode_stage_buttons_to_target_scope():
-    """Episode cards should ignore request-wide staged fallback when scope is episode-specific."""
+def test_dashboard_js_uses_per_release_conflict_metadata_for_stage_buttons():
+    """Release cards should not infer replacement from stale request-wide staged state."""
     js = _read_dashboard_js()
 
     assert "const releaseScope = release.target_scope || {};" in js
     assert "const isScopedEpisodeRelease = releaseScope.type === 'single_episode';" in js
-    assert (
-        "const activeStagedTorrent = release.active_staged_torrent || (isScopedEpisodeRelease ? null : window.currentActiveStagedTorrent);"
-        in js
-    )
+    assert "const activeStagedTorrent = release.active_staged_torrent || null;" in js
+    assert "const conflictsActiveSelection = !!release.conflicts_active_selection;" in js
+
+
+def test_dashboard_js_uses_cyan_staged_release_indicators():
+    """Staged releases and TV status badges should use cyan styling."""
+    js = _read_dashboard_js()
+
+    assert "'staged': 'badge-cyan'" in js
+    assert "'badge-blue' : 'badge-cyan'" in js
+    assert "border-cyan-500/70 bg-cyan-950/20" in js
+
+
+def test_dashboard_js_collapses_staged_tv_scope_after_reload():
+    """TV scoped staging should remember and collapse the matching accordion."""
+    js = _read_dashboard_js()
+
+    assert "data-stage-scope" in js
+    assert "{ preserveUiState: true }" in js
+    assert "function captureDetailsAccordionState()" in js
+    assert "function restoreDetailsAccordionState(state)" in js
+    assert "function collapseStagedTvScope(requestId, scope)" in js
+    assert "episode-details-' + requestId + '-' + scope.season_number" in js
+    assert "season-details-' + requestId + '-' + seasons[0]" in js
+    assert "collapseStagedTvScope(window.currentRequestId, stagedScope);" in js
 
 
 def test_dashboard_js_uses_scope_menu_helpers():
@@ -279,7 +300,7 @@ def test_dashboard_template_splits_staged_and_downloading_tabs(dashboard_templat
     assert "qBittorrent finished; waiting for Plex" in template
     assert "RAR-packed or otherwise unimportable" in template
     assert "Open qBittorrent" in template
-    assert "torrent.request_id in downloading_request_ids" in template
+    assert "torrent.id in replace_staged_torrent_ids" in template
     assert "openReplaceModal({{ torrent.id }}" in template
     assert (
         "openReplaceModal({{ torrent.id }}, {{ torrent.request_id }}"

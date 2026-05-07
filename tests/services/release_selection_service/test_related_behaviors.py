@@ -118,3 +118,82 @@ async def test_store_search_results_replaces_request_releases_without_stale_epis
         assert request_releases[0].title == "Severance.S01E01.1080p.WEB-DL"
 
     await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_store_search_results_purges_only_matching_tv_scope():
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+    session_maker = async_sessionmaker(engine, expire_on_commit=False)
+
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+
+    async with session_maker() as session:
+        request = Request(
+            external_id="tv-3",
+            media_type=MediaType.TV,
+            title="Severance",
+            status=RequestStatus.PENDING,
+        )
+        session.add(request)
+        await session.commit()
+
+        existing_episode = Release(
+            request_id=request.id,
+            title="Severance.S01E01.720p.WEB-DL",
+            size=1,
+            seeders=1,
+            leechers=0,
+            download_url="https://example.test/old-episode.torrent",
+            indexer="IndexerOld",
+            season_number=1,
+            episode_number=1,
+            score=1,
+            passed_rules=True,
+        )
+        existing_season_pack = Release(
+            request_id=request.id,
+            title="Severance.S01.1080p.WEB-DL",
+            size=10,
+            seeders=10,
+            leechers=0,
+            download_url="https://example.test/season-pack.torrent",
+            indexer="IndexerSeason",
+            season_number=1,
+            season_coverage="1",
+            score=10,
+            passed_rules=True,
+        )
+        session.add_all([existing_episode, existing_season_pack])
+        await session.commit()
+
+        new_episode = ProwlarrRelease(
+            title="Severance.S01E01.2160p.WEB-DL",
+            size=2,
+            seeders=20,
+            leechers=0,
+            download_url="https://example.test/new-episode.torrent",
+            indexer="IndexerNew",
+        )
+        evaluation = ReleaseEvaluation(release=new_episode, passed=True, total_score=20, matches=[])
+
+        await release_storage.store_search_results(
+            session,
+            request.id,
+            [evaluation],
+            scope={"type": "single_episode", "season_number": 1, "episode_number": 1},
+        )
+
+        titles = [
+            release.title
+            for release in (
+                await session.execute(
+                    select(Release).where(Release.request_id == request.id).order_by(Release.title)
+                )
+            )
+            .scalars()
+            .all()
+        ]
+        assert titles == ["Severance.S01.1080p.WEB-DL", "Severance.S01E01.2160p.WEB-DL"]
+
+    await engine.dispose()

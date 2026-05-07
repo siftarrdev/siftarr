@@ -58,6 +58,8 @@ async def test_request_details_reuses_persisted_multi_season_coverage(
     release_result.scalars.return_value.all.return_value = [stored_release]
     rules_result = MagicMock()
     rules_result.scalars.return_value.all.return_value = []
+    active_stage_result = MagicMock()
+    active_stage_result.scalars.return_value.all.return_value = []
     seasons_result = MagicMock()
     seasons_result.scalars.return_value.all.return_value = [season_one, season_two]
     episodes_one_result = MagicMock()
@@ -69,6 +71,7 @@ async def test_request_details_reuses_persisted_multi_season_coverage(
         count_result,
         release_result,
         rules_result,
+        active_stage_result,
         seasons_result,
         episodes_one_result,
         episodes_two_result,
@@ -203,6 +206,8 @@ async def test_request_details_orders_stored_releases_by_score_then_size(
     ]
     rules_result = MagicMock()
     rules_result.scalars.return_value.all.return_value = []
+    active_stage_result = MagicMock()
+    active_stage_result.scalars.return_value.all.return_value = []
     seasons_result = MagicMock()
     seasons_result.scalars.return_value.all.return_value = [season_one, season_two]
     episodes_one_result = MagicMock()
@@ -214,6 +219,7 @@ async def test_request_details_orders_stored_releases_by_score_then_size(
         count_result,
         release_result,
         rules_result,
+        active_stage_result,
         seasons_result,
         episodes_one_result,
         episodes_two_result,

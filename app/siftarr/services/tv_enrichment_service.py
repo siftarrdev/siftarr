@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from typing import Any
+from collections.abc import Mapping
+from typing import Any, cast
 
 from fastapi import BackgroundTasks
 from sqlalchemy import select
@@ -44,8 +45,10 @@ class TVEnrichmentService:
         request_id: int,
         background_tasks: BackgroundTasks,
         releases: list[dict[str, object]],
+        active_staged_torrents: list[dict[str, object]] | None = None,
     ) -> DashboardTVDetails:
         """Build TV detail payload with seasons, episodes, and release grouping."""
+        active_staged_torrents = active_staged_torrents or []
         seasons, episodes = await load_tv_seasons_with_episodes(self.db, request_id)
 
         episodes_by_season: dict[int, list[Any]] = {}
@@ -64,14 +67,27 @@ class TVEnrichmentService:
                 1 for ep in season_episodes if ep.status == RequestStatus.COMPLETED
             )
             state_counts = count_season_episode_states(season_episodes)
+            season_staged = self._season_has_staged_scope(
+                season.season_number, active_staged_torrents
+            )
+            staged_episode_numbers = {
+                ep.episode_number
+                for ep in season_episodes
+                if self._episode_has_staged_scope(
+                    season.season_number, ep.episode_number, active_staged_torrents
+                )
+            }
+            staged_count = len(staged_episode_numbers)
+            pending_count = max(state_counts["pending"] - staged_count, 0)
             seasons_data.append(
                 {
                     "id": season.id,
                     "season_number": season.season_number,
-                    "status": season.status.value,
+                    "status": "staged" if season_staged else season.status.value,
                     "available_count": available_count,
                     "total_count": len(season_episodes),
-                    "pending_count": state_counts["pending"],
+                    "pending_count": pending_count,
+                    "staged_count": staged_count,
                     "unreleased_count": state_counts["unreleased"],
                     "episodes": [
                         {
@@ -79,7 +95,9 @@ class TVEnrichmentService:
                             "episode_number": ep.episode_number,
                             "title": ep.title,
                             "air_date": ep.air_date.isoformat() if ep.air_date else None,
-                            "status": ep.status.value,
+                            "status": "staged"
+                            if ep.episode_number in staged_episode_numbers
+                            else ep.status.value,
                         }
                         for ep in season_episodes
                     ],
@@ -97,6 +115,49 @@ class TVEnrichmentService:
             sync_state=sync_state,
             aggregate_counts=count_request_episode_states(seasons_data),
         )
+
+    def _season_has_staged_scope(
+        self, season_number: int, active_staged_torrents: list[dict[str, object]]
+    ) -> bool:
+        for staged in active_staged_torrents:
+            scope = staged.get("target_scope")
+            if not isinstance(scope, Mapping):
+                continue
+            scope = cast(Mapping[str, object], scope)
+            scope_type = scope.get("type")
+            if scope_type == "complete_series":
+                return True
+            if scope_type in {"season_pack", "multi_season_pack"}:
+                seasons = scope.get("season_numbers")
+                if isinstance(seasons, list) and season_number in seasons:
+                    return True
+        return False
+
+    def _episode_has_staged_scope(
+        self,
+        season_number: int,
+        episode_number: int,
+        active_staged_torrents: list[dict[str, object]],
+    ) -> bool:
+        for staged in active_staged_torrents:
+            scope = staged.get("target_scope")
+            if not isinstance(scope, Mapping):
+                continue
+            scope = cast(Mapping[str, object], scope)
+            scope_type = scope.get("type")
+            if scope_type == "single_episode":
+                if (
+                    scope.get("season_number") == season_number
+                    and scope.get("episode_number") == episode_number
+                ):
+                    return True
+            elif scope_type == "complete_series":
+                return True
+            elif scope_type in {"season_pack", "multi_season_pack"}:
+                seasons = scope.get("season_numbers")
+                if isinstance(seasons, list) and season_number in seasons:
+                    return True
+        return False
 
     def _apply_known_tv_release_metadata(
         self,

@@ -1,5 +1,6 @@
 """Dashboard router for main UI."""
 
+import json
 import logging
 from datetime import UTC, date, datetime, timedelta
 
@@ -33,6 +34,26 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["dashboard"])
 templates = Jinja2Templates(directory="app/siftarr/templates")
+
+
+def _download_completed_torrent_ids(details: str | None) -> set[int]:
+    if not details:
+        return set()
+    try:
+        payload = json.loads(details)
+    except (TypeError, ValueError):
+        return set()
+    if not isinstance(payload, dict):
+        return set()
+
+    torrent_ids: set[int] = set()
+    torrent_id = payload.get("torrent_id")
+    if isinstance(torrent_id, int):
+        torrent_ids.add(torrent_id)
+    for item in payload.get("done_torrents") or []:
+        if isinstance(item, dict) and isinstance(item.get("torrent_id"), int):
+            torrent_ids.add(item["torrent_id"])
+    return torrent_ids
 
 
 @router.get("/")
@@ -88,6 +109,10 @@ async def dashboard(
         for t in active_workflow_torrents
         if t.request_id is None
         or is_active_staging_workflow_status(raw_staged_request_statuses.get(t.request_id))
+        or (
+            t.status == "staged"
+            and staged_request_identity.get(t.request_id, (None, None, None))[0] == MediaType.TV
+        )
     ]
     staged_torrents = [t for t in active_workflow_torrents if t.status == "staged"]
     downloading_torrents = [
@@ -103,6 +128,12 @@ async def dashboard(
         if any(t.request_id == request_id for t in downloading_torrents)
     }
     downloading_request_ids = {t.request_id for t in downloading_torrents if t.request_id}
+    replace_staged_torrent_ids = {
+        t.id
+        for t in staged_torrents
+        if t.request_id in downloading_request_ids
+        and staged_request_identity.get(t.request_id, (None, None, None))[0] != MediaType.TV
+    }
     movie_identity_mismatch_warnings: dict[int, str] = {}
     for torrent in active_workflow_torrents:
         if torrent.request_id is None:
@@ -121,6 +152,7 @@ async def dashboard(
         if reason:
             movie_identity_mismatch_warnings[torrent.id] = reason
     downloading_waiting_plex_request_ids: set[int] = set()
+    downloading_waiting_plex_torrent_ids: set[int] = set()
     downloading_waiting_plex_candidate_ids = {
         request_id
         for request_id in downloading_request_ids
@@ -128,16 +160,23 @@ async def dashboard(
     }
     if downloading_waiting_plex_candidate_ids:
         download_completed_result = await db.execute(
-            select(ActivityLog.request_id).where(
+            select(ActivityLog.request_id, ActivityLog.details).where(
                 ActivityLog.request_id.in_(downloading_waiting_plex_candidate_ids),
                 ActivityLog.event_type == EventType.DOWNLOAD_COMPLETED.value,
             )
         )
-        downloading_waiting_plex_request_ids = {
-            request_id
-            for (request_id,) in download_completed_result.all()
-            if request_id is not None
-        }
+        legacy_waiting_request_ids: set[int] = set()
+        for request_id, details in download_completed_result.all():
+            if request_id is None:
+                continue
+            torrent_ids = _download_completed_torrent_ids(details)
+            if torrent_ids:
+                downloading_waiting_plex_torrent_ids.update(torrent_ids)
+            else:
+                legacy_waiting_request_ids.add(request_id)
+        valid_downloading_torrent_ids = {t.id for t in downloading_torrents}
+        downloading_waiting_plex_torrent_ids &= valid_downloading_torrent_ids
+        downloading_waiting_plex_request_ids = legacy_waiting_request_ids
 
     # Build mapping for replaced torrents to their replacements
     replaced_by_titles: dict[int, str] = {}
@@ -325,7 +364,9 @@ async def dashboard(
             "staged_request_statuses": staged_request_statuses,
             "downloading_request_statuses": downloading_request_statuses,
             "downloading_request_ids": downloading_request_ids,
+            "replace_staged_torrent_ids": replace_staged_torrent_ids,
             "downloading_waiting_plex_request_ids": downloading_waiting_plex_request_ids,
+            "downloading_waiting_plex_torrent_ids": downloading_waiting_plex_torrent_ids,
             "movie_identity_mismatch_warnings": movie_identity_mismatch_warnings,
             "replaced_by_titles": replaced_by_titles,
             "unreleased_requests": unreleased_requests,

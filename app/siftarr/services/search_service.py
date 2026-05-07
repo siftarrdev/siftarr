@@ -1,6 +1,7 @@
 """Search service for request processing and manual release selection."""
 
 import logging
+from copy import copy
 from typing import Any
 
 from sqlalchemy import select
@@ -25,11 +26,17 @@ from app.siftarr.services.release_parser import (
     is_exact_single_episode_release,
 )
 from app.siftarr.services.release_serializers import (
+    apply_release_size_per_season_metadata,
     finalize_releases,
     season_pack_release_sort_key,
     serialize_evaluated_release,
+    serialize_stored_evaluated_release,
 )
-from app.siftarr.services.release_storage import persist_manual_release
+from app.siftarr.services.release_storage import (
+    get_release_persistence_key,
+    persist_manual_release,
+    store_search_results,
+)
 from app.siftarr.services.rule_engine import (
     ReleaseEvaluation,
     RuleEngine,
@@ -142,7 +149,8 @@ class SearchService:
             )
 
         engine = await self._build_rule_engine(media_type="tv")
-        releases = []
+        evaluations = []
+        coverages = []
         for release in result.releases:
             coverage = cached_parse_release_coverage(release.title)
             if coverage.episode_number is not None:
@@ -151,12 +159,15 @@ class SearchService:
                 continue
             if coverage.season_numbers != (season_number,):
                 continue
-            releases.append(
-                serialize_evaluated_release(release, engine.evaluate(release), coverage=coverage)
-            )
+            evaluations.append(self._evaluation_for_release(engine.evaluate(release), release))
+            coverages.append(coverage)
+        scope: dict[str, object] = {"type": "season_packs", "season_number": season_number}
+        releases = await self._persist_and_serialize_tv_evaluations(
+            request.id, evaluations, scope=scope, coverages=coverages
+        )
         return TVSearchData(
             releases=finalize_releases(releases, sort_key=season_pack_release_sort_key),
-            scope={"type": "season_packs", "season_number": season_number},
+            scope=scope,
         )
 
     async def search_multi_season_packs(self, request: Any, *, request_id: int) -> TVSearchData:
@@ -173,25 +184,28 @@ class SearchService:
             )
 
         engine = await self._build_rule_engine(media_type="tv")
-        releases = []
+        evaluations = []
+        coverages = []
         for release in result.releases:
             coverage = cached_parse_release_coverage(release.title)
             if coverage.episode_number is not None:
                 continue
             if not coverage.is_complete_series and len(coverage.season_numbers) <= 1:
                 continue
-            releases.append(
-                serialize_evaluated_release(
-                    release,
-                    engine.evaluate(release),
-                    coverage=coverage,
-                    known_total_seasons=known_total_seasons,
-                )
-            )
+            evaluations.append(self._evaluation_for_release(engine.evaluate(release), release))
+            coverages.append(coverage)
+        scope: dict[str, object] = {"type": "multi_season_packs"}
+        releases = await self._persist_and_serialize_tv_evaluations(
+            request.id,
+            evaluations,
+            scope=scope,
+            coverages=coverages,
+            known_total_seasons=known_total_seasons,
+        )
         return TVSearchData(
             releases=finalize_releases(releases, sort_key=season_pack_release_sort_key),
             known_total_seasons=known_total_seasons,
-            scope={"type": "multi_season_packs"},
+            scope=scope,
         )
 
     async def search_episode(
@@ -215,7 +229,8 @@ class SearchService:
             )
 
         engine = await self._build_rule_engine(media_type="tv")
-        releases = []
+        evaluations = []
+        coverages = []
         for release in result.releases:
             coverage = cached_parse_release_coverage(release.title)
             if coverage.is_complete_series:
@@ -226,15 +241,72 @@ class SearchService:
                 continue
             if not is_exact_single_episode_release(release.title, season_number, episode_number):
                 continue
-            releases.append(serialize_evaluated_release(release, engine.evaluate(release)))
+            evaluations.append(self._evaluation_for_release(engine.evaluate(release), release))
+            coverages.append(coverage)
+        scope: dict[str, object] = {
+            "type": "single_episode",
+            "season_number": season_number,
+            "episode_number": episode_number,
+        }
+        releases = await self._persist_and_serialize_tv_evaluations(
+            request.id, evaluations, scope=scope, coverages=coverages
+        )
         return TVSearchData(
             releases=finalize_releases(releases),
-            scope={
-                "type": "single_episode",
-                "season_number": season_number,
-                "episode_number": episode_number,
-            },
+            scope=scope,
         )
+
+    async def _persist_and_serialize_tv_evaluations(
+        self,
+        request_id: int,
+        evaluations: list[ReleaseEvaluation],
+        *,
+        scope: dict[str, object],
+        coverages: list[Any],
+        known_total_seasons: int | None = None,
+    ) -> list[dict[str, object]]:
+        """Persist scoped TV evaluations and serialize with IDs; tolerate pure mocks."""
+        try:
+            stored_by_key = await store_search_results(
+                self.db, request_id, evaluations, scope=scope
+            )
+        except (StopAsyncIteration, StopIteration):
+            releases = [
+                serialize_evaluated_release(
+                    evaluation.release,
+                    evaluation,
+                    coverage=coverages[index] if index < len(coverages) else None,
+                    known_total_seasons=known_total_seasons,
+                )
+                for index, evaluation in enumerate(evaluations)
+            ]
+        else:
+            releases = [
+                serialize_stored_evaluated_release(stored, evaluation, media_type=MediaType.TV)
+                for evaluation in evaluations
+                if (
+                    stored := stored_by_key.get(
+                        get_release_persistence_key(
+                            title=evaluation.release.title, info_hash=evaluation.release.info_hash
+                        )
+                    )
+                )
+                is not None
+            ]
+
+        if known_total_seasons is not None:
+            for release in releases:
+                release["known_total_seasons"] = known_total_seasons
+                apply_release_size_per_season_metadata(release)
+        return releases
+
+    def _evaluation_for_release(
+        self, evaluation: ReleaseEvaluation, release: ProwlarrRelease
+    ) -> ReleaseEvaluation:
+        """Return an evaluation object bound to the release, isolating shared mocks."""
+        bound = copy(evaluation)
+        bound.release = release
+        return bound
 
     async def _search_tv(
         self,

@@ -1,7 +1,7 @@
 """Tests for dashboard request staging detail payloads."""
 
 import json
-from typing import cast
+from typing import Any, cast
 from unittest.mock import MagicMock
 
 import pytest
@@ -10,6 +10,114 @@ from app.siftarr.models.release import Release
 from app.siftarr.models.request import MediaType, RequestStatus
 from app.siftarr.routers import dashboard_api
 from app.siftarr.services import detail_service, metadata_service
+from app.siftarr.services.release_serializers import apply_active_selection_metadata
+from app.siftarr.services.tv_enrichment_service import TVEnrichmentService
+
+
+def test_tv_staged_scope_helpers_cover_episode_season_multi_and_complete():
+    service = TVEnrichmentService(db=cast(Any, object()))
+    staged_payloads: list[dict[str, object]] = [
+        {"target_scope": {"type": "single_episode", "season_number": 3, "episode_number": 3}},
+        {"target_scope": {"type": "season_pack", "season_numbers": [4]}},
+        {"target_scope": {"type": "multi_season_pack", "season_numbers": [5, 6]}},
+        {"target_scope": {"type": "complete_series"}},
+    ]
+
+    assert service._episode_has_staged_scope(3, 3, staged_payloads)
+    assert service._season_has_staged_scope(4, staged_payloads)
+    assert service._episode_has_staged_scope(5, 1, staged_payloads)
+    assert service._season_has_staged_scope(99, staged_payloads)
+
+
+def test_tv_active_selection_matches_title_scope_and_magnet_after_release_refresh():
+    releases: list[dict[str, object]] = [
+        {
+            "title": "Foundation.S01E01.1080p.WEB-DL",
+            "magnet_url": "magnet:?xt=urn:btih:s01e01",
+            "target_scope": {"type": "single_episode", "season_number": 1, "episode_number": 1},
+        },
+        {
+            "title": "Foundation.S01E02.1080p.WEB-DL",
+            "magnet_url": "magnet:?xt=urn:btih:s01e02",
+            "target_scope": {"type": "single_episode", "season_number": 1, "episode_number": 2},
+        },
+    ]
+    active_stages: list[dict[str, object]] = [
+        {
+            "id": 77,
+            "title": "Foundation.S01E01.1080p.WEB-DL",
+            "status": "staged",
+            "selection_source": "manual",
+            "magnet_url": "magnet:?xt=urn:btih:s01e01",
+            "target_scope": {"type": "single_episode", "season_number": 1, "episode_number": 1},
+        }
+    ]
+
+    marked = apply_active_selection_metadata(releases, active_stages, media_type=MediaType.TV)
+
+    assert marked[0]["is_active_selection"] is True
+    assert marked[0]["conflicts_active_selection"] is True
+    assert marked[0]["active_selection_source"] == "manual"
+    assert marked[1]["is_active_selection"] is False
+    assert marked[1]["conflicts_active_selection"] is False
+
+
+def test_tv_active_selection_metadata_marks_only_overlapping_replace_scopes():
+    releases: list[dict[str, object]] = [
+        {
+            "title": "Show.S01E01.REPACK.1080p.WEB-DL",
+            "target_scope": {"type": "single_episode", "season_number": 1, "episode_number": 1},
+        },
+        {
+            "title": "Show.S01E02.1080p.WEB-DL",
+            "target_scope": {"type": "single_episode", "season_number": 1, "episode_number": 2},
+        },
+        {
+            "title": "Show.S01.REPACK.1080p.WEB-DL",
+            "target_scope": {"type": "season_pack", "season_numbers": [1]},
+        },
+        {
+            "title": "Show.S02.1080p.WEB-DL",
+            "target_scope": {"type": "season_pack", "season_numbers": [2]},
+        },
+        {
+            "title": "Show.S02-S03.1080p.WEB-DL",
+            "target_scope": {"type": "multi_season_pack", "season_numbers": [2, 3]},
+        },
+    ]
+    active_stages: list[dict[str, object]] = [
+        {
+            "id": 77,
+            "title": "Show.S01E01.1080p.WEB-DL",
+            "status": "staged",
+            "selection_source": "manual",
+            "target_scope": {"type": "single_episode", "season_number": 1, "episode_number": 1},
+        },
+        {
+            "id": 78,
+            "title": "Show.S03.1080p.WEB-DL",
+            "status": "staged",
+            "selection_source": "manual",
+            "target_scope": {"type": "season_pack", "season_numbers": [3]},
+        },
+    ]
+
+    marked = apply_active_selection_metadata(releases, active_stages, media_type=MediaType.TV)
+
+    assert [release["is_active_selection"] for release in marked] == [
+        False,
+        False,
+        False,
+        False,
+        False,
+    ]
+    assert [release["conflicts_active_selection"] for release in marked] == [
+        True,
+        False,
+        True,
+        False,
+        True,
+    ]
 
 
 @pytest.mark.asyncio
@@ -135,14 +243,14 @@ async def test_request_details_surfaces_active_staged_torrent_metadata(
 
 
 @pytest.mark.asyncio
-async def test_request_details_tv_scopes_active_stage_to_matching_episode(
+async def test_request_details_tv_loads_persisted_active_stage_for_pending_request(
     mock_db, monkeypatch, background_tasks
 ):
-    """TV details should expose per-episode staged metadata instead of request-wide flags."""
+    """TV details should restore staged metadata from persisted rows on initial load."""
     request_record = MagicMock()
     request_record.id = 21
     request_record.media_type = MediaType.TV
-    request_record.status = RequestStatus.STAGED
+    request_record.status = RequestStatus.PENDING
     request_record.title = "Foundation"
     request_record.overseerr_request_id = None
 

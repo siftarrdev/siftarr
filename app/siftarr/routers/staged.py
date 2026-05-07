@@ -17,7 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.siftarr.config import get_settings
 from app.siftarr.database import get_db
-from app.siftarr.models.activity_log import EventType
+from app.siftarr.models.activity_log import ActivityLog, EventType
 from app.siftarr.models.request import (
     MediaType,
     Request,
@@ -141,6 +141,26 @@ def _progress_percent(progress: float | None) -> float | None:
     if progress is None:
         return None
     return round(progress * 100, 1)
+
+
+def _download_completed_torrent_ids(details: str | None) -> set[int]:
+    if not details:
+        return set()
+    try:
+        payload = json.loads(details)
+    except (TypeError, ValueError):
+        return set()
+    if not isinstance(payload, dict):
+        return set()
+
+    torrent_ids: set[int] = set()
+    torrent_id = payload.get("torrent_id")
+    if isinstance(torrent_id, int):
+        torrent_ids.add(torrent_id)
+    for item in payload.get("done_torrents") or []:
+        if isinstance(item, dict) and isinstance(item.get("torrent_id"), int):
+            torrent_ids.add(item["torrent_id"])
+    return torrent_ids
 
 
 async def _finalize_action_response(
@@ -319,7 +339,7 @@ def _should_refresh_staged_tab(
     resolved_request_status: str,
 ) -> bool:
     """Return whether the staged tab should immediately refresh server-rendered state."""
-    return qbit_complete or plex_available or resolved_request_status != request_status
+    return plex_available or resolved_request_status != request_status
 
 
 @router.post("/{torrent_id}/approve", response_model=None)
@@ -549,6 +569,32 @@ async def get_download_status(
     if not torrents:
         return JSONResponse({"torrents": []})
 
+    waiting_plex_torrent_ids: set[int] = set()
+    legacy_waiting_plex_request_ids: set[int] = set()
+    downloading_request_ids = {
+        request_id
+        for request_id, status in request_statuses.items()
+        if status == RequestStatus.DOWNLOADING
+    }
+    if downloading_request_ids:
+        logs_result = await db.execute(
+            select(ActivityLog.request_id, ActivityLog.details).where(
+                ActivityLog.request_id.in_(downloading_request_ids),
+                ActivityLog.event_type == EventType.DOWNLOAD_COMPLETED.value,
+            )
+        )
+        for request_id, details in logs_result.all():
+            if request_id is None:
+                continue
+            torrent_ids = _download_completed_torrent_ids(details)
+            if torrent_ids:
+                waiting_plex_torrent_ids.update(torrent_ids)
+            else:
+                legacy_waiting_plex_request_ids.add(request_id)
+
+    active_torrent_ids = {torrent.id for torrent in torrents}
+    waiting_plex_torrent_ids &= active_torrent_ids
+
     runtime_settings = get_settings()
     qbittorrent = QbittorrentService(settings=runtime_settings)
 
@@ -585,6 +631,11 @@ async def get_download_status(
             request_status = "unknown"
 
         qbit_complete = qbit_progress is None or qbit_progress >= 1.0
+        waiting_for_plex = (
+            torrent.id in waiting_plex_torrent_ids
+            or torrent.request_id in legacy_waiting_plex_request_ids
+            or (qbit_complete and request_status == RequestStatus.DOWNLOADING.value)
+        )
         plex_available = False
         resolved_request_status = request_status
 
@@ -600,6 +651,7 @@ async def get_download_status(
                 "qbit_eta_seconds": info.get("eta") if info else None,
                 "qbit_download_speed": info.get("dlspeed") if info else None,
                 "qbit_complete": qbit_complete,
+                "waiting_for_plex": waiting_for_plex,
                 "plex_available": plex_available,
                 "refresh_staged_tab": _should_refresh_staged_tab(
                     qbit_complete=qbit_complete,

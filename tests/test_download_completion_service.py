@@ -22,7 +22,16 @@ def _rows_result(rows: list) -> MagicMock:
 def _request_id_rows(request_ids: list[int]) -> MagicMock:
     """Create a mock execute result that returns request_id tuples from .all()."""
     result = MagicMock()
-    result.all.return_value = [(request_id,) for request_id in request_ids]
+    result.all.return_value = [
+        (request_id, json.dumps({"done_torrents": [{"torrent_id": 1}]}))
+        for request_id in request_ids
+    ]
+    return result
+
+
+def _completion_log_rows(rows: list[tuple[int, dict]]) -> MagicMock:
+    result = MagicMock()
+    result.all.return_value = [(request_id, json.dumps(details)) for request_id, details in rows]
     return result
 
 
@@ -456,10 +465,10 @@ class TestDownloadCompletionService:
         mock_plex_polling.check_request.assert_called_once_with(10)
 
     @pytest.mark.asyncio
-    async def test_download_completed_log_is_deduplicated(
+    async def test_download_completed_log_is_deduplicated_per_torrent(
         self, mock_db, mock_qbit, mock_plex_polling
     ):
-        """Existing download_completed activity should not be logged again."""
+        """Existing download_completed activity for the same torrent should not be logged again."""
         from app.siftarr.models.request import MediaType, RequestStatus
         from app.siftarr.services.plex_polling_service import CheckRequestResult
 
@@ -503,6 +512,72 @@ class TestDownloadCompletionService:
 
         assert result == 0
         mock_db.add.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_tv_episode_download_completed_logs_are_per_torrent(
+        self, mock_db, mock_qbit, mock_plex_polling
+    ):
+        """Two approved TV episode torrents on one request should log completion independently."""
+        from app.siftarr.models.request import MediaType, RequestStatus
+        from app.siftarr.services.plex_polling_service import CheckRequestResult
+
+        first = MagicMock()
+        first.id = 1
+        first.request_id = 10
+        first.title = "Test Show S01E01"
+        first.magnet_url = "magnet:?xt=urn:btih:da39a3ee5e6b4b0d3255bfef95601890afd80709"
+
+        second = MagicMock()
+        second.id = 2
+        second.request_id = 10
+        second.title = "Test Show S01E02"
+        second.magnet_url = "magnet:?xt=urn:btih:ea39a3ee5e6b4b0d3255bfef95601890afd80709"
+
+        request = MagicMock()
+        request.id = 10
+        request.title = "Test Show"
+        request.media_type = MediaType.TV
+        request.status = RequestStatus.DOWNLOADING
+
+        mock_qbit.get_all_active_torrents = AsyncMock(
+            return_value=[
+                {
+                    "hash": "da39a3ee5e6b4b0d3255bfef95601890afd80709",
+                    "name": first.title,
+                    "progress": 1.0,
+                    "state": "uploading",
+                },
+                {
+                    "hash": "ea39a3ee5e6b4b0d3255bfef95601890afd80709",
+                    "name": second.title,
+                    "progress": 1.0,
+                    "state": "uploading",
+                },
+            ]
+        )
+        mock_plex_polling.check_request = AsyncMock(
+            return_value=CheckRequestResult(
+                request_id=10,
+                matched=False,
+                available=False,
+                status_before=RequestStatus.DOWNLOADING,
+                status_after=RequestStatus.DOWNLOADING,
+            )
+        )
+        mock_db.execute.side_effect = [
+            _rows_result([(first, request), (second, request)]),
+            _completion_log_rows(
+                [(10, {"done_torrents": [{"torrent_id": 1, "title": first.title}]})]
+            ),
+        ]
+
+        service = DownloadCompletionService(mock_db, mock_qbit, mock_plex_polling)
+        result = await service.check_downloading_requests()
+
+        assert result == 0
+        details = json.loads(mock_db.add.call_args.args[0].details)
+        assert [item["torrent_id"] for item in details["done_torrents"]] == [2]
+        mock_plex_polling.check_request.assert_called_once_with(10)
 
     @pytest.mark.asyncio
     async def test_qbit_progress_one_retries_plex_without_completing_request(

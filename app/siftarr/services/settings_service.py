@@ -747,6 +747,7 @@ class PreparedOverseerrImport:
     requester_email: str | None
     overseerr_request_id: int | None
     media_details: dict | None
+    created_at: datetime | None = None
 
 
 def extract_title_and_year_from_media_details(
@@ -815,6 +816,13 @@ async def prepare_overseerr_import(
         media_details = await media_details_task
 
     title, year = extract_title_and_year_from_media_details(media_details)
+
+    created_at = None
+    raw = ov_req.get("createdAt")
+    if raw:
+        with contextlib.suppress(ValueError, TypeError):
+            created_at = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+
     return PreparedOverseerrImport(
         external_id=external_id,
         media_type=media_type,
@@ -826,6 +834,7 @@ async def prepare_overseerr_import(
         requester_email=email,
         overseerr_request_id=overseerr_request_id,
         media_details=media_details,
+        created_at=created_at,
     )
 
 
@@ -996,6 +1005,7 @@ async def import_overseerr_requests(
                     requester_email=prepared.requester_email,
                     status=RequestStatus.PENDING,
                     overseerr_request_id=prepared.overseerr_request_id,
+                    created_at=prepared.created_at,
                 )
                 db.add(new_request)
                 await db.flush()

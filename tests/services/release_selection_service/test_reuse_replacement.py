@@ -214,7 +214,7 @@ async def test_use_releases_replaces_existing_active_stage_for_manual_selection(
 
     assert result["status"] == "staged"
     assert result["action"] == "replaced_active_selection"
-    assert result["message"] == "Replaced the active staged selection with 1 release(s)."
+    assert result["message"] == "Replaced overlapping staged torrent(s) with 1 release(s)."
     assert result["staged_ids"] == [replacement_stage.id]
     mock_db.delete.assert_awaited_once_with(existing_stage)
     queue_service.remove_from_queue.assert_awaited_once_with(request_record.id)
@@ -270,7 +270,7 @@ async def test_use_releases_reuses_existing_manual_pick_and_retires_auto_pick(
 
     assert result["status"] == "staged"
     assert result["action"] == "replaced_active_selection"
-    assert result["message"] == "Replaced the active staged selection with 1 release(s)."
+    assert result["message"] == "Replaced overlapping staged torrent(s) with 1 release(s)."
     assert result["staged_ids"] == [manual_stage.id]
     mock_db.delete.assert_awaited_once_with(auto_stage)
     assert manual_stage.status == "staged"

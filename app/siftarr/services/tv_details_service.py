@@ -45,12 +45,16 @@ def count_season_episode_states(episodes: list[Any]) -> dict[str, int]:
 
 def count_request_episode_states(seasons_data: list[dict[str, object]]) -> dict[str, int]:
     """Aggregate TV episode counts across all serialized seasons."""
-    return {
+    counts = {
         "available": sum(normalize_int(season.get("available_count")) for season in seasons_data),
         "pending": sum(normalize_int(season.get("pending_count")) for season in seasons_data),
         "unreleased": sum(normalize_int(season.get("unreleased_count")) for season in seasons_data),
         "total": sum(normalize_int(season.get("total_count")) for season in seasons_data),
     }
+    staged = sum(normalize_int(season.get("staged_count")) for season in seasons_data)
+    if staged:
+        counts["staged"] = staged
+    return counts
 
 
 def compute_sync_metadata(

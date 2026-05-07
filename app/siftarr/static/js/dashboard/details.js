@@ -1,7 +1,8 @@
 // Dashboard Details Module - Request details modal and timeline
 // =============================================================
 
-async function openRequestDetails(requestId, explicitIndex = null) {
+async function openRequestDetails(requestId, explicitIndex = null, options = {}) {
+    const preserveUiState = !!options.preserveUiState;
     const modal = document.getElementById('request-details-modal');
     const title = document.getElementById('request-details-title');
     const meta = document.getElementById('request-details-meta');
@@ -25,9 +26,15 @@ async function openRequestDetails(requestId, explicitIndex = null) {
     }
     window.updateNavigationButtons();
 
-    title.textContent = 'Loading...';
-    meta.textContent = '';
-    overview.textContent = '';
+    const preservedDetailsState = preserveUiState && window.captureDetailsAccordionState
+        ? window.captureDetailsAccordionState()
+        : null;
+
+    if (!preserveUiState) {
+        title.textContent = 'Loading...';
+        meta.textContent = '';
+        overview.textContent = '';
+    }
     if (overseerrLink) {
         overseerrLink.classList.add('hidden');
         overseerrLink.removeAttribute('href');
@@ -47,10 +54,12 @@ async function openRequestDetails(requestId, explicitIndex = null) {
     window.setPoster(null, 'Loading poster');
     document.getElementById('release-results-header').classList.remove('hidden');
     document.getElementById('release-filter-input').classList.remove('hidden');
-    releases.innerHTML = '<div class="text-gray-500 text-sm">Loading search results...</div>';
+    if (!preserveUiState) {
+        releases.innerHTML = '<div class="text-gray-500 text-sm">Loading search results...</div>';
+    }
     const cacheIndicatorInit = document.getElementById('release-cache-indicator');
     if (cacheIndicatorInit) cacheIndicatorInit.classList.add('hidden');
-    if (filterInput) filterInput.value = '';
+    if (filterInput && !preserveUiState) filterInput.value = '';
     modal.classList.remove('hidden');
 
     try {
@@ -91,6 +100,7 @@ async function openRequestDetails(requestId, explicitIndex = null) {
 
         window.currentReleases = data.releases || [];
         window.currentRequestId = data.request.id;
+        window.currentRequestMediaType = data.request.media_type || 'movie';
         window.updateActiveStageBanner(data);
 
         const cacheIndicator = document.getElementById('release-cache-indicator');
@@ -103,6 +113,9 @@ async function openRequestDetails(requestId, explicitIndex = null) {
             document.getElementById('release-filter-input').classList.add('hidden');
             if (cacheIndicator) cacheIndicator.classList.add('hidden');
             releases.innerHTML = window.renderSeasonAccordion(data);
+            if (preservedDetailsState && window.restoreDetailsAccordionState) {
+                window.restoreDetailsAccordionState(preservedDetailsState);
+            }
         } else {
             document.getElementById('release-results-header').classList.remove('hidden');
             document.getElementById('release-filter-input').classList.remove('hidden');

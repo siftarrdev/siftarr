@@ -1,5 +1,6 @@
 """Service for detecting when approved/downloading torrents have finished."""
 
+import json
 import logging
 import re
 from typing import Any
@@ -31,6 +32,26 @@ def _extract_hash(magnet_url: str | None) -> str | None:
         return None
     m = _BTIH_RE.search(magnet_url)
     return m.group(1).lower() if m else None
+
+
+def _download_completed_torrent_ids(details: str | None) -> set[int]:
+    if not details:
+        return set()
+    try:
+        payload = json.loads(details)
+    except (TypeError, ValueError):
+        return set()
+    if not isinstance(payload, dict):
+        return set()
+
+    torrent_ids: set[int] = set()
+    torrent_id = payload.get("torrent_id")
+    if isinstance(torrent_id, int):
+        torrent_ids.add(torrent_id)
+    for item in payload.get("done_torrents") or []:
+        if isinstance(item, dict) and isinstance(item.get("torrent_id"), int):
+            torrent_ids.add(item["torrent_id"])
+    return torrent_ids
 
 
 class DownloadCompletionService:
@@ -148,16 +169,20 @@ class DownloadCompletionService:
             return completed
 
         existing_download_completed_logs_result = await self.db.execute(
-            select(ActivityLog.request_id).where(
+            select(ActivityLog.request_id, ActivityLog.details).where(
                 ActivityLog.request_id.in_(set(ready_request_map)),
                 ActivityLog.event_type == EventType.DOWNLOAD_COMPLETED.value,
             )
         )
-        existing_download_completed_logs = {
-            request_id
-            for (request_id,) in existing_download_completed_logs_result.all()
-            if request_id is not None
+        completed_torrent_ids_by_request: dict[int, set[int]] = {
+            request_id: set() for request_id in ready_request_map
         }
+        for request_id, details in existing_download_completed_logs_result.all():
+            if request_id is None:
+                continue
+            completed_torrent_ids_by_request.setdefault(request_id, set()).update(
+                _download_completed_torrent_ids(details)
+            )
 
         for request_id, (request, torrents, done_torrents) in ready_request_map.items():
             # 4b. At least one torrent is done/missing – check Plex immediately.
@@ -169,17 +194,21 @@ class DownloadCompletionService:
                 request.title,
             )
 
-            if request_id not in existing_download_completed_logs:
+            existing_torrent_ids = completed_torrent_ids_by_request.setdefault(request_id, set())
+            newly_done_torrents = [t for t in done_torrents if t.id not in existing_torrent_ids]
+            if newly_done_torrents:
                 await activity_log.log(
                     EventType.DOWNLOAD_COMPLETED,
                     request_id=request_id,
                     details={
                         "title": request.title,
                         "torrent_count": len(torrents),
-                        "done_torrents": [qbit_evidence_by_torrent_id[t.id] for t in done_torrents],
+                        "done_torrents": [
+                            qbit_evidence_by_torrent_id[t.id] for t in newly_done_torrents
+                        ],
                     },
                 )
-                existing_download_completed_logs.add(request_id)
+                existing_torrent_ids.update(t.id for t in newly_done_torrents)
                 await self.db.commit()
 
             try:

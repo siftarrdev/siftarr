@@ -25,7 +25,10 @@ from app.siftarr.services.prowlarr_service import ProwlarrRelease
 from app.siftarr.services.qbittorrent_service import MediaCategory, QbittorrentService
 from app.siftarr.services.release_parser import (
     cached_parse_release_coverage,
-    is_exact_single_episode_release,
+)
+from app.siftarr.services.release_serializers import (
+    serialize_target_scope,
+    tv_target_scopes_overlap,
 )
 from app.siftarr.services.release_storage import build_prowlarr_release
 
@@ -100,16 +103,14 @@ async def _get_active_staged_torrents(
     return list(result.scalars().all())
 
 
-def _get_exact_single_episode_scope(title: str) -> tuple[int, int] | None:
-    """Return exact episode scope for titles that target one TV episode."""
+def _target_scope_from_title(title: str) -> dict[str, object]:
     coverage = cached_parse_release_coverage(title)
-    season_number = coverage.season_number
-    episode_number = coverage.episode_number
-    if season_number is None or episode_number is None:
-        return None
-    if not is_exact_single_episode_release(title, season_number, episode_number):
-        return None
-    return season_number, episode_number
+    return serialize_target_scope(
+        media_type=MediaType.TV,
+        title=title,
+        season_number=coverage.season_number,
+        episode_number=coverage.episode_number,
+    )
 
 
 def _filter_active_staged_torrents_for_release(
@@ -121,14 +122,11 @@ def _filter_active_staged_torrents_for_release(
     if request.media_type != MediaType.TV:
         return active_staged
 
-    release_scope = _get_exact_single_episode_scope(release.title)
-    if release_scope is None:
-        return active_staged
-
+    release_scope = _target_scope_from_title(release.title)
     return [
         staged
         for staged in active_staged
-        if _get_exact_single_episode_scope(staged.title) == release_scope
+        if tv_target_scopes_overlap(release_scope, _target_scope_from_title(staged.title))
     ]
 
 
@@ -136,7 +134,13 @@ def _should_delete_superseded_staged_torrents(
     request: Request,
     selection_source: str,
 ) -> bool:
-    """Return whether this selection must remove other active stages in scope."""
+    """Return whether this selection must remove other active stages in scope.
+
+    Note: The caller already filters active staged torrents via
+    ``_filter_active_staged_torrents_for_release()`` so only overlapping
+    (in-scope) torrents reach this function.  This guard just ensures we
+    don't delete for auto-staged selections on TV requests.
+    """
     if request.media_type == MediaType.MOVIE:
         return True
     return selection_source == "manual"
@@ -157,7 +161,7 @@ def _staged_selection_outcome(
     if replaced_active_selection:
         return (
             "replaced_active_selection",
-            f"Replaced the active staged selection with {staged_count} release(s).",
+            f"Replaced overlapping staged torrent(s) with {staged_count} release(s).",
         )
     return (
         "manual_staged",
@@ -298,12 +302,21 @@ class StagingService:
         STAGING_DIR.mkdir(parents=True, exist_ok=True)
 
         if release.download_url.startswith("http"):
-            client = await get_shared_client()
-            response = await client.get(release.download_url, timeout=60.0)
-            response.raise_for_status()
-            with open(torrent_path, "wb") as f:
-                f.write(response.content)
-            logger.debug("Downloaded torrent file: %s", torrent_path)
+            try:
+                client = await get_shared_client()
+                response = await client.get(release.download_url, timeout=60.0)
+                response.raise_for_status()
+                with open(torrent_path, "wb") as f:
+                    f.write(response.content)
+                logger.debug("Downloaded torrent file: %s", torrent_path)
+            except Exception:
+                logger.warning(
+                    "Failed to download torrent file from %s for %s — staging without local file; "
+                    "approval will use magnet URL if available",
+                    release.download_url,
+                    release.title,
+                    exc_info=True,
+                )
         else:
             logger.debug("Using magnet URI (no torrent file download): %s", release.title)
 
@@ -329,6 +342,7 @@ class StagingService:
                 "leechers": release.leechers,
                 "download_url": release.download_url,
                 "magnet_url": release.magnet_url,
+                "info_hash": release.info_hash,
             },
             "staged_at": datetime.now(UTC).isoformat(),
             "filename": filename,
