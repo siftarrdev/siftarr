@@ -9,6 +9,7 @@ Pure functions in this module have no database access.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from datetime import UTC, date, datetime
 from typing import TYPE_CHECKING
 
@@ -27,7 +28,7 @@ def derive_episode_status(*, is_on_plex: bool, air_date: date | None) -> Request
     return RequestStatus.PENDING
 
 
-def episodes_are_unreleased(episodes: list[Episode]) -> bool:
+def episodes_are_unreleased(episodes: Sequence[Episode]) -> bool:
     """Return whether any episode has a future air date.
 
     Silently skips episodes where ``air_date`` is not a ``date`` instance
@@ -41,7 +42,7 @@ def episodes_are_unreleased(episodes: list[Episode]) -> bool:
     return False
 
 
-def derive_season_status(episodes: list[Episode]) -> RequestStatus:
+def derive_season_status(episodes: Sequence[Episode]) -> RequestStatus:
     """Derive season status from episode statuses (highest-precedence-first).
 
     Precedence (highest → lowest):
@@ -90,7 +91,7 @@ def derive_season_status(episodes: list[Episode]) -> RequestStatus:
     return RequestStatus.PENDING
 
 
-def derive_request_status_from_episodes(episodes: list[Episode]) -> RequestStatus:
+def derive_request_status_from_episodes(episodes: Sequence[Episode]) -> RequestStatus:
     """Derive aggregate TV request status from episode statuses."""
     return derive_season_status(episodes)
 

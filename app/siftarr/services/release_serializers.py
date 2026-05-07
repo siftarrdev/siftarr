@@ -227,7 +227,7 @@ def serialize_target_scope(
 def scope_to_episode_set(
     scope: object,
     known_season_numbers: list[int] | None = None,
-) -> set[tuple[int, int]]:
+) -> set[tuple[int, int | None]]:
     """Convert a target_scope dict to a set of (season_number, episode_number) tuples.
 
     ``single_episode`` scopes return the exact episode pair.
@@ -236,17 +236,18 @@ def scope_to_episode_set(
     ``complete_series`` scopes use ``known_season_numbers`` if provided, otherwise empty.
     ``unknown`` and non-Mapping inputs return an empty set.
     """
-    if not isinstance(scope, Mapping):
+    if not isinstance(scope, dict):
         return set()
-    scope_type = scope.get("type")
+    scope_dict: dict[str, object] = cast(dict[str, object], scope)
+    scope_type = scope_dict.get("type")
     if scope_type == "single_episode":
-        sn = scope.get("season_number")
-        en = scope.get("episode_number")
+        sn = scope_dict.get("season_number")
+        en = scope_dict.get("episode_number")
         if isinstance(sn, int) and isinstance(en, int):
             return {(sn, en)}
         return set()
     if scope_type in {"season_pack", "multi_season_pack"}:
-        season_numbers = scope.get("season_numbers")
+        season_numbers = scope_dict.get("season_numbers")
         if isinstance(season_numbers, list):
             return {(s, None) for s in season_numbers if isinstance(s, int)}
         return set()
@@ -256,7 +257,9 @@ def scope_to_episode_set(
     return set()
 
 
-def _episode_sets_overlap(left_set: set[tuple[int, int]], right_set: set[tuple[int, int]]) -> bool:
+def _episode_sets_overlap(
+    left_set: set[tuple[int, int | None]], right_set: set[tuple[int, int | None]]
+) -> bool:
     """Check if two episode sets overlap, treating ``None`` as a wildcard.
 
     ``(s, None)`` represents coverage of an entire season ``s``, so it overlaps
