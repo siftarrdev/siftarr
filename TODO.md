@@ -9,4 +9,4 @@
 ## Bugs
 - fix the search all pending requests button. it seems to be broken and only searching the last episode and staging only one release. i seem to have to manually search and stage each episode in a season pack which is a pain.
 
-- clicking deny on a request in teh active requests, or pending requests. doesnt seem to do anything. and it doesnt seem to be denying the request in overseerr either. it just seems to be a no-op. the request is still there and still pending in overseerr. It should deny the request in overseerr and remove it from the pending requests list in siftarr.
+- clicking deny on a request in the pending requests tab doesnt seem to do anything. it does work in the active tab. make it work in the pending tab as well.

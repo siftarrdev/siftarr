@@ -13,8 +13,14 @@
     <div class="grid grid-cols-2 md:grid-cols-7 gap-3">
         <button onclick="showTab('active')" class="card group text-left hover:border-gray-600 transition-colors">
             <div class="px-4 py-3.5">
-                <div class="text-xs font-medium uppercase tracking-wider text-gray-500 group-hover:text-gray-400">Active</div>
+                <div class="text-xs font-medium uppercase tracking-wider text-gray-500 group-hover:text-gray-400">All</div>
                 <div class="mt-1 text-2xl font-bold text-white tabular-nums">{{ stats.active }}</div>
+            </div>
+        </button>
+        <button onclick="showTab('unreleased')" class="card group text-left hover:border-gray-600 transition-colors">
+            <div class="px-4 py-3.5">
+                <div class="text-xs font-medium uppercase tracking-wider text-gray-500 group-hover:text-gray-400">Unreleased</div>
+                <div class="mt-1 text-2xl font-bold text-gray-400 tabular-nums">{{ stats.unreleased }}</div>
             </div>
         </button>
         <button onclick="showTab('pending')" class="card group text-left hover:border-gray-600 transition-colors">
@@ -41,12 +47,6 @@
                 <div class="mt-1 text-2xl font-bold text-emerald-400 tabular-nums">{{ stats.completed }}</div>
             </div>
         </button>
-        <button onclick="showTab('unreleased')" class="card group text-left hover:border-gray-600 transition-colors">
-            <div class="px-4 py-3.5">
-                <div class="text-xs font-medium uppercase tracking-wider text-gray-500 group-hover:text-gray-400">Unreleased</div>
-                <div class="mt-1 text-2xl font-bold text-gray-400 tabular-nums">{{ stats.unreleased }}</div>
-            </div>
-        </button>
         <button onclick="showTab('rejected')" class="card group text-left hover:border-gray-600 transition-colors">
             <div class="px-4 py-3.5">
                 <div class="text-xs font-medium uppercase tracking-wider text-gray-500 group-hover:text-gray-400">Denied</div>
@@ -58,12 +58,12 @@
     {# ── Tabs ── #}
     <div class="border-b border-gray-700/60">
         <nav class="-mb-px flex gap-6 overflow-x-auto">
+            <button onclick="showTab('active')" id="tab-active"
+                    class="tab-button border-b-2 border-transparent pb-3 text-sm font-medium text-gray-500 hover:text-gray-300 whitespace-nowrap">All Requests</button>
             <button onclick="showTab('unreleased')" id="tab-unreleased"
                     class="tab-button border-b-2 border-transparent pb-3 text-sm font-medium text-gray-500 hover:text-gray-300 whitespace-nowrap">Unreleased</button>
-            <button onclick="showTab('active')" id="tab-active"
-                    class="tab-button border-b-2 border-brand-500 pb-3 text-sm font-medium text-brand-400 whitespace-nowrap">Active Requests</button>
             <button onclick="showTab('pending')" id="tab-pending"
-                    class="tab-button border-b-2 border-transparent pb-3 text-sm font-medium text-gray-500 hover:text-gray-300 whitespace-nowrap">Pending Search</button>
+                    class="tab-button border-b-2 border-brand-500 pb-3 text-sm font-medium text-brand-400 whitespace-nowrap">Pending Search</button>
             <button onclick="showTab('staged')" id="tab-staged"
                     class="tab-button border-b-2 border-transparent pb-3 text-sm font-medium text-gray-500 hover:text-gray-300 whitespace-nowrap">Staged</button>
             <button onclick="showTab('downloading')" id="tab-downloading"
@@ -75,8 +75,8 @@
         </nav>
     </div>
 
-    {# ═══════════════ ACTIVE REQUESTS TAB ═══════════════ #}
-    <div id="content-active" class="tab-content">
+    {# ═══════════════ ALL REQUESTS TAB ═══════════════ #}
+    <div id="content-active" class="tab-content hidden">
         {% if active_requests %}
         <div class="card overflow-hidden">
             <form action="/requests/bulk" method="post" onsubmit="return handleBulkRequestActionSubmit(event, this)">
@@ -84,8 +84,8 @@
                 <div class="card-header">
                     <div class="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
                         <div class="min-w-0">
-                            <div class="section-title">Active Requests</div>
-                            <div class="section-subtitle">Browse active requests, filter the list, and run actions on multiple items at once.</div>
+                            <div class="section-title">All Requests</div>
+                            <div class="section-subtitle">Browse all active requests, filter the list, and run actions on multiple items at once.</div>
                         </div>
                         <div class="flex flex-wrap gap-2">
                             <button type="submit" name="action" value="search" data-search-submit-control="true" class="btn-primary btn-sm">Search Selected</button>
@@ -158,7 +158,7 @@
     </div>
 
     {# ═══════════════ PENDING SEARCH TAB ═══════════════ #}
-    <div id="content-pending" class="tab-content hidden">
+    <div id="content-pending" class="tab-content">
         {% if pending_requests %}
         <div class="card overflow-hidden">
             <form action="/requests/bulk" method="post" onsubmit="return handleBulkRequestActionSubmit(event, this)">
