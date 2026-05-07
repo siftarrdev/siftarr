@@ -24,6 +24,7 @@ from app.siftarr.services.qbittorrent_service import QbittorrentService, _torren
 logger = logging.getLogger(__name__)
 
 _BTIH_RE = re.compile(r"urn:btih:([0-9a-fA-F]{40}|[2-7A-Za-z]{32})", re.IGNORECASE)
+_NON_ALNUM_RE = re.compile(r"[^a-zA-Z0-9]+")
 
 
 def _extract_hash(magnet_url: str | None, torrent_path: str | None = None) -> str | None:
@@ -55,6 +56,16 @@ def _download_completed_torrent_ids(details: str | None) -> set[int]:
         if isinstance(item, dict) and isinstance(item.get("torrent_id"), int):
             torrent_ids.add(item["torrent_id"])
     return torrent_ids
+
+
+def _normalize_name(name: str) -> str:
+    """Normalize a torrent name for loose matching.
+
+    Replaces runs of non-alphanumeric characters with a single space and
+    lowercases, so that e.g. ``"Finding.Carter.S01-S02.1080p.WEB-DL"``
+    and ``"Finding Carter S01-S02 1080p WEB-DL"`` compare as equal.
+    """
+    return _NON_ALNUM_RE.sub(" ", name).strip().lower()
 
 
 class DownloadCompletionService:
@@ -131,10 +142,11 @@ class DownloadCompletionService:
                 if info is not None:
                     progress = info.get("progress")
             else:
-                # No hash available — fall back to name matching
-                title_lower = torrent.title.lower()
+                # No hash available — fall back to name matching with
+                # normalised separators (spaces vs dots vs dashes).
+                title_norm = _normalize_name(torrent.title)
                 matched = next(
-                    (t for qname, t in by_name.items() if title_lower in qname),
+                    (t for qname, t in by_name.items() if title_norm in _normalize_name(qname)),
                     None,
                 )
                 if matched is not None:
