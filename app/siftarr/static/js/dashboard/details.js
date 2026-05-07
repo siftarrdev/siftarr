@@ -81,6 +81,16 @@ async function openRequestDetails(requestId, explicitIndex = null, options = {})
             if (data.request.status) items.push(`<span class="badge badge-gray">${window.escapeHtml(String(data.request.status).replace(/_/g, ' '))}</span>`);
             metaRow.innerHTML = items.join('');
         }
+        const releaseDateEl = document.getElementById('request-details-release-date');
+        if (releaseDateEl) {
+            const releaseDate = data.overseerr?.release_date;
+            if (releaseDate) {
+                releaseDateEl.textContent = 'Release: ' + releaseDate;
+                releaseDateEl.classList.remove('hidden');
+            } else {
+                releaseDateEl.classList.add('hidden');
+            }
+        }
         window.setPoster(data.overseerr?.poster, data.request.title);
         if (overseerrLink && data.overseerr?.url) {
             overseerrLink.href = data.overseerr.url;
