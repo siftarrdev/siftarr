@@ -22,6 +22,7 @@ class MediaCategory(StrEnum):
 
 
 _MAGNET_HASH_RE = re.compile(r"xt=urn:btih:([a-fA-F0-9]{40})")
+_NON_ALNUM_RE = re.compile(r"[^a-zA-Z0-9]+")
 
 
 def _parse_magnet_info_hash(magnet_uri: str) -> str | None:
@@ -48,6 +49,11 @@ def _torrent_file_info_hash(torrent_path: str) -> str | None:
     if info_raw is None:
         return None
     return hashlib.sha1(info_raw).hexdigest()
+
+
+def _normalize_name(name: str) -> str:
+    """Normalize separators for loose name matching (dots, dashes, spaces → space)."""
+    return _NON_ALNUM_RE.sub(" ", name).strip().lower()
 
 
 def _bencode_extract_info_value(data: bytes) -> bytes | None:
@@ -336,25 +342,32 @@ class QbittorrentService:
     async def get_torrent_progress_by_name(self, name_fragment: str) -> float | None:
         """Get progress of a torrent matching a name fragment.
 
-        Args:
-            name_fragment: Case-insensitive substring to search in torrent names.
-
-        Returns:
-            Progress (0.0 to 1.0) of the first matching torrent, or None if not found.
+        Tries exact substring first, then falls back to normalised matching
+        where separators (dots, dashes, spaces) are treated interchangeably.
         """
+        name_lower = name_fragment.lower()
+        name_norm = _normalize_name(name_fragment)
         torrents = await self.get_all_active_torrents()
-        fragment_lower = name_fragment.lower()
         for torrent in torrents:
-            if fragment_lower in (torrent.get("name") or "").lower():
+            qname = torrent.get("name") or ""
+            qname_lower = qname.lower()
+            if name_lower in qname_lower or name_norm in _normalize_name(qname):
                 return torrent["progress"]
         return None
 
     async def get_torrent_info_by_name(self, name_fragment: str) -> dict | None:
-        """Get qBittorrent info for the first torrent matching a name fragment."""
+        """Get qBittorrent info for the first torrent matching a name fragment.
+
+        Tries exact substring first, then falls back to normalised matching
+        where separators (dots, dashes, spaces) are treated interchangeably.
+        """
+        name_lower = name_fragment.lower()
+        name_norm = _normalize_name(name_fragment)
         torrents = await self.get_all_active_torrents()
-        fragment_lower = name_fragment.lower()
         for torrent in torrents:
-            if fragment_lower in (torrent.get("name") or "").lower():
+            qname = torrent.get("name") or ""
+            qname_lower = qname.lower()
+            if name_lower in qname_lower or name_norm in _normalize_name(qname):
                 return torrent
         return None
 
