@@ -114,6 +114,44 @@ async def test_poll_tv_partial_episodes(service, mock_db, mock_plex):
 
 
 @pytest.mark.asyncio
+async def test_apply_decisions_counts_only_completed_tv_requests(service, mock_db, mock_plex):
+    ep1 = make_episode(1, status=RequestStatus.DOWNLOADING)
+    ep2 = make_episode(2, status=RequestStatus.DOWNLOADING)
+    req = make_request(
+        media_type=MediaType.TV,
+        status=RequestStatus.DOWNLOADING,
+        tmdb_id=999,
+        seasons=[make_season(1, [ep1, ep2])],
+    )
+
+    async def reconcile_partial(db, request, seasons, availability):
+        del db, seasons, availability
+        request.status = RequestStatus.DOWNLOADING
+
+    with patch(
+        "app.siftarr.services.plex_polling_service.persist_episode_availability",
+        new_callable=AsyncMock,
+    ) as mock_reconcile:
+        mock_reconcile.side_effect = reconcile_partial
+        completed = await service._apply_decisions(
+            [req],
+            [
+                type(
+                    "Decision",
+                    (),
+                    {
+                        "request_id": req.id,
+                        "reason": "Some episodes found on Plex",
+                        "availability": {(1, 1): True, (1, 2): False},
+                    },
+                )()
+            ],
+        )
+
+    assert completed == 0
+
+
+@pytest.mark.asyncio
 async def test_poll_pending_request_can_complete(service, mock_db, mock_plex):
     ep1 = make_episode(1, status=RequestStatus.COMPLETED)
     ep2 = make_episode(2, status=RequestStatus.PENDING)

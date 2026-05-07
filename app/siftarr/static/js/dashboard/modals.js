@@ -298,8 +298,8 @@ function openDenyModal(requestId, redirectTo) {
     _denyRedirectTo = redirectTo || '/';
     const modal = document.getElementById('deny-modal');
     const reason = document.getElementById('deny-reason');
-    reason.value = '';
-    modal.classList.remove('hidden');
+    if (reason) reason.value = '';
+    if (modal) modal.classList.remove('hidden');
 }
 
 async function submitDenyRequest() {
@@ -311,7 +311,7 @@ async function submitDenyRequest() {
     try {
         const formData = new FormData();
         formData.append('redirect_to', _denyRedirectTo);
-        if (reason.value) formData.append('reason', reason.value);
+        if (reason && reason.value) formData.append('reason', reason.value);
 
         const response = await fetch('/requests/' + _denyRequestId + '/deny', {
             method: 'POST',
@@ -333,9 +333,21 @@ async function submitDenyRequest() {
 }
 
 function closeDenyModal() {
-    document.getElementById('deny-modal').classList.add('hidden');
+    const modal = document.getElementById('deny-modal');
+    if (modal) modal.classList.add('hidden');
     _denyRequestId = null;
     _denyRedirectTo = null;
+}
+
+function bindDenyModalHandlers() {
+    const submitBtn = document.getElementById('deny-submit-btn');
+    if (submitBtn && !submitBtn.getAttribute('onclick') && submitBtn.dataset.denyHandlerBound !== 'true') {
+        submitBtn.addEventListener('click', event => {
+            event.preventDefault();
+            window.submitDenyRequest();
+        });
+        submitBtn.dataset.denyHandlerBound = 'true';
+    }
 }
 
 function openReplaceModal(torrentId, requestId, torrentTitle, redirectTo) {
@@ -356,11 +368,19 @@ function closeReplaceModal() {
 
 function bindSelectAll(toggle, checkboxSelector) {
     if (!toggle) return;
+    if (toggle.dataset.selectAllBound === 'true') return;
+    toggle.dataset.selectAllBound = 'true';
     toggle.addEventListener('change', event => {
         document.querySelectorAll(checkboxSelector).forEach(checkbox => {
             checkbox.checked = event.target.checked;
         });
     });
+}
+
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', bindDenyModalHandlers);
+} else {
+    bindDenyModalHandlers();
 }
 
 // Export functions to window for HTML onclick handlers
@@ -373,6 +393,7 @@ window.handleBulkRequestActionSubmit = handleBulkRequestActionSubmit;
 window.openDenyModal = openDenyModal;
 window.submitDenyRequest = submitDenyRequest;
 window.closeDenyModal = closeDenyModal;
+window.bindDenyModalHandlers = bindDenyModalHandlers;
 window.openReplaceModal = openReplaceModal;
 window.closeReplaceModal = closeReplaceModal;
 window.bindSelectAll = bindSelectAll;

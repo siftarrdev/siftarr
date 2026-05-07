@@ -27,6 +27,7 @@ class DashboardOverseerrDetails:
     poster: str | None
     status: str
     url: str | None
+    release_date: str | None = None
 
 
 @dataclass(slots=True)
@@ -101,6 +102,7 @@ def serialize_request_details_response(data: RequestDetailsData) -> dict[str, ob
             "poster": data.overseerr.poster,
             "status": data.overseerr.status,
             "url": data.overseerr.url,
+            "release_date": data.overseerr.release_date,
         }
     if data.tv_info is not None:
         payload["tv_info"] = {

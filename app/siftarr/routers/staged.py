@@ -650,7 +650,10 @@ async def get_download_status(
         # progress) that the torrent is done in qBittorrent.
         waiting_for_plex = (
             torrent.id in waiting_plex_torrent_ids
-            or torrent.request_id in legacy_waiting_plex_request_ids
+            or (
+                torrent.request_id in legacy_waiting_plex_request_ids
+                and not (qbit_progress is not None and qbit_progress < 1.0)
+            )
             or (qbit_complete and request_status == RequestStatus.DOWNLOADING.value)
         )
         plex_available = False

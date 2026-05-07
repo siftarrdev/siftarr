@@ -12,6 +12,16 @@ from app.siftarr.services.prowlarr_service import (
 class TestProwlarrService:
     """Test cases for ProwlarrService."""
 
+    def test_normalize_search_title_strips_apostrophes(self) -> None:
+        """Apostrophes should be stripped for broader indexer matching."""
+        assert ProwlarrService._normalize_search_title("Margo's") == "Margos"
+        assert ProwlarrService._normalize_search_title("Tom & Jerry's") == "Tom & Jerrys"
+
+    def test_normalize_search_title_preserves_normal_titles(self) -> None:
+        """Titles without apostrophes should pass through unchanged, and whitespace stripped."""
+        assert ProwlarrService._normalize_search_title("The Mentalist") == "The Mentalist"
+        assert ProwlarrService._normalize_search_title("  Return to Me  ") == "Return to Me"
+
     def test_extract_resolution(self) -> None:
         """Test resolution extraction from title."""
         service = ProwlarrService()

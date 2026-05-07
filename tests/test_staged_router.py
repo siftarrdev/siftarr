@@ -498,6 +498,59 @@ class TestDownloadStatusEndpoint:
         mock_db.commit.assert_not_awaited()
 
     @pytest.mark.asyncio
+    async def test_incomplete_sibling_remains_visible_after_download_completed_log(
+        self, mock_db, monkeypatch
+    ):
+        """A sibling completion log must not make a <100% torrent wait-for-Plex/hidden."""
+        import json
+
+        from app.siftarr.routers import staged as staged_module
+        from app.siftarr.routers.staged import get_download_status
+
+        season_one = MagicMock()
+        season_one.id = 11
+        season_one.title = "Test Show S01"
+        season_one.request_id = 99
+        season_one.magnet_url = "magnet:?xt=urn:btih:1111111111111111111111111111111111111111"
+        season_one.status = "approved"
+
+        season_two = MagicMock()
+        season_two.id = 12
+        season_two.title = "Test Show S02"
+        season_two.request_id = 99
+        season_two.magnet_url = "magnet:?xt=urn:btih:2222222222222222222222222222222222222222"
+        season_two.status = "approved"
+
+        torrent_result = MagicMock()
+        torrent_result.scalars.return_value.all.return_value = [season_one, season_two]
+        request_status_result = MagicMock()
+        request_status_result.all.return_value = [(99, RequestStatus.DOWNLOADING)]
+        logs_result = MagicMock()
+        logs_result.all.return_value = [(99, json.dumps({"done_torrents": [{"torrent_id": 11}]}))]
+        mock_db.execute.side_effect = [torrent_result, request_status_result, logs_result]
+
+        qbit = AsyncMock()
+
+        async def get_torrent_info(torrent_hash):
+            if torrent_hash == "1111111111111111111111111111111111111111":
+                return {"progress": 1.0, "state": "uploading"}
+            return {"progress": 0.42, "state": "downloading"}
+
+        qbit.get_torrent_info = AsyncMock(side_effect=get_torrent_info)
+        monkeypatch.setattr(staged, "get_settings", lambda: MagicMock())
+        monkeypatch.setattr(staged_module, "QbittorrentService", MagicMock(return_value=qbit))
+
+        response = await get_download_status(db=mock_db)
+
+        body = json.loads(bytes(response.body))  # type: ignore[arg-type]
+        by_id = {torrent["id"]: torrent for torrent in body["torrents"]}
+        assert sorted(by_id) == [11, 12]
+        assert by_id[11]["waiting_for_plex"] is True
+        assert by_id[12]["qbit_progress"] == 0.42
+        assert by_id[12]["qbit_complete"] is False
+        assert by_id[12]["waiting_for_plex"] is False
+
+    @pytest.mark.asyncio
     async def test_reconcile_request_via_plex_closes_service_on_error(self, mock_db, monkeypatch):
         """Targeted check should always close PlexService."""
         from app.siftarr.routers.staged import _reconcile_request_via_plex

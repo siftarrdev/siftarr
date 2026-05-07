@@ -465,6 +465,73 @@ class TestDownloadCompletionService:
         mock_plex_polling.check_request.assert_called_once_with(10)
 
     @pytest.mark.asyncio
+    async def test_tv_sibling_season_pack_stays_active_after_partial_plex_reconcile(
+        self, mock_db, mock_qbit, mock_plex_polling
+    ):
+        """S01 qBit completion must not complete/hide still-downloading S02."""
+        from app.siftarr.models.request import MediaType, RequestStatus
+        from app.siftarr.services.plex_polling_service import CheckRequestResult
+
+        season_one = MagicMock()
+        season_one.id = 11
+        season_one.request_id = 10
+        season_one.title = "Test Show S01 1080p"
+        season_one.magnet_url = "magnet:?xt=urn:btih:1111111111111111111111111111111111111111"
+
+        season_two = MagicMock()
+        season_two.id = 12
+        season_two.request_id = 10
+        season_two.title = "Test Show S02 1080p"
+        season_two.magnet_url = "magnet:?xt=urn:btih:2222222222222222222222222222222222222222"
+
+        request = MagicMock()
+        request.id = 10
+        request.title = "Test Show"
+        request.media_type = MediaType.TV
+        request.status = RequestStatus.DOWNLOADING
+
+        mock_qbit.get_all_active_torrents = AsyncMock(
+            return_value=[
+                {
+                    "hash": "1111111111111111111111111111111111111111",
+                    "name": season_one.title,
+                    "progress": 1.0,
+                    "state": "uploading",
+                },
+                {
+                    "hash": "2222222222222222222222222222222222222222",
+                    "name": season_two.title,
+                    "progress": 0.42,
+                    "state": "downloading",
+                },
+            ]
+        )
+        mock_plex_polling.check_request = AsyncMock(
+            return_value=CheckRequestResult(
+                request_id=10,
+                matched=True,
+                available=True,
+                status_before=RequestStatus.DOWNLOADING,
+                status_after=RequestStatus.DOWNLOADING,
+                reason="Some episodes found on Plex",
+            )
+        )
+        mock_db.execute.side_effect = [
+            _rows_result([(season_one, request), (season_two, request)]),
+            _request_id_rows([]),
+        ]
+
+        service = DownloadCompletionService(mock_db, mock_qbit, mock_plex_polling)
+        result = await service.check_downloading_requests()
+
+        assert result == 0
+        assert request.status == RequestStatus.DOWNLOADING
+        details = json.loads(mock_db.add.call_args.args[0].details)
+        assert [item["torrent_id"] for item in details["done_torrents"]] == [11]
+        assert details["done_torrents"][0]["qbit_progress"] == 1.0
+        mock_plex_polling.check_request.assert_called_once_with(10)
+
+    @pytest.mark.asyncio
     async def test_download_completed_log_is_deduplicated_per_torrent(
         self, mock_db, mock_qbit, mock_plex_polling
     ):

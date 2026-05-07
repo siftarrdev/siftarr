@@ -98,3 +98,43 @@ async def test_check_request_tv_full_availability(service, mock_db, mock_plex):
     assert result.status_after == RequestStatus.COMPLETED
     assert result.reason == "All episodes found on Plex"
     mock_reconcile.assert_awaited_once_with(mock_db, req, req.seasons, {(1, 1): True, (1, 2): True})
+
+
+@pytest.mark.asyncio
+async def test_check_request_tv_partial_season_pack_preserves_downloading_episodes(
+    service, mock_db, mock_plex
+):
+    s1e1 = make_episode(1, status=RequestStatus.DOWNLOADING)
+    s1e2 = make_episode(2, status=RequestStatus.DOWNLOADING)
+    s2e1 = make_episode(1, status=RequestStatus.DOWNLOADING)
+    s2e2 = make_episode(2, status=RequestStatus.DOWNLOADING)
+    req = make_request(
+        id=80,
+        media_type=MediaType.TV,
+        status=RequestStatus.DOWNLOADING,
+        tmdb_id=999,
+        seasons=[make_season(1, [s1e1, s1e2]), make_season(2, [s2e1, s2e2])],
+    )
+    db_result = MagicMock()
+    db_result.scalar_one_or_none.return_value = req
+    mock_db.execute.return_value = db_result
+    mock_db.flush = AsyncMock()
+    mock_db.commit = AsyncMock()
+
+    mock_plex.get_show_by_tmdb.return_value = {"rating_key": "42"}
+    mock_plex.get_episode_availability.return_value = {
+        (1, 1): True,
+        (1, 2): True,
+        (2, 1): False,
+        (2, 2): False,
+    }
+
+    result = await service.check_request(80)
+
+    assert result.matched is True
+    assert result.available is True
+    assert result.status_after == RequestStatus.DOWNLOADING
+    assert result.reason == "Some episodes found on Plex"
+    assert [s1e1.status, s1e2.status] == [RequestStatus.COMPLETED, RequestStatus.COMPLETED]
+    assert [s2e1.status, s2e2.status] == [RequestStatus.DOWNLOADING, RequestStatus.DOWNLOADING]
+    assert req.status == RequestStatus.DOWNLOADING

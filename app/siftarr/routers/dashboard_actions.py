@@ -76,6 +76,11 @@ def _selection_success_message(result: dict[str, object]) -> str:
     return str(result.get("message") or "Torrent sent successfully")
 
 
+def _json_action_response(message: str, redirect_to: str) -> JSONResponse:
+    """Return the standard JSON shape used by dashboard fetch actions."""
+    return JSONResponse({"status": "ok", "message": message, "redirect_to": redirect_to})
+
+
 async def _deny_request_record(
     request: RequestModel,
     db: AsyncSession,
@@ -125,12 +130,12 @@ async def bulk_request_action(
         for request in requests:
             await search_service.process_request_search(request)
         if wants_json:
-            return JSONResponse({"status": "ok", "message": "Search started"})
+            return _json_action_response("Search started", redirect_url)
         return RedirectResponse(url=redirect_url, status_code=303)
 
     if not request_ids:
         if wants_json:
-            return JSONResponse({"status": "ok", "message": "No items selected"})
+            return _json_action_response("No items selected", redirect_url)
         return RedirectResponse(url=redirect_url, status_code=303)
 
     result = await db.execute(
@@ -150,7 +155,7 @@ async def bulk_request_action(
             count += 1
 
     if wants_json:
-        return JSONResponse({"status": "ok", "message": f"Denied {count} request(s)"})
+        return _json_action_response(f"Denied {count} request(s)", redirect_url)
     return RedirectResponse(url=redirect_url, status_code=303)
 
 
@@ -267,9 +272,10 @@ async def deny_request(
     request = await load_request_or_404(db, request_id)
 
     await _deny_request_record(request, db, reason=reason)
+    redirect_url = redirect_to or "/"
     if "application/json" in http_request.headers.get("accept", ""):
-        return JSONResponse({"status": "ok", "message": "Request denied"})
-    return RedirectResponse(url=redirect_to or "/", status_code=303)
+        return _json_action_response("Request denied", redirect_url)
+    return RedirectResponse(url=redirect_url, status_code=303)
 
 
 @router.post("/{request_id}/episodes/{episode_id}/mark-available")

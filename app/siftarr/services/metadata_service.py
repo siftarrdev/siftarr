@@ -47,6 +47,14 @@ class MetadataService:
         media_details = await media_details_task if media_details_task else None
         merged_media = {**media, **(media_details or {})}
         overview_value = merged_media.get("overview") or merged_media.get("summary")
+
+        release_date: str | None = None
+        if media_details:
+            if request.media_type.value == "movie":
+                release_date = media_details.get("releaseDate")  # type: ignore[union-attr]
+            elif request.media_type.value == "tv":
+                release_date = media_details.get("firstAirDate")  # type: ignore[union-attr]
+
         return DashboardOverseerrDetails(
             overview=str(overview_value) if overview_value else "",
             poster=build_poster_url(merged_media.get("posterPath") or merged_media.get("poster")),
@@ -56,4 +64,5 @@ class MetadataService:
                 request.media_type.value,
                 request.tmdb_id,
             ),
+            release_date=release_date,
         )
