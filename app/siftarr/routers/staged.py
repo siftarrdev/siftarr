@@ -614,9 +614,10 @@ async def get_download_status(
         qbit_progress: float | None = None
         qbit_state: str | None = None
 
-        # Try to get progress via hash first, then fall back to name
-        torrent_hash: str | None = None
-        if torrent.magnet_url:
+        # Try to get progress via stored info_hash first, then magnet URL,
+        # then fall back to name matching
+        torrent_hash: str | None = torrent.info_hash
+        if not torrent_hash and torrent.magnet_url:
             m = _BTIH_RE.search(torrent.magnet_url)
             if m:
                 torrent_hash = m.group(1).lower()
@@ -640,7 +641,13 @@ async def get_download_status(
         else:
             request_status = "unknown"
 
-        qbit_complete = qbit_progress is None or qbit_progress >= 1.0
+        # Only treat qBittorrent as "done" when we can confirm progress >= 1.0.
+        # Do NOT treat "not found" (None) as done — name matching is unreliable
+        # and would falsely mark a downloading torrent as complete.
+        qbit_complete = qbit_progress is not None and qbit_progress >= 1.0
+        # waiting_for_plex is set when the download_completion service logged a
+        # DOWNLOAD_COMPLETED event, OR when we have confirmed (via a non-None
+        # progress) that the torrent is done in qBittorrent.
         waiting_for_plex = (
             torrent.id in waiting_plex_torrent_ids
             or torrent.request_id in legacy_waiting_plex_request_ids
@@ -693,8 +700,8 @@ async def check_now(
     qbit_progress: float | None = None
     qbit_state: str | None = None
 
-    torrent_hash: str | None = None
-    if torrent.magnet_url:
+    torrent_hash: str | None = torrent.info_hash
+    if not torrent_hash and torrent.magnet_url:
         m = _BTIH_RE.search(torrent.magnet_url)
         if m:
             torrent_hash = m.group(1).lower()
@@ -707,7 +714,7 @@ async def check_now(
     else:
         qbit_progress = await qbittorrent.get_torrent_progress_by_name(torrent.title)
 
-    qbit_complete = qbit_progress is None or qbit_progress >= 1.0
+    qbit_complete = qbit_progress is not None and qbit_progress >= 1.0
     plex_available = False
     if torrent.request_id:
         try:

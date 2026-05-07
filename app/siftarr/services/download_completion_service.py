@@ -132,8 +132,14 @@ class DownloadCompletionService:
         done_torrent_ids: set[int] = set()
         qbit_evidence_by_torrent_id: dict[int, dict[str, Any]] = {}
         for torrent, _request in rows:
-            # Try to get the info hash from magnet URI or .torrent file
+            # Prefer the stored info_hash (most reliable), then fall back to
+            # extracting from magnet URI or computing from the .torrent file.
+            # Use getattr + isinstance so MagicMock in tests doesn't auto-create
+            # a fake hash that would break JSON serialisation.
             torrent_hash = _extract_hash(torrent.magnet_url, torrent.torrent_path)
+            stored_hash = getattr(torrent, "info_hash", None)
+            if isinstance(stored_hash, str) and stored_hash:
+                torrent_hash = stored_hash
             info: dict[str, Any] | None = None
             progress: float | None = None
 

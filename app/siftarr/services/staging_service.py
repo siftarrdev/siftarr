@@ -365,6 +365,18 @@ class StagingService:
         with open(json_path, "w") as f:
             json.dump(metadata, f, indent=2)
 
+        # Compute info hash from magnet URI or .torrent file if not provided by the indexer
+        info_hash: str | None = release.info_hash
+        if not info_hash:
+            if release.magnet_url:
+                from app.siftarr.services.qbittorrent_service import _parse_magnet_info_hash
+
+                info_hash = _parse_magnet_info_hash(release.magnet_url)
+            if not info_hash and torrent_path and torrent_path.exists():
+                from app.siftarr.services.qbittorrent_service import _torrent_file_info_hash
+
+                info_hash = _torrent_file_info_hash(str(torrent_path))
+
         staged = StagedTorrent(
             request_id=request.id,
             torrent_path=str(torrent_path),
@@ -375,6 +387,7 @@ class StagingService:
             indexer=release.indexer,
             score=score,
             magnet_url=release.magnet_url,
+            info_hash=info_hash,
             selection_source=selection_source,
             status="staged",
         )
