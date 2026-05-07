@@ -12,8 +12,7 @@ from __future__ import annotations
 from datetime import UTC, date, datetime
 from typing import TYPE_CHECKING
 
-from app.siftarr.models.request import MediaType, Request, RequestStatus
-from app.siftarr.models.season import Season
+from app.siftarr.models.request import Request, RequestStatus
 
 if TYPE_CHECKING:
     from app.siftarr.models.episode import Episode

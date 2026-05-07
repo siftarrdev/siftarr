@@ -546,15 +546,11 @@ class TVDecisionService:
                 # Set episode statuses from pack releases
                 for _, covered_seasons_set in selected_pack_releases:
                     for season_num in covered_seasons_set:
-                        await self._set_episodes_for_season(
-                            request.id, season_num, new_status
-                        )
+                        await self._set_episodes_for_season(request.id, season_num, new_status)
 
                 # Set episode statuses from individual episode releases
                 for season, episode in best_episodes_by_key:
-                    await self._set_episode_status(
-                        request.id, season, episode, new_status
-                    )
+                    await self._set_episode_status(request.id, season, episode, new_status)
 
                 # Recompute season and request statuses from episode ground truth
                 await self.db.flush()

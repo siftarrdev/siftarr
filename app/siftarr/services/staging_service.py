@@ -20,14 +20,14 @@ from app.siftarr.config import get_settings
 from app.siftarr.models.release import Release
 from app.siftarr.models.request import MediaType, Request, RequestStatus
 from app.siftarr.models.staged_torrent import StagedTorrent
-from app.siftarr.services.http_client import get_shared_client
-from app.siftarr.services.pending_queue_service import PendingQueueService
-from app.siftarr.services.prowlarr_service import ProwlarrRelease
-from app.siftarr.services.qbittorrent_service import MediaCategory, QbittorrentService
 from app.siftarr.services.episode_derive import (
     derive_request_status_from_episodes,
     derive_season_status,
 )
+from app.siftarr.services.http_client import get_shared_client
+from app.siftarr.services.pending_queue_service import PendingQueueService
+from app.siftarr.services.prowlarr_service import ProwlarrRelease
+from app.siftarr.services.qbittorrent_service import MediaCategory, QbittorrentService
 from app.siftarr.services.release_parser import (
     cached_parse_release_coverage,
 )
@@ -298,9 +298,7 @@ async def _apply_release_to_episodes(
         )
     elif coverage.is_complete_series:
         # Complete series — set all episodes for all seasons
-        seasons_result = await db.execute(
-            select(Season).where(Season.request_id == request_id)
-        )
+        seasons_result = await db.execute(select(Season).where(Season.request_id == request_id))
         seasons = list(seasons_result.scalars().all())
         for season in seasons:
             episodes_result = await db.execute(

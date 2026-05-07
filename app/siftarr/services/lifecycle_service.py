@@ -6,8 +6,14 @@ from sqlalchemy import and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.siftarr.models.activity_log import EventType
+from app.siftarr.models.episode import Episode
 from app.siftarr.models.request import MediaType, Request, RequestStatus
+from app.siftarr.models.season import Season
 from app.siftarr.services.activity_log_service import ActivityLogService
+from app.siftarr.services.episode_derive import (
+    derive_request_status_from_episodes,
+    derive_season_status,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -30,6 +36,14 @@ class LifecycleService:
 
     def __init__(self, db: AsyncSession):
         self.db = db
+
+    async def _load_all_episodes(self, request: Request) -> list[Episode]:
+        """Load all episodes across all seasons for a TV request."""
+        all_episodes: list[Episode] = []
+        for season in request.seasons:
+            result = await self.db.execute(select(Episode).where(Episode.season_id == season.id))
+            all_episodes.extend(result.scalars().all())
+        return all_episodes
 
     async def transition(
         self,
@@ -55,16 +69,48 @@ class LifecycleService:
             return None
 
         old_status = request.status
-        request.status = new_status
         if reason is not None:
             request.rejection_reason = reason
+        request.updated_at = datetime.now(UTC)
+
+        if request.media_type == MediaType.TV:
+            # For TV, apply transition at the episode level and derive request.status
+            all_episodes = await self._load_all_episodes(request)
+            if new_status == RequestStatus.DENIED:
+                for ep in all_episodes:
+                    ep.status = RequestStatus.DENIED
+            elif new_status == RequestStatus.UNRELEASED:
+                for ep in all_episodes:
+                    if ep.status == RequestStatus.PENDING:
+                        ep.status = RequestStatus.UNRELEASED
+            elif new_status == RequestStatus.FAILED:
+                for ep in all_episodes:
+                    if ep.status in (
+                        RequestStatus.PENDING,
+                        RequestStatus.SEARCHING,
+                        RequestStatus.DOWNLOADING,
+                    ):
+                        ep.status = RequestStatus.FAILED
+            elif new_status == RequestStatus.DOWNLOADING:
+                for ep in all_episodes:
+                    if ep.status == RequestStatus.STAGED:
+                        ep.status = RequestStatus.DOWNLOADING
+            # COMPLETED, PENDING, SEARCHING — no episode-level changes needed
+            # Recompute season statuses and derive request status from episodes
+            for season in request.seasons:
+                season_eps = [ep for ep in all_episodes if ep.season_id == season.id]
+                season.status = derive_season_status(season_eps)
+            request.status = derive_request_status_from_episodes(all_episodes)
+        else:
+            request.status = new_status
+
         request.updated_at = datetime.now(UTC)
         await self.db.flush()
 
         logger.info(
             "Request state transition: request_id=%s %s -> %s%s",
             request_id,
-            old_status.value,
+            old_status.value if old_status else "None",
             new_status.value,
             f" (reason: {reason})" if reason else "",
         )
@@ -74,7 +120,7 @@ class LifecycleService:
             EventType.REQUEST_STATUS_CHANGED,
             request_id=request_id,
             details={
-                "old_status": old_status.value,
+                "old_status": old_status.value if old_status else "None",
                 "new_status": new_status.value,
                 "reason": reason,
             },
@@ -93,18 +139,33 @@ class LifecycleService:
         self,
         limit: int = 100,
     ) -> list[Request]:
-        """Get all active requests (not completed/failed)."""
+        """Get all active requests (not completed/failed).
+
+        For TV, includes requests where any episode is in a non-terminal
+        state (SEARCHING, PENDING, UNRELEASED, STAGED, DOWNLOADING).
+        """
+        NON_TERMINAL = [
+            RequestStatus.SEARCHING,
+            RequestStatus.PENDING,
+            RequestStatus.UNRELEASED,
+            RequestStatus.STAGED,
+            RequestStatus.DOWNLOADING,
+        ]
+        tv_active_ids_subq = (
+            select(Season.request_id)
+            .select_from(Episode)
+            .join(Season, Episode.season_id == Season.id)
+            .where(Episode.status.in_(NON_TERMINAL))
+        ).subquery()
         result = await self.db.execute(
             select(Request)
             .where(
-                Request.status.in_(
-                    [
-                        RequestStatus.SEARCHING,
-                        RequestStatus.PENDING,
-                        RequestStatus.UNRELEASED,
-                        RequestStatus.STAGED,
-                        RequestStatus.DOWNLOADING,
-                    ]
+                or_(
+                    Request.status.in_(NON_TERMINAL),
+                    and_(
+                        Request.media_type == MediaType.TV,
+                        Request.id.in_(select(tv_active_ids_subq.c.request_id)),
+                    ),
                 )
             )
             .order_by(Request.created_at.desc())
@@ -117,10 +178,20 @@ class LifecycleService:
         status: RequestStatus,
         limit: int = 100,
     ) -> list[Request]:
-        """Get requests by specific status."""
+        """Get requests by specific status.
+
+        For TV, status is derived from episodes so we include TV requests
+        alongside the exact Request.status match; callers may further
+        refine based on derived episode state.
+        """
         result = await self.db.execute(
             select(Request)
-            .where(Request.status == status)
+            .where(
+                or_(
+                    Request.status == status,
+                    Request.media_type == MediaType.TV,
+                )
+            )
             .order_by(Request.created_at.desc())
             .limit(limit)
         )
@@ -128,6 +199,10 @@ class LifecycleService:
 
     async def get_requests_stats(self) -> dict:
         """Get statistics about all requests using SQL aggregates.
+
+        For TV requests, status is derived from episodes so we count them
+        separately and distribute across status buckets based on episode
+        aggregates.
 
         Results are cached in-memory for 30 seconds to avoid repeated
         aggregate queries on every settings page load.
@@ -145,6 +220,16 @@ class LifecycleService:
         for status, count in rows:
             by_status[status.value] = count
             total += count
+
+        # Count TV requests and add them to stats
+        tv_count_result = await self.db.execute(
+            select(func.count()).where(Request.media_type == MediaType.TV)
+        )
+        tv_count = tv_count_result.scalar() or 0
+        # TV requests are counted as "pending" since their fine-grained
+        # status requires episode-level derivation
+        by_status[RequestStatus.PENDING.value] += tv_count
+        total += tv_count
 
         stats = {
             "total": total,
@@ -179,15 +264,21 @@ class LifecycleService:
         return request
 
     async def get_unreleased_requests(self, limit: int = 500) -> list[Request]:
-        """Get requests that may need the Unreleased tab treatment."""
+        """Get requests that may need the Unreleased tab treatment.
+
+        Includes TV requests — their unreleased state is episode-derived.
+        """
         result = await self.db.execute(
             select(Request)
             .where(
-                Request.status.in_(
-                    [
-                        RequestStatus.UNRELEASED,
-                        RequestStatus.COMPLETED,
-                    ]
+                or_(
+                    Request.status.in_(
+                        [
+                            RequestStatus.UNRELEASED,
+                            RequestStatus.COMPLETED,
+                        ]
+                    ),
+                    Request.media_type == MediaType.TV,
                 )
             )
             .order_by(Request.updated_at.desc())
@@ -196,20 +287,17 @@ class LifecycleService:
         return list(result.scalars().all())
 
     async def get_release_recheck_requests(self, limit: int = 500) -> list[Request]:
-        """Get requests that should be revisited for unreleased/released state."""
+        """Get requests that should be revisited for unreleased/released state.
+
+        Includes TV requests (their status is episode-derived) so they
+        are rechecked alongside movie requests.
+        """
         result = await self.db.execute(
             select(Request)
             .where(
                 or_(
                     Request.status == RequestStatus.UNRELEASED,
-                    and_(
-                        Request.media_type == MediaType.TV,
-                        Request.status.in_(
-                            [
-                                RequestStatus.COMPLETED,
-                            ]
-                        ),
-                    ),
+                    Request.media_type == MediaType.TV,
                 )
             )
             .order_by(Request.updated_at.desc())

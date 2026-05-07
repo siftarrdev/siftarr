@@ -222,6 +222,9 @@ class UnreleasedEvaluator:
     ) -> RequestStatus | None:
         current = request.status
 
+        if request.media_type == MediaType.TV:
+            return await self._apply_verdict_tv(request, verdict)
+
         if verdict == "unreleased" and current in _REDIRECTABLE_STATUSES:
             _logger.info(
                 "UnreleasedEvaluator: reclassifying request_id=%s title=%s from %s to unreleased",
@@ -241,6 +244,65 @@ class UnreleasedEvaluator:
         if verdict == "released" and current == RequestStatus.UNRELEASED:
             updated = await self.lifecycle.transition(request.id, RequestStatus.PENDING)
             if updated is not None:
+                return RequestStatus.PENDING
+            return None
+
+        return None
+
+    async def _apply_verdict_tv(
+        self,
+        request: Request,
+        verdict: Literal["released", "unreleased"],
+    ) -> RequestStatus | None:
+        """Apply verdict at the episode level for TV requests."""
+        # Load all episodes for this request
+        result = await self.db.execute(
+            select(Episode)
+            .join(Season, Season.id == Episode.season_id)
+            .where(Season.request_id == request.id)
+        )
+        all_episodes = list(result.scalars().all())
+
+        if verdict == "unreleased":
+            # Redirectable for TV: any episode is PENDING, SEARCHING, or COMPLETED
+            has_redirectable = any(ep.status in _REDIRECTABLE_STATUSES for ep in all_episodes)
+            if not has_redirectable:
+                return None
+
+            _logger.info(
+                "UnreleasedEvaluator(TV): reclassifying request_id=%s title=%s "
+                "setting PENDING episodes to UNRELEASED",
+                request.id,
+                request.title,
+            )
+            changed = False
+            for ep in all_episodes:
+                if ep.status == RequestStatus.PENDING:
+                    ep.status = RequestStatus.UNRELEASED
+                    changed = True
+            if changed:
+                await self.db.commit()
+                return RequestStatus.UNRELEASED
+            return None
+
+        if verdict == "released":
+            has_unreleased = any(ep.status == RequestStatus.UNRELEASED for ep in all_episodes)
+            if not has_unreleased:
+                return None
+
+            _logger.info(
+                "UnreleasedEvaluator(TV): reclassifying request_id=%s title=%s "
+                "setting UNRELEASED episodes to PENDING",
+                request.id,
+                request.title,
+            )
+            changed = False
+            for ep in all_episodes:
+                if ep.status == RequestStatus.UNRELEASED:
+                    ep.status = RequestStatus.PENDING
+                    changed = True
+            if changed:
+                await self.db.commit()
                 return RequestStatus.PENDING
             return None
 

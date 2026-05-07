@@ -12,79 +12,15 @@ from app.siftarr.models.episode import Episode
 from app.siftarr.models.request import Request, RequestStatus
 from app.siftarr.models.season import Season
 from app.siftarr.services.async_utils import gather_limited
+from app.siftarr.services.episode_derive import (
+    derive_episode_status,
+    derive_request_status_from_episodes,
+    derive_season_status,
+)
 from app.siftarr.services.overseerr_service import OverseerrService
 from app.siftarr.services.plex_service import PlexService
 
 logger = logging.getLogger(__name__)
-
-
-def _episodes_are_unreleased(episodes: list[Episode]) -> bool:
-    """Return whether any episode has a future air date."""
-    today = datetime.now(UTC).date()
-    return any(episode.air_date is not None and episode.air_date > today for episode in episodes)
-
-
-def _derive_episode_status(*, is_on_plex: bool, air_date: date | None) -> RequestStatus:
-    """Derive an episode status from Plex availability and air date."""
-    if is_on_plex:
-        return RequestStatus.COMPLETED
-
-    if air_date is not None and air_date > datetime.now(UTC).date():
-        return RequestStatus.UNRELEASED
-    return RequestStatus.PENDING
-
-
-def _derive_season_status(episodes: list[Episode]) -> RequestStatus:
-    """Derive the season status from episode statuses."""
-    if not episodes:
-        return RequestStatus.PENDING
-
-    statuses = {episode.status for episode in episodes}
-
-    if statuses == {RequestStatus.COMPLETED}:
-        return RequestStatus.COMPLETED
-    if RequestStatus.COMPLETED in statuses:
-        return RequestStatus.PENDING
-    if RequestStatus.PENDING in statuses:
-        return RequestStatus.PENDING
-    if _episodes_are_unreleased(episodes):
-        return RequestStatus.UNRELEASED
-    return RequestStatus.PENDING
-
-
-def _derive_request_status_from_episodes(episodes: list[Episode]) -> RequestStatus:
-    """Derive an aggregate TV request status from episode statuses."""
-    if not episodes:
-        return RequestStatus.PENDING
-
-    statuses = {episode.status for episode in episodes}
-
-    if statuses == {RequestStatus.COMPLETED}:
-        return RequestStatus.COMPLETED
-    if RequestStatus.COMPLETED in statuses:
-        return RequestStatus.PENDING
-    if RequestStatus.PENDING in statuses:
-        return RequestStatus.PENDING
-    if _episodes_are_unreleased(episodes):
-        return RequestStatus.UNRELEASED
-    return RequestStatus.PENDING
-
-
-def _derive_request_status_from_seasons(seasons: list[Season]) -> RequestStatus:
-    """Compatibility wrapper that derives request status from season episodes."""
-    episodes = [
-        episode for season in seasons for episode in list(getattr(season, "episodes", []) or [])
-    ]
-    if episodes:
-        return _derive_request_status_from_episodes(episodes)
-
-    if not seasons:
-        return RequestStatus.PENDING
-    if all(season.status == RequestStatus.COMPLETED for season in seasons):
-        return RequestStatus.COMPLETED
-    if all(season.status == RequestStatus.UNRELEASED for season in seasons):
-        return RequestStatus.UNRELEASED
-    return RequestStatus.PENDING
 
 
 async def _load_season_episodes(db: AsyncSession, season: Season) -> list[Episode]:
@@ -118,15 +54,15 @@ async def persist_episode_availability(
 
         for episode in episodes:
             is_on_plex = availability.get((season.season_number, episode.episode_number), False)
-            episode.status = _derive_episode_status(
+            episode.status = derive_episode_status(
                 is_on_plex=is_on_plex,
                 air_date=episode.air_date,
             )
 
         await db.flush()
-        season.status = _derive_season_status(episodes)
+        season.status = derive_season_status(episodes)
 
-    request.status = _derive_request_status_from_episodes(request_episodes)
+    request.status = derive_request_status_from_episodes(request_episodes)
     await db.commit()
     return seasons
 
@@ -157,11 +93,6 @@ class EpisodeSyncService:
     def set_plex(self, plex: PlexService) -> None:
         """Set the Plex service instance."""
         self._plex = plex
-
-    async def _update_request_status(self, request: Request, episodes: list[Episode]) -> None:
-        """Persist aggregate TV request status from current episode statuses."""
-        request.status = _derive_request_status_from_episodes(episodes)
-        await self.db.flush()
 
     async def _persist_episode_availability(
         self,
@@ -265,7 +196,6 @@ class EpisodeSyncService:
             await self.db.flush()
         else:
             season.synced_at = datetime.now(UTC).replace(tzinfo=None)
-        season.status = RequestStatus.PENDING
 
         season_episodes: list[Episode] = []
 
@@ -289,7 +219,7 @@ class EpisodeSyncService:
                 with contextlib.suppress(ValueError, TypeError):
                     air_date = date.fromisoformat(air_date_str[:10])
 
-            episode_status = _derive_episode_status(is_on_plex=False, air_date=air_date)
+            episode_status = derive_episode_status(is_on_plex=False, air_date=air_date)
 
             if episode is None:
                 episode = Episode(
@@ -308,8 +238,6 @@ class EpisodeSyncService:
                 episode.status = episode_status
 
             season_episodes.append(episode)
-
-        season.status = _derive_season_status(season_episodes)
 
         return season, season_episodes
 
@@ -346,7 +274,6 @@ class EpisodeSyncService:
             seasons_data,
         )
         synced_seasons: list[Season] = []
-        synced_episodes: list[Episode] = []
 
         for season_info in seasons_data:
             episodes_data = self._get_season_episodes_payload(season_info, fetched_season_details)
@@ -357,9 +284,7 @@ class EpisodeSyncService:
             )
             if season is not None:
                 synced_seasons.append(season)
-                synced_episodes.extend(season_episodes)
 
-        await self._update_request_status(request, synced_episodes)
         await self.db.commit()
 
         return synced_seasons
