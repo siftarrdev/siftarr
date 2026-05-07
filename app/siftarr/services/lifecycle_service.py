@@ -4,6 +4,7 @@ from datetime import UTC, datetime
 
 from sqlalchemy import and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from app.siftarr.models.activity_log import EventType
 from app.siftarr.models.episode import Episode
@@ -62,7 +63,9 @@ class LifecycleService:
         Returns:
             Updated Request or None if not found
         """
-        result = await self.db.execute(select(Request).where(Request.id == request_id))
+        result = await self.db.execute(
+            select(Request).options(selectinload(Request.seasons)).where(Request.id == request_id)
+        )
         request = result.scalar_one_or_none()
 
         if not request:

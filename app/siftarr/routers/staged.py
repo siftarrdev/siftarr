@@ -202,18 +202,19 @@ async def _approve_torrent(torrent: StagedTorrent, db: AsyncSession) -> bool:
     runtime_settings = get_settings()
     qbittorrent = QbittorrentService(settings=runtime_settings)
 
+    # Add to qBittorrent (idempotent — if already present by info hash it
+    # returns the existing hash and skips the add).
+    torrent_hash: str | None = None
     if torrent.magnet_url:
         torrent_hash = await qbittorrent.add_torrent(
             magnet_uri=torrent.magnet_url, category=category
         )
-        success = torrent_hash is not None
     else:
-        success = (
-            await qbittorrent.add_torrent(torrent_path=torrent.torrent_path, category=category)
-            is not None
+        torrent_hash = await qbittorrent.add_torrent(
+            torrent_path=torrent.torrent_path, category=category
         )
 
-    if not success:
+    if torrent_hash is None:
         return False
 
     activity_log = ActivityLogService(db)
@@ -233,6 +234,11 @@ async def _approve_torrent(torrent: StagedTorrent, db: AsyncSession) -> bool:
         approved_torrent=torrent,
         rules_selected_torrent=rules_selected_torrent,
     )
+
+    # Snapshot paths before any commit that might expire the torrent object
+    torrent_path = torrent.torrent_path
+    json_path = torrent.json_path
+
     torrent.status = "approved"
     if request:
         lifecycle_service = LifecycleService(db)
@@ -244,10 +250,10 @@ async def _approve_torrent(torrent: StagedTorrent, db: AsyncSession) -> bool:
             await lifecycle_service.transition(request.id, RequestStatus.DOWNLOADING)
 
     try:
-        if os.path.exists(torrent.torrent_path):
-            os.remove(torrent.torrent_path)
-        if os.path.exists(torrent.json_path):
-            os.remove(torrent.json_path)
+        if os.path.exists(torrent_path):
+            os.remove(torrent_path)
+        if os.path.exists(json_path):
+            os.remove(json_path)
     except OSError:
         pass
 
@@ -255,6 +261,10 @@ async def _approve_torrent(torrent: StagedTorrent, db: AsyncSession) -> bool:
 
 
 async def _discard_torrent(torrent: StagedTorrent, db: AsyncSession) -> bool:
+    # Snapshot paths before any commit that might expire the torrent object
+    torrent_path = torrent.torrent_path
+    json_path = torrent.json_path
+
     if torrent.request_id:
         result = await db.execute(select(Request).where(Request.id == torrent.request_id))
         request = result.scalar_one_or_none()
@@ -273,10 +283,10 @@ async def _discard_torrent(torrent: StagedTorrent, db: AsyncSession) -> bool:
     torrent.status = "discarded"
 
     try:
-        if os.path.exists(torrent.torrent_path):
-            os.remove(torrent.torrent_path)
-        if os.path.exists(torrent.json_path):
-            os.remove(torrent.json_path)
+        if os.path.exists(torrent_path):
+            os.remove(torrent_path)
+        if os.path.exists(json_path):
+            os.remove(json_path)
     except OSError:
         pass
 
