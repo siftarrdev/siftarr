@@ -85,15 +85,16 @@ function renderReleaseCard(release, requestId) {
     ].filter(Boolean).join(' \u00B7 ');
     const availability = `Seeders ${release.seeders ?? 0} \u00B7 Leechers ${release.leechers ?? 0}`;
     const downloaded = release.downloaded ? '<span class="badge badge-blue">Already sent</span>' : '';
-    const activeStagedTorrent = release.active_staged_torrent || (isScopedEpisodeRelease ? null : window.currentActiveStagedTorrent);
-    const hasActiveStagedSelection = window.siftarrStagingModeEnabled && !!activeStagedTorrent;
+    const activeStagedTorrent = release.active_staged_torrent || null;
+    const conflictsActiveSelection = !!release.conflicts_active_selection;
+    const hasActiveStagedSelection = window.siftarrStagingModeEnabled && conflictsActiveSelection;
     const isActiveSelection = !!release.is_active_selection || !!(
         !isScopedEpisodeRelease && hasActiveStagedSelection && activeStagedTorrent && release.title === activeStagedTorrent.title
     );
     const activeSelectionMode = window.siftarrStagingModeEnabled && isActiveSelection;
     const activeSelectionBadge = activeSelectionMode
         ? `<span class="badge ${
-            (release.active_selection_status || activeStagedTorrent?.status) === 'approved' ? 'badge-blue' : 'badge-yellow'
+            (release.active_selection_status || activeStagedTorrent?.status) === 'approved' ? 'badge-blue' : 'badge-cyan'
         }">${window.escapeHtml((release.active_selection_source || activeStagedTorrent?.selection_source) === 'rule' ? 'Auto-selected and staged' : 'Currently staged')}</span>`
         : '';
     const actionVerb = window.siftarrStagingModeEnabled
@@ -126,7 +127,8 @@ function renderReleaseCard(release, requestId) {
                 ? 'Replace the active staged torrent with this selection.'
                 : 'Stage this torrent for review and approval.')
         : 'Send this torrent to qBittorrent.';
-    const actionHtml = `<button type="button" class="btn-primary btn-sm" ${disableAction || activeSelectionMode ? 'disabled' : ''} title="${window.escapeHtml(disableAction ? 'No download source available' : actionTitle)}" data-stage-url="${window.escapeHtml(formAction)}" data-stage-fields="${manualDataJson}" onclick="stageRelease(this)">${useLabel}</button>`;
+    const stageScopeJson = window.escapeHtml(JSON.stringify(releaseScope || {}));
+    const actionHtml = `<button type="button" class="btn-primary btn-sm" ${disableAction || activeSelectionMode ? 'disabled' : ''} title="${window.escapeHtml(disableAction ? 'No download source available' : actionTitle)}" data-stage-url="${window.escapeHtml(formAction)}" data-stage-fields="${manualDataJson}" data-stage-scope="${stageScopeJson}" onclick="stageRelease(this)">${useLabel}</button>`;
     const publishAge = formatRelativePublishAge(release.publish_date);
     const coverageHtml = (Array.isArray(release.covered_seasons) || release.is_complete_series)
         ? renderCoverageBadge(release)
@@ -137,7 +139,7 @@ function renderReleaseCard(release, requestId) {
         : '';
 
     return `
-        <div class="rounded-xl border border-gray-700/60 bg-surface-800 p-2">
+        <div class="rounded-xl border ${activeSelectionMode ? 'border-cyan-500/70 bg-cyan-950/20' : 'border-gray-700/60 bg-surface-800'} p-2">
             <div class="flex flex-col gap-2 lg:flex-row lg:items-start lg:justify-between">
                 <div class="min-w-0">
                     <div class="font-medium text-white text-sm break-words">${window.escapeHtml(release.title)}</div>
@@ -186,7 +188,7 @@ function episodeStatusBadge(status) {
         'searching': 'badge-blue',
         'pending': 'badge-yellow',
         'unreleased': 'badge-purple',
-        'staged': 'badge-blue',
+        'staged': 'badge-cyan',
         'downloading': 'badge-blue',
         'completed': 'badge-green',
         'available': 'badge-green',
@@ -266,11 +268,12 @@ function renderSeasonAccordion(data) {
         var hasMarkable = (season.episodes || []).some(function(ep) { return ep.status !== 'available' && ep.status !== 'completed'; });
 
         var summaryBits = [season.available_count + '/' + season.total_count + ' available'];
+        if (season.staged_count) summaryBits.push(season.staged_count + ' staged');
         if (season.pending_count) summaryBits.push(season.pending_count + ' pending');
         if (season.unreleased_count) summaryBits.push(season.unreleased_count + ' unreleased');
         var availableText = summaryBits.join(' \u00B7 ');
 
-        return '<details class="group">' +
+        return '<details id="season-details-' + requestId + '-' + season.season_number + '" class="group">' +
             '<summary class="flex items-center justify-between gap-3 cursor-pointer rounded-xl border border-gray-700/60 bg-surface-800 p-3 hover:bg-surface-850/80 transition-colors">' +
                 '<div class="flex items-center gap-3">' +
                     '<svg class="accordion-chevron w-4 h-4 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>' +
@@ -409,6 +412,7 @@ async function searchAllPendingEpisodes() {
 async function stageRelease(btn) {
     const url = btn.dataset.stageUrl;
     const fields = JSON.parse(btn.dataset.stageFields || '{}');
+    const stagedScope = JSON.parse(btn.dataset.stageScope || '{}');
     const originalText = btn.textContent;
     btn.disabled = true;
     btn.textContent = window.siftarrStagingModeEnabled ? 'Updating…' : 'Sending…';
@@ -433,12 +437,44 @@ async function stageRelease(btn) {
         window.showToast(payload.message || (window.siftarrStagingModeEnabled ? 'Active staged selection updated' : 'Torrent sent successfully'));
         window.refreshStagedTabData();
         if (window.siftarrStagingModeEnabled && window.currentRequestId) {
-            await window.openRequestDetails(window.currentRequestId, window.currentDetailsIndex);
+            await window.openRequestDetails(window.currentRequestId, window.currentDetailsIndex, { preserveUiState: true });
+            collapseStagedTvScope(window.currentRequestId, stagedScope);
         }
     } catch (err) {
         btn.disabled = false;
         btn.textContent = originalText;
         window.showToast('Error: ' + err.message);
+    }
+}
+
+function captureDetailsAccordionState() {
+    const state = {};
+    document.querySelectorAll('#request-details-releases details[id]').forEach(function(details) {
+        state[details.id] = !!details.open;
+    });
+    return state;
+}
+
+function restoreDetailsAccordionState(state) {
+    if (!state) return;
+    document.querySelectorAll('#request-details-releases details[id]').forEach(function(details) {
+        if (Object.prototype.hasOwnProperty.call(state, details.id)) {
+            details.open = !!state[details.id];
+        }
+    });
+}
+
+function collapseStagedTvScope(requestId, scope) {
+    if (!scope || !scope.type) return;
+    if (scope.type === 'single_episode') {
+        const details = document.getElementById('episode-details-' + requestId + '-' + scope.season_number + '-' + scope.episode_number);
+        if (details) details.open = false;
+        return;
+    }
+    const seasons = Array.isArray(scope.season_numbers) ? scope.season_numbers : [];
+    if (scope.type === 'season_pack' && seasons.length === 1) {
+        const details = document.getElementById('season-details-' + requestId + '-' + seasons[0]);
+        if (details) details.open = false;
     }
 }
 
@@ -486,4 +522,7 @@ window.closeTvSearchScopeMenu = closeTvSearchScopeMenu;
 window.populateTvSearchScopeMenu = populateTvSearchScopeMenu;
 window.searchAllPendingEpisodes = searchAllPendingEpisodes;
 window.stageRelease = stageRelease;
+window.collapseStagedTvScope = collapseStagedTvScope;
+window.captureDetailsAccordionState = captureDetailsAccordionState;
+window.restoreDetailsAccordionState = restoreDetailsAccordionState;
 window.updateActiveStageBanner = updateActiveStageBanner;

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from collections.abc import Mapping
 from datetime import UTC, datetime
 from typing import Any, cast
@@ -192,7 +193,11 @@ def serialize_target_scope(
     if media_type != MediaType.TV:
         return {"type": "request"}
 
-    coverage = parse_stored_release_coverage(season_coverage, season_number, episode_number)
+    coverage = (
+        cached_parse_release_coverage(title)
+        if season_coverage is None
+        else parse_stored_release_coverage(season_coverage, season_number, episode_number)
+    )
     scoped_season_number = coverage.season_number
     scoped_episode_number = coverage.episode_number
 
@@ -207,7 +212,77 @@ def serialize_target_scope(
             "episode_number": scoped_episode_number,
         }
 
-    return {"type": "broad"}
+    if coverage.is_complete_series:
+        return {"type": "complete_series"}
+
+    covered_seasons = list(coverage.season_numbers)
+    if len(covered_seasons) == 1:
+        return {"type": "season_pack", "season_numbers": covered_seasons}
+    if len(covered_seasons) > 1:
+        return {"type": "multi_season_pack", "season_numbers": covered_seasons}
+
+    return {"type": "unknown"}
+
+
+def tv_target_scopes_overlap(
+    left_scope: SerializedObject | None,
+    right_scope: SerializedObject | None,
+) -> bool:
+    """Return True when a candidate TV scope should replace an active scope.
+
+    ``left_scope`` is the candidate release being staged/rendered and
+    ``right_scope`` is an already-active staged torrent.  Any candidate that
+    targets coverage already represented by an active pack/complete-series
+    torrent overlaps it, including an individual episode inside that pack; a
+    different individual episode in the same season does not overlap another
+    single-episode stage.
+    """
+    if left_scope is None or right_scope is None:
+        return True
+
+    left_type = left_scope.get("type")
+    right_type = right_scope.get("type")
+    if left_type == "complete_series":
+        return True
+    if right_type == "complete_series":
+        return True
+    if left_type == "unknown" or right_type == "unknown":
+        return True
+
+    if left_type == right_type == "single_episode":
+        return left_scope.get("season_number") == right_scope.get(
+            "season_number"
+        ) and left_scope.get("episode_number") == right_scope.get("episode_number")
+
+    left_seasons = _scope_seasons(left_scope)
+    right_seasons = _scope_seasons(right_scope)
+    if not left_seasons or not right_seasons:
+        return False
+    return bool(left_seasons & right_seasons)
+
+
+def _scope_seasons(scope: SerializedObject) -> set[int]:
+    scope_type = scope.get("type")
+    if scope_type == "single_episode":
+        season_number = scope.get("season_number")
+        return {season_number} if isinstance(season_number, int) else set()
+    season_numbers = scope.get("season_numbers")
+    if isinstance(season_numbers, list):
+        return {season for season in season_numbers if isinstance(season, int)}
+    return set()
+
+
+def _load_staged_release_identity(staged_torrent: Any) -> dict[str, object]:
+    json_path = getattr(staged_torrent, "json_path", None)
+    if not json_path:
+        return {}
+    try:
+        with open(json_path) as f:
+            metadata = json.load(f)
+    except (OSError, json.JSONDecodeError, TypeError):
+        return {}
+    release = metadata.get("release")
+    return release if isinstance(release, dict) else {}
 
 
 def serialize_active_staged_torrent(
@@ -217,7 +292,8 @@ def serialize_active_staged_torrent(
 ) -> dict[str, object]:
     """Serialize staged-torrent metadata for dashboard selection state."""
     coverage = cached_parse_release_coverage(staged_torrent.title)
-    return {
+    release_identity = _load_staged_release_identity(staged_torrent)
+    payload = {
         "id": staged_torrent.id,
         "title": staged_torrent.title,
         "status": staged_torrent.status,
@@ -229,6 +305,16 @@ def serialize_active_staged_torrent(
             episode_number=coverage.episode_number,
         ),
     }
+    info_hash = release_identity.get("info_hash")
+    model_magnet = getattr(staged_torrent, "magnet_url", None)
+    magnet_url = (
+        model_magnet if isinstance(model_magnet, str) else release_identity.get("magnet_url")
+    )
+    if isinstance(info_hash, str) and info_hash:
+        payload["info_hash"] = info_hash
+    if isinstance(magnet_url, str) and magnet_url:
+        payload["magnet_url"] = magnet_url
+    return payload
 
 
 def release_matches_active_stage(
@@ -243,16 +329,29 @@ def release_matches_active_stage(
 
     release_scope = _as_serialized_object(release.get("target_scope"))
     active_scope = _as_serialized_object(active_stage.get("target_scope"))
+    scopes_match = release_scope == active_scope
+
+    release_info_hash = release.get("info_hash")
+    active_info_hash = active_stage.get("info_hash")
+    if release_info_hash and active_info_hash:
+        return release_info_hash == active_info_hash and scopes_match
+
+    release_magnet = release.get("magnet_url")
+    active_magnet = active_stage.get("magnet_url")
+    if release_magnet and active_magnet:
+        return release_magnet == active_magnet and scopes_match
+
     if (
         release_scope is not None
         and active_scope is not None
         and release_scope.get("type") == active_scope.get("type") == "single_episode"
     ):
-        return release_scope.get("season_number") == active_scope.get(
+        scope_matches = release_scope.get("season_number") == active_scope.get(
             "season_number"
         ) and release_scope.get("episode_number") == active_scope.get("episode_number")
+        return scope_matches and release.get("title") == active_stage.get("title")
 
-    return release.get("title") == active_stage.get("title")
+    return scopes_match and release.get("title") == active_stage.get("title")
 
 
 def apply_active_selection_metadata(
@@ -272,6 +371,17 @@ def apply_active_selection_metadata(
             None,
         )
         release["is_active_selection"] = matching_active_stage is not None
+        release["conflicts_active_selection"] = (
+            any(
+                tv_target_scopes_overlap(
+                    _as_serialized_object(release.get("target_scope")),
+                    _as_serialized_object(active_stage.get("target_scope")),
+                )
+                for active_stage in active_staged_payloads
+            )
+            if media_type == MediaType.TV
+            else bool(active_staged_payloads)
+        )
         release["active_selection_status"] = (
             matching_active_stage.get("status") if matching_active_stage else None
         )

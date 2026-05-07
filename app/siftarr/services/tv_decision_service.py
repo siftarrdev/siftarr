@@ -12,6 +12,7 @@ from app.siftarr.models.episode import Episode
 from app.siftarr.models.release import Release
 from app.siftarr.models.request import MediaType, Request, RequestStatus
 from app.siftarr.models.season import Season
+from app.siftarr.models.staged_torrent import StagedTorrent
 from app.siftarr.services.decision_pipeline import (
     add_to_pending_queue,
     build_rule_engine,
@@ -552,6 +553,22 @@ class TVDecisionService:
                     for e in all_selected_releases
                 ],
                 "message": action_result["message"],
+            }
+
+        active_stage_result = await self.db.execute(
+            select(StagedTorrent).where(
+                StagedTorrent.request_id == request.id,
+                StagedTorrent.status.in_(("staged", "approved")),
+            )
+        )
+        active_stages = list(active_stage_result.scalars().all())
+        if active_stages:
+            request.status = RequestStatus.STAGED
+            await self.db.commit()
+            return {
+                "status": "staged",
+                "selected_releases": [],
+                "message": "Active staged selection preserved.",
             }
 
         request.status = RequestStatus.PENDING

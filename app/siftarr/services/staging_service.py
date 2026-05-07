@@ -25,7 +25,10 @@ from app.siftarr.services.prowlarr_service import ProwlarrRelease
 from app.siftarr.services.qbittorrent_service import MediaCategory, QbittorrentService
 from app.siftarr.services.release_parser import (
     cached_parse_release_coverage,
-    is_exact_single_episode_release,
+)
+from app.siftarr.services.release_serializers import (
+    serialize_target_scope,
+    tv_target_scopes_overlap,
 )
 from app.siftarr.services.release_storage import build_prowlarr_release
 
@@ -100,26 +103,14 @@ async def _get_active_staged_torrents(
     return list(result.scalars().all())
 
 
-def _get_exact_single_episode_scope(title: str) -> tuple[int, int] | None:
-    """Return exact episode scope for titles that target one TV episode."""
+def _target_scope_from_title(title: str) -> dict[str, object]:
     coverage = cached_parse_release_coverage(title)
-    season_number = coverage.season_number
-    episode_number = coverage.episode_number
-    if season_number is None or episode_number is None:
-        return None
-    if not is_exact_single_episode_release(title, season_number, episode_number):
-        return None
-    return season_number, episode_number
-
-
-def _has_overlapping_season(staged_title: str, release_seasons: set[int]) -> bool:
-    """Return True if staged torrent's coverage overlaps any of release_seasons."""
-    coverage = cached_parse_release_coverage(staged_title)
-    if coverage.is_complete_series:
-        return True
-    if coverage.season_numbers:
-        return bool(set(coverage.season_numbers) & release_seasons)
-    return True  # can't determine; be safe and treat as overlapping
+    return serialize_target_scope(
+        media_type=MediaType.TV,
+        title=title,
+        season_number=coverage.season_number,
+        episode_number=coverage.episode_number,
+    )
 
 
 def _filter_active_staged_torrents_for_release(
@@ -131,34 +122,12 @@ def _filter_active_staged_torrents_for_release(
     if request.media_type != MediaType.TV:
         return active_staged
 
-    release_coverage = cached_parse_release_coverage(release.title)
-
-    # Single episode: scope to exact same episode
-    if release_coverage.episode_number is not None:
-        release_scope = _get_exact_single_episode_scope(release.title)
-        if release_scope is not None:
-            return [
-                staged
-                for staged in active_staged
-                if _get_exact_single_episode_scope(staged.title) == release_scope
-            ]
-        return []  # shouldn't happen but be safe
-
-    # Complete series: replaces everything
-    if release_coverage.is_complete_series:
-        return active_staged
-
-    # Season pack(s): scope to overlapping seasons
-    if release_coverage.season_numbers:
-        release_seasons = set(release_coverage.season_numbers)
-        return [
-            staged
-            for staged in active_staged
-            if _has_overlapping_season(staged.title, release_seasons)
-        ]
-
-    # Fallback: no coverage info, return all (conservative)
-    return active_staged
+    release_scope = _target_scope_from_title(release.title)
+    return [
+        staged
+        for staged in active_staged
+        if tv_target_scopes_overlap(release_scope, _target_scope_from_title(staged.title))
+    ]
 
 
 def _should_delete_superseded_staged_torrents(
@@ -373,6 +342,7 @@ class StagingService:
                 "leechers": release.leechers,
                 "download_url": release.download_url,
                 "magnet_url": release.magnet_url,
+                "info_hash": release.info_hash,
             },
             "staged_at": datetime.now(UTC).isoformat(),
             "filename": filename,

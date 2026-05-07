@@ -295,6 +295,43 @@ def _active_mock(staged: list[StagedTorrent]) -> MagicMock:
     return m
 
 
+def test_tv_conflict_scope_allows_multiple_same_season_episodes_and_seasons():
+    request_record = _tv_request()
+    active = [
+        _staged(1, request_record.id, "Show.S01E01.1080p.WEB-DL"),
+        _staged(2, request_record.id, "Show.S03.1080p.WEB-DL"),
+    ]
+
+    episode_two = _release(1, "Show.S01E02.1080p.WEB-DL")
+    season_two = _release(2, "Show.S02.1080p.WEB-DL")
+
+    assert svc._filter_active_staged_torrents_for_release(request_record, episode_two, active) == []
+    assert svc._filter_active_staged_torrents_for_release(request_record, season_two, active) == []
+
+
+def test_tv_conflict_scope_episode_replaces_covering_pack_multi_and_complete_series():
+    request_record = _tv_request()
+    season_pack = _staged(1, request_record.id, "Show.S01.1080p.WEB-DL")
+    multi_1_2 = _staged(2, request_record.id, "Show.S01-S02.1080p.WEB-DL")
+    multi_3_4 = _staged(3, request_record.id, "Show.S03-S04.1080p.WEB-DL")
+    complete_series = _staged(4, request_record.id, "Show.Complete.Series.1080p.WEB-DL")
+    active = [season_pack, multi_1_2, multi_3_4, complete_series]
+
+    episode_one = _release(1, "Show.S01E01.1080p.WEB-DL")
+    multi_2_3 = _release(2, "Show.S02-S03.1080p.WEB-DL")
+
+    assert svc._filter_active_staged_torrents_for_release(request_record, episode_one, active) == [
+        season_pack,
+        multi_1_2,
+        complete_series,
+    ]
+    assert svc._filter_active_staged_torrents_for_release(request_record, multi_2_3, active) == [
+        multi_1_2,
+        multi_3_4,
+        complete_series,
+    ]
+
+
 @patch.object(svc, "PendingQueueService")
 @patch.object(svc, "get_settings")
 @pytest.mark.asyncio

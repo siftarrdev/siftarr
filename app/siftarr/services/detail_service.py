@@ -68,6 +68,7 @@ class DetailService:
                 request_id=request_id,
                 background_tasks=background_tasks,
                 releases=releases,
+                active_staged_torrents=active_staged_torrents,
             )
 
         metadata_service = MetadataService(settings=self.settings)
@@ -162,7 +163,7 @@ class DetailService:
         request_status: RequestStatus,
     ) -> list[dict[str, object]]:
         """Load active staged torrent payloads for a request."""
-        if not is_active_staging_workflow_status(request_status):
+        if media_type != MediaType.TV and not is_active_staging_workflow_status(request_status):
             return []
 
         result = await self.db.execute(

@@ -11,6 +11,7 @@ from app.siftarr.services.prowlarr_service import ProwlarrRelease
 from app.siftarr.services.release_parser import (
     cached_parse_release_coverage,
     parse_season_episode,
+    parse_stored_release_coverage,
     serialize_release_coverage,
 )
 from app.siftarr.services.rule_engine import ReleaseEvaluation
@@ -80,11 +81,17 @@ async def store_search_results(
     db: AsyncSession,
     request_id: int,
     evaluations: list[ReleaseEvaluation],
+    *,
+    scope: dict[str, object] | None = None,
 ) -> dict[str, Release]:
-    """Replace stored search results for a request with the latest evaluations."""
+    """Upsert stored search results and purge stale rows within the same scope."""
     # 1. Load existing releases for this request
     existing_result = await db.execute(select(Release).where(Release.request_id == request_id))
-    existing_records = list(existing_result.scalars().all())
+    existing_records = [
+        record
+        for record in existing_result.scalars().all()
+        if _release_matches_persistence_scope(record, scope)
+    ]
 
     # Build lookup keyed by persistence key, handle duplicate keys
     existing_by_key: dict[str, Release] = {}
@@ -176,6 +183,34 @@ async def store_search_results(
 
     await db.commit()
     return records_by_key
+
+
+def _release_matches_persistence_scope(release: Release, scope: dict[str, object] | None) -> bool:
+    """Return whether a stored release belongs to a scoped TV search result set."""
+    if scope is None:
+        return True
+
+    scope_type = scope.get("type")
+    coverage = parse_stored_release_coverage(
+        release.season_coverage,
+        release.season_number,
+        release.episode_number,
+    )
+    if scope_type == "single_episode":
+        return coverage.season_number == scope.get(
+            "season_number"
+        ) and coverage.episode_number == scope.get("episode_number")
+    if scope_type == "season_packs":
+        return (
+            coverage.episode_number is None
+            and not coverage.is_complete_series
+            and coverage.season_numbers == (scope.get("season_number"),)
+        )
+    if scope_type == "multi_season_packs":
+        return coverage.episode_number is None and (
+            coverage.is_complete_series or len(coverage.season_numbers) > 1
+        )
+    return True
 
 
 async def persist_manual_release(

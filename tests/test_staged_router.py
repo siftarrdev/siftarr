@@ -369,7 +369,9 @@ class TestDownloadStatusEndpoint:
         request_status_result = MagicMock()
         request_status_result.all.return_value = [(99, RequestStatus.DOWNLOADING)]
 
-        mock_db.execute.side_effect = [torrent_result, request_status_result]
+        logs_result = MagicMock()
+        logs_result.all.return_value = []
+        mock_db.execute.side_effect = [torrent_result, request_status_result, logs_result]
 
         qbit = AsyncMock()
         qbit.get_torrent_info = AsyncMock(
@@ -439,7 +441,9 @@ class TestDownloadStatusEndpoint:
             (101, RequestStatus.COMPLETED),
         ]
 
-        mock_db.execute.side_effect = [torrent_result, request_status_result]
+        logs_result = MagicMock()
+        logs_result.all.return_value = []
+        mock_db.execute.side_effect = [torrent_result, request_status_result, logs_result]
 
         qbit = AsyncMock()
         qbit.get_torrent_info = AsyncMock(return_value={"progress": 0.6, "state": "downloading"})
@@ -473,7 +477,9 @@ class TestDownloadStatusEndpoint:
         request_status_result = MagicMock()
         request_status_result.all.return_value = [(99, RequestStatus.DOWNLOADING)]
 
-        mock_db.execute.side_effect = [torrent_result, request_status_result]
+        logs_result = MagicMock()
+        logs_result.all.return_value = []
+        mock_db.execute.side_effect = [torrent_result, request_status_result, logs_result]
 
         qbit = AsyncMock()
         qbit.get_torrent_info = AsyncMock(return_value={"progress": 1.0, "state": "uploading"})
@@ -485,9 +491,10 @@ class TestDownloadStatusEndpoint:
 
         body = json.loads(bytes(response.body))  # type: ignore[arg-type]
         assert body["torrents"][0]["qbit_complete"] is True
+        assert body["torrents"][0]["waiting_for_plex"] is True
         assert body["torrents"][0]["plex_available"] is False
         assert body["torrents"][0]["request_status"] == RequestStatus.DOWNLOADING.value
-        assert body["torrents"][0]["refresh_staged_tab"] is True
+        assert body["torrents"][0]["refresh_staged_tab"] is False
         mock_db.commit.assert_not_awaited()
 
     @pytest.mark.asyncio

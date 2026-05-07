@@ -54,11 +54,15 @@ async function _patchStagedDownloadStatus() {
 
             const stateSpan = row.querySelector('[data-download-state]');
             if (stateSpan) {
-                const stateLabel = torrent.qbit_state || 'sent to qBittorrent';
-                const done = torrent.qbit_progress !== null && torrent.qbit_progress !== undefined && torrent.qbit_progress >= 1.0;
-                stateSpan.className = `badge ${done ? 'badge-green' : 'badge-blue'}`;
+                const waitingForPlex = !!torrent.waiting_for_plex;
+                const stateLabel = waitingForPlex
+                    ? 'qBittorrent finished; waiting for Plex'
+                    : (torrent.qbit_state || 'sent to qBittorrent');
+                const done = torrent.qbit_complete || (torrent.qbit_progress !== null && torrent.qbit_progress !== undefined && torrent.qbit_progress >= 1.0);
+                stateSpan.className = `badge ${waitingForPlex ? 'badge-yellow' : (done ? 'badge-green' : 'badge-blue')}`;
                 stateSpan.textContent = stateLabel;
-                row.dataset.state = stateLabel.toLowerCase();
+                row.dataset.state = waitingForPlex ? 'qbit_finished_waiting_plex' : stateLabel.toLowerCase();
+                row.dataset.qbitFinishedWaitingPlex = waitingForPlex ? 'true' : 'false';
             }
 
             const reqStateTd = row.querySelector('td:nth-child(5)');

@@ -65,7 +65,10 @@ class TestGetDownloadStatus:
         mock_result_2 = MagicMock()
         mock_result_2.all.return_value = [(1, RequestStatus.DOWNLOADING)]
 
-        mock_db.execute = AsyncMock(side_effect=[mock_result_1, mock_result_2])
+        mock_result_3 = MagicMock()
+        mock_result_3.all.return_value = []
+
+        mock_db.execute = AsyncMock(side_effect=[mock_result_1, mock_result_2, mock_result_3])
 
         with (
             patch("app.siftarr.routers.staged.get_settings") as mock_settings,
@@ -87,7 +90,9 @@ class TestGetDownloadStatus:
         t = body["torrents"][0]
         assert "qbit_complete" in t
         assert "plex_available" in t
+        assert "waiting_for_plex" in t
         assert t["qbit_complete"] is True
+        assert t["waiting_for_plex"] is True
         assert t["plex_available"] is False
 
     @pytest.mark.asyncio
@@ -106,7 +111,10 @@ class TestGetDownloadStatus:
         mock_result_2 = MagicMock()
         mock_result_2.all.return_value = [(1, RequestStatus.DOWNLOADING)]
 
-        mock_db.execute = AsyncMock(side_effect=[mock_result_1, mock_result_2])
+        mock_result_3 = MagicMock()
+        mock_result_3.all.return_value = []
+
+        mock_db.execute = AsyncMock(side_effect=[mock_result_1, mock_result_2, mock_result_3])
 
         with (
             patch("app.siftarr.routers.staged.get_settings") as mock_settings,
