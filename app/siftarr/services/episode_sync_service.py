@@ -41,8 +41,10 @@ async def persist_episode_availability(
 ) -> list[Season]:
     """Persist Plex episode availability for a request's seasons and episodes.
 
-    Sets per-episode status based on Plex availability, derives aggregate
-    season/request statuses, and commits the transaction.
+    Sets per-episode status to COMPLETED for episodes confirmed on Plex.
+    Preserves existing status for episodes not yet on Plex (they may be
+    DOWNLOADING, STAGED, PENDING, etc.), derives aggregate season/request
+    statuses, and commits the transaction.
     """
     request_episodes: list[Episode] = []
     for season in seasons:
@@ -54,10 +56,14 @@ async def persist_episode_availability(
 
         for episode in episodes:
             is_on_plex = availability.get((season.season_number, episode.episode_number), False)
-            episode.status = derive_episode_status(
-                is_on_plex=is_on_plex,
-                air_date=episode.air_date,
-            )
+            if is_on_plex:
+                episode.status = RequestStatus.COMPLETED
+            elif isinstance(episode.air_date, date) and episode.air_date > datetime.now(UTC).date():
+                # Future episode not yet on Plex → mark as unreleased
+                episode.status = RequestStatus.UNRELEASED
+            # Otherwise preserve existing status for episodes not yet on Plex
+            # so that workflow states (DOWNLOADING, STAGED) are not reset to
+            # PENDING before Plex has indexed the newly-added media.
 
         await db.flush()
         season.status = derive_season_status(episodes)

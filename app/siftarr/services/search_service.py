@@ -119,10 +119,10 @@ class SearchService:
             result = await decision_service.process_request(request.id)
         else:
             decision_service = TVDecisionService(self.db, prowlarr_service, qbittorrent_service)
-            # Dashboard-triggered searches for TV shows should only search for
-            # season packs and multi-season packs, not individual episodes.
-            # Individual episode searching is done from the details modal.
-            result = await decision_service.process_request(request.id, search_episodes=False)
+            # Dashboard-triggered searches for TV shows search for season packs,
+            # multi-season packs, AND individual PENDING episodes so that all
+            # unresolved episodes are covered in a single search pass.
+            result = await decision_service.process_request(request.id, search_episodes=True)
 
         activity_log = ActivityLogService(self.db)
         await activity_log.log(
