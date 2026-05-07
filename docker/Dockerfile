@@ -4,7 +4,8 @@ WORKDIR /build
 COPY package.json tailwind.config.js ./
 COPY app/siftarr/static/css/tailwind-input.css ./app/siftarr/static/css/tailwind-input.css
 COPY app/siftarr/templates/ ./app/siftarr/templates/
-RUN npm install && \
+RUN --mount=type=cache,target=/root/.npm \
+    npm install && \
     npx tailwindcss -i ./app/siftarr/static/css/tailwind-input.css -o ./app/siftarr/static/css/tailwind.css --minify
 
 # Stage 2: Python application
@@ -28,7 +29,8 @@ RUN groupadd -g 1000 appgroup && useradd -u 1000 -g appgroup -m -s /bin/bash app
 COPY pyproject.toml uv.lock* ./
 
 # Install dependencies
-RUN SETUPTOOLS_SCM_PRETEND_VERSION_FOR_SIFTARR="${SIFTARR_VERSION#v}" uv sync --frozen
+RUN --mount=type=cache,target=/root/.cache/uv \
+    SETUPTOOLS_SCM_PRETEND_VERSION_FOR_SIFTARR="${SIFTARR_VERSION#v}" uv sync --frozen
 
 # Copy application code
 COPY app/ ./app/
