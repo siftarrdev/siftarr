@@ -191,8 +191,14 @@ async function refreshCurrentTabContent() {
         restore();
 
         // Re-bind selection handlers if applicable
-        if (tabName === 'staged' && window.bindStagedSelectionHandlers) {
-            window.bindStagedSelectionHandlers();
+        if (tabName === 'staged') {
+            if (window.bindStagedSelectionHandlers) {
+                window.bindStagedSelectionHandlers();
+            }
+            const stagedSelectAll = document.getElementById('staged-select-all');
+            if (stagedSelectAll && window.bindSelectAll) {
+                window.bindSelectAll(stagedSelectAll, '.staged-torrent-checkbox');
+            }
         }
         if (tabName === 'active' || tabName === 'pending') {
             const selectAll = document.getElementById(tabName === 'active' ? 'active-select-all' : 'pending-select-all');

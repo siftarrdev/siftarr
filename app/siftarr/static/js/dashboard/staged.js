@@ -112,6 +112,10 @@ async function refreshStagedTabData() {
 
         stagedContent.innerHTML = newContent.innerHTML;
         bindStagedSelectionHandlers();
+        const stagedSelectAll = document.getElementById('staged-select-all');
+        if (stagedSelectAll && window.bindSelectAll) {
+            window.bindSelectAll(stagedSelectAll, '.staged-torrent-checkbox');
+        }
         restore();
     } catch (err) {
         console.error('Failed to refresh staged tab:', err);

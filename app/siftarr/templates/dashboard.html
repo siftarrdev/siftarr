@@ -304,6 +304,7 @@
 
     {# ═══════════════ STAGED TAB ═══════════════ #}
     <div id="content-staged" class="tab-content hidden">
+        {% if staged_torrents %}
         <div class="card overflow-hidden">
             <div class="card-header flex flex-col gap-3 md:flex-row md:items-center">
                 <input type="text" id="staged-filter-input" placeholder="Filter staged torrents..." class="form-input md:flex-1">
@@ -315,8 +316,8 @@
             <div class="overflow-x-auto">
                 <table class="min-w-full divide-y divide-gray-700/60 data-resizable" id="staged-torrents-table">
                     <colgroup>
+                        <col data-col-key="selectbox" style="width: 48px;">
                         <col data-col-key="title" style="width: 240px;">
-                        <col data-col-key="select" style="width: 80px;">
                         <col data-col-key="requeststate" style="width: 130px;">
                         <col data-col-key="size" style="width: 100px;">
                         <col data-col-key="indexer" style="width: 120px;">
@@ -325,8 +326,11 @@
                     </colgroup>
                     <thead>
                         <tr class="bg-surface-850">
+                            <th class="px-5 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 w-12" style="position: relative;" data-col-key="selectbox">
+                                <input id="staged-select-all" type="checkbox" class="rounded border-gray-600 bg-surface-900 text-brand-500 focus:ring-brand-500">
+                                <div class="resize-handle"></div>
+                            </th>
                             <th class="px-5 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 cursor-pointer hover:text-gray-300" data-table="staged" data-sort="title" data-col-key="title" style="position: relative;"><span class="sort-title">Title <span class="sort-indicator"></span></span><div class="resize-handle"></div></th>
-                            <th class="px-5 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500" data-col-key="select" style="position: relative;"><span class="sort-title">Select</span><div class="resize-handle"></div></th>
                             <th class="px-5 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 cursor-pointer hover:text-gray-300" data-table="staged" data-sort="requeststate" data-col-key="requeststate" style="position: relative;"><span class="sort-title">Request State <span class="sort-indicator"></span></span><div class="resize-handle"></div></th>
                             <th class="px-5 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 cursor-pointer hover:text-gray-300" data-table="staged" data-sort="size" data-col-key="size" style="position: relative;"><span class="sort-title">Size <span class="sort-indicator"></span></span><div class="resize-handle"></div></th>
                             <th class="px-5 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 cursor-pointer hover:text-gray-300" data-table="staged" data-sort="indexer" data-col-key="indexer" style="position: relative;"><span class="sort-title">Indexer <span class="sort-indicator"></span></span><div class="resize-handle"></div></th>
@@ -335,18 +339,19 @@
                         </tr>
                     </thead>
                     <tbody class="divide-y divide-gray-700/40" id="staged-torrents-body">
-                        {% if staged_torrents %}
                         {% for torrent in staged_torrents %}
                         {% set request_state = staged_request_statuses.get(torrent.request_id, 'unknown') %}
                         {% set identity_warning = movie_identity_mismatch_warnings.get(torrent.id) %}
                         <tr class="hover:bg-surface-850/80 cursor-pointer transition-colors" onclick="{% if torrent.request_id %}openRequestDetails({{ torrent.request_id }}){% endif %}" data-torrent-id="{{ torrent.id }}" data-request-id="{{ torrent.request_id }}" data-title="{{ torrent.title|lower }}" data-state="{{ torrent.status|lower }}" data-requeststate="{{ request_state|lower }}" data-size="{{ torrent.size }}" data-indexer="{{ torrent.indexer|lower }}" data-score="{{ torrent.score }}">
+                            <td class="px-5 py-3.5 text-sm" onclick="event.stopPropagation()">
+                                <input type="checkbox" class="staged-torrent-checkbox rounded border-gray-600 bg-surface-900 text-brand-500 focus:ring-brand-500" value="{{ torrent.id }}">
+                            </td>
                             <td class="px-5 py-3.5 text-sm font-medium text-white">
                                 <div>{{ torrent.title }}</div>
                                 {% if identity_warning %}
                                 <div class="mt-1 text-xs text-amber-300">Possible wrong movie: {{ identity_warning }}</div>
                                 {% endif %}
                             </td>
-                            <td class="px-5 py-3.5  text-sm" onclick="event.stopPropagation()"><input type="checkbox" class="staged-torrent-checkbox rounded border-gray-600 bg-surface-900 text-brand-500 focus:ring-brand-500" value="{{ torrent.id }}"></td>
                             <td class="px-5 py-3.5  text-sm"><span class="badge {% if request_state == 'staged' %}badge-yellow{% else %}badge-gray{% endif %}">{{ request_state }}</span></td>
                             <td class="px-5 py-3.5  text-sm text-gray-400 tabular-nums">{{ (torrent.size / 1024 / 1024 / 1024)|round(2) }} GB</td>
                             <td class="px-5 py-3.5  text-sm text-gray-400">{{ torrent.indexer }}</td>
@@ -354,15 +359,16 @@
                             <td class="px-5 py-3.5  text-sm" onclick="event.stopPropagation()"><div class="flex items-center gap-3">{% if torrent.request_id %}<button type="button" onclick="openRequestDetails({{ torrent.request_id }})" class="text-brand-400 hover:text-brand-300 font-medium">Details</button>{% endif %}{% if torrent.id in replace_staged_torrent_ids %}<button type="button" onclick="openReplaceModal({{ torrent.id }}, {{ torrent.request_id }}, '{{ torrent.title|replace("'", "\'") }}', '/?tab=downloading')" class="text-amber-400 hover:text-amber-300 font-medium">Replace</button>{% else %}<button type="button" onclick="postStagedAction('/staged/{{ torrent.id }}/approve', '/?tab=staged')" class="text-emerald-400 hover:text-emerald-300 font-medium">Approve</button>{% endif %}<button type="button" onclick="postStagedAction('/staged/{{ torrent.id }}/discard', '/?tab=staged')" class="text-red-400 hover:text-red-300 font-medium">Discard</button></div></td>
                         </tr>
                         {% endfor %}
-                        {% endif %}
                     </tbody>
                 </table>
             </div>
         </div>
+        {% else %}<p class="text-gray-500">No staged torrents.</p>{% endif %}
     </div>
 
     {# ═══════════════ DOWNLOADING TAB ═══════════════ #}
     <div id="content-downloading" class="tab-content hidden">
+        {% if downloading_torrents %}
         <div class="card overflow-hidden">
             <div class="card-header flex flex-col gap-3 md:flex-row md:items-center">
                 <input type="text" id="downloading-filter-input" placeholder="Filter downloading torrents..." class="form-input md:flex-1">
@@ -395,7 +401,6 @@
                         </tr>
                     </thead>
                     <tbody class="divide-y divide-gray-700/40" id="downloading-torrents-body">
-                        {% if downloading_torrents %}
                         {% for torrent in downloading_torrents %}
                         {% set request_state = downloading_request_statuses.get(torrent.request_id, 'unknown') %}
                         {% set waiting_for_plex = torrent.id in downloading_waiting_plex_torrent_ids or torrent.request_id in downloading_waiting_plex_request_ids %}
@@ -420,11 +425,11 @@
                             <td class="px-5 py-3.5  text-sm" onclick="event.stopPropagation()"><div class="flex items-center gap-3">{% if torrent.request_id %}<button type="button" onclick="openRequestDetails({{ torrent.request_id }})" class="text-brand-400 hover:text-brand-300 font-medium">Details</button>{% endif %}<button type="button" onclick="checkNow({{ torrent.id }})" class="bg-brand-500 hover:bg-brand-400 text-white text-xs px-2 py-0.5 rounded">Check Now</button></div></td>
                         </tr>
                         {% endfor %}
-                        {% endif %}
                     </tbody>
                 </table>
             </div>
         </div>
+        {% else %}<p class="text-gray-500">No downloading torrents.</p>{% endif %}
     </div>
 
     {# ═══════════════ FINISHED TAB ═══════════════ #}
