@@ -7,5 +7,4 @@
 - Authentication & Authorization — Zero auth on any endpoint today. Add API-key header auth at minimum; ideally integrate with Overseerr's SSO or support basic auth. This is a critical gap
 
 ## Bugs
-- the requested on date seems to be the date the request was loaded from overseerr rather than the date the request was made.
-- searching for and staging season packs doesnt work well. If i select a pack that is outside of the normal rules. it doenst show up in the staging area, and then i am unsure if try and stage additional season if they will be staged as well or they will replace the force staged pack.
+- fix the search all pending requests button. it seems to be broken and only searching the last episode and staging only one release. i seem to have to manually search and stage each episode in a season pack which is a pain.

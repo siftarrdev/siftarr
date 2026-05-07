@@ -306,9 +306,8 @@ class TVDecisionService:
         Args:
             request_id: The ID of the request to search.
             search_episodes: If True (default), also search for individual episodes
-                for uncovered seasons. When called from the dashboard "Search Selected"
-                action, this is False to limit the search to season packs and multi-season
-                packs only.
+                for uncovered seasons. When False, only season packs and multi-season
+                packs are searched.
         """
         result = await self.db.execute(
             select(Request)
