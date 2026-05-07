@@ -133,8 +133,16 @@ class ProwlarrService:
         )
 
     @staticmethod
+    def _normalize_search_title(title: str) -> str:
+        """Strip apostrophes and normalize whitespace for broader indexer matching."""
+        normalized = title.replace("'", "")
+        return " ".join(normalized.split())
+
+    @staticmethod
     def _build_movie_query(title: str | None, tmdbid: int, year: int | None = None) -> str:
         """Build a Prowlarr movie query with metadata tokens in the query string."""
+        if title:
+            title = ProwlarrService._normalize_search_title(title)
         parts = [title.strip() for title in [title] if title and title.strip()]
         parts.append(f"{{tmdbid:{tmdbid}}}")
         if year is not None:
@@ -144,6 +152,8 @@ class ProwlarrService:
     @staticmethod
     def _build_movie_title_query(title: str | None, year: int | None = None) -> str:
         """Build a plain title-based movie query for fallback searches."""
+        if title:
+            title = ProwlarrService._normalize_search_title(title)
         parts = [title.strip() for title in [title] if title and title.strip()]
         if year is not None:
             parts.append(str(year))
@@ -158,6 +168,8 @@ class ProwlarrService:
         year: int | None = None,
     ) -> str:
         """Build a Prowlarr TV query with metadata tokens in the query string."""
+        if title:
+            title = ProwlarrService._normalize_search_title(title)
         parts = [title.strip() for title in [title] if title and title.strip()]
         parts.append(f"{{tvdbid:{tvdbid}}}")
         if season is not None:
@@ -176,6 +188,8 @@ class ProwlarrService:
         year: int | None = None,
     ) -> str:
         """Build a plain title-based TV query for fallback searches."""
+        if title:
+            title = ProwlarrService._normalize_search_title(title)
         parts = [title.strip() for title in [title] if title and title.strip()]
         if season is not None and episode is not None:
             parts.append(f"S{season:02d}E{episode:02d}")
@@ -466,7 +480,8 @@ class ProwlarrService:
         Returns:
             ProwlarrSearchResult with all unique releases found
         """
-        # Query strategies for broad TV searches
+        # Normalize title and build query strategies
+        title = self._normalize_search_title(title)
         title_queries = [
             f"{title} S01-".strip(),  # e.g. "The Mentalist S01-"
             f"{title} complete".strip(),  # e.g. "The Mentalist complete"
