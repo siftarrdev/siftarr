@@ -117,6 +117,13 @@ async function refreshStagedTabData() {
             window.bindSelectAll(stagedSelectAll, '.staged-torrent-checkbox');
         }
         restore();
+
+        // Update stat cards
+        const statsContainer = document.querySelector('.grid.grid-cols-2.md\\:grid-cols-7');
+        const newStatsContainer = doc.querySelector('.grid.grid-cols-2.md\\:grid-cols-7');
+        if (statsContainer && newStatsContainer) {
+            statsContainer.innerHTML = newStatsContainer.innerHTML;
+        }
     } catch (err) {
         console.error('Failed to refresh staged tab:', err);
     } finally {
@@ -143,6 +150,13 @@ async function refreshDownloadingTabData() {
         downloadingContent.innerHTML = newContent.innerHTML;
         await _patchStagedDownloadStatus();
         restore();
+
+        // Update stat cards
+        const statsContainer = document.querySelector('.grid.grid-cols-2.md\\:grid-cols-7');
+        const newStatsContainer = doc.querySelector('.grid.grid-cols-2.md\\:grid-cols-7');
+        if (statsContainer && newStatsContainer) {
+            statsContainer.innerHTML = newStatsContainer.innerHTML;
+        }
     } catch (err) {
         console.error('Failed to refresh downloading tab:', err);
     } finally {

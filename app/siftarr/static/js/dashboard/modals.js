@@ -176,6 +176,7 @@ function postToAction(action, redirectTo, trigger = null) {
             window.startSearchProgress(requestId, title, function(data) {
                 window.updateRequestRow(requestId, data.result);
                 resetTrigger();
+                window.refreshCurrentTabContent();
             }, function() {
                 resetTrigger();
             });
@@ -278,6 +279,8 @@ function handleBulkRequestActionSubmit(event, form) {
                 });
             }
             resetSubmitter();
+            // Refresh stats cards after search completes
+            window.refreshCurrentTabContent();
         }, function() {
             resetSubmitter();
         }, { searchAllPending: searchAll });
