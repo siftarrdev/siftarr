@@ -66,7 +66,11 @@ def derive_season_status(episodes: list[Episode]) -> RequestStatus:
 
     # Mixed completed with anything non-terminal → PENDING
     if RequestStatus.COMPLETED in statuses:
-        non_terminal = statuses - {RequestStatus.COMPLETED, RequestStatus.FAILED, RequestStatus.DENIED}
+        non_terminal = statuses - {
+            RequestStatus.COMPLETED,
+            RequestStatus.FAILED,
+            RequestStatus.DENIED,
+        }
         if non_terminal:
             return RequestStatus.PENDING
 

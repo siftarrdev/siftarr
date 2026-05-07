@@ -147,6 +147,7 @@ Business logic and integrations.
 - `connection_tester.py` — external connectivity test helpers
 - `http_client.py` — shared HTTP client lifecycle
 - `release_parser.py`, `media_helpers.py`, `type_utils.py`, `async_utils.py` — shared parsing and utility helpers; `release_parser` includes `cached_parse_release_coverage` (lru_cache, maxsize=4096) to avoid redundant coverage parsing
+- `episode_derive.py` — canonical derivation functions for TV episode/season/request statuses (episode status is ground truth for TV)
 - `activity_log_service.py` / `unreleased_service.py` — supporting domain workflows (unreleased detection moved here from lifecycle_service)
 - `search_service.py` — ad hoc release evaluation/selection, request search orchestration, and TV season-pack/episode ad hoc search
 

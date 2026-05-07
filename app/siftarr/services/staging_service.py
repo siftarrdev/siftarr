@@ -641,9 +641,7 @@ class StagingService:
             if request.media_type == MediaType.TV:
                 # Episode-centric: set covered episode statuses, then recompute
                 for release in usable_releases:
-                    await self._apply_release_to_episodes(
-                        release, RequestStatus.STAGED
-                    )
+                    await self._apply_release_to_episodes(release, RequestStatus.STAGED)
                 await self._recompute_tv_statuses(request.id)
             else:
                 await _set_request_status(self.db, request, RequestStatus.STAGED)
@@ -694,9 +692,7 @@ class StagingService:
         if request.media_type == MediaType.TV:
             # Episode-centric: set covered episode statuses, then recompute
             for release in usable_releases:
-                await self._apply_release_to_episodes(
-                    release, RequestStatus.DOWNLOADING
-                )
+                await self._apply_release_to_episodes(release, RequestStatus.DOWNLOADING)
                 await self._recompute_tv_statuses(request.id)
         else:
             await _set_request_status(self.db, request, RequestStatus.DOWNLOADING)

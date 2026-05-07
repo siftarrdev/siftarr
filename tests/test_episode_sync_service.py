@@ -505,9 +505,10 @@ class TestEpisodeSyncService:
         # derive_request_status_from_episodes expects Episode objects, not Season objects
         assert derive_request_status_from_episodes(available.episodes) == RequestStatus.COMPLETED
         assert derive_request_status_from_episodes(future.episodes) == RequestStatus.UNRELEASED
-        assert derive_request_status_from_episodes(
-            available.episodes + future.episodes
-        ) == RequestStatus.PENDING
+        assert (
+            derive_request_status_from_episodes(available.episodes + future.episodes)
+            == RequestStatus.PENDING
+        )
 
     @pytest.mark.asyncio
     async def test_apply_plex_completed_updates_request_status(self, mock_db, mock_overseerr):
