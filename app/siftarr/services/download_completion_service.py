@@ -19,19 +19,23 @@ from app.siftarr.models.staged_torrent import StagedTorrent
 from app.siftarr.services.activity_log_service import ActivityLogService
 from app.siftarr.services.lifecycle_service import LifecycleService
 from app.siftarr.services.plex_polling_service import PlexPollingService
-from app.siftarr.services.qbittorrent_service import QbittorrentService
+from app.siftarr.services.qbittorrent_service import QbittorrentService, _torrent_file_info_hash
 
 logger = logging.getLogger(__name__)
 
 _BTIH_RE = re.compile(r"urn:btih:([0-9a-fA-F]{40}|[2-7A-Za-z]{32})", re.IGNORECASE)
+_NON_ALNUM_RE = re.compile(r"[^a-zA-Z0-9]+")
 
 
-def _extract_hash(magnet_url: str | None) -> str | None:
-    """Extract the info-hash from a magnet URI."""
-    if not magnet_url:
-        return None
-    m = _BTIH_RE.search(magnet_url)
-    return m.group(1).lower() if m else None
+def _extract_hash(magnet_url: str | None, torrent_path: str | None = None) -> str | None:
+    """Extract the info-hash from a magnet URI, or compute it from a .torrent file."""
+    if magnet_url:
+        m = _BTIH_RE.search(magnet_url)
+        if m:
+            return m.group(1).lower()
+    if torrent_path:
+        return _torrent_file_info_hash(torrent_path)
+    return None
 
 
 def _download_completed_torrent_ids(details: str | None) -> set[int]:
@@ -52,6 +56,16 @@ def _download_completed_torrent_ids(details: str | None) -> set[int]:
         if isinstance(item, dict) and isinstance(item.get("torrent_id"), int):
             torrent_ids.add(item["torrent_id"])
     return torrent_ids
+
+
+def _normalize_name(name: str) -> str:
+    """Normalize a torrent name for loose matching.
+
+    Replaces runs of non-alphanumeric characters with a single space and
+    lowercases, so that e.g. ``"Finding.Carter.S01-S02.1080p.WEB-DL"``
+    and ``"Finding Carter S01-S02 1080p WEB-DL"`` compare as equal.
+    """
+    return _NON_ALNUM_RE.sub(" ", name).strip().lower()
 
 
 class DownloadCompletionService:
@@ -118,7 +132,14 @@ class DownloadCompletionService:
         done_torrent_ids: set[int] = set()
         qbit_evidence_by_torrent_id: dict[int, dict[str, Any]] = {}
         for torrent, _request in rows:
-            torrent_hash = _extract_hash(torrent.magnet_url)
+            # Prefer the stored info_hash (most reliable), then fall back to
+            # extracting from magnet URI or computing from the .torrent file.
+            # Use getattr + isinstance so MagicMock in tests doesn't auto-create
+            # a fake hash that would break JSON serialisation.
+            torrent_hash = _extract_hash(torrent.magnet_url, torrent.torrent_path)
+            stored_hash = getattr(torrent, "info_hash", None)
+            if isinstance(stored_hash, str) and stored_hash:
+                torrent_hash = stored_hash
             info: dict[str, Any] | None = None
             progress: float | None = None
 
@@ -126,18 +147,31 @@ class DownloadCompletionService:
                 info = by_hash.get(torrent_hash.lower())
                 if info is not None:
                     progress = info.get("progress")
-                # If info is None, torrent not found in qBit → treat as done
             else:
-                title_lower = torrent.title.lower()
+                # No hash available — fall back to name matching with
+                # normalised separators (spaces vs dots vs dashes).
+                title_norm = _normalize_name(torrent.title)
                 matched = next(
-                    (t for qname, t in by_name.items() if title_lower in qname),
+                    (t for qname, t in by_name.items() if title_norm in _normalize_name(qname)),
                     None,
                 )
                 if matched is not None:
                     info = matched
                     progress = info.get("progress")
 
-            qbit_done = (progress is None) or (progress >= 1.0)
+            # A torrent is "done" in qBittorrent only when we can confirm it:
+            #   a) progress >= 1.0, or
+            #   b) we identified it by hash and it's gone from qBittorrent.
+            # We do NOT treat "not found by name matching" as done — the name
+            # heuristic is unreliable and would falsely trigger the Plex check
+            # while the torrent is still downloading.
+            if progress is not None:
+                qbit_done = progress >= 1.0
+            elif torrent_hash and info is None:
+                # Identified by hash but no longer in qBittorrent → removed after completion
+                qbit_done = True
+            else:
+                qbit_done = False
             qbit_evidence_by_torrent_id[torrent.id] = {
                 "torrent_id": torrent.id,
                 "title": torrent.title,

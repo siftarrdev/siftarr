@@ -202,18 +202,19 @@ async def _approve_torrent(torrent: StagedTorrent, db: AsyncSession) -> bool:
     runtime_settings = get_settings()
     qbittorrent = QbittorrentService(settings=runtime_settings)
 
+    # Add to qBittorrent (idempotent — if already present by info hash it
+    # returns the existing hash and skips the add).
+    torrent_hash: str | None = None
     if torrent.magnet_url:
         torrent_hash = await qbittorrent.add_torrent(
             magnet_uri=torrent.magnet_url, category=category
         )
-        success = torrent_hash is not None
     else:
-        success = (
-            await qbittorrent.add_torrent(torrent_path=torrent.torrent_path, category=category)
-            is not None
+        torrent_hash = await qbittorrent.add_torrent(
+            torrent_path=torrent.torrent_path, category=category
         )
 
-    if not success:
+    if torrent_hash is None:
         return False
 
     activity_log = ActivityLogService(db)
@@ -233,6 +234,11 @@ async def _approve_torrent(torrent: StagedTorrent, db: AsyncSession) -> bool:
         approved_torrent=torrent,
         rules_selected_torrent=rules_selected_torrent,
     )
+
+    # Snapshot paths before any commit that might expire the torrent object
+    torrent_path = torrent.torrent_path
+    json_path = torrent.json_path
+
     torrent.status = "approved"
     if request:
         lifecycle_service = LifecycleService(db)
@@ -244,10 +250,10 @@ async def _approve_torrent(torrent: StagedTorrent, db: AsyncSession) -> bool:
             await lifecycle_service.transition(request.id, RequestStatus.DOWNLOADING)
 
     try:
-        if os.path.exists(torrent.torrent_path):
-            os.remove(torrent.torrent_path)
-        if os.path.exists(torrent.json_path):
-            os.remove(torrent.json_path)
+        if os.path.exists(torrent_path):
+            os.remove(torrent_path)
+        if os.path.exists(json_path):
+            os.remove(json_path)
     except OSError:
         pass
 
@@ -255,6 +261,10 @@ async def _approve_torrent(torrent: StagedTorrent, db: AsyncSession) -> bool:
 
 
 async def _discard_torrent(torrent: StagedTorrent, db: AsyncSession) -> bool:
+    # Snapshot paths before any commit that might expire the torrent object
+    torrent_path = torrent.torrent_path
+    json_path = torrent.json_path
+
     if torrent.request_id:
         result = await db.execute(select(Request).where(Request.id == torrent.request_id))
         request = result.scalar_one_or_none()
@@ -273,10 +283,10 @@ async def _discard_torrent(torrent: StagedTorrent, db: AsyncSession) -> bool:
     torrent.status = "discarded"
 
     try:
-        if os.path.exists(torrent.torrent_path):
-            os.remove(torrent.torrent_path)
-        if os.path.exists(torrent.json_path):
-            os.remove(torrent.json_path)
+        if os.path.exists(torrent_path):
+            os.remove(torrent_path)
+        if os.path.exists(json_path):
+            os.remove(json_path)
     except OSError:
         pass
 
@@ -604,9 +614,10 @@ async def get_download_status(
         qbit_progress: float | None = None
         qbit_state: str | None = None
 
-        # Try to get progress via hash first, then fall back to name
-        torrent_hash: str | None = None
-        if torrent.magnet_url:
+        # Try to get progress via stored info_hash first, then magnet URL,
+        # then fall back to name matching
+        torrent_hash: str | None = torrent.info_hash
+        if not torrent_hash and torrent.magnet_url:
             m = _BTIH_RE.search(torrent.magnet_url)
             if m:
                 torrent_hash = m.group(1).lower()
@@ -630,7 +641,13 @@ async def get_download_status(
         else:
             request_status = "unknown"
 
-        qbit_complete = qbit_progress is None or qbit_progress >= 1.0
+        # Only treat qBittorrent as "done" when we can confirm progress >= 1.0.
+        # Do NOT treat "not found" (None) as done — name matching is unreliable
+        # and would falsely mark a downloading torrent as complete.
+        qbit_complete = qbit_progress is not None and qbit_progress >= 1.0
+        # waiting_for_plex is set when the download_completion service logged a
+        # DOWNLOAD_COMPLETED event, OR when we have confirmed (via a non-None
+        # progress) that the torrent is done in qBittorrent.
         waiting_for_plex = (
             torrent.id in waiting_plex_torrent_ids
             or torrent.request_id in legacy_waiting_plex_request_ids
@@ -683,8 +700,8 @@ async def check_now(
     qbit_progress: float | None = None
     qbit_state: str | None = None
 
-    torrent_hash: str | None = None
-    if torrent.magnet_url:
+    torrent_hash: str | None = torrent.info_hash
+    if not torrent_hash and torrent.magnet_url:
         m = _BTIH_RE.search(torrent.magnet_url)
         if m:
             torrent_hash = m.group(1).lower()
@@ -697,7 +714,7 @@ async def check_now(
     else:
         qbit_progress = await qbittorrent.get_torrent_progress_by_name(torrent.title)
 
-    qbit_complete = qbit_progress is None or qbit_progress >= 1.0
+    qbit_complete = qbit_progress is not None and qbit_progress >= 1.0
     plex_available = False
     if torrent.request_id:
         try:

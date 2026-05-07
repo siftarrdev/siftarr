@@ -1,7 +1,9 @@
 """Service for interacting with qBittorrent API."""
 
 import asyncio
+import hashlib
 import logging
+import re
 from enum import StrEnum
 from typing import Any
 
@@ -17,6 +19,119 @@ class MediaCategory(StrEnum):
 
     MOVIES = "radarr"
     TV = "sonarr"
+
+
+_MAGNET_HASH_RE = re.compile(r"xt=urn:btih:([a-fA-F0-9]{40})")
+_NON_ALNUM_RE = re.compile(r"[^a-zA-Z0-9]+")
+
+
+def _parse_magnet_info_hash(magnet_uri: str) -> str | None:
+    """Extract the info hash (hex) from a magnet URI."""
+    m = _MAGNET_HASH_RE.search(magnet_uri)
+    return m.group(1).lower() if m else None
+
+
+def _torrent_file_info_hash(torrent_path: str) -> str | None:
+    """Compute the SHA1 info hash of a .torrent file.
+
+    The info hash is SHA1 of the raw bencoded ``info`` dictionary inside the
+    top-level torrent metadata.
+    """
+    try:
+        with open(torrent_path, "rb") as f:
+            data = f.read()
+    except Exception:
+        return None
+
+    # Find the raw byte range of the value for the "info" key in the outermost
+    # bencoded dictionary.  We return the hex digest of SHA1 over those bytes.
+    info_raw = _bencode_extract_info_value(data)
+    if info_raw is None:
+        return None
+    return hashlib.sha1(info_raw).hexdigest()
+
+
+def _normalize_name(name: str) -> str:
+    """Normalize separators for loose name matching (dots, dashes, spaces → space)."""
+    return _NON_ALNUM_RE.sub(" ", name).strip().lower()
+
+
+def _bencode_extract_info_value(data: bytes) -> bytes | None:
+    """Given a bencoded torrent file, return the raw bytes of the ``info`` key's value."""
+    if not data or data[0:1] != b"d":
+        return None
+    cur: int = 1  # skip leading 'd'
+    while cur < len(data):
+        if data[cur : cur + 1] == b"e":
+            return None  # reached end without finding 'info'
+        # Parse key
+        key: bytes | None
+        nxt: int | None
+        key, nxt = _bencode_read_string(data, cur)
+        if key is None or nxt is None:
+            return None
+        cur = nxt
+        val_start: int = cur
+        # Skip over the value (any type)
+        nxt = _bencode_skip_value(data, cur)
+        if nxt is None:
+            return None
+        cur = nxt
+        if key == b"info":
+            return data[val_start:cur]
+    return None
+
+
+def _bencode_read_string(data: bytes, pos: int) -> tuple[bytes | None, int | None]:
+    """Read a bencoded byte-string starting at *pos*. Returns ``(value, next_pos)``."""
+    colon = data.find(b":", pos)
+    if colon == -1:
+        return None, None
+    try:
+        length = int(data[pos:colon])
+    except ValueError:
+        return None, None
+    start = colon + 1
+    end = start + length
+    if end > len(data):
+        return None, None
+    return data[start:end], end
+
+
+def _bencode_skip_value(data: bytes, pos: int) -> int | None:
+    """Skip over one bencoded value at *pos* and return the position after it."""
+    if pos >= len(data):
+        return None
+    ch = data[pos : pos + 1]
+    if ch == b"d":
+        cur: int = pos + 1
+        while cur < len(data) and data[cur : cur + 1] != b"e":
+            # skip key
+            _key, nxt = _bencode_read_string(data, cur)
+            if nxt is None:
+                return None
+            cur = nxt
+            # skip value
+            nxt = _bencode_skip_value(data, cur)
+            if nxt is None:
+                return None
+            cur = nxt
+        return cur + 1  # skip 'e'
+    elif ch == b"l":
+        cur = pos + 1
+        while cur < len(data) and data[cur : cur + 1] != b"e":
+            nxt = _bencode_skip_value(data, cur)
+            if nxt is None:
+                return None
+            cur = nxt
+        return cur + 1  # skip 'e'
+    elif ch == b"i":
+        end = data.find(b"e", pos)
+        return end + 1 if end != -1 else None
+    elif ch in b"0123456789":
+        _, nxt = _bencode_read_string(data, pos)
+        return nxt
+    return None
 
 
 class QbittorrentService:
@@ -98,7 +213,10 @@ class QbittorrentService:
         ratio_limit: float | None = None,
         seeding_time_limit: int | None = None,
     ) -> str | None:
-        """Add a torrent to qBittorrent.
+        """Add a torrent to qBittorrent (idempotent).
+
+        If the torrent already exists in qBittorrent (detected by info hash),
+        this returns the existing hash instead of adding a duplicate.
 
         Args:
             torrent_path: Path to .torrent file (mutually exclusive with magnet_uri).
@@ -112,11 +230,24 @@ class QbittorrentService:
         Returns:
             Torrent hash if successful, None otherwise.
         """
+        # ── 1. Compute the info hash for duplicate detection ──
+        info_hash: str | None = None
+        if magnet_uri:
+            info_hash = _parse_magnet_info_hash(magnet_uri)
+        elif torrent_path:
+            info_hash = _torrent_file_info_hash(torrent_path)
+
+        # ── 2. Check if already in qBittorrent (idempotent) ──
+        if info_hash:
+            existing = await self.get_torrent_info(info_hash)
+            if existing:
+                logger.info("Torrent already in qBittorrent (hash=%s), skipping add", info_hash)
+                return info_hash
+
+        # ── 3. Add to qBittorrent ──
         try:
-            # Ensure category exists
             await self.ensure_category_exists(category.value)
 
-            # Add torrent
             if magnet_uri:
                 result = await asyncio.to_thread(
                     self.client.torrents_add,
@@ -142,16 +273,16 @@ class QbittorrentService:
             else:
                 raise ValueError("Either torrent_path or magnet_uri must be provided")
 
-            # Check result - qBittorrent returns "Ok." on success
             if result == "Ok.":
-                # Get torrent hash if we have a magnet URI
+                # Return the pre-computed hash, or fall back to looking it up
+                if info_hash:
+                    return info_hash
                 if magnet_uri:
                     torrents = await asyncio.to_thread(self.client.torrents_info)
-                    # Find the torrent we just added (most recent)
-                    for torrent in sorted(torrents, key=lambda t: t.added_on, reverse=True):
-                        if magnet_uri in (torrent.magnet_uri or ""):
-                            return str(torrent.hash)
-                return str(result) if result == "Ok." else None
+                    for t in sorted(torrents, key=lambda t: t.added_on, reverse=True):
+                        if magnet_uri in (t.magnet_uri or ""):
+                            return str(t.hash)
+                return "Ok."
             return None
         except Exception as e:
             logger.error("Error adding torrent: %s", e)
@@ -211,25 +342,32 @@ class QbittorrentService:
     async def get_torrent_progress_by_name(self, name_fragment: str) -> float | None:
         """Get progress of a torrent matching a name fragment.
 
-        Args:
-            name_fragment: Case-insensitive substring to search in torrent names.
-
-        Returns:
-            Progress (0.0 to 1.0) of the first matching torrent, or None if not found.
+        Tries exact substring first, then falls back to normalised matching
+        where separators (dots, dashes, spaces) are treated interchangeably.
         """
+        name_lower = name_fragment.lower()
+        name_norm = _normalize_name(name_fragment)
         torrents = await self.get_all_active_torrents()
-        fragment_lower = name_fragment.lower()
         for torrent in torrents:
-            if fragment_lower in (torrent.get("name") or "").lower():
+            qname = torrent.get("name") or ""
+            qname_lower = qname.lower()
+            if name_lower in qname_lower or name_norm in _normalize_name(qname):
                 return torrent["progress"]
         return None
 
     async def get_torrent_info_by_name(self, name_fragment: str) -> dict | None:
-        """Get qBittorrent info for the first torrent matching a name fragment."""
+        """Get qBittorrent info for the first torrent matching a name fragment.
+
+        Tries exact substring first, then falls back to normalised matching
+        where separators (dots, dashes, spaces) are treated interchangeably.
+        """
+        name_lower = name_fragment.lower()
+        name_norm = _normalize_name(name_fragment)
         torrents = await self.get_all_active_torrents()
-        fragment_lower = name_fragment.lower()
         for torrent in torrents:
-            if fragment_lower in (torrent.get("name") or "").lower():
+            qname = torrent.get("name") or ""
+            qname_lower = qname.lower()
+            if name_lower in qname_lower or name_norm in _normalize_name(qname):
                 return torrent
         return None
 

@@ -1,0 +1,7 @@
+services:
+  siftarr:
+    volumes:
+      - ../app:/app/app
+      - ../db/alembic:/app/alembic
+      - ../db/alembic.ini:/app/alembic.ini
+    command: ["/app/.venv/bin/python", "-m", "uvicorn", "app.siftarr.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]

@@ -188,7 +188,9 @@ Static assets.
 - container startup runs Alembic/SQLite repair before the FastAPI app launches
 - `docker/Dockerfile` — multi-stage production image build (Node stage builds Tailwind CSS, Python stage runs the app)
 - `docker/docker-compose.yml` — local container orchestration
-- `docker/rebuild-run-logs.sh` — rebuild, run, and log-tail helper
+- `docker/rebuild-run-logs.sh` — rebuild, run, and log-tail helper (use when deps change)
+- `docker/dev-up.sh` — fast dev loop with volume mounts and uvicorn --reload (daily use, no rebuild)
+- `docker/docker-compose.override.yml` — dev overrides: source code volume mounts and `--reload` command
 - `docker/entrypoint.sh` — container startup script
 
 ## Tailwind CSS Build
@@ -200,6 +202,13 @@ npm run build:css
 ```
 
 The Docker multi-stage build rebuilds Tailwind CSS automatically.
+
+### Dev mode
+
+When running via `docker/dev-up.sh`, the app container mounts the host
+`app/` directory and uses `uvicorn --reload` for instant restart on
+Python/template changes. For Tailwind CSS changes, run a full Docker
+rebuild (`docker/rebuild-run-logs.sh`).
 
 ## Quality gates
 
