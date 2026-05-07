@@ -128,9 +128,7 @@ class TVDecisionService:
         )
 
     @staticmethod
-    def _get_multi_season_coverage(
-        evaluation: ReleaseEvaluation, requested_seasons: set[int]
-    ) -> set[int]:
+    def _get_pack_coverage(evaluation: ReleaseEvaluation, requested_seasons: set[int]) -> set[int]:
         coverage = cached_parse_release_coverage(evaluation.release.title)
         if coverage.episode_number is not None:
             return set()
@@ -138,10 +136,15 @@ class TVDecisionService:
         if coverage.is_complete_series:
             return set(requested_seasons)
 
-        season_coverage = set(coverage.season_numbers).intersection(requested_seasons)
-        if len(season_coverage) < 2:
-            return set()
-        return season_coverage
+        return set(coverage.season_numbers).intersection(requested_seasons)
+
+    @staticmethod
+    def _get_multi_season_coverage(
+        evaluation: ReleaseEvaluation, requested_seasons: set[int]
+    ) -> set[int]:
+        """Return only multi-season/complete-series coverage for compatibility."""
+        coverage = TVDecisionService._get_pack_coverage(evaluation, requested_seasons)
+        return coverage if len(coverage) > 1 else set()
 
     @staticmethod
     def _is_exact_season_pack(evaluation: ReleaseEvaluation, requested_season: int) -> bool:
@@ -255,6 +258,69 @@ class TVDecisionService:
 
         return evaluated_releases, passing_releases, errors
 
+    async def _search_season_sweeps_and_evaluate(
+        self,
+        request: Request,
+        rule_engine: RuleEngine,
+        seasons: Sequence[int],
+    ) -> tuple[list[ReleaseEvaluation], list[ReleaseEvaluation], list[str]]:
+        """Run one logical paginated season sweep per requested season and dedupe results."""
+        if not seasons:
+            return [], [], []
+
+        search_results = await asyncio.gather(
+            *(
+                self.prowlarr.search_tv_season_sweep(
+                    title=request.title,
+                    season=season,
+                    imdbid=getattr(request, "imdb_id", None),
+                    tvdbid=request.tvdb_id,
+                )
+                for season in seasons
+            ),
+            return_exceptions=True,
+        )
+
+        evaluated_releases: list[ReleaseEvaluation] = []
+        passing_releases: list[ReleaseEvaluation] = []
+        errors: list[str] = []
+        seen_keys: set[str] = set()
+
+        for season, search_result in zip(seasons, search_results, strict=False):
+            if isinstance(search_result, Exception):
+                logger.warning(
+                    "TV season sweep failed: request_id=%s season=%s error=%s",
+                    request.id,
+                    season,
+                    search_result,
+                )
+                errors.append(str(search_result))
+                continue
+            if not isinstance(search_result, ProwlarrSearchResult):
+                errors.append("Unexpected search result type")
+                continue
+            if search_result.error and not search_result.releases:
+                logger.warning(
+                    "TV season sweep error: request_id=%s season=%s error=%s",
+                    request.id,
+                    season,
+                    search_result.error,
+                )
+                errors.append(search_result.error)
+
+            for release in search_result.releases:
+                dedup_key = self._release_dedup_key(release)
+                if dedup_key in seen_keys:
+                    continue
+                seen_keys.add(dedup_key)
+
+                evaluation = rule_engine.evaluate(release)
+                evaluated_releases.append(evaluation)
+                if evaluation.passed:
+                    passing_releases.append(evaluation)
+
+        return evaluated_releases, passing_releases, errors
+
     @staticmethod
     def _release_dedup_key(release: ProwlarrRelease) -> str:
         """Compute a deduplication key for a Prowlarr release."""
@@ -358,107 +424,61 @@ class TVDecisionService:
         selected_pack_releases: list[tuple[ReleaseEvaluation, set[int]]] = []
         covered_seasons: set[int] = set()
 
-        # ── Multi-season pack search ──────────────────────────────────
-        if len(requested_seasons) > 1:
-            broad_evaluations, broad_candidates, broad_errors = await self._search_and_evaluate(
-                request,
-                rule_engine,
-                [("multi_season_pack", None, None)],
-            )
-            all_evaluated_releases.extend(broad_evaluations)
-            all_search_errors.extend(broad_errors)
+        # ── One logical paginated season sweep per requested season ───
+        (
+            sweep_evaluations,
+            sweep_candidates,
+            sweep_errors,
+        ) = await self._search_season_sweeps_and_evaluate(request, rule_engine, requested_seasons)
+        all_evaluated_releases.extend(sweep_evaluations)
+        all_search_errors.extend(sweep_errors)
 
-            best_multi_season_pack: tuple[ReleaseEvaluation, set[int]] | None = None
-            requested_season_set = set(requested_seasons)
-            for _, _, evaluation in broad_candidates:
-                coverage = self._get_multi_season_coverage(evaluation, requested_season_set)
-                if not coverage:
-                    continue
-                passing_pack_count += 1
-                if best_multi_season_pack is None or (
-                    len(coverage),
-                    evaluation.total_score,
-                ) > (
-                    len(best_multi_season_pack[1]),
-                    best_multi_season_pack[0].total_score,
-                ):
-                    best_multi_season_pack = (evaluation, coverage)
+        requested_season_set = set(requested_seasons)
 
-            if best_multi_season_pack is not None:
-                selected_pack_releases.append(best_multi_season_pack)
-                covered_seasons.update(best_multi_season_pack[1])
-                all_selected_releases.append(best_multi_season_pack[0])
-
-        # ── Season pack search ────────────────────────────────────────
-        uncovered_seasons = [
-            season for season in requested_seasons if season not in covered_seasons
-        ]
-        season_pack_searches = [("season_pack", season, None) for season in uncovered_seasons]
-        season_evaluations, season_candidates, season_errors = await self._search_and_evaluate(
-            request,
-            rule_engine,
-            season_pack_searches,
-        )
-        all_evaluated_releases.extend(season_evaluations)
-        all_search_errors.extend(season_errors)
-
-        best_season_packs: dict[int, ReleaseEvaluation] = {}
-        for season, _, evaluation in season_candidates:
-            assert season is not None
-            if not self._is_exact_season_pack(evaluation, season):
+        # ── Pack-first selection from classified sweep results ────────
+        pack_candidates: list[tuple[ReleaseEvaluation, set[int]]] = []
+        for evaluation in sweep_candidates:
+            coverage = self._get_pack_coverage(evaluation, requested_season_set)
+            if not coverage:
                 continue
             passing_pack_count += 1
-            existing = best_season_packs.get(season)
-            if existing is None or evaluation.total_score > existing.total_score:
-                best_season_packs[season] = evaluation
+            pack_candidates.append((evaluation, coverage))
 
-        for season in uncovered_seasons:
-            evaluation = best_season_packs.get(season)
-            if evaluation is None:
+        for evaluation, coverage in sorted(
+            pack_candidates, key=lambda item: (len(item[1]), item[0].total_score), reverse=True
+        ):
+            uncovered_coverage = coverage - covered_seasons
+            if not uncovered_coverage:
                 continue
-            selected_pack_releases.append((evaluation, {season}))
-            covered_seasons.add(season)
+            selected_pack_releases.append((evaluation, uncovered_coverage))
+            covered_seasons.update(uncovered_coverage)
             all_selected_releases.append(evaluation)
+            if covered_seasons >= requested_season_set:
+                break
 
-        # ── Individual episode search ─────────────────────────────────
+        # ── Exact episode fallback from stored/classified sweep results ─
+        best_episodes_by_key: dict[tuple[int, int], ReleaseEvaluation] = {}
         if search_episodes:
-            episode_searches: list[tuple[str, int | None, int | None]] = []
+            episode_targets: dict[int, list[int]] = {}
             for season in requested_seasons:
                 if season in covered_seasons:
                     continue
-                for episode in await self._get_episode_search_targets(
+                episode_targets[season] = await self._get_episode_search_targets(
                     request, season, requested_episodes
-                ):
-                    episode_searches.append(("episode", season, episode))
+                )
 
-            (
-                episode_stage_evaluations,
-                episode_candidates,
-                episode_errors,
-            ) = await self._search_and_evaluate(
-                request,
-                rule_engine,
-                episode_searches,
-            )
-            all_evaluated_releases.extend(episode_stage_evaluations)
-            all_search_errors.extend(episode_errors)
+            for evaluation in sweep_candidates:
+                for season, episodes in episode_targets.items():
+                    for episode in episodes:
+                        if not self._is_exact_episode_match(evaluation, season, episode):
+                            continue
+                        episode_evaluations.append((season, episode, evaluation))
+                        key = (season, episode)
+                        existing = best_episodes_by_key.get(key)
+                        if existing is None or evaluation.total_score > existing.total_score:
+                            best_episodes_by_key[key] = evaluation
 
-            best_episodes_by_key: dict[tuple[int, int], ReleaseEvaluation] = {}
-            for season, episode, evaluation in episode_candidates:
-                assert season is not None
-                assert episode is not None
-                if not self._is_exact_episode_match(evaluation, season, episode):
-                    continue
-                episode_evaluations.append((season, episode, evaluation))
-                key = (season, episode)
-                existing = best_episodes_by_key.get(key)
-                if existing is None or evaluation.total_score > existing.total_score:
-                    best_episodes_by_key[key] = evaluation
-
-            for (_season, _episode), evaluation in best_episodes_by_key.items():
-                all_selected_releases.append(evaluation)
-        else:
-            best_episodes_by_key = {}
+            all_selected_releases.extend(best_episodes_by_key.values())
 
         logger.info(
             "TV search completed: request_id=%s total_results=%s passing_packs=%s passing_episodes=%s errors=%s",
@@ -485,8 +505,6 @@ class TVDecisionService:
         )
 
         if all_selected_releases:
-            all_selected_releases.sort(key=lambda x: x.total_score, reverse=True)
-
             stored_releases: list[Release] = []
             seen_selected_keys: set[str] = set()
             for evaluation in all_selected_releases:

@@ -63,11 +63,22 @@ class DetailService:
 
         tv_info = None
         if request.media_type == MediaType.TV:
+            tv_releases = releases
+            if total_releases > len(releases):
+                tv_releases, _ = await self._load_serialized_stored_releases(
+                    request_id,
+                    media_type=request.media_type,
+                    offset=0,
+                    limit=total_releases,
+                )
+                apply_active_selection_metadata(
+                    tv_releases, active_staged_torrents, media_type=request.media_type
+                )
             tv_enrichment = TVEnrichmentService(self.db)
             tv_info = await tv_enrichment.load_tv_info(
                 request_id=request_id,
                 background_tasks=background_tasks,
-                releases=releases,
+                releases=tv_releases,
                 active_staged_torrents=active_staged_torrents,
             )
 

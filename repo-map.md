@@ -32,7 +32,7 @@ Siftarr is a FastAPI application that sits between Overseerr, Prowlarr, Plex, an
 Primary flow:
 
 1. Overseerr webhook or manual action creates/syncs a request
-2. Search and decision services query Prowlarr and evaluate releases
+2. Search and decision services query Prowlarr and evaluate releases (TV automatic search runs bounded paginated season sweeps and classifies stored coverage)
 3. Winning releases are staged or sent to qBittorrent
 4. Background services track retries, lifecycle state, Plex polling, and completion
 5. Dashboard and settings UI expose control and visibility
@@ -128,8 +128,8 @@ HTTP route layer.
 Business logic and integrations.
 
 - `dashboard_service.py` — dashboard DTOs and response serializers only (load/assembly logic moved to sub-services)
-- `detail_service.py` — request detail loading (releases, timeline, TV enrichment integration)
-- `tv_enrichment_service.py` — TV season/episode enrichment (season data, release grouping, metadata)
+- `detail_service.py` — request detail loading (releases, timeline, TV enrichment integration; TV bucket construction loads all stored releases independent of list pagination)
+- `tv_enrichment_service.py` — TV season/episode enrichment (season data, coverage-based release grouping, metadata)
 - `metadata_service.py` — Overseerr metadata lookup for request details
 - `settings_service.py` — SettingsStore (DB-backed settings persistence), SSE progress, scheduled job helpers, Plex rescan/Overseerr import orchestration
 - `request_service.py` — request creation/update orchestration
@@ -142,14 +142,14 @@ Business logic and integrations.
 - `scheduler_service.py` / `background_tasks.py` — recurring jobs and background orchestration
 - `pending_queue_service.py` / `lifecycle_service.py` / `download_completion_service.py` — retry, status transitions, and completion detection (unreleased detection moved to unreleased_service); pending queue methods support optional `commit=False` for batched transactions; completion service fetches qBit torrent list once per cycle for local matching; lifecycle stats cached with 30s TTL
 - `episode_sync_service.py` / `tv_details_service.py` — TV metadata and episode synchronization helpers
-- `overseerr_service.py` / `prowlarr_service.py` / `qbittorrent_service.py` — external service integrations; Prowlarr service includes LRU search result cache (45s TTL, 50 entries, disable via `SIFTARR_DISABLE_SEARCH_CACHE`), concurrent broad TV searches via `asyncio.gather`, and cache invalidation on rule changes
+- `overseerr_service.py` / `prowlarr_service.py` / `qbittorrent_service.py` — external service integrations; Prowlarr service includes LRU search result cache (45s TTL, 50 entries, disable via `SIFTARR_DISABLE_SEARCH_CACHE`), bounded paginated TV season sweeps (`prowlarr_tv_page_size`, max-pages/results caps, title/IMDb/title-season/optional-TVDB strategies), concurrent broad TV searches via `asyncio.gather`, and cache invalidation on rule changes. IPTorrents season sweeps page by `offset` in 100-result pages and do not send `limit`.
 - `plex_service/` / `plex_polling_service.py` — Plex lookups, scans, and polling logic; polling prioritizes recent/downloading requests with periodic full reconcile every 20th poll cycle
 - `connection_tester.py` — external connectivity test helpers
 - `http_client.py` — shared HTTP client lifecycle
-- `release_parser.py`, `media_helpers.py`, `type_utils.py`, `async_utils.py` — shared parsing and utility helpers; `release_parser` includes `cached_parse_release_coverage` (lru_cache, maxsize=4096) to avoid redundant coverage parsing
+- `release_parser.py`, `media_helpers.py`, `type_utils.py`, `async_utils.py` — shared parsing and utility helpers; `release_parser` classifies exact episodes, season/multi-season/complete-series packs, and multi-episode packs, with `cached_parse_release_coverage` (lru_cache, maxsize=4096)
 - `episode_derive.py` — canonical derivation functions for TV episode/season/request statuses (episode status is ground truth for TV)
 - `activity_log_service.py` / `unreleased_service.py` — supporting domain workflows (unreleased detection moved here from lifecycle_service)
-- `search_service.py` — ad hoc release evaluation/selection, request search orchestration, and TV season-pack/episode ad hoc search
+- `search_service.py` — ad hoc release evaluation/selection, request search orchestration, and TV season-pack/episode ad hoc search; automatic TV orchestration delegates to season-sweep decision flow
 
 ### `app/siftarr/templates/`
 
