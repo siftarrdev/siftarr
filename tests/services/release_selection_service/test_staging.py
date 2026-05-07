@@ -197,7 +197,10 @@ async def test_use_releases_tv_single_episode_selection_only_replaces_same_episo
         active_result_after_episode_one,
     ]
 
-    with patch.object(StagingService, "save_release", new_callable=AsyncMock) as mock_save:
+    with (
+        patch.object(StagingService, "save_release", new_callable=AsyncMock) as mock_save,
+        _patch_tv_methods(),
+    ):
         mock_save.side_effect = [
             stage_episode_one,
             stage_episode_two,
@@ -295,6 +298,19 @@ def _active_mock(staged: list[StagedTorrent]) -> MagicMock:
     return m
 
 
+def _patch_tv_methods():
+    """Context manager that patches TV episode-status methods on StagingService.
+
+    These tests verify staging/replacement behavior, not episode tracking,
+    so the TV-specific methods are mocked away.
+    """
+    return patch.multiple(
+        StagingService,
+        _apply_release_to_episodes=AsyncMock(),
+        _recompute_tv_statuses=AsyncMock(),
+    )
+
+
 def test_tv_conflict_scope_allows_multiple_same_season_episodes_and_seasons():
     request_record = _tv_request()
     active = [
@@ -355,7 +371,10 @@ async def test_use_releases_tv_season_pack_s02_does_not_replace_s01(
         _active_mock([stage_s01]),  # second call: S01 already staged
     ]
 
-    with patch.object(StagingService, "save_release", new_callable=AsyncMock) as mock_save:
+    with (
+        patch.object(StagingService, "save_release", new_callable=AsyncMock) as mock_save,
+        _patch_tv_methods(),
+    ):
         mock_save.side_effect = [stage_s01, stage_s02]
         staging = StagingService(mock_db)
 
@@ -401,7 +420,10 @@ async def test_use_releases_tv_season_pack_replaces_same_season_keeps_other(
         _active_mock([stage_s01_first, stage_s02]),  # call 3: stage S01.REPACK → both active
     ]
 
-    with patch.object(StagingService, "save_release", new_callable=AsyncMock) as mock_save:
+    with (
+        patch.object(StagingService, "save_release", new_callable=AsyncMock) as mock_save,
+        _patch_tv_methods(),
+    ):
         mock_save.side_effect = [stage_s01_first, stage_s02, stage_s01_repack]
         staging = StagingService(mock_db)
 
@@ -442,7 +464,10 @@ async def test_use_releases_tv_single_episode_does_not_interfere_with_season_pac
         _active_mock([stage_s02_pack]),
     ]
 
-    with patch.object(StagingService, "save_release", new_callable=AsyncMock) as mock_save:
+    with (
+        patch.object(StagingService, "save_release", new_callable=AsyncMock) as mock_save,
+        _patch_tv_methods(),
+    ):
         mock_save.side_effect = [stage_s02_pack, stage_s01e01]
         staging = StagingService(mock_db)
 
@@ -478,7 +503,10 @@ async def test_use_releases_tv_complete_series_replaces_all(
         _active_mock([stage_s01_pack]),
     ]
 
-    with patch.object(StagingService, "save_release", new_callable=AsyncMock) as mock_save:
+    with (
+        patch.object(StagingService, "save_release", new_callable=AsyncMock) as mock_save,
+        _patch_tv_methods(),
+    ):
         mock_save.side_effect = [stage_s01_pack, stage_complete]
         staging = StagingService(mock_db)
 

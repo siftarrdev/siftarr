@@ -6,7 +6,7 @@ from datetime import datetime
 from fastapi import APIRouter, Depends, Form, HTTPException
 from fastapi import Request as FastAPIRequest
 from fastapi.responses import JSONResponse, RedirectResponse
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.siftarr.config import get_settings
@@ -14,10 +14,14 @@ from app.siftarr.database import get_db
 from app.siftarr.models import EventType
 from app.siftarr.models.episode import Episode
 from app.siftarr.models.release import Release
+from app.siftarr.models.request import MediaType, RequestStatus
 from app.siftarr.models.request import Request as RequestModel
-from app.siftarr.models.request import RequestStatus
 from app.siftarr.models.season import Season
 from app.siftarr.services.activity_log_service import ActivityLogService
+from app.siftarr.services.episode_derive import (
+    derive_request_status_from_episodes,
+    derive_season_status,
+)
 from app.siftarr.services.lifecycle_service import LifecycleService
 from app.siftarr.services.overseerr_service import OverseerrService
 from app.siftarr.services.pending_queue_service import PendingQueueService
@@ -36,10 +40,25 @@ router = APIRouter(prefix="/requests", tags=["dashboard-actions"])
 
 
 async def _load_all_pending_search_requests(db: AsyncSession) -> list[RequestModel]:
-    """Load requests targeted by Search All bulk search actions."""
+    """Load requests targeted by Search All bulk search actions.
+
+    For TV, includes requests where any episode has PENDING status
+    (since request.status is episode-derived).
+    """
+    tv_pending_ids_subq = (
+        select(Season.request_id)
+        .select_from(Episode)
+        .join(Season, Episode.season_id == Season.id)
+        .where(Episode.status == RequestStatus.PENDING)
+    ).subquery()
     result = await db.execute(
         select(RequestModel)
-        .where(RequestModel.status.in_([RequestStatus.PENDING, RequestStatus.SEARCHING]))
+        .where(
+            or_(
+                RequestModel.status.in_([RequestStatus.PENDING, RequestStatus.SEARCHING]),
+                RequestModel.id.in_(select(tv_pending_ids_subq.c.request_id)),
+            )
+        )
         .order_by(RequestModel.created_at.desc())
     )
     return list(result.scalars().all())
@@ -253,37 +272,17 @@ async def deny_request(
     return RedirectResponse(url=redirect_to or "/", status_code=303)
 
 
-def _recalculate_season_status(season: Season) -> RequestStatus:
-    """Compute season status from its episodes."""
-    if not season.episodes:
-        return season.status
-    statuses = {ep.status for ep in season.episodes}
-    if statuses <= {RequestStatus.COMPLETED}:
-        return RequestStatus.COMPLETED
-    if statuses & {RequestStatus.COMPLETED}:
-        return RequestStatus.PENDING
-    return season.status
-
-
-def _recalculate_request_status(request: RequestModel) -> RequestStatus:
-    """Compute request status from its seasons."""
-    if not request.seasons:
-        return request.status
-    season_statuses = {s.status for s in request.seasons}
-    if season_statuses <= {RequestStatus.COMPLETED}:
-        return RequestStatus.COMPLETED
-    if season_statuses & {RequestStatus.COMPLETED, RequestStatus.PENDING}:
-        return RequestStatus.PENDING
-    return request.status
-
-
 @router.post("/{request_id}/episodes/{episode_id}/mark-available")
 async def mark_episode_available(
     request_id: int,
     episode_id: int,
     db: AsyncSession = Depends(get_db),
 ) -> JSONResponse:
-    """Mark a single episode as available and recalculate season/request status."""
+    """Mark a single episode as available and recalculate season/request status.
+
+    For TV requests, season and request statuses are derived from episodes
+    (not persisted directly) since episode status is ground truth.
+    """
     result = await db.execute(select(Episode).where(Episode.id == episode_id))
     episode = result.scalar_one_or_none()
     if not episode:
@@ -300,17 +299,29 @@ async def mark_episode_available(
 
     episode.status = RequestStatus.COMPLETED
 
-    # Eagerly load all episodes for recalculation
-    await db.refresh(season, ["episodes"])
-    season.status = _recalculate_season_status(season)
-
     # Load request with seasons
     req_result = await db.execute(select(RequestModel).where(RequestModel.id == request_id))
     request = req_result.scalar_one_or_none()
     if not request:
         raise HTTPException(status_code=404, detail="Request not found")
     await db.refresh(request, ["seasons"])
-    request.status = _recalculate_request_status(request)
+
+    if request.media_type == MediaType.TV:
+        # Derive season status from episodes (don't write for TV)
+        await db.refresh(season, ["episodes"])
+        _ = derive_season_status(list(season.episodes))
+        # Derive request status from all episodes
+        all_episodes: list[Episode] = []
+        for s in request.seasons:
+            await db.refresh(s, ["episodes"])
+            all_episodes.extend(s.episodes)
+        _ = derive_request_status_from_episodes(all_episodes)
+    else:
+        # Movie: persist season and request status directly
+        await db.refresh(season, ["episodes"])
+        season.status = derive_season_status(list(season.episodes))
+        all_episodes = list(season.episodes)
+        request.status = derive_request_status_from_episodes(all_episodes)
 
     activity_log = ActivityLogService(db)
     await activity_log.log(
@@ -329,7 +340,11 @@ async def mark_season_all_available(
     season_id: int,
     db: AsyncSession = Depends(get_db),
 ) -> JSONResponse:
-    """Mark all episodes in a season as available and recalculate statuses."""
+    """Mark all episodes in a season as available and recalculate statuses.
+
+    For TV requests, season and request statuses are derived from episodes
+    (not persisted directly) since episode status is ground truth.
+    """
     season_result = await db.execute(select(Season).where(Season.id == season_id))
     season = season_result.scalar_one_or_none()
     if not season or season.request_id != request_id:
@@ -349,14 +364,25 @@ async def mark_season_all_available(
                 details={"episode_id": ep.id, "season_id": season_id},
             )
 
-    season.status = _recalculate_season_status(season)
-
     req_result = await db.execute(select(RequestModel).where(RequestModel.id == request_id))
     request = req_result.scalar_one_or_none()
     if not request:
         raise HTTPException(status_code=404, detail="Request not found")
     await db.refresh(request, ["seasons"])
-    request.status = _recalculate_request_status(request)
+
+    if request.media_type == MediaType.TV:
+        # Derive season status from episodes (don't persist for TV)
+        _ = derive_season_status(list(season.episodes))
+        # Derive request status from all episodes across all seasons
+        all_episodes: list[Episode] = []
+        for s in request.seasons:
+            await db.refresh(s, ["episodes"])
+            all_episodes.extend(s.episodes)
+        _ = derive_request_status_from_episodes(all_episodes)
+    else:
+        season.status = derive_season_status(list(season.episodes))
+        all_episodes = list(season.episodes)
+        request.status = derive_request_status_from_episodes(all_episodes)
 
     await db.commit()
     return JSONResponse({"status": "ok"})

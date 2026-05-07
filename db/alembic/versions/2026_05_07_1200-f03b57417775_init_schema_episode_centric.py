@@ -1,8 +1,8 @@
 """Single init migration representing the full current schema.
 
-Revision ID: 85be358dde52
+Revision ID: f03b57417775
 Revises: None
-Create Date: 2026-05-05 15:47:00.000000
+Create Date: 2026-05-07 12:00:00.000000
 
 """
 
@@ -14,7 +14,7 @@ from sqlalchemy import engine_from_config
 from app.siftarr.models import Base
 
 # revision identifiers, used by Alembic.
-revision: str = "85be358dde52"
+revision: str = "f03b57417775"
 down_revision: str | None = None
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None

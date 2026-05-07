@@ -14,11 +14,18 @@ from pathlib import Path
 import httpx
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from app.siftarr.config import get_settings
+from app.siftarr.models.episode import Episode
 from app.siftarr.models.release import Release
 from app.siftarr.models.request import MediaType, Request, RequestStatus
+from app.siftarr.models.season import Season
 from app.siftarr.models.staged_torrent import StagedTorrent
+from app.siftarr.services.episode_derive import (
+    derive_request_status_from_episodes,
+    derive_season_status,
+)
 from app.siftarr.services.http_client import get_shared_client
 from app.siftarr.services.pending_queue_service import PendingQueueService
 from app.siftarr.services.prowlarr_service import ProwlarrRelease
@@ -188,13 +195,20 @@ async def _set_request_status(
     request: Request,
     new_status: RequestStatus,
 ) -> None:
-    """Persist the request status, even if an older bad state needs correcting."""
-    if request.status == new_status:
-        return
+    """Persist the request status.
 
-    request.status = new_status
-    request.updated_at = datetime.now(UTC)
-    await db.commit()
+    For **movies** this is the authoritative field.
+    For **TV** this is a derived cache — prefer setting episode statuses
+    and calling :func:`_recompute_tv_statuses` instead.
+    """
+    if request.media_type == MediaType.MOVIE:
+        if request.status == new_status:
+            return
+        request.status = new_status
+        request.updated_at = datetime.now(UTC)
+        await db.commit()
+    # For TV, request.status is derived from episodes — this is a no-op.
+    # Callers should set episode statuses and recompute instead.
 
 
 def _get_media_category(request: Request) -> MediaCategory:
@@ -438,6 +452,103 @@ class StagingService:
         """Check if staging mode is enabled."""
         return False
 
+    # ── Episode-centric TV helpers ─────────────────────────────────
+
+    async def _set_episode_status(
+        self,
+        *,
+        request_id: int,
+        season_number: int,
+        episode_number: int,
+        status: RequestStatus,
+    ) -> None:
+        """Set a single episode's status (episode-centric ground truth for TV)."""
+        result = await self.db.execute(
+            select(Episode)
+            .join(Season, Episode.season_id == Season.id)
+            .where(
+                Season.request_id == request_id,
+                Season.season_number == season_number,
+                Episode.episode_number == episode_number,
+            )
+        )
+        episode = result.scalar_one_or_none()
+        if episode:
+            episode.status = status
+
+    async def _recompute_tv_statuses(self, request_id: int) -> None:
+        """Recompute Season.status and Request.status from episode ground truth.
+
+        Call after any episode mutation for TV requests so the cached summary
+        columns stay in sync.
+        """
+        result = await self.db.execute(
+            select(Request)
+            .where(Request.id == request_id)
+            .options(selectinload(Request.seasons).selectinload(Season.episodes))
+        )
+        request = result.scalar_one_or_none()
+        if not request or request.media_type != MediaType.TV:
+            return
+
+        all_episodes: list[Episode] = []
+        for season in request.seasons:
+            season_episodes = list(season.episodes)
+            season.status = derive_season_status(season_episodes)
+            all_episodes.extend(season_episodes)
+
+        request.status = derive_request_status_from_episodes(all_episodes)
+        request.updated_at = datetime.now(UTC)
+
+    async def _apply_release_to_episodes(
+        self,
+        release: Release,
+        status: RequestStatus,
+    ) -> None:
+        """Set episode statuses based on a release's coverage.
+
+        Parses the release title to determine which episodes it covers
+        (single episode, season pack, multi-season pack, or complete series)
+        and sets each covered episode's status.
+
+        This is the episode-centric path — episode status is ground truth.
+        """
+        request_id = release.request_id
+        coverage = cached_parse_release_coverage(release.title)
+        if coverage.episode_number is not None and coverage.season_number is not None:
+            # Single episode
+            await self._set_episode_status(
+                request_id=request_id,
+                season_number=coverage.season_number,
+                episode_number=coverage.episode_number,
+                status=status,
+            )
+        elif coverage.is_complete_series:
+            # Complete series — set all episodes for all seasons
+            seasons_result = await self.db.execute(
+                select(Season).where(Season.request_id == request_id)
+            )
+            seasons = list(seasons_result.scalars().all())
+            for season in seasons:
+                episodes_result = await self.db.execute(
+                    select(Episode).where(Episode.season_id == season.id)
+                )
+                for ep in episodes_result.scalars().all():
+                    ep.status = status
+        elif coverage.season_numbers:
+            # Season pack or multi-season pack
+            for season_num in coverage.season_numbers:
+                episodes_result = await self.db.execute(
+                    select(Episode)
+                    .join(Season, Episode.season_id == Season.id)
+                    .where(
+                        Season.request_id == request_id,
+                        Season.season_number == season_num,
+                    )
+                )
+                for ep in episodes_result.scalars().all():
+                    ep.status = status
+
     # ── Release handoff (use_releases) ──
 
     async def use_releases(
@@ -527,7 +638,13 @@ class StagingService:
             if deleted_superseded:
                 await self.db.commit()
 
-            await _set_request_status(self.db, request, RequestStatus.STAGED)
+            if request.media_type == MediaType.TV:
+                # Episode-centric: set covered episode statuses, then recompute
+                for release in usable_releases:
+                    await self._apply_release_to_episodes(release, RequestStatus.STAGED)
+                await self._recompute_tv_statuses(request.id)
+            else:
+                await _set_request_status(self.db, request, RequestStatus.STAGED)
             await queue_service.remove_from_queue(request.id)
             action, message = _staged_selection_outcome(
                 selection_source=selection_source,
@@ -572,7 +689,13 @@ class StagingService:
             )
 
         await self.db.commit()
-        await _set_request_status(self.db, request, RequestStatus.DOWNLOADING)
+        if request.media_type == MediaType.TV:
+            # Episode-centric: set covered episode statuses, then recompute
+            for release in usable_releases:
+                await self._apply_release_to_episodes(release, RequestStatus.DOWNLOADING)
+                await self._recompute_tv_statuses(request.id)
+        else:
+            await _set_request_status(self.db, request, RequestStatus.DOWNLOADING)
         await queue_service.remove_from_queue(request.id)
         logger.info(
             "Request downloading: request_id=%s torrent_count=%s",

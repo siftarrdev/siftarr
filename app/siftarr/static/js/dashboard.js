@@ -152,6 +152,8 @@ document.addEventListener('DOMContentLoaded', () => {
     // Bind select all checkboxes
     window.bindSelectAll(activeSelectAll, '.active-request-checkbox');
     window.bindSelectAll(pendingSelectAll, '.pending-request-checkbox');
+    const stagedSelectAll = document.getElementById('staged-select-all');
+    window.bindSelectAll(stagedSelectAll, '.staged-torrent-checkbox');
     window.bindStagedSelectionHandlers();
 
     if (document.getElementById('unreleased-requests-table')) {

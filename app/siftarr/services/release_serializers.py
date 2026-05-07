@@ -224,52 +224,76 @@ def serialize_target_scope(
     return {"type": "unknown"}
 
 
+def scope_to_episode_set(
+    scope: object,
+    known_season_numbers: list[int] | None = None,
+) -> set[tuple[int, int | None]]:
+    """Convert a target_scope dict to a set of (season_number, episode_number) tuples.
+
+    ``single_episode`` scopes return the exact episode pair.
+    ``season_pack``/``multi_season_pack`` scopes return (s, None) for each covered season
+    (episode granularity is unknown for packs).
+    ``complete_series`` scopes use ``known_season_numbers`` if provided, otherwise empty.
+    ``unknown`` and non-Mapping inputs return an empty set.
+    """
+    if not isinstance(scope, dict):
+        return set()
+    scope_dict: dict[str, object] = cast(dict[str, object], scope)
+    scope_type = scope_dict.get("type")
+    if scope_type == "single_episode":
+        sn = scope_dict.get("season_number")
+        en = scope_dict.get("episode_number")
+        if isinstance(sn, int) and isinstance(en, int):
+            return {(sn, en)}
+        return set()
+    if scope_type in {"season_pack", "multi_season_pack"}:
+        season_numbers = scope_dict.get("season_numbers")
+        if isinstance(season_numbers, list):
+            return {(s, None) for s in season_numbers if isinstance(s, int)}
+        return set()
+    if scope_type == "complete_series":
+        seasons = known_season_numbers or []
+        return {(s, None) for s in seasons if isinstance(s, int)}
+    return set()
+
+
+def _episode_sets_overlap(
+    left_set: set[tuple[int, int | None]], right_set: set[tuple[int, int | None]]
+) -> bool:
+    """Check if two episode sets overlap, treating ``None`` as a wildcard.
+
+    ``(s, None)`` represents coverage of an entire season ``s``, so it overlaps
+    with any ``(s, e)`` for that season.
+    """
+    for ls, le in left_set:
+        for rs, re in right_set:
+            if ls == rs and (le is None or re is None or le == re):
+                return True
+    return False
+
+
 def tv_target_scopes_overlap(
     left_scope: SerializedObject | None,
     right_scope: SerializedObject | None,
+    known_season_numbers: list[int] | None = None,
 ) -> bool:
     """Return True when a candidate TV scope should replace an active scope.
 
-    ``left_scope`` is the candidate release being staged/rendered and
-    ``right_scope`` is an already-active staged torrent.  Any candidate that
-    targets coverage already represented by an active pack/complete-series
-    torrent overlaps it, including an individual episode inside that pack; a
-    different individual episode in the same season does not overlap another
-    single-episode stage.
+    Both scopes are converted to episode sets via ``scope_to_episode_set()``
+    and checked for overlap via ``_episode_sets_overlap()``.  If either set is
+    empty (e.g. unknown scope or missing data) the function returns True
+    conservatively.
     """
-    if left_scope is None or right_scope is None:
-        return True
-
-    left_type = left_scope.get("type")
-    right_type = right_scope.get("type")
-    if left_type == "complete_series":
-        return True
-    if right_type == "complete_series":
-        return True
-    if left_type == "unknown" or right_type == "unknown":
-        return True
-
-    if left_type == right_type == "single_episode":
-        return left_scope.get("season_number") == right_scope.get(
-            "season_number"
-        ) and left_scope.get("episode_number") == right_scope.get("episode_number")
-
-    left_seasons = _scope_seasons(left_scope)
-    right_seasons = _scope_seasons(right_scope)
-    if not left_seasons or not right_seasons:
-        return False
-    return bool(left_seasons & right_seasons)
+    left_set = scope_to_episode_set(left_scope, known_season_numbers)
+    right_set = scope_to_episode_set(right_scope, known_season_numbers)
+    if not left_set or not right_set:
+        return True  # Conservative: assume overlap when scope is unclear
+    return _episode_sets_overlap(left_set, right_set)
 
 
 def _scope_seasons(scope: SerializedObject) -> set[int]:
-    scope_type = scope.get("type")
-    if scope_type == "single_episode":
-        season_number = scope.get("season_number")
-        return {season_number} if isinstance(season_number, int) else set()
-    season_numbers = scope.get("season_numbers")
-    if isinstance(season_numbers, list):
-        return {season for season in season_numbers if isinstance(season, int)}
-    return set()
+    """Extract season numbers from a scope via ``scope_to_episode_set``."""
+    return {s for (s, e) in scope_to_episode_set(scope)}
 
 
 def _load_staged_release_identity(staged_torrent: Any) -> dict[str, object]:

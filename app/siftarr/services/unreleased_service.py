@@ -16,6 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.siftarr.models.episode import Episode
 from app.siftarr.models.request import MediaType, Request, RequestStatus
 from app.siftarr.models.season import Season
+from app.siftarr.services.episode_derive import derive_request_status_from_episodes
 from app.siftarr.services.lifecycle_service import LifecycleService
 from app.siftarr.services.overseerr_service import OverseerrService
 
@@ -222,6 +223,9 @@ class UnreleasedEvaluator:
     ) -> RequestStatus | None:
         current = request.status
 
+        if request.media_type == MediaType.TV:
+            return await self._apply_verdict_tv(request, verdict)
+
         if verdict == "unreleased" and current in _REDIRECTABLE_STATUSES:
             _logger.info(
                 "UnreleasedEvaluator: reclassifying request_id=%s title=%s from %s to unreleased",
@@ -243,6 +247,68 @@ class UnreleasedEvaluator:
             if updated is not None:
                 return RequestStatus.PENDING
             return None
+
+        return None
+
+    async def _apply_verdict_tv(
+        self,
+        request: Request,
+        verdict: Literal["released", "unreleased"],
+    ) -> RequestStatus | None:
+        """Apply verdict at the episode level for TV requests.
+
+        After mutating episode statuses, always derives the cached
+        request-level status from episodes to keep it in sync.
+        """
+        # Load all episodes for this request
+        result = await self.db.execute(
+            select(Episode)
+            .join(Season, Season.id == Episode.season_id)
+            .where(Season.request_id == request.id)
+        )
+        all_episodes = list(result.scalars().all())
+
+        if verdict == "unreleased":
+            # Redirectable for TV: any episode is PENDING, SEARCHING, or COMPLETED
+            has_redirectable = any(ep.status in _REDIRECTABLE_STATUSES for ep in all_episodes)
+            if not has_redirectable:
+                # Still sync cached status even when not redirectable
+                request.status = derive_request_status_from_episodes(all_episodes)
+                await self.db.commit()
+                return request.status
+
+            _logger.info(
+                "UnreleasedEvaluator(TV): reclassifying request_id=%s title=%s "
+                "setting PENDING episodes to UNRELEASED",
+                request.id,
+                request.title,
+            )
+            for ep in all_episodes:
+                if ep.status == RequestStatus.PENDING:
+                    ep.status = RequestStatus.UNRELEASED
+            if all_episodes:
+                await self.db.flush()
+            # Derive cached request status from episodes
+            request.status = derive_request_status_from_episodes(all_episodes)
+            await self.db.commit()
+            return request.status
+
+        if verdict == "released":
+            _logger.info(
+                "UnreleasedEvaluator(TV): setting UNRELEASED episodes to PENDING "
+                "for request_id=%s title=%s",
+                request.id,
+                request.title,
+            )
+            for ep in all_episodes:
+                if ep.status == RequestStatus.UNRELEASED:
+                    ep.status = RequestStatus.PENDING
+            if all_episodes:
+                await self.db.flush()
+            # Derive cached request status from episodes
+            request.status = derive_request_status_from_episodes(all_episodes)
+            await self.db.commit()
+            return request.status
 
         return None
 

@@ -3,7 +3,9 @@ from datetime import UTC, datetime, timedelta
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.siftarr.models.request import Request, RequestStatus
+from app.siftarr.models.episode import Episode
+from app.siftarr.models.request import MediaType, Request, RequestStatus
+from app.siftarr.models.season import Season
 
 
 class PendingQueueService:
@@ -132,7 +134,20 @@ class PendingQueueService:
         request.retry_count += 1
 
         if request.retry_count >= max_retries:
-            request.status = RequestStatus.FAILED
+            if request.media_type == MediaType.TV:
+                # For TV, set remaining PENDING episodes to FAILED
+                # instead of setting request.status
+                episodes_result = await self.db.execute(
+                    select(Episode)
+                    .join(Season, Season.id == Episode.season_id)
+                    .where(Season.request_id == request.id)
+                    .where(Episode.status == RequestStatus.PENDING)
+                )
+                pending_eps = list(episodes_result.scalars().all())
+                for ep in pending_eps:
+                    ep.status = RequestStatus.FAILED
+            else:
+                request.status = RequestStatus.FAILED
             request.next_retry_at = None
             request.retry_count = 0
             if commit:
