@@ -80,8 +80,7 @@ class ConnectionSettings(BaseModel):
     prowlarr_url: str | None = None
     prowlarr_api_key: str | None = None
     qbittorrent_url: str | None = None
-    qbittorrent_username: str | None = None
-    qbittorrent_password: str | None = None
+    qbittorrent_api_key: str | None = None
     tz: str = "UTC"
 
 
@@ -223,8 +222,7 @@ async def save_connections(
     prowlarr_url: str | None = Form(None),
     prowlarr_api_key: str | None = Form(None),
     qbittorrent_url: str | None = Form(None),
-    qbittorrent_username: str | None = Form(None),
-    qbittorrent_password: str | None = Form(None),
+    qbittorrent_api_key: str | None = Form(None),
     plex_url: str | None = Form(None),
     plex_token: str | None = Form(None),
     tz: str | None = Form(None),
@@ -237,8 +235,7 @@ async def save_connections(
     await _apply_runtime_setting(store, "prowlarr_url", prowlarr_url or "")
     await _apply_runtime_setting(store, "prowlarr_api_key", prowlarr_api_key or "")
     await _apply_runtime_setting(store, "qbittorrent_url", qbittorrent_url or "")
-    await _apply_runtime_setting(store, "qbittorrent_username", qbittorrent_username or "")
-    await _apply_runtime_setting(store, "qbittorrent_password", qbittorrent_password or "")
+    await _apply_runtime_setting(store, "qbittorrent_api_key", qbittorrent_api_key or "")
     await _apply_runtime_setting(store, "plex_url", plex_url or "")
     await _apply_runtime_setting(store, "plex_token", plex_token or "")
     if tz:
@@ -262,8 +259,7 @@ async def reset_connections(
         "prowlarr_url",
         "prowlarr_api_key",
         "qbittorrent_url",
-        "qbittorrent_username",
-        "qbittorrent_password",
+        "qbittorrent_api_key",
         "plex_url",
         "plex_token",
         "tz",
@@ -286,8 +282,7 @@ async def get_connections_api(db: AsyncSession = Depends(get_db)) -> dict:
         "prowlarr_url": effective["prowlarr_url"],
         "prowlarr_api_key": effective["prowlarr_api_key"],
         "qbittorrent_url": effective["qbittorrent_url"],
-        "qbittorrent_username": effective["qbittorrent_username"],
-        "qbittorrent_password": effective["qbittorrent_password"],
+        "qbittorrent_api_key": effective["qbittorrent_api_key"],
         "tz": effective["tz"],
     }
 
