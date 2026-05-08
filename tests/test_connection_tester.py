@@ -41,8 +41,8 @@ class TestConnectionTester:
         settings.prowlarr_url = "http://localhost:9696"
         settings.prowlarr_api_key = "test_key"
         settings.qbittorrent_url = "http://localhost:8080"
-        settings.qbittorrent_username = "admin"
-        settings.qbittorrent_password = "admin123"
+        settings.qbittorrent_api_key = "qbt_test_key"
+        settings.qbittorrent_api_key = "qbt_test_key"
         return settings
 
     @pytest.mark.asyncio
@@ -239,31 +239,20 @@ class TestConnectionTester:
         assert "URL is not configured" in result.message
 
     @pytest.mark.asyncio
-    async def test_test_qbittorrent_no_username(self, mock_settings):
-        """Test qBittorrent test with no username configured."""
-        mock_settings.qbittorrent_username = ""
+    async def test_test_qbittorrent_no_api_key(self, mock_settings):
+        """Test qBittorrent test with no API key configured."""
+        mock_settings.qbittorrent_api_key = ""
 
         result = await ConnectionTester.test_qbittorrent(mock_settings)
 
         assert result.success is False
-        assert "username" in result.message.lower()
-
-    @pytest.mark.asyncio
-    async def test_test_qbittorrent_no_password(self, mock_settings):
-        """Test qBittorrent test with no password configured."""
-        mock_settings.qbittorrent_password = ""
-
-        result = await ConnectionTester.test_qbittorrent(mock_settings)
-
-        assert result.success is False
-        assert "password" in result.message.lower()
+        assert "api key" in result.message.lower()
 
     @pytest.mark.asyncio
     async def test_test_qbittorrent_success(self, mock_settings):
         """Test successful qBittorrent connection."""
 
         mock_client = MagicMock()
-        mock_client.auth.log_in = MagicMock()
         mock_client.app.web_api_version = "v2.0"
 
         with (
@@ -278,14 +267,10 @@ class TestConnectionTester:
 
     @pytest.mark.asyncio
     async def test_test_qbittorrent_login_failed(self, mock_settings):
-        """Test qBittorrent with invalid credentials."""
+        """Test qBittorrent with invalid API key."""
         import qbittorrentapi
 
-        with patch("qbittorrentapi.Client") as mock_client_class:
-            mock_client = MagicMock()
-            mock_client.auth.log_in = MagicMock(side_effect=qbittorrentapi.LoginFailed("Invalid"))
-            mock_client_class.return_value = mock_client
-
+        with patch("qbittorrentapi.Client", side_effect=qbittorrentapi.LoginFailed("Invalid")):
             result = await ConnectionTester.test_qbittorrent(mock_settings)
 
             assert result.success is False
@@ -296,14 +281,10 @@ class TestConnectionTester:
         """Test qBittorrent when version check fails but login succeeds."""
 
         mock_client = MagicMock()
-        mock_client.auth.log_in = MagicMock()
-        mock_client.app.web_api_version = property(
-            lambda self: (_ for _ in ()).throw(Exception("Failed"))
-        )
 
         with (
             patch("qbittorrentapi.Client", return_value=mock_client),
-            patch("asyncio.to_thread", AsyncMock()),
+            patch("asyncio.to_thread", AsyncMock(side_effect=Exception("Failed"))),
         ):
             result = await ConnectionTester.test_qbittorrent(mock_settings)
 
