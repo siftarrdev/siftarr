@@ -197,3 +197,96 @@ async def test_store_search_results_purges_only_matching_tv_scope():
         assert titles == ["Severance.S01.1080p.WEB-DL", "Severance.S01E01.2160p.WEB-DL"]
 
     await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_automatic_store_search_results_preserves_adhoc_and_manual_releases():
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+    session_maker = async_sessionmaker(engine, expire_on_commit=False)
+
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+
+    async with session_maker() as session:
+        request = Request(
+            external_id="tv-4",
+            media_type=MediaType.TV,
+            title="Severance",
+            status=RequestStatus.PENDING,
+        )
+        session.add(request)
+        await session.commit()
+
+        session.add_all(
+            [
+                Release(
+                    request_id=request.id,
+                    title="Severance.S01.adhoc.1080p.WEB-DL",
+                    size=10,
+                    seeders=10,
+                    leechers=0,
+                    download_url="https://example.test/adhoc.torrent",
+                    indexer="IndexerAdhoc",
+                    score=10,
+                    passed_rules=True,
+                    search_source="adhoc",
+                ),
+                Release(
+                    request_id=request.id,
+                    title="Severance.S01.manual.1080p.WEB-DL",
+                    size=10,
+                    seeders=10,
+                    leechers=0,
+                    download_url="https://example.test/manual.torrent",
+                    indexer="IndexerManual",
+                    score=10,
+                    passed_rules=True,
+                    search_source="manual",
+                ),
+                Release(
+                    request_id=request.id,
+                    title="Severance.S01.old-auto.1080p.WEB-DL",
+                    size=10,
+                    seeders=10,
+                    leechers=0,
+                    download_url="https://example.test/auto.torrent",
+                    indexer="IndexerAuto",
+                    score=10,
+                    passed_rules=True,
+                    search_source="automatic",
+                ),
+            ]
+        )
+        await session.commit()
+
+        new_release = ProwlarrRelease(
+            title="Severance.S01.new-auto.1080p.WEB-DL",
+            size=20,
+            seeders=20,
+            leechers=0,
+            download_url="https://example.test/new-auto.torrent",
+            indexer="IndexerNew",
+        )
+        await release_storage.store_search_results(
+            session,
+            request.id,
+            [ReleaseEvaluation(release=new_release, passed=True, total_score=20, matches=[])],
+        )
+
+        titles = [
+            release.title
+            for release in (
+                await session.execute(
+                    select(Release).where(Release.request_id == request.id).order_by(Release.title)
+                )
+            )
+            .scalars()
+            .all()
+        ]
+        assert titles == [
+            "Severance.S01.adhoc.1080p.WEB-DL",
+            "Severance.S01.manual.1080p.WEB-DL",
+            "Severance.S01.new-auto.1080p.WEB-DL",
+        ]
+
+    await engine.dispose()

@@ -49,6 +49,7 @@ Primary flow:
 - `README.md` — product overview and quick start
 - `CONTRIBUTING.md` — developer setup, workflow, quality gates, and PR expectations
 - `AGENTS.md` — repository-specific agent/development rules
+- `alembic.ini` — local Alembic CLI configuration pointing at `db/alembic/`
 - `pyproject.toml` — Python project metadata, dependencies, pytest, and Ruff config
 - `ty.toml` — static type checker configuration
 - `uv.lock` — locked dependency graph for `uv`
@@ -136,20 +137,20 @@ Business logic and integrations.
 - `rule_service.py` — CRUD/order logic for rules
 - `rule_engine.py` — release filtering and scoring evaluation; includes module-level rule version cache (`_rule_version`) for rule engine reuse across requests, invalidated on rule mutations
 - `decision_pipeline.py` — shared decision pipeline helpers (rule loading, activity logging, pending queue, best-release selection); accepts optional cached `RuleEngine` to skip DB load
-- `release_storage.py` — release persistence and reconstruction helpers; now uses upsert/diff approach in `store_search_results()` to avoid full-table churn on re-search
+- `release_storage.py` — release persistence and reconstruction helpers; `store_search_results()` scopes stale cleanup by search source so automatic sweeps do not purge ad hoc/manual rows
 - `staging_service.py` — stage/send workflows, staged torrent handling, torrent download/validation, and release handoff (`use_releases`); uses shared HTTP client for torrent downloads
 - `release_serializers.py` — API-facing serialization helpers
 - `scheduler_service.py` / `background_tasks.py` — recurring jobs and background orchestration
 - `pending_queue_service.py` / `lifecycle_service.py` / `download_completion_service.py` — retry, status transitions, and completion detection (unreleased detection moved to unreleased_service); pending queue methods support optional `commit=False` for batched transactions; completion service fetches qBit torrent list once per cycle for local matching; lifecycle stats cached with 30s TTL
 - `episode_sync_service.py` / `tv_details_service.py` — TV metadata and episode synchronization helpers
-- `overseerr_service.py` / `prowlarr_service.py` / `qbittorrent_service.py` — external service integrations; Prowlarr service includes LRU search result cache (45s TTL, 50 entries, disable via `SIFTARR_DISABLE_SEARCH_CACHE`), bounded paginated TV season sweeps (`prowlarr_tv_page_size`, max-pages/results caps, title/IMDb/title-season/optional-TVDB strategies), concurrent broad TV searches via `asyncio.gather`, and cache invalidation on rule changes. IPTorrents season sweeps page by `offset` in 100-result pages and do not send `limit`.
+- `overseerr_service.py` / `prowlarr_service.py` / `qbittorrent_service.py` — external service integrations; TV season sweeps fetch IMDb IDs from Overseerr metadata when available. Prowlarr service includes LRU search result cache (45s TTL, 50 entries, disable via `SIFTARR_DISABLE_SEARCH_CACHE`), bounded paginated TV season sweeps (`prowlarr_tv_page_size`, max-pages/results caps, title/IMDb/title-season/optional-TVDB strategies), concurrent broad TV searches via `asyncio.gather`, and cache invalidation on rule changes. IPTorrents season sweeps page by `offset` in 100-result pages and do not send `limit`.
 - `plex_service/` / `plex_polling_service.py` — Plex lookups, scans, and polling logic; polling prioritizes recent/downloading requests with periodic full reconcile every 20th poll cycle
 - `connection_tester.py` — external connectivity test helpers
 - `http_client.py` — shared HTTP client lifecycle
 - `release_parser.py`, `media_helpers.py`, `type_utils.py`, `async_utils.py` — shared parsing and utility helpers; `release_parser` classifies exact episodes, season/multi-season/complete-series packs, and multi-episode packs, with `cached_parse_release_coverage` (lru_cache, maxsize=4096)
 - `episode_derive.py` — canonical derivation functions for TV episode/season/request statuses (episode status is ground truth for TV)
 - `activity_log_service.py` / `unreleased_service.py` — supporting domain workflows (unreleased detection moved here from lifecycle_service)
-- `search_service.py` — ad hoc release evaluation/selection, request search orchestration, and TV season-pack/episode ad hoc search; automatic TV orchestration delegates to season-sweep decision flow
+- `search_service.py` — ad hoc release evaluation/selection, request search orchestration, and TV season-pack/episode ad hoc search; TV ad hoc endpoints use explicit-refresh paginated season sweeps, while automatic TV orchestration delegates to season-sweep decision flow
 
 ### `app/siftarr/templates/`
 
@@ -183,8 +184,9 @@ Static assets.
 
 ## Database and operations
 
+- `alembic.ini` / `db/alembic.ini` — local and container Alembic CLI configuration
 - `db/alembic/env.py` — Alembic environment wiring
-- `db/alembic/versions/` — single init migration only while the database is in flux; reset/stamp existing local databases when schema history is collapsed
+- `db/alembic/versions/` — compact schema migrations; reset/stamp existing local databases when schema history is collapsed
 - container startup runs Alembic/SQLite repair before the FastAPI app launches
 - `docker/Dockerfile` — multi-stage production image build (Node stage builds Tailwind CSS, Python stage runs the app)
 - `docker/docker-compose.yml` — local container orchestration

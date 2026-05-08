@@ -119,6 +119,28 @@ class TestProcessRequest:
         assert "No seasons" in result["message"]
 
     @pytest.mark.asyncio
+    async def test_season_sweep_uses_overseerr_imdb_id(self, service):
+        request = _make_request(tmdb_id=987, seasons=[1])
+        release = _make_release("Test.Show.S01.1080p")
+        engine = MagicMock(evaluate=MagicMock(return_value=_passing_eval(release)))
+        service.prowlarr.search_tv_season_sweep.return_value = ProwlarrSearchResult(
+            releases=[release], query_time_ms=1
+        )
+
+        with patch("app.siftarr.services.tv_decision_service.OverseerrService") as overseerr_cls:
+            overseerr_cls.return_value.get_media_details = AsyncMock(
+                return_value={"externalIds": {"imdbId": "tt1234567"}}
+            )
+            await service._search_season_sweeps_and_evaluate(request, engine, [1])
+
+        service.prowlarr.search_tv_season_sweep.assert_awaited_once_with(
+            title="Test Show",
+            season=1,
+            imdbid="tt1234567",
+            tvdbid=12345,
+        )
+
+    @pytest.mark.asyncio
     async def test_request_not_found_returns_error(self, service, mock_db):
         mock_db.execute.return_value = MagicMock(scalar_one_or_none=MagicMock(return_value=None))
 

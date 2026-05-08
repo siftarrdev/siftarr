@@ -80,7 +80,7 @@ async def test_search_multi_season_packs_returns_coverage_metadata(mock_db, monk
     )
 
     prowlarr_service = AsyncMock()
-    prowlarr_service.search_by_tvdbid.return_value = ProwlarrSearchResult(
+    prowlarr_service.search_tv_season_sweep.return_value = ProwlarrSearchResult(
         releases=[
             broad_pack,
             compact_broad_pack,
@@ -195,7 +195,7 @@ async def test_search_season_packs_excludes_multi_season_results(mock_db, monkey
     )
 
     prowlarr_service = AsyncMock()
-    prowlarr_service.search_by_tvdbid.return_value = ProwlarrSearchResult(
+    prowlarr_service.search_tv_season_sweep.return_value = ProwlarrSearchResult(
         releases=[
             exact_season,
             multi_season,
@@ -267,7 +267,7 @@ async def test_search_season_packs_orders_by_score_then_size(mock_db, monkeypatc
     )
 
     prowlarr_service = AsyncMock()
-    prowlarr_service.search_by_tvdbid.return_value = ProwlarrSearchResult(
+    prowlarr_service.search_tv_season_sweep.return_value = ProwlarrSearchResult(
         releases=[larger_high_score, lower_score, smaller_high_score],
         query_time_ms=5,
     )
@@ -337,7 +337,7 @@ async def test_search_season_packs_prioritizes_size_limit_passes(mock_db, monkey
     )
 
     prowlarr_service = AsyncMock()
-    prowlarr_service.search_by_tvdbid.return_value = ProwlarrSearchResult(
+    prowlarr_service.search_tv_season_sweep.return_value = ProwlarrSearchResult(
         releases=[size_limit_fail, passing_size_but_other_rule_fail],
         query_time_ms=5,
     )
@@ -463,7 +463,7 @@ async def test_search_episode_excludes_packs_and_multi_season_results(mock_db, m
     )
 
     prowlarr_service = AsyncMock()
-    prowlarr_service.search_by_tvdbid.return_value = ProwlarrSearchResult(
+    prowlarr_service.search_tv_season_sweep.return_value = ProwlarrSearchResult(
         releases=[
             exact_episode,
             season_pack,
@@ -547,7 +547,7 @@ async def test_search_multi_season_packs_orders_by_score_then_size(mock_db, monk
     )
 
     prowlarr_service = AsyncMock()
-    prowlarr_service.search_by_tvdbid.return_value = ProwlarrSearchResult(
+    prowlarr_service.search_tv_season_sweep.return_value = ProwlarrSearchResult(
         releases=[larger_high_score, lower_score, smaller_high_score],
         query_time_ms=5,
     )
@@ -625,7 +625,7 @@ async def test_search_episode_orders_by_score_then_size(mock_db, monkeypatch):
     )
 
     prowlarr_service = AsyncMock()
-    prowlarr_service.search_by_tvdbid.return_value = ProwlarrSearchResult(
+    prowlarr_service.search_tv_season_sweep.return_value = ProwlarrSearchResult(
         releases=[larger_high_score, lower_score, smaller_high_score],
         query_time_ms=5,
     )

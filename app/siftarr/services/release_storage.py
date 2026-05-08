@@ -83,6 +83,7 @@ async def store_search_results(
     evaluations: list[ReleaseEvaluation],
     *,
     scope: dict[str, object] | None = None,
+    source: str = "automatic",
 ) -> dict[str, Release]:
     """Upsert stored search results and purge stale rows within the same scope."""
     # 1. Load existing releases for this request
@@ -90,7 +91,8 @@ async def store_search_results(
     existing_records = [
         record
         for record in existing_result.scalars().all()
-        if _release_matches_persistence_scope(record, scope)
+        if _release_matches_source(record, source)
+        and _release_matches_persistence_scope(record, scope)
     ]
 
     # Build lookup keyed by persistence key, handle duplicate keys
@@ -141,6 +143,7 @@ async def store_search_results(
             existing.rejection_reason = (
                 evaluation.rejection_reason[:500] if evaluation.rejection_reason else None
             )
+            existing.search_source = source
             records_by_key[dedupe_key] = existing
             matched_keys.add(dedupe_key)
         else:
@@ -169,6 +172,7 @@ async def store_search_results(
                 rejection_reason=evaluation.rejection_reason[:500]
                 if evaluation.rejection_reason
                 else None,
+                search_source=source,
             )
             db.add(record)
             records_by_key[dedupe_key] = record
@@ -183,6 +187,10 @@ async def store_search_results(
 
     await db.commit()
     return records_by_key
+
+
+def _release_matches_source(release: Release, source: str) -> bool:
+    return (release.search_source or "automatic") == source
 
 
 def _release_matches_persistence_scope(release: Release, scope: dict[str, object] | None) -> bool:
@@ -263,6 +271,7 @@ async def persist_manual_release(
             rejection_reason=evaluation.rejection_reason[:500]
             if evaluation.rejection_reason
             else None,
+            search_source="manual",
         )
         db.add(record)
     else:
@@ -287,6 +296,7 @@ async def persist_manual_release(
         record.rejection_reason = (
             evaluation.rejection_reason[:500] if evaluation.rejection_reason else None
         )
+        record.search_source = "manual"
 
     await db.commit()
     await db.refresh(record)

@@ -38,6 +38,8 @@ from app.siftarr.services.episode_derive import (
     derive_request_status_from_episodes,
     derive_season_status,
 )
+from app.siftarr.services.metadata_service import extract_imdb_id
+from app.siftarr.services.overseerr_service import OverseerrService
 from app.siftarr.services.prowlarr_service import (
     ProwlarrRelease,
     ProwlarrSearchResult,
@@ -268,12 +270,13 @@ class TVDecisionService:
         if not seasons:
             return [], [], []
 
+        imdb_id = await self._load_imdb_id(request)
         search_results = await asyncio.gather(
             *(
                 self.prowlarr.search_tv_season_sweep(
                     title=request.title,
                     season=season,
-                    imdbid=getattr(request, "imdb_id", None),
+                    imdbid=imdb_id,
                     tvdbid=request.tvdb_id,
                 )
                 for season in seasons
@@ -320,6 +323,20 @@ class TVDecisionService:
                     passing_releases.append(evaluation)
 
         return evaluated_releases, passing_releases, errors
+
+    async def _load_imdb_id(self, request: Request) -> str | None:
+        if not request.tmdb_id:
+            return None
+        try:
+            details = await OverseerrService(settings=self._settings).get_media_details(
+                "tv", request.tmdb_id
+            )
+        except Exception:
+            logger.warning(
+                "IMDb metadata lookup failed for request_id=%s", request.id, exc_info=True
+            )
+            return None
+        return extract_imdb_id(details if isinstance(details, dict) else None)
 
     @staticmethod
     def _release_dedup_key(release: ProwlarrRelease) -> str:

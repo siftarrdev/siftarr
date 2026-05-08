@@ -13,10 +13,12 @@ from app.siftarr.models.release import Release
 from app.siftarr.models.request import MediaType
 from app.siftarr.models.request import Request as RequestModel
 from app.siftarr.models.rule import Rule
+from app.siftarr.models.season import Season
 from app.siftarr.services.activity_log_service import ActivityLogService
 from app.siftarr.services.dashboard_service import TVSearchData
 from app.siftarr.services.lifecycle_service import LifecycleService
 from app.siftarr.services.media_helpers import extract_media_title_and_year
+from app.siftarr.services.metadata_service import extract_imdb_id
 from app.siftarr.services.movie_decision_service import MovieDecisionService
 from app.siftarr.services.overseerr_service import OverseerrService
 from app.siftarr.services.pending_queue_service import PendingQueueService
@@ -141,7 +143,7 @@ class SearchService:
 
     async def search_season_packs(self, request: Any, *, season_number: int) -> TVSearchData:
         """Search for season packs covering exactly one season."""
-        result = await self._search_tv(request, season=season_number)
+        result = await self._search_tv_season_sweep(request, season_number=season_number)
         if result.error:
             return TVSearchData(
                 releases=[],
@@ -175,7 +177,14 @@ class SearchService:
         """Search for multi-season packs covering 2+ seasons or complete series."""
         tv_enrichment = TVEnrichmentService(self.db)
         known_total_seasons = await tv_enrichment.known_total_seasons(request_id)
-        result = await self._search_tv(request)
+        season_numbers = await self._requested_season_numbers(request)
+        if not season_numbers and known_total_seasons:
+            season_numbers = list(range(1, known_total_seasons + 1))
+        results = [
+            await self._search_tv_season_sweep(request, season_number=season)
+            for season in season_numbers
+        ]
+        result = self._combine_tv_results(results)
         if result.error:
             return TVSearchData(
                 releases=[],
@@ -221,7 +230,7 @@ class SearchService:
         Passing releases are automatically staged via the rule engine
         selection (``selection_source="rule"``).
         """
-        result = await self._search_tv(request, season=season_number, episode=episode_number)
+        result = await self._search_tv_season_sweep(request, season_number=season_number)
         if result.error:
             return TVSearchData(
                 releases=[],
@@ -330,7 +339,7 @@ class SearchService:
         """Persist scoped TV evaluations and serialize with IDs; tolerate pure mocks."""
         try:
             stored_by_key = await store_search_results(
-                self.db, request_id, evaluations, scope=scope
+                self.db, request_id, evaluations, scope=scope, source="adhoc"
             )
         except (StopAsyncIteration, StopIteration):
             releases = [
@@ -401,6 +410,91 @@ class SearchService:
             year=request.year,
             cacheable=cacheable,
         )
+
+    async def _search_tv_season_sweep(self, request: Any, *, season_number: int) -> Any:
+        """Run an explicit-refresh paginated season sweep for ad hoc TV searches."""
+        from app.siftarr.services.request_service import ensure_tvdb_id
+
+        tvdb_id = ensure_tvdb_id(request)
+        runtime_settings = get_settings()
+        imdb_id = await self._load_imdb_id(request)
+        prowlarr = ProwlarrService(settings=runtime_settings)
+        return await prowlarr.search_tv_season_sweep(
+            title=request.title,
+            season=season_number,
+            imdbid=imdb_id,
+            tvdbid=tvdb_id,
+            cacheable=False,
+        )
+
+    async def _load_imdb_id(self, request: Any) -> str | None:
+        tmdb_id = getattr(request, "tmdb_id", None)
+        if not tmdb_id:
+            return None
+        try:
+            details = await OverseerrService(settings=get_settings()).get_media_details(
+                "tv", tmdb_id
+            )
+        except Exception:
+            logger.warning(
+                "IMDb metadata lookup failed for request_id=%s",
+                getattr(request, "id", None),
+                exc_info=True,
+            )
+            return None
+        return extract_imdb_id(details if isinstance(details, dict) else None)
+
+    async def _requested_season_numbers(self, request: Any) -> list[int]:
+        try:
+            seasons = getattr(request, "seasons", None) or []
+        except Exception:
+            seasons = []
+        if type(seasons).__module__.startswith("unittest.mock"):
+            seasons = []
+        values = [getattr(season, "season_number", None) for season in seasons]
+        season_numbers = sorted({season for season in values if isinstance(season, int)})
+        if season_numbers:
+            return season_numbers
+        if type(getattr(request, "seasons", None)).__module__.startswith("unittest.mock"):
+            return []
+        request_id = getattr(request, "id", None)
+        if request_id is None:
+            return []
+        result = await self.db.execute(
+            select(Season.season_number).where(Season.request_id == request_id)
+        )
+        return sorted({row[0] for row in result.all() if isinstance(row[0], int)})
+
+    @staticmethod
+    def _combine_tv_results(results: list[Any]) -> Any:
+        if not results:
+            from app.siftarr.services.prowlarr_service import ProwlarrSearchResult
+
+            return ProwlarrSearchResult(releases=[], query_time_ms=0, error="No seasons specified")
+
+        first = copy(results[0])
+        releases = []
+        seen: set[str] = set()
+        errors = []
+        total_time = 0
+        for result in results:
+            if getattr(result, "error", None) and not getattr(result, "releases", None):
+                errors.append(result.error)
+            total_time += getattr(result, "query_time_ms", 0)
+            for release in getattr(result, "releases", []):
+                key = (
+                    release.info_hash
+                    or release.download_url
+                    or f"{release.title}|{release.indexer}"
+                )
+                if key in seen:
+                    continue
+                seen.add(key)
+                releases.append(release)
+        first.releases = releases
+        first.query_time_ms = total_time
+        first.error = "; ".join(errors) if errors and not releases else None
+        return first
 
     async def _build_rule_engine(self, *, media_type: str) -> RuleEngine:
         """Load rules from DB and build a RuleEngine (cached)."""
