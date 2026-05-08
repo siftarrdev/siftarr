@@ -138,7 +138,7 @@ Business logic and integrations.
 - `rule_engine.py` — release filtering and scoring evaluation; includes module-level rule version cache (`_rule_version`) for rule engine reuse across requests, invalidated on rule mutations
 - `decision_pipeline.py` — shared decision pipeline helpers (rule loading, activity logging, pending queue, best-release selection); accepts optional cached `RuleEngine` to skip DB load
 - `release_storage.py` — release persistence and reconstruction helpers; `store_search_results()` scopes stale cleanup by search source so automatic sweeps do not purge ad hoc/manual rows
-- `staging_service.py` — stage/send workflows, staged torrent handling, torrent download/validation, and release handoff (`use_releases`); uses shared HTTP client for torrent downloads
+- `staging_service.py` — stage/send workflows, staged torrent handling, metadata-first staging, optional torrent download/validation, and release handoff (`use_releases`); bulk staging batches DB commits
 - `release_serializers.py` — API-facing serialization helpers
 - `scheduler_service.py` / `background_tasks.py` — recurring jobs and background orchestration
 - `pending_queue_service.py` / `lifecycle_service.py` / `download_completion_service.py` — retry, status transitions, and completion detection (unreleased detection moved to unreleased_service); pending queue methods support optional `commit=False` for batched transactions; completion service fetches qBit torrent list once per cycle for local matching; lifecycle stats cached with 30s TTL

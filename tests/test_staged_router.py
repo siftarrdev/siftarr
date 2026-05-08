@@ -1,5 +1,6 @@
 """Tests for staged torrent approval routes."""
 
+import json
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -115,6 +116,52 @@ class TestStagedRouter:
             request=request,
             approved_torrent=torrent,
             rules_selected_torrent=rule_torrent,
+        )
+
+    @pytest.mark.asyncio
+    async def test_approve_uses_stored_download_url_when_file_missing(
+        self, mock_db, monkeypatch, tmp_path
+    ):
+        """Staged approvals can use sidecar download URL without local torrent file."""
+        json_path = tmp_path / "stage.json"
+        json_path.write_text(
+            json.dumps({"release": {"download_url": "https://example.test/release.torrent"}})
+        )
+        torrent = MagicMock()
+        torrent.id = 6
+        torrent.request_id = 7
+        torrent.magnet_url = None
+        torrent.status = "staged"
+        torrent.selection_source = "rule"
+        torrent.torrent_path = str(tmp_path / "missing.torrent")
+        torrent.json_path = str(json_path)
+
+        request = MagicMock()
+        request.id = 7
+        request.media_type = MediaType.MOVIE
+        rule_result = MagicMock()
+        rule_result.scalars.return_value.first.return_value = torrent
+        torrent_result = MagicMock()
+        torrent_result.scalar_one_or_none.return_value = torrent
+        request_result = MagicMock()
+        request_result.scalar_one_or_none.return_value = request
+        mock_db.execute.side_effect = [torrent_result, request_result, rule_result]
+
+        qbittorrent = AsyncMock()
+        qbittorrent.add_torrent.return_value = "hash789"
+        monkeypatch.setattr(staged, "get_settings", lambda: MagicMock())
+        monkeypatch.setattr(staged, "QbittorrentService", MagicMock(return_value=qbittorrent))
+        monkeypatch.setattr(staged, "LifecycleService", MagicMock(return_value=AsyncMock()))
+        monkeypatch.setattr(staged, "log_staging_decision", MagicMock())
+
+        response = await staged.approve_staged_torrent(
+            6, http_request=MagicMock(headers={}), db=mock_db
+        )
+
+        assert response.status_code == 303
+        qbittorrent.add_torrent.assert_awaited_once_with(
+            magnet_uri="https://example.test/release.torrent",
+            category=staged.MediaCategory.MOVIES,
         )
 
     @pytest.mark.asyncio

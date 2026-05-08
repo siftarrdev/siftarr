@@ -592,6 +592,7 @@ class TVDecisionService:
 
         # ── Exact episode fallback from stored/classified sweep results ─
         best_episodes_by_key: dict[tuple[int, int], ReleaseEvaluation] = {}
+        uncovered_episode_target_keys: set[tuple[int, int]] = set()
         if search_episodes:
             episode_targets: dict[int, list[int]] = {}
             for season in requested_seasons:
@@ -600,6 +601,11 @@ class TVDecisionService:
                 episode_targets[season] = await self._get_episode_search_targets(
                     request, season, requested_episodes
                 )
+            uncovered_episode_target_keys = {
+                (season, episode)
+                for season, episodes in episode_targets.items()
+                for episode in episodes
+            }
 
             for evaluation in sweep_candidates:
                 for season, episodes in episode_targets.items():
@@ -612,19 +618,13 @@ class TVDecisionService:
                         if existing is None or evaluation.total_score > existing.total_score:
                             best_episodes_by_key[key] = evaluation
 
-            exact_release_keys = {
-                (season, episode)
-                for evaluation in sweep_evaluations
-                for season, episodes in episode_targets.items()
-                for episode in episodes
-                if self._is_exact_episode_match(evaluation, season, episode)
-            }
+            selected_sweep_episode_keys = set(best_episodes_by_key)
             capped_missing_targets = [
                 (season, episode)
                 for season, episodes in episode_targets.items()
                 if season in limited_sweep_seasons
                 for episode in episodes
-                if (season, episode) not in exact_release_keys
+                if (season, episode) not in selected_sweep_episode_keys
             ]
             if capped_missing_targets:
                 fallback_target_count = len(capped_missing_targets)
@@ -661,6 +661,17 @@ class TVDecisionService:
                         best_episodes_by_key[key] = evaluation
 
             all_selected_releases.extend(best_episodes_by_key.values())
+
+        selected_episode_keys = set(best_episodes_by_key)
+        logger.info(
+            "TV selected episode coverage summary: request_id=%s requested_uncovered_episode_keys=%s selected_episode_keys=%s missing_episode_keys=%s covered_seasons=%s selected_pack_count=%s",
+            request.id,
+            sorted(uncovered_episode_target_keys),
+            sorted(selected_episode_keys),
+            sorted(uncovered_episode_target_keys - selected_episode_keys),
+            sorted(covered_seasons),
+            len(selected_pack_releases),
+        )
 
         logger.info(
             "TV exact episode fallback merge summary: request_id=%s fallback_target_count=%s fallback_release_count=%s final_result_count=%s exact_episode_bucket_counts=%s source=prowlarr",

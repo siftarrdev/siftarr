@@ -114,10 +114,7 @@ def test_dashboard_js_includes_read_only_tv_buckets():
     assert "function searchTvRequestAll()" in js
     assert "const streamUrl = '/requests/' + window.currentRequestId + '/search/stream';" in js
     assert "window.startTvSearchProgress(streamUrl, 'TV Search All: ' + detailsTitle" in js
-    assert (
-        "window.startSearchProgress(window.currentRequestId, detailsTitle, async function()"
-        not in js
-    )
+    assert "function searchRequestFromDetails()" in js
     assert (
         "window.openRequestDetails(window.currentRequestId, window.currentDetailsIndex, { preserveUiState: true })"
         in js
@@ -137,12 +134,15 @@ def test_dashboard_details_search_sets_progress_and_restores_button():
     assert "btn.disabled = true;" in js
     assert "btn.textContent = 'Searching...';" in js
     assert "window.startSearchProgress(" in js
-    assert "/requests/' + window.currentRequestId + '/search/results" in js
+    assert "/requests/' + window.currentRequestId + '/search/results" not in js
+    assert (
+        "window.openRequestDetails(window.currentRequestId, window.currentDetailsIndex, { skipAutoSearch: true })"
+        in js
+    )
     assert "btn.innerHTML = originalText || 'Refresh Search';" in js
     assert "cacheInd.classList.add('hidden');" in js
     assert (
-        "window.startSearchProgress(window.currentRequestId, detailsTitle, async function(data)"
-        in js
+        "window.startSearchProgress(window.currentRequestId, detailsTitle, async function()" in js
     )
 
 

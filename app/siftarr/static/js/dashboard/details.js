@@ -217,33 +217,10 @@ async function searchRequestFromDetails() {
     if (cacheInd) {
         cacheInd.classList.add('hidden');
     }
-    window.startSearchProgress(window.currentRequestId, detailsTitle, async function(data) {
-        // Reload releases via the search-results API (avoids re-triggering
-        // the auto-search loop in openRequestDetails when no releases exist).
-        try {
-            const resp = await fetch('/requests/' + window.currentRequestId + '/search/results');
-            if (resp.ok) {
-                const result = await resp.json();
-                const newReleases = result.releases || [];
-                window.currentReleases = newReleases;
-                if (newReleases.length > 0) {
-                    releasesContainer.innerHTML = newReleases.map(function(r) {
-                        return window.renderReleaseCard(r, window.currentRequestId);
-                    }).join('');
-                    const cacheInd = document.getElementById('release-cache-indicator');
-                    const cacheIndText = document.getElementById('release-cache-indicator-text');
-                    if (cacheInd && cacheIndText) {
-                        cacheIndText.textContent = 'Showing cached results';
-                        cacheInd.classList.remove('hidden');
-                    }
-                } else {
-                    releasesContainer.innerHTML = '<div class="text-gray-500 text-sm">No releases found.</div>';
-                }
-            }
-        } catch (_err) {
-            // fallback: reload full details without re-triggering auto-search
-            window.openRequestDetails(window.currentRequestId, window.currentDetailsIndex, { skipAutoSearch: true });
-        }
+    window.startSearchProgress(window.currentRequestId, detailsTitle, async function() {
+        // Reload full details from the existing details API. skipAutoSearch avoids
+        // re-triggering the auto-search loop when the completed search found none.
+        await window.openRequestDetails(window.currentRequestId, window.currentDetailsIndex, { skipAutoSearch: true });
         if (btn) {
             btn.disabled = false;
             btn.innerHTML = originalText || 'Refresh Search';

@@ -194,6 +194,8 @@ async def _set_request_status(
     db: AsyncSession,
     request: Request,
     new_status: RequestStatus,
+    *,
+    commit: bool = True,
 ) -> None:
     """Persist the request status.
 
@@ -206,7 +208,8 @@ async def _set_request_status(
             return
         request.status = new_status
         request.updated_at = datetime.now(UTC)
-        await db.commit()
+        if commit:
+            await db.commit()
     # For TV, request.status is derived from episodes — this is a no-op.
     # Callers should set episode statuses and recompute instead.
 
@@ -281,11 +284,15 @@ class StagingService:
         request: Request,
         score: int = 0,
         selection_source: str = "rule",
+        *,
+        commit: bool = True,
+        download_torrent_file: bool = False,
     ) -> StagedTorrent:
         """
         Save a release to staging.
 
-        Downloads the torrent file and creates a sidecar JSON with metadata.
+        Creates a sidecar JSON with metadata. Torrent files are not downloaded
+        by default; approval can use the magnet URL or stored download URL.
 
         Args:
             release: The Prowlarr release to stage.
@@ -315,7 +322,11 @@ class StagingService:
 
         STAGING_DIR.mkdir(parents=True, exist_ok=True)
 
-        if release.download_url.startswith("http"):
+        if (
+            download_torrent_file
+            and not release.magnet_url
+            and release.download_url.startswith("http")
+        ):
             try:
                 client = await get_shared_client()
                 response = await client.get(release.download_url, timeout=60.0)
@@ -332,7 +343,7 @@ class StagingService:
                     exc_info=True,
                 )
         else:
-            logger.debug("Using magnet URI (no torrent file download): %s", release.title)
+            logger.debug("Staging without local torrent file: %s", release.title)
 
         metadata = {
             "request": {
@@ -393,8 +404,11 @@ class StagingService:
         )
 
         self.db.add(staged)
-        await self.db.commit()
-        await self.db.refresh(staged)
+        if commit:
+            await self.db.commit()
+            await self.db.refresh(staged)
+        else:
+            await self.db.flush()
 
         return staged
 
@@ -599,6 +613,13 @@ class StagingService:
             replaced_active_selection = False
             deleted_superseded = False
 
+            logger.info(
+                "Staging releases: request_id=%s release_count=%s selection_source=%s",
+                request.id,
+                len(usable_releases),
+                selection_source,
+            )
+
             for release in usable_releases:
                 active_staged = await _get_active_staged_torrents(self.db, request.id)
                 relevant_active_staged = _filter_active_staged_torrents_for_release(
@@ -617,9 +638,10 @@ class StagingService:
                         request,
                         score=release.score,
                         selection_source=selection_source,
+                        commit=False,
                     )
                     staged_ids.append(staged.id)
-                    logger.info(
+                    logger.debug(
                         "Release staged: request_id=%s title=%s staged_id=%s score=%s",
                         request.id,
                         release.title,
@@ -648,17 +670,15 @@ class StagingService:
                         )
                         replaced_active_selection = True
 
-            if deleted_superseded:
-                await self.db.commit()
-
             if request.media_type == MediaType.TV:
                 # Episode-centric: set covered episode statuses, then recompute
                 for release in usable_releases:
                     await self._apply_release_to_episodes(release, RequestStatus.STAGED)
                 await self._recompute_tv_statuses(request.id)
             else:
-                await _set_request_status(self.db, request, RequestStatus.STAGED)
+                await _set_request_status(self.db, request, RequestStatus.STAGED, commit=False)
             await queue_service.remove_from_queue(request.id)
+            await self.db.commit()
             action, message = _staged_selection_outcome(
                 selection_source=selection_source,
                 staged_count=len(staged_ids),
