@@ -4,7 +4,7 @@ import os
 import time
 from functools import lru_cache
 
-from pydantic import Field
+from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from app.siftarr.version import __version__
@@ -67,6 +67,28 @@ class Settings(BaseSettings):
 
     # Search result caching (Prowlarr)
     siftarr_disable_search_cache: bool = False
+
+    # Prowlarr TV season-sweep settings
+    prowlarr_tv_page_size: int = Field(default=100, ge=1, le=500)
+    prowlarr_tv_max_pages_per_query: int = Field(default=6, ge=1, le=50)
+    prowlarr_tv_max_results_per_season: int = Field(default=600, ge=1, le=5000)
+    prowlarr_tv_strategy_title_sxx_enabled: bool = True
+    prowlarr_tv_strategy_imdb_enabled: bool = True
+    prowlarr_tv_strategy_title_season_token_enabled: bool = True
+    prowlarr_tv_strategy_tvdb_enabled: bool = False
+
+    @model_validator(mode="after")
+    def _validate_tv_sweep_strategies(self) -> "Settings":
+        if not any(
+            [
+                self.prowlarr_tv_strategy_title_sxx_enabled,
+                self.prowlarr_tv_strategy_imdb_enabled,
+                self.prowlarr_tv_strategy_title_season_token_enabled,
+                self.prowlarr_tv_strategy_tvdb_enabled,
+            ]
+        ):
+            raise ValueError("at least one Prowlarr TV season strategy must be enabled")
+        return self
 
 
 @lru_cache

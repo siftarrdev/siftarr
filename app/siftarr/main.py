@@ -40,6 +40,9 @@ def _configure_logging() -> None:
 
     root_logger = logging.getLogger()
     root_logger.setLevel(logging.INFO)
+    if any(existing.get_name() == "siftarr" for existing in root_logger.handlers):
+        return
+    handler.set_name("siftarr")
     root_logger.addHandler(handler)
 
     logging.getLogger("httpx").setLevel(logging.WARNING)
@@ -163,4 +166,5 @@ def create_app() -> FastAPI:
     return app
 
 
+_configure_logging()
 app = create_app()

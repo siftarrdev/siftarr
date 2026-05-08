@@ -37,7 +37,17 @@ def test_dashboard_template_loads_external_assets(dashboard_template_path):
 
     assert "url_for('static', path='/css/dashboard.css') }}?v={{ static_version }}" in template
     assert "url_for('static', path='/js/dashboard.js') }}?v={{ static_version }}" in template
+    assert "window.siftarrStaticVersion = {{ static_version | tojson }};" in template
     assert 'type="module"' in template
+
+
+def test_dashboard_entry_cache_busts_imported_modules():
+    """ES module children need their own version query, not just the entry file."""
+    js = _read_dashboard_entry_js()
+
+    assert "window.siftarrStaticVersion" in js
+    assert "await import(`./dashboard/details.js?v=${moduleVersion}`);" in js
+    assert "await import(`./dashboard/search_sse.js?v=${moduleVersion}`);" in js
 
 
 def test_dashboard_css_contains_resize_styles():
@@ -65,60 +75,52 @@ def test_dashboard_js_uses_shared_search_loading_state():
     assert "search-progress-toast" in js
     assert "document.createElement('div')" in js
     assert js.count("window.escapeHtml = escapeHtml;") == 1
-    assert "renderSearchLoadingState('Searching episode...')" in js
-    assert "renderSearchLoadingState('Searching season packs...')" in js
-    assert "renderSearchLoadingState('Searching multi season packs...')" in js
+    assert "Refresh Search sweeps requested seasons" in js
     assert "window.renderMovieSearchLoadingState()" in js
     assert "Searching movie torrents" in js
     assert "Checking indexers now" in js
 
 
-def test_dashboard_tv_scope_selector_uses_explicit_actions():
-    """Dashboard TV search UI should expose explicit search scopes."""
+def test_dashboard_tv_details_use_single_search_all_action():
+    """Dashboard TV search UI should expose one Search All/refresh action."""
     with open(
         os.path.join(os.path.dirname(__file__), "../../../app/siftarr/templates/dashboard.html"),
         encoding="utf-8",
     ) as handle:
         template = handle.read()
 
-    assert "Search Scope" in template
-    assert "TV Search Scope" in template
-    assert "Search All Pending Episodes" in template
-    assert "Search Multi-Season Packs" in template
-    assert "toggleTvSearchScopeMenu(event)" in template
-    assert "searchAllPendingEpisodes(); closeTvSearchScopeMenu();" in template
-    assert "searchMultiSeasonPacks(currentRequestId); closeTvSearchScopeMenu();" in template
+    assert 'id="request-details-tv-search-btn" onclick="searchTvRequestAll()"' in template
+    assert "Refresh Search" in template
+    assert "Search Scope" not in template
+    assert "TV Search Scope" not in template
+    assert "Search All Pending Episodes" not in template
+    assert "Search Multi-Season Packs" not in template
+    assert "toggleTvSearchScopeMenu(event)" not in template
 
 
-def test_dashboard_js_includes_search_multi_season_ui():
-    """Dashboard JS should expose the explicit multi-season TV search UI."""
+def test_dashboard_js_includes_read_only_tv_buckets():
+    """Dashboard JS should show read-only TV buckets filled by Search All."""
     js = _read_dashboard_js()
 
-    assert "Search Multi Season Packs" in js
-    assert "Run Search Multi Season Packs to inspect broad multi-season coverage." in js
-    assert "Searching multi season packs..." in js
-    assert "No multi season or complete-series results found." in js
-    assert "function searchMultiSeasonPacks(" in js
-    assert "/requests/' + targetRequestId + '/multi-season-packs/search" in js
-    assert "function searchSeasonPacks(requestId, seasonNumber)" in js
-    assert "/requests/' + requestId + '/seasons/' + seasonNumber + '/season-packs/search" in js
-    assert "function searchAllPendingEpisodes()" in js
-    assert "No pending aired episodes to search." in js
-    assert "Finished searching all pending aired episodes" in js
+    assert "Multi-season and complete-series buckets" in js
+    assert "Read-only cached results" in js
     assert (
-        "window.startTvSearchProgress('/requests/' + requestId + '/seasons/' + seasonNumber + '/season-packs/search/stream'"
+        "Refresh Search sweeps requested seasons and fills episode, season-pack, and multi-season buckets"
         in js
     )
+    assert "No cached multi-season or complete-series results yet" in js
+    assert "No cached episode results yet" in js
+    assert "No cached season-pack results yet" in js
+    assert "function searchTvRequestAll()" in js
+    assert "const streamUrl = '/requests/' + window.currentRequestId + '/search/stream';" in js
+    assert "window.startTvSearchProgress(streamUrl, 'TV Search All: ' + detailsTitle" in js
+    assert "function searchRequestFromDetails()" in js
     assert (
-        "window.startTvSearchProgress('/requests/' + targetRequestId + '/multi-season-packs/search/stream'"
+        "window.openRequestDetails(window.currentRequestId, window.currentDetailsIndex, { preserveUiState: true })"
         in js
     )
-    assert (
-        "window.startTvSearchProgress('/requests/' + requestId + '/seasons/' + seasonNumber + '/episodes/' + episodeNumber + '/search/stream'"
-        in js
-    )
-    assert "window.showSearchProgressToast('Searching pending episodes'" in js
-    assert "tv-search-all-results" not in js
+    assert "Search Season Packs" not in js
+    assert "Search Multi Season Packs" not in js
 
 
 def test_dashboard_details_search_sets_progress_and_restores_button():
@@ -132,12 +134,15 @@ def test_dashboard_details_search_sets_progress_and_restores_button():
     assert "btn.disabled = true;" in js
     assert "btn.textContent = 'Searching...';" in js
     assert "window.startSearchProgress(" in js
-    assert "/requests/' + window.currentRequestId + '/search/results" in js
+    assert "/requests/' + window.currentRequestId + '/search/results" not in js
+    assert (
+        "window.openRequestDetails(window.currentRequestId, window.currentDetailsIndex, { skipAutoSearch: true })"
+        in js
+    )
     assert "btn.innerHTML = originalText || 'Refresh Search';" in js
     assert "cacheInd.classList.add('hidden');" in js
     assert (
-        "window.startSearchProgress(window.currentRequestId, detailsTitle, async function(data)"
-        in js
+        "window.startSearchProgress(window.currentRequestId, detailsTitle, async function()" in js
     )
 
 
@@ -209,16 +214,12 @@ def test_dashboard_modals_exports_inline_handler_names():
 
 
 def test_dashboard_js_uses_collapsible_episode_results():
-    """Episode search results should live in their own collapsible sections."""
+    """Episode cached results should live in their own collapsible sections."""
     js = _read_dashboard_js()
 
     assert "episode-details-" in js
     assert '<details id="\' + episodeDetailsId + \'" class="group rounded-lg border' in js
-    assert "if (details) details.open = true;" in js
-    assert (
-        "/requests/' + requestId + '/seasons/' + seasonNumber + '/episodes/' + episodeNumber + '/search"
-        in js
-    )
+    assert "No cached episode results yet" in js
 
 
 def test_dashboard_js_includes_release_status_column_and_upload_age():
@@ -292,17 +293,15 @@ def test_dashboard_js_collapses_staged_tv_scope_after_reload():
     assert "collapseStagedTvScope(window.currentRequestId, stagedScope);" in js
 
 
-def test_dashboard_js_uses_scope_menu_helpers():
-    """TV scope menu helpers should replace the legacy generic dropdown naming."""
+def test_dashboard_js_removes_scope_menu_helpers():
+    """Normal TV details UI should not expose scope-menu search controls."""
     js = _read_dashboard_js()
 
-    assert "tv-search-scope-menu" in js
-    assert "tv-search-scope-seasons" in js
-    assert "function toggleTvSearchScopeMenu(event)" in js
-    assert "function closeTvSearchScopeMenu()" in js
-    assert "function populateTvSearchScopeMenu()" in js
-    assert "closeTvSearchScopeMenu();" in js
-    assert "populateTvSearchScopeMenu();" in js
+    assert "tv-search-scope-menu" not in js
+    assert "tv-search-scope-seasons" not in js
+    assert "function toggleTvSearchScopeMenu(event)" not in js
+    assert "function closeTvSearchScopeMenu()" not in js
+    assert "function populateTvSearchScopeMenu()" not in js
     assert "tv-search-dropdown" not in js
     assert (
         "!isScopedEpisodeRelease && hasActiveStagedSelection && activeStagedTorrent && release.title === activeStagedTorrent.title"

@@ -48,7 +48,6 @@ async function openRequestDetails(requestId, explicitIndex = null, options = {})
     }
     if (tvSearchBtn) {
         tvSearchBtn.classList.add('hidden');
-        window.closeTvSearchScopeMenu();
     }
     window.currentTvSeasons = [];
     window.updateActiveStageBanner({ active_staged_torrent: null });
@@ -119,7 +118,6 @@ async function openRequestDetails(requestId, explicitIndex = null, options = {})
 
         if (data.request.media_type === 'tv' && data.tv_info) {
             window.currentTvSeasons = data.tv_info.seasons || [];
-            window.populateTvSearchScopeMenu();
             document.getElementById('release-results-header').classList.add('hidden');
             document.getElementById('release-filter-input').classList.add('hidden');
             if (cacheIndicator) cacheIndicator.classList.add('hidden');
@@ -154,6 +152,30 @@ async function openRequestDetails(requestId, explicitIndex = null, options = {})
         window.setPoster(null, 'Poster unavailable');
         releases.innerHTML = '<div class="text-red-400 text-sm">Failed to load request details. Check that Overseerr is reachable.</div>';
     }
+}
+
+async function searchTvRequestAll() {
+    if (!window.currentRequestId) return;
+    const btn = document.getElementById('request-details-tv-search-btn');
+    const originalText = btn ? btn.innerHTML : '';
+    if (btn) {
+        btn.disabled = true;
+        btn.textContent = 'Searching...';
+    }
+    const detailsTitle = document.getElementById('request-details-title')?.textContent?.trim() || 'TV Search All';
+    const streamUrl = '/requests/' + window.currentRequestId + '/search/stream';
+    window.startTvSearchProgress(streamUrl, 'TV Search All: ' + detailsTitle, async function() {
+        await window.openRequestDetails(window.currentRequestId, window.currentDetailsIndex, { preserveUiState: true });
+        if (btn) {
+            btn.disabled = false;
+            btn.innerHTML = originalText || 'Refresh Search';
+        }
+    }, function() {
+        if (btn) {
+            btn.disabled = false;
+            btn.innerHTML = originalText || 'Refresh Search';
+        }
+    });
 }
 
 async function refreshPlexAndReload() {
@@ -195,33 +217,10 @@ async function searchRequestFromDetails() {
     if (cacheInd) {
         cacheInd.classList.add('hidden');
     }
-    window.startSearchProgress(window.currentRequestId, detailsTitle, async function(data) {
-        // Reload releases via the search-results API (avoids re-triggering
-        // the auto-search loop in openRequestDetails when no releases exist).
-        try {
-            const resp = await fetch('/requests/' + window.currentRequestId + '/search/results');
-            if (resp.ok) {
-                const result = await resp.json();
-                const newReleases = result.releases || [];
-                window.currentReleases = newReleases;
-                if (newReleases.length > 0) {
-                    releasesContainer.innerHTML = newReleases.map(function(r) {
-                        return window.renderReleaseCard(r, window.currentRequestId);
-                    }).join('');
-                    const cacheInd = document.getElementById('release-cache-indicator');
-                    const cacheIndText = document.getElementById('release-cache-indicator-text');
-                    if (cacheInd && cacheIndText) {
-                        cacheIndText.textContent = 'Showing cached results';
-                        cacheInd.classList.remove('hidden');
-                    }
-                } else {
-                    releasesContainer.innerHTML = '<div class="text-gray-500 text-sm">No releases found.</div>';
-                }
-            }
-        } catch (_err) {
-            // fallback: reload full details without re-triggering auto-search
-            window.openRequestDetails(window.currentRequestId, window.currentDetailsIndex, { skipAutoSearch: true });
-        }
+    window.startSearchProgress(window.currentRequestId, detailsTitle, async function() {
+        // Reload full details from the existing details API. skipAutoSearch avoids
+        // re-triggering the auto-search loop when the completed search found none.
+        await window.openRequestDetails(window.currentRequestId, window.currentDetailsIndex, { skipAutoSearch: true });
         if (btn) {
             btn.disabled = false;
             btn.innerHTML = originalText || 'Refresh Search';
@@ -312,3 +311,4 @@ function renderTimeline(timelineData) {
 window.openRequestDetails = openRequestDetails;
 window.refreshPlexAndReload = refreshPlexAndReload;
 window.searchRequestFromDetails = searchRequestFromDetails;
+window.searchTvRequestAll = searchTvRequestAll;

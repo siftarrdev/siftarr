@@ -13,6 +13,7 @@ from app.siftarr.services.release_parser import (
     ParsedReleaseCoverage,
     cached_parse_release_coverage,
     is_exact_single_episode_release,
+    is_multi_episode_release,
     parse_stored_release_coverage,
 )
 from app.siftarr.services.rule_engine import ReleaseEvaluation
@@ -211,6 +212,15 @@ def serialize_target_scope(
             "season_number": scoped_season_number,
             "episode_number": scoped_episode_number,
         }
+
+    if scoped_season_number is not None and scoped_episode_number is not None:
+        if is_multi_episode_release(title):
+            return {
+                "type": "multi_episode_pack",
+                "season_number": scoped_season_number,
+                "first_episode_number": scoped_episode_number,
+            }
+        return {"type": "unknown"}
 
     if coverage.is_complete_series:
         return {"type": "complete_series"}

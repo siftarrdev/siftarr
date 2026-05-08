@@ -34,6 +34,20 @@ from app.siftarr.services.qbittorrent_service import MediaCategory, QbittorrentS
 logger = logging.getLogger(__name__)
 
 _BTIH_RE = re.compile(r"urn:btih:([0-9a-fA-F]{40}|[2-7A-Za-z]{32})", re.IGNORECASE)
+
+
+def _staged_download_url(torrent: StagedTorrent) -> str | None:
+    """Return stored release download URL from staging sidecar metadata."""
+    try:
+        with open(torrent.json_path) as f:
+            metadata = json.load(f)
+    except (OSError, json.JSONDecodeError, TypeError):
+        return None
+    release = metadata.get("release") if isinstance(metadata, dict) else None
+    download_url = release.get("download_url") if isinstance(release, dict) else None
+    return download_url if isinstance(download_url, str) and download_url else None
+
+
 STAGING_DECISION_LOG_PATH = Path("/data/staging/decision-log.jsonl")
 
 router = APIRouter(prefix="/staged", tags=["staged"])
@@ -205,10 +219,13 @@ async def _approve_torrent(torrent: StagedTorrent, db: AsyncSession) -> bool:
     # Add to qBittorrent (idempotent — if already present by info hash it
     # returns the existing hash and skips the add).
     torrent_hash: str | None = None
+    download_url = _staged_download_url(torrent)
     if torrent.magnet_url:
         torrent_hash = await qbittorrent.add_torrent(
             magnet_uri=torrent.magnet_url, category=category
         )
+    elif download_url and not os.path.exists(torrent.torrent_path):
+        torrent_hash = await qbittorrent.add_torrent(magnet_uri=download_url, category=category)
     else:
         torrent_hash = await qbittorrent.add_torrent(
             torrent_path=torrent.torrent_path, category=category
@@ -500,12 +517,17 @@ async def replace_staged_torrent(
     qbittorrent = QbittorrentService(settings=runtime_settings)
     success = False
 
+    download_url = _staged_download_url(new_torrent)
     if new_torrent.magnet_url:
         torrent_hash = await qbittorrent.add_torrent(
             magnet_uri=new_torrent.magnet_url,
             category=category,
         )
         success = torrent_hash is not None
+    elif download_url and not os.path.exists(new_torrent.torrent_path):
+        success = (
+            await qbittorrent.add_torrent(magnet_uri=download_url, category=category) is not None
+        )
     else:
         success = (
             await qbittorrent.add_torrent(

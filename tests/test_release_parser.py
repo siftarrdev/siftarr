@@ -2,15 +2,18 @@
 
 import pytest
 
+from app.siftarr.models.request import MediaType
 from app.siftarr.services.release_parser import (
     ParsedReleaseCoverage,
     ParsedSeasonEpisode,
     is_exact_single_episode_release,
+    is_multi_episode_release,
     movie_release_identity_rejection_reason,
     parse_movie_release_identity,
     parse_release_coverage,
     parse_season_episode,
 )
+from app.siftarr.services.release_serializers import serialize_target_scope
 
 
 class TestParseSeasonEpisode:
@@ -89,6 +92,17 @@ class TestParseSeasonEpisode:
 
 
 class TestParseReleaseCoverage:
+    def test_exact_episode_coverage_and_display_scope(self):
+        title = "Show.S01E02.1080p"
+        assert parse_release_coverage(title) == ParsedReleaseCoverage(
+            season_numbers=(1,), episode_number=2
+        )
+        assert serialize_target_scope(media_type=MediaType.TV, title=title) == {
+            "type": "single_episode",
+            "season_number": 1,
+            "episode_number": 2,
+        }
+
     def test_single_season_pack(self):
         result = parse_release_coverage(".S01.")
         assert result == ParsedReleaseCoverage(season_numbers=(1,), episode_number=None)
@@ -96,6 +110,10 @@ class TestParseReleaseCoverage:
     def test_multi_season_sxx_range(self):
         result = parse_release_coverage("Show.S01-S05.1080p")
         assert result == ParsedReleaseCoverage(season_numbers=(1, 2, 3, 4, 5), episode_number=None)
+        assert serialize_target_scope(media_type=MediaType.TV, title="Show.S01-S05.1080p") == {
+            "type": "multi_season_pack",
+            "season_numbers": [1, 2, 3, 4, 5],
+        }
 
     def test_multi_season_compact_sxx_range_without_repeated_s(self):
         result = parse_release_coverage("Show.S01-07.1080p")
@@ -130,6 +148,9 @@ class TestParseReleaseCoverage:
             episode_number=None,
             is_complete_series=True,
         )
+        assert serialize_target_scope(
+            media_type=MediaType.TV, title="Show.Complete.Series.1080p"
+        ) == {"type": "complete_series"}
 
     def test_bare_complete_marks_complete_series(self):
         result = parse_release_coverage("Show.Complete.1080p")
@@ -171,6 +192,22 @@ class TestParseReleaseCoverage:
     def test_no_match_returns_empty_coverage(self):
         result = parse_release_coverage("Movie.4K.Bluray")
         assert result == ParsedReleaseCoverage(season_numbers=(), episode_number=None)
+        assert serialize_target_scope(media_type=MediaType.TV, title="Movie.4K.Bluray") == {
+            "type": "unknown"
+        }
+
+    def test_multi_episode_pack_classifies_separately_from_exact_episode_or_season_pack(self):
+        title = "Show.S01E01-E03.1080p"
+        assert parse_release_coverage(title) == ParsedReleaseCoverage(
+            season_numbers=(1,), episode_number=1
+        )
+        assert is_multi_episode_release(title) is True
+        assert is_exact_single_episode_release(title, 1, 1) is False
+        assert serialize_target_scope(media_type=MediaType.TV, title=title) == {
+            "type": "multi_episode_pack",
+            "season_number": 1,
+            "first_episode_number": 1,
+        }
 
     def test_multi_season_thru_range(self):
         result = parse_release_coverage("Show.Seasons 1 thru 7.1080p")

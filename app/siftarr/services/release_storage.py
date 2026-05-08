@@ -83,6 +83,7 @@ async def store_search_results(
     evaluations: list[ReleaseEvaluation],
     *,
     scope: dict[str, object] | None = None,
+    source: str = "automatic",
 ) -> dict[str, Release]:
     """Upsert stored search results and purge stale rows within the same scope."""
     # 1. Load existing releases for this request
@@ -90,8 +91,16 @@ async def store_search_results(
     existing_records = [
         record
         for record in existing_result.scalars().all()
-        if _release_matches_persistence_scope(record, scope)
+        if _release_matches_source(record, source)
+        and _release_matches_persistence_scope(record, scope)
     ]
+    logger.info(
+        "Stored release cache loaded: request_id=%s scope=%s source=db search_source=%s count=%s",
+        request_id,
+        scope.get("type") if scope else "all",
+        source,
+        len(existing_records),
+    )
 
     # Build lookup keyed by persistence key, handle duplicate keys
     existing_by_key: dict[str, Release] = {}
@@ -141,6 +150,7 @@ async def store_search_results(
             existing.rejection_reason = (
                 evaluation.rejection_reason[:500] if evaluation.rejection_reason else None
             )
+            existing.search_source = source
             records_by_key[dedupe_key] = existing
             matched_keys.add(dedupe_key)
         else:
@@ -169,6 +179,7 @@ async def store_search_results(
                 rejection_reason=evaluation.rejection_reason[:500]
                 if evaluation.rejection_reason
                 else None,
+                search_source=source,
             )
             db.add(record)
             records_by_key[dedupe_key] = record
@@ -181,8 +192,24 @@ async def store_search_results(
     for record in extra_records:
         await db.delete(record)
 
+    deleted_count = sum(1 for key in existing_by_key if key not in matched_keys) + len(
+        extra_records
+    )
     await db.commit()
+    logger.info(
+        "Stored search results saved: request_id=%s scope=%s search_source=%s evaluated=%s stored=%s deleted=%s source=db",
+        request_id,
+        scope.get("type") if scope else "all",
+        source,
+        len(evaluations),
+        len(records_by_key),
+        deleted_count,
+    )
     return records_by_key
+
+
+def _release_matches_source(release: Release, source: str) -> bool:
+    return (release.search_source or "automatic") == source
 
 
 def _release_matches_persistence_scope(release: Release, scope: dict[str, object] | None) -> bool:
@@ -209,6 +236,15 @@ def _release_matches_persistence_scope(release: Release, scope: dict[str, object
     if scope_type == "multi_season_packs":
         return coverage.episode_number is None and (
             coverage.is_complete_series or len(coverage.season_numbers) > 1
+        )
+    if scope_type == "season_sweep":
+        season_number = scope.get("season_number")
+        if not isinstance(season_number, int):
+            return True
+        return (
+            coverage.is_complete_series
+            or coverage.season_number == season_number
+            or season_number in coverage.season_numbers
         )
     return True
 
@@ -263,6 +299,7 @@ async def persist_manual_release(
             rejection_reason=evaluation.rejection_reason[:500]
             if evaluation.rejection_reason
             else None,
+            search_source="manual",
         )
         db.add(record)
     else:
@@ -287,6 +324,7 @@ async def persist_manual_release(
         record.rejection_reason = (
             evaluation.rejection_reason[:500] if evaluation.rejection_reason else None
         )
+        record.search_source = "manual"
 
     await db.commit()
     await db.refresh(record)

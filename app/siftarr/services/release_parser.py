@@ -99,6 +99,19 @@ def is_exact_single_episode_release(title: str, season_number: int, episode_numb
     return not ADDITIONAL_EPISODE_TOKEN_PATTERN.search(remainder)
 
 
+def is_multi_episode_release(title: str) -> bool:
+    """Return True when a title starts at one episode but includes more episodes."""
+    match = SINGLE_EPISODE_RELEASE_PATTERN.search(title)
+    if not match:
+        return False
+    remainder = title[match.end() :]
+    return bool(
+        FOLLOWUP_EPISODE_TOKEN_PATTERN.match(remainder)
+        or SINGLE_EPISODE_RELEASE_PATTERN.search(remainder)
+        or ADDITIONAL_EPISODE_TOKEN_PATTERN.search(remainder)
+    )
+
+
 @dataclass(frozen=True)
 class MovieReleaseIdentity:
     title: str | None

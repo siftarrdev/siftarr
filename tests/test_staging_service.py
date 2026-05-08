@@ -1,5 +1,6 @@
 """Tests for StagingService."""
 
+import json
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -167,3 +168,62 @@ class TestStagingServiceIntegration:
         added_record = service.db.add.call_args.args[0]
         assert added_record.selection_source == "manual"
         assert saved is service.db.refresh.await_args_list[0].args[0]
+
+    @pytest.mark.asyncio
+    async def test_save_release_skips_eager_download_and_stores_sources(self, service, tmp_path):
+        request = MagicMock(spec=Request)
+        request.id = 42
+        request.external_id = "ext-42"
+        request.media_type = MediaType.MOVIE
+        request.tmdb_id = 123
+        request.tvdb_id = None
+        request.title = "Example Movie"
+        request.year = 2024
+        release = ProwlarrRelease(
+            title="Example.Movie.2024.1080p",
+            size=1_500_000_000,
+            seeders=10,
+            leechers=2,
+            download_url="https://example.test/example.torrent",
+            magnet_url="magnet:?xt=urn:btih:0123456789abcdef0123456789abcdef01234567",
+            indexer="Indexer A",
+        )
+
+        with (
+            patch("app.siftarr.services.staging_service.STAGING_DIR", tmp_path),
+            patch("app.siftarr.services.staging_service.get_shared_client") as get_client,
+        ):
+            await service.save_release(release, request)
+
+        get_client.assert_not_called()
+        assert not list(tmp_path.glob("*.torrent"))
+        metadata = json.loads(next(tmp_path.glob("*.json")).read_text())
+        assert metadata["release"]["download_url"] == release.download_url
+        assert metadata["release"]["magnet_url"] == release.magnet_url
+
+    @pytest.mark.asyncio
+    async def test_save_release_can_batch_without_commit(self, service, tmp_path):
+        request = MagicMock(spec=Request)
+        request.id = 42
+        request.external_id = "ext-42"
+        request.media_type = MediaType.MOVIE
+        request.tmdb_id = 123
+        request.tvdb_id = None
+        request.title = "Example Movie"
+        request.year = 2024
+        release = ProwlarrRelease(
+            title="Example.Movie.2024.1080p",
+            size=1_500_000_000,
+            seeders=10,
+            leechers=2,
+            download_url="https://example.test/example.torrent",
+            magnet_url=None,
+            indexer="Indexer A",
+        )
+
+        with patch("app.siftarr.services.staging_service.STAGING_DIR", tmp_path):
+            await service.save_release(release, request, commit=False)
+
+        service.db.flush.assert_awaited_once()
+        service.db.commit.assert_not_awaited()
+        service.db.refresh.assert_not_awaited()

@@ -78,6 +78,13 @@ class ProwlarrSearchResult(BaseModel):
     releases: list[ProwlarrRelease]
     query_time_ms: int
     error: str | None = None
+    offset: int | None = None
+    page_size: int | None = None
+    page_count: int | None = None
+    is_short_page: bool | None = None
+    query_strategy: str | None = None
+    source: str | None = None
+    hit_limit: bool = False
 
 
 class ProwlarrService:
@@ -199,6 +206,25 @@ class ProwlarrService:
             parts.append(str(year))
         return " ".join(parts)
 
+    @staticmethod
+    def _build_tv_imdb_season_query(title: str | None, imdbid: str | int, season: int) -> str:
+        """Build an IPTorrents-compatible IMDb + season TV query."""
+        if title:
+            title = ProwlarrService._normalize_search_title(title)
+        imdb = str(imdbid).removeprefix("tt")
+        parts = [title.strip() for title in [title] if title and title.strip()]
+        parts.extend([f"{{imdbid:{imdb}}}", f"{{season:{season}}}"])
+        return " ".join(parts)
+
+    @staticmethod
+    def _build_tv_title_season_token_query(title: str | None, season: int) -> str:
+        """Build an IPTorrents-compatible title + {season:N} TV query."""
+        if title:
+            title = ProwlarrService._normalize_search_title(title)
+        parts = [title.strip() for title in [title] if title and title.strip()]
+        parts.append(f"{{season:{season}}}")
+        return " ".join(parts)
+
     async def _search(
         self,
         params: dict,
@@ -222,14 +248,15 @@ class ProwlarrService:
             cached = _cache_get(cache_key)
             if cached is not None:
                 logger.info(
-                    "Prowlarr search cache hit: type=%s query=%s categories=%s",
+                    "Prowlarr search results loaded: source=cache type=%s query=%s categories=%s count=%s",
                     params.get("type"),
                     params.get("query"),
                     params.get("categories"),
+                    len(cached.releases),
                 )
-                return cached
+                return cached.model_copy(update={"source": "cache"})
 
-        logger.info(
+        logger.debug(
             "Prowlarr search request: type=%s query=%s categories=%s",
             params.get("type"),
             params.get("query"),
@@ -250,7 +277,7 @@ class ProwlarrService:
                 results = response.json()
                 for release_data in self._extract_release_items(results):
                     releases.append(self._parse_release_info(release_data))
-                logger.info(
+                logger.debug(
                     "Prowlarr search response: type=%s query=%s releases=%s elapsed_ms=%s",
                     params.get("type"),
                     params.get("query"),
@@ -264,6 +291,7 @@ class ProwlarrService:
                         releases=releases,
                         query_time_ms=int((time_module.time() - start_time) * 1000),
                         error=None,
+                        source="prowlarr",
                     )
                     _cache_set(cache_key, result_to_cache)
             else:
@@ -286,6 +314,7 @@ class ProwlarrService:
             releases=releases,
             query_time_ms=int((time_module.time() - start_time) * 1000),
             error=error_message,
+            source="prowlarr",
         )
 
     @staticmethod
@@ -454,6 +483,179 @@ class ProwlarrService:
         fallback_result = await self._search(fallback_params, cacheable=cacheable)
         fallback_result.query_time_ms += metadata_result.query_time_ms
         return fallback_result
+
+    def _tv_season_strategy_queries(
+        self,
+        title: str,
+        season: int,
+        imdbid: str | int | None = None,
+        tvdbid: int | None = None,
+    ) -> list[tuple[str, str, str]]:
+        """Return enabled TV season query strategies as (name, type, query)."""
+        strategies: list[tuple[str, str, str]] = []
+        if self.settings.prowlarr_tv_strategy_title_sxx_enabled:
+            strategies.append(("title_sxx", "search", self._build_tv_title_query(title, season)))
+        if imdbid and self.settings.prowlarr_tv_strategy_imdb_enabled:
+            strategies.append(
+                ("imdb_season", "tvsearch", self._build_tv_imdb_season_query(title, imdbid, season))
+            )
+        if self.settings.prowlarr_tv_strategy_title_season_token_enabled:
+            strategies.append(
+                (
+                    "title_season_token",
+                    "tvsearch",
+                    self._build_tv_title_season_token_query(title, season),
+                )
+            )
+        if tvdbid and self.settings.prowlarr_tv_strategy_tvdb_enabled:
+            strategies.append(
+                ("tvdb_season", "tvsearch", self._build_tv_query(title, tvdbid, season))
+            )
+        return strategies
+
+    async def search_tv_season_page(
+        self,
+        title: str,
+        season: int,
+        strategy: str,
+        offset: int = 0,
+        imdbid: str | int | None = None,
+        tvdbid: int | None = None,
+        categories: list[int] | None = None,
+        cacheable: bool = True,
+        request_id: int | None = None,
+    ) -> ProwlarrSearchResult:
+        """Search one TV season strategy page with caller-controlled offset."""
+        if categories is None:
+            categories = [5000]
+
+        strategy_map = {
+            name: (search_type, query)
+            for name, search_type, query in self._tv_season_strategy_queries(
+                title, season, imdbid=imdbid, tvdbid=tvdbid
+            )
+        }
+        if strategy not in strategy_map:
+            return ProwlarrSearchResult(
+                releases=[],
+                query_time_ms=0,
+                error=f"TV season strategy unavailable: {strategy}",
+                offset=offset,
+                page_size=self.settings.prowlarr_tv_page_size,
+                page_count=0,
+                is_short_page=True,
+                query_strategy=strategy,
+            )
+
+        search_type, query = strategy_map[strategy]
+        # Confirmed with IPTorrents via Prowlarr: the indexer returns pages of up
+        # to 100 releases selected by ``offset`` and ignores/does not need a
+        # caller-provided ``limit``.  Keep the request offset-only so Siftarr's
+        # page size setting controls offset increments and short-page stopping.
+        params = {
+            "type": search_type,
+            "query": query,
+            "categories": categories,
+            "offset": offset,
+        }
+        result = await self._search(params, cacheable=cacheable)
+        page_size = self.settings.prowlarr_tv_page_size
+        result.offset = offset
+        result.page_size = page_size
+        result.page_count = len(result.releases)
+        result.is_short_page = len(result.releases) < page_size
+        result.query_strategy = strategy
+        logger.info(
+            "TV season page received: request_id=%s title=%s season=%s strategy=%s offset=%s count=%s page_size=%s short_page=%s source=%s",
+            request_id,
+            title,
+            season,
+            strategy,
+            offset,
+            len(result.releases),
+            page_size,
+            result.is_short_page,
+            result.source or "prowlarr",
+        )
+        return result
+
+    async def search_tv_season_sweep(
+        self,
+        title: str,
+        season: int,
+        imdbid: str | int | None = None,
+        tvdbid: int | None = None,
+        categories: list[int] | None = None,
+        cacheable: bool = True,
+        request_id: int | None = None,
+    ) -> ProwlarrSearchResult:
+        """Run bounded paginated TV season strategy searches."""
+        if categories is None:
+            categories = [5000]
+
+        page_size = self.settings.prowlarr_tv_page_size
+        max_pages = self.settings.prowlarr_tv_max_pages_per_query
+        max_results = self.settings.prowlarr_tv_max_results_per_season
+        total_query_time_ms = 0
+        all_releases: list[ProwlarrRelease] = []
+        hit_limit = False
+
+        logger.info(
+            "TV season sweep started: request_id=%s title=%s season=%s source=prowlarr page_size=%s max_pages=%s max_results=%s",
+            request_id,
+            title,
+            season,
+            page_size,
+            max_pages,
+            max_results,
+        )
+
+        for strategy, _, _ in self._tv_season_strategy_queries(
+            title, season, imdbid=imdbid, tvdbid=tvdbid
+        ):
+            for page in range(max_pages):
+                if len(all_releases) >= max_results:
+                    hit_limit = True
+                    break
+                result = await self.search_tv_season_page(
+                    title,
+                    season,
+                    strategy,
+                    offset=page * page_size,
+                    imdbid=imdbid,
+                    tvdbid=tvdbid,
+                    categories=categories,
+                    cacheable=cacheable,
+                    request_id=request_id,
+                )
+                total_query_time_ms += result.query_time_ms
+                remaining = max_results - len(all_releases)
+                all_releases.extend(result.releases[:remaining])
+                if len(result.releases) > remaining or len(all_releases) >= max_results:
+                    hit_limit = True
+                if result.error or result.is_short_page:
+                    break
+            else:
+                hit_limit = True
+
+        logger.info(
+            "TV season sweep done: request_id=%s title=%s season=%s total_results=%s hit_limit=%s elapsed_ms=%s source=prowlarr",
+            request_id,
+            title,
+            season,
+            len(all_releases),
+            hit_limit,
+            total_query_time_ms,
+        )
+        return ProwlarrSearchResult(
+            releases=all_releases,
+            query_time_ms=total_query_time_ms,
+            error=None if all_releases else "No releases found",
+            page_size=page_size,
+            page_count=len(all_releases),
+            source="prowlarr",
+            hit_limit=hit_limit,
+        )
 
     async def _broad_tv_search(
         self,

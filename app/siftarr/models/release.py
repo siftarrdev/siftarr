@@ -47,6 +47,9 @@ class Release(Base):
     season_number: Mapped[int | None] = mapped_column(Integer, nullable=True)
     episode_number: Mapped[int | None] = mapped_column(Integer, nullable=True)
     season_coverage: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    search_source: Mapped[str | None] = mapped_column(
+        String(20), nullable=True, default="automatic"
+    )
 
     # Scoring
     score: Mapped[int] = mapped_column(Integer, default=0)

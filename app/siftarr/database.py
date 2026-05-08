@@ -16,7 +16,7 @@ from sqlalchemy.ext.asyncio import (
 from app.siftarr.config import get_settings
 from app.siftarr.models import Base
 
-CURRENT_ALEMBIC_REVISION = "85be358dde52"
+CURRENT_ALEMBIC_REVISION = "f03b57417775"
 ALEMBIC_VERSION_TABLE = "alembic_version"
 
 

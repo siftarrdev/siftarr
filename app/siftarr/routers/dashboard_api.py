@@ -133,7 +133,7 @@ async def search_season_packs(
     season_number: int,
     db: AsyncSession = Depends(get_db),
 ) -> JSONResponse:
-    """Search for season packs for a specific season."""
+    """Compatibility/debug endpoint for inspecting one season-pack bucket."""
     request = await load_request_or_404(db, request_id)
     validate_tv_request(request)
     service = SearchService(db)
@@ -149,7 +149,7 @@ async def search_multi_season_packs(
     request_id: int,
     db: AsyncSession = Depends(get_db),
 ) -> JSONResponse:
-    """Search broadly for TV multi-season packs without downloading anything."""
+    """Compatibility/debug endpoint for inspecting multi-season/series-pack buckets."""
     request = await load_request_or_404(db, request_id)
     validate_tv_request(request)
     service = SearchService(db)
@@ -167,7 +167,7 @@ async def search_episode(
     episode_number: int,
     db: AsyncSession = Depends(get_db),
 ) -> JSONResponse:
-    """Search for a specific episode."""
+    """Compatibility/debug endpoint for inspecting one episode bucket."""
     request = await load_request_or_404(db, request_id)
     validate_tv_request(request)
     service = SearchService(db)

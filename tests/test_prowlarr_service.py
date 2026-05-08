@@ -2,11 +2,23 @@
 
 import pytest
 
+from app.siftarr.config import Settings
 from app.siftarr.services.prowlarr_service import (
     ProwlarrRelease,
     ProwlarrSearchResult,
     ProwlarrService,
 )
+
+
+def _release(index: int) -> ProwlarrRelease:
+    return ProwlarrRelease(
+        title=f"The Rookie S01E{index:02d}",
+        size=1000,
+        seeders=1,
+        leechers=0,
+        download_url=f"http://example.com/{index}",
+        indexer="IPTorrents",
+    )
 
 
 class TestProwlarrService:
@@ -234,6 +246,31 @@ class TestProwlarrService:
 
         assert query == "Example Show S08 2024"
 
+    def test_build_tv_season_strategy_queries_for_iptorrents(self) -> None:
+        """Season strategies should produce IPTorrents-compatible query params."""
+        service = ProwlarrService(Settings(prowlarr_tv_strategy_tvdb_enabled=True))
+
+        strategies = service._tv_season_strategy_queries(
+            "The Rookie", 1, imdbid="tt7587890", tvdbid=350665
+        )
+
+        assert strategies == [
+            ("title_sxx", "search", "The Rookie S01"),
+            ("imdb_season", "tvsearch", "The Rookie {imdbid:7587890} {season:1}"),
+            ("title_season_token", "tvsearch", "The Rookie {season:1}"),
+            ("tvdb_season", "tvsearch", "The Rookie {tvdbid:350665} {season:1}"),
+        ]
+
+    def test_build_tv_season_strategy_queries_skip_unavailable_optional_metadata(self) -> None:
+        service = ProwlarrService(Settings(prowlarr_tv_strategy_tvdb_enabled=True))
+
+        strategies = service._tv_season_strategy_queries("The Rookie", 1)
+
+        assert [strategy[0] for strategy in strategies] == [
+            "title_sxx",
+            "title_season_token",
+        ]
+
     @pytest.mark.asyncio
     async def test_search_by_tmdbid_falls_back_to_title_query(self, monkeypatch) -> None:
         """Movie search should retry with a title query when metadata search is empty."""
@@ -370,3 +407,172 @@ class TestProwlarrService:
         # Should only have 1 release despite multiple queries returning same URL
         assert len(result.releases) == 1
         assert result.releases[0].download_url == "http://example.com/same"
+
+    @pytest.mark.asyncio
+    async def test_search_tv_season_page_sets_offset_without_limit(self, monkeypatch) -> None:
+        service = ProwlarrService(Settings(prowlarr_tv_page_size=100))
+        calls = []
+
+        async def fake_search(params, **kwargs):
+            calls.append(params)
+            return ProwlarrSearchResult(releases=[_release(1)], query_time_ms=10)
+
+        monkeypatch.setattr(service, "_search", fake_search)
+
+        result = await service.search_tv_season_page("The Rookie", 1, "title_sxx", offset=100)
+
+        assert calls == [
+            {
+                "type": "search",
+                "query": "The Rookie S01",
+                "categories": [5000],
+                "offset": 100,
+            }
+        ]
+        assert "limit" not in calls[0]
+        assert result.offset == 100
+        assert result.page_size == 100
+        assert result.page_count == 1
+        assert result.is_short_page is True
+        assert result.query_strategy == "title_sxx"
+
+    @pytest.mark.asyncio
+    async def test_search_tv_season_sweep_increments_offsets_and_stops_on_short_page(
+        self, monkeypatch
+    ) -> None:
+        service = ProwlarrService(
+            Settings(
+                prowlarr_tv_page_size=100,
+                prowlarr_tv_max_pages_per_query=6,
+                prowlarr_tv_max_results_per_season=600,
+                prowlarr_tv_strategy_imdb_enabled=False,
+                prowlarr_tv_strategy_title_season_token_enabled=False,
+            )
+        )
+        calls = []
+
+        async def fake_search(params, **kwargs):
+            calls.append(params)
+            count = 100 if params["offset"] in {0, 100} else 54
+            return ProwlarrSearchResult(
+                releases=[_release(params["offset"] + i) for i in range(count)],
+                query_time_ms=10,
+            )
+
+        monkeypatch.setattr(service, "_search", fake_search)
+
+        result = await service.search_tv_season_sweep("The Rookie", 1)
+
+        assert [call["offset"] for call in calls] == [0, 100, 200]
+        assert all("limit" not in call for call in calls)
+        assert len(result.releases) == 254
+
+    @pytest.mark.asyncio
+    async def test_search_tv_season_sweep_stops_on_empty_page(self, monkeypatch) -> None:
+        service = ProwlarrService(
+            Settings(
+                prowlarr_tv_page_size=100,
+                prowlarr_tv_strategy_imdb_enabled=False,
+                prowlarr_tv_strategy_title_season_token_enabled=False,
+            )
+        )
+        calls = []
+
+        async def fake_search(params, **kwargs):
+            calls.append(params)
+            releases = [_release(i) for i in range(100)] if params["offset"] == 0 else []
+            return ProwlarrSearchResult(releases=releases, query_time_ms=10)
+
+        monkeypatch.setattr(service, "_search", fake_search)
+
+        result = await service.search_tv_season_sweep("The Rookie", 1)
+
+        assert [call["offset"] for call in calls] == [0, 100]
+        assert len(result.releases) == 100
+
+    @pytest.mark.asyncio
+    async def test_search_tv_season_sweep_honors_max_pages(self, monkeypatch) -> None:
+        service = ProwlarrService(
+            Settings(
+                prowlarr_tv_page_size=100,
+                prowlarr_tv_max_pages_per_query=2,
+                prowlarr_tv_max_results_per_season=1000,
+                prowlarr_tv_strategy_imdb_enabled=False,
+                prowlarr_tv_strategy_title_season_token_enabled=False,
+            )
+        )
+        calls = []
+
+        async def fake_search(params, **kwargs):
+            calls.append(params)
+            return ProwlarrSearchResult(
+                releases=[_release(i) for i in range(100)], query_time_ms=10
+            )
+
+        monkeypatch.setattr(service, "_search", fake_search)
+
+        result = await service.search_tv_season_sweep("The Rookie", 1)
+
+        assert [call["offset"] for call in calls] == [0, 100]
+        assert len(result.releases) == 200
+
+    @pytest.mark.asyncio
+    async def test_search_tv_season_sweep_honors_max_results(self, monkeypatch) -> None:
+        service = ProwlarrService(
+            Settings(
+                prowlarr_tv_page_size=100,
+                prowlarr_tv_max_pages_per_query=6,
+                prowlarr_tv_max_results_per_season=150,
+                prowlarr_tv_strategy_imdb_enabled=False,
+                prowlarr_tv_strategy_title_season_token_enabled=False,
+            )
+        )
+        calls = []
+
+        async def fake_search(params, **kwargs):
+            calls.append(params)
+            return ProwlarrSearchResult(
+                releases=[_release(i) for i in range(100)], query_time_ms=10
+            )
+
+        monkeypatch.setattr(service, "_search", fake_search)
+
+        result = await service.search_tv_season_sweep("The Rookie", 1)
+
+        assert [call["offset"] for call in calls] == [0, 100]
+        assert len(result.releases) == 150
+
+    @pytest.mark.asyncio
+    async def test_search_tv_season_sweep_keeps_title_and_imdb_when_tvdb_empty(
+        self, monkeypatch
+    ) -> None:
+        """IPTorrents can return 0 for TVDB while title/IMDb strategies succeed."""
+        service = ProwlarrService(
+            Settings(
+                prowlarr_tv_page_size=100,
+                prowlarr_tv_max_pages_per_query=1,
+                prowlarr_tv_strategy_title_season_token_enabled=False,
+                prowlarr_tv_strategy_tvdb_enabled=True,
+            )
+        )
+        calls = []
+
+        async def fake_search(params, **kwargs):
+            calls.append(params)
+            query = params["query"]
+            if "{tvdbid:" in query:
+                return ProwlarrSearchResult(releases=[], query_time_ms=10)
+            return ProwlarrSearchResult(releases=[_release(len(calls))], query_time_ms=10)
+
+        monkeypatch.setattr(service, "_search", fake_search)
+
+        result = await service.search_tv_season_sweep(
+            "The Rookie", 1, imdbid="tt7587890", tvdbid=350665
+        )
+
+        assert [call["query"] for call in calls] == [
+            "The Rookie S01",
+            "The Rookie {imdbid:7587890} {season:1}",
+            "The Rookie {tvdbid:350665} {season:1}",
+        ]
+        assert len(result.releases) == 2

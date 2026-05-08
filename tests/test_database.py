@@ -1,6 +1,7 @@
 """Tests for database module."""
 
 import sqlite3
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -43,6 +44,8 @@ class TestInitDb:
             assert "episodes" in tables
             assert "app_settings" in tables
             assert "alembic_version" in tables
+            release_columns = {row[1] for row in connection.execute("PRAGMA table_info(releases)")}
+            assert "search_source" in release_columns
         finally:
             connection.close()
 
@@ -193,8 +196,6 @@ class TestDatabaseHelpers:
 
     def test_inspect_returns_empty_for_nonexistent_db(self):
         """_inspect_sqlite_database should return empty sets for missing files."""
-        from pathlib import Path
-
         from app.siftarr.database import _inspect_sqlite_database
 
         tables, revision = _inspect_sqlite_database(Path("/nonexistent/path.db"))
@@ -211,5 +212,16 @@ class TestDatabaseHelpers:
         """CURRENT_ALEMBIC_REVISION should be a non-empty string."""
         from app.siftarr.database import CURRENT_ALEMBIC_REVISION
 
-        assert CURRENT_ALEMBIC_REVISION
-        assert isinstance(CURRENT_ALEMBIC_REVISION, str)
+        assert CURRENT_ALEMBIC_REVISION == "f03b57417775"
+
+    def test_alembic_history_is_single_initial_revision(self):
+        """Alembic history should contain only the complete initial migration."""
+
+        versions = list(Path("db/alembic/versions").glob("*.py"))
+        assert len(versions) == 1, versions
+
+        text = versions[0].read_text()
+        assert 'revision: str = "f03b57417775"' in text
+        assert "down_revision: str | None = None" in text
+        assert "Base.metadata.create_all" in text
+        assert "search_source" in text or "Base.metadata.create_all" in text

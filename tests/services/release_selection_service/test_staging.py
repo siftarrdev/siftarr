@@ -45,6 +45,39 @@ async def test_use_releases_marks_manual_selection_source(
     queue_service.remove_from_queue.assert_awaited_once_with(request_record.id)
 
 
+@patch.object(svc, "PendingQueueService")
+@patch.object(svc, "get_settings")
+@pytest.mark.asyncio
+async def test_use_releases_batches_staging_commit(
+    mock_get_settings, mock_pq_cls, mock_db, request_record, selected_release
+):
+    settings = MagicMock(staging_mode_enabled=True)
+    mock_get_settings.return_value = settings
+    queue_service = AsyncMock()
+    mock_pq_cls.return_value = queue_service
+    mock_db.execute.return_value = MagicMock(
+        scalar_one_or_none=MagicMock(return_value=None),
+        scalars=MagicMock(return_value=MagicMock(all=MagicMock(return_value=[]))),
+    )
+    second_release = MagicMock(**selected_release.__dict__)
+    second_release.title = "User Pick 2"
+
+    staged_records = [MagicMock(id=33), MagicMock(id=34)]
+    with patch.object(
+        StagingService, "save_release", new_callable=AsyncMock, side_effect=staged_records
+    ) as mock_save:
+        result = await StagingService(mock_db).use_releases(
+            request_record,
+            [selected_release, second_release],
+            selection_source="manual",
+        )
+
+    assert result["staged_ids"] == [33, 34]
+    assert mock_save.await_count == 2
+    assert all(call.kwargs["commit"] is False for call in mock_save.await_args_list)
+    mock_db.commit.assert_awaited_once()
+
+
 @patch.object(svc, "QbittorrentService")
 @patch.object(svc, "PendingQueueService")
 @patch.object(svc, "get_settings")

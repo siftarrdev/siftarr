@@ -2,13 +2,15 @@
 // ==========================
 // This file imports all dashboard modules and initializes the application.
 
-import './dashboard/core.js';
-import './dashboard/releases.js';
-import './dashboard/filters.js';
-import './dashboard/details.js';
-import './dashboard/staged.js';
-import './dashboard/modals.js';
-import './dashboard/search_sse.js';
+const moduleVersion = encodeURIComponent(window.siftarrStaticVersion || Date.now().toString());
+
+await import(`./dashboard/core.js?v=${moduleVersion}`);
+await import(`./dashboard/releases.js?v=${moduleVersion}`);
+await import(`./dashboard/filters.js?v=${moduleVersion}`);
+await import(`./dashboard/details.js?v=${moduleVersion}`);
+await import(`./dashboard/staged.js?v=${moduleVersion}`);
+await import(`./dashboard/modals.js?v=${moduleVersion}`);
+await import(`./dashboard/search_sse.js?v=${moduleVersion}`);
 
 // Column Resizer Class - Must be defined here as it's used across modules
 class ColumnResizer {
