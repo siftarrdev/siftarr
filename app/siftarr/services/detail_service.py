@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from typing import Any
 
 from fastapi import BackgroundTasks
@@ -30,6 +31,8 @@ from app.siftarr.services.release_serializers import (
 from app.siftarr.services.release_storage import build_prowlarr_release
 from app.siftarr.services.rule_engine import RuleEngine, get_cached_engine, set_cached_engine
 from app.siftarr.services.tv_enrichment_service import TVEnrichmentService
+
+logger = logging.getLogger(__name__)
 
 
 class DetailService:
@@ -151,6 +154,15 @@ class DetailService:
             .limit(limit)
         )
         releases = list(release_result.scalars().all())
+        logger.info(
+            "Stored releases loaded from DB: request_id=%s media_type=%s offset=%s limit=%s count=%s total=%s source=db",
+            request_id,
+            media_type.value,
+            offset,
+            limit,
+            len(releases),
+            total_count,
+        )
         engine = await self._build_rule_engine(media_type=media_type.value)
         return (
             finalize_releases(

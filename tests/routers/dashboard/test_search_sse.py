@@ -48,6 +48,37 @@ async def test_stream_search_request_yields_phases_and_result(mock_db, monkeypat
 
 
 @pytest.mark.asyncio
+async def test_stream_search_request_tv_search_all_reload_signal(mock_db, monkeypatch):
+    """Request-level TV stream is the Search All path and tells clients to reload DB buckets."""
+    request_record = MagicMock()
+    request_record.title = "Test Show"
+    request_record.year = 2020
+    request_record.tmdb_id = 123
+    request_record.media_type = MediaType.TV
+
+    async def fake_load(db, req_id):
+        return request_record
+
+    monkeypatch.setattr(search_sse, "load_request_or_404", fake_load)
+
+    process_search = AsyncMock(return_value={"status": "staged", "message": "Selected pack"})
+    monkeypatch.setattr(search_service_mod.SearchService, "process_request_search", process_search)
+
+    response = await search_sse.stream_search_request(request_id=1, db=mock_db)
+    chunks = []
+    async for chunk in response.body_iterator:
+        chunks.append(chunk)
+    body = "".join(chunks)
+
+    process_search.assert_awaited_once_with(request_record)
+    assert "Starting TV Search All for Test Show" in body
+    assert "Sweeping requested seasons across indexer pages" in body
+    assert "evaluated releases, applied auto-stage/select rules" in body
+    assert '"reload_details": true' in body
+    assert '"buckets_source": "db"' in body
+
+
+@pytest.mark.asyncio
 async def test_stream_search_request_handles_exception(mock_db, monkeypatch):
     async def fake_load(db, req_id):
         raise RuntimeError("Prowlarr down")
@@ -160,6 +191,7 @@ async def test_stream_bulk_search_reports_request_failure_and_continues(mock_db,
 
 @pytest.mark.asyncio
 async def test_stream_tv_season_pack_search(mock_db, monkeypatch):
+    """Granular season-pack stream remains available for compatibility/debug."""
     request_record = MagicMock()
     request_record.media_type = MediaType.TV
     request_record.tvdb_id = 999
@@ -199,6 +231,7 @@ async def test_stream_tv_season_pack_search(mock_db, monkeypatch):
 
 @pytest.mark.asyncio
 async def test_stream_tv_multi_season_search(mock_db, monkeypatch):
+    """Granular multi-season stream remains available for compatibility/debug."""
     request_record = MagicMock()
     request_record.media_type = MediaType.TV
     request_record.tvdb_id = 999
@@ -238,6 +271,7 @@ async def test_stream_tv_multi_season_search(mock_db, monkeypatch):
 
 @pytest.mark.asyncio
 async def test_stream_tv_episode_search(mock_db, monkeypatch):
+    """Granular episode stream remains available for compatibility/debug."""
     request_record = MagicMock()
     request_record.media_type = MediaType.TV
     request_record.tvdb_id = 999

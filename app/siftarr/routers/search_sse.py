@@ -7,6 +7,7 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.siftarr.database import get_db
+from app.siftarr.models.request import MediaType
 from app.siftarr.models.request import Request as RequestModel
 from app.siftarr.routers.dashboard_actions import _load_all_pending_search_requests
 from app.siftarr.services.dashboard_service import (
@@ -24,11 +25,17 @@ router = APIRouter(prefix="/requests", tags=["search-sse"])
 async def _search_request_generator(request_id: int, db: AsyncSession):
     try:
         request = await load_request_or_404(db, request_id)
+        if request.media_type == MediaType.TV:
+            logger.info(
+                "TV Search All stream started: request_id=%s title=%s source=prowlarr",
+                request_id,
+                request.title,
+            )
         yield serialize_sse(
             build_sse_progress(
                 "starting",
                 percent=5,
-                message=f"Starting search for {request.title}…",
+                message=f"Starting {'TV Search All' if request.media_type == MediaType.TV else 'search'} for {request.title}…",
             )
         )
         if request.year is None and (request.tmdb_id or request.tvdb_id):
@@ -42,16 +49,43 @@ async def _search_request_generator(request_id: int, db: AsyncSession):
             build_sse_progress(
                 "searching",
                 percent=50,
-                message="Querying indexers and evaluating releases…",
+                message="Sweeping requested seasons across indexer pages…"
+                if request.media_type == MediaType.TV
+                else "Querying indexers and evaluating releases…",
             )
         )
         service = SearchService(db)
         result = await service.process_request_search(request)
+        if request.media_type == MediaType.TV:
+            complete_message = (
+                "TV Search All complete: evaluated releases, applied auto-stage/select rules, "
+                "and refreshed DB-backed buckets."
+            )
+            logger.info(
+                "TV Search All stream done: request_id=%s title=%s status=%s source=prowlarr",
+                request_id,
+                request.title,
+                result.get("status"),
+            )
+        else:
+            complete_message = result.get("message", "Search complete")
+        if request.media_type == MediaType.TV:
+            yield serialize_sse(
+                build_sse_progress(
+                    "complete",
+                    percent=100,
+                    message=complete_message,
+                    result=result,
+                    reload_details=True,
+                    buckets_source="db",
+                )
+            )
+            return
         yield serialize_sse(
             build_sse_progress(
                 "complete",
                 percent=100,
-                message=result.get("message", "Search complete"),
+                message=complete_message,
                 result=result,
             )
         )
@@ -144,6 +178,7 @@ async def _bulk_search_generator(
 
 
 async def _tv_season_pack_generator(request_id: int, season_number: int, db: AsyncSession):
+    """Compatibility/debug stream for inspecting cached/refreshed season-pack rows."""
     try:
         yield serialize_sse(build_sse_progress("starting", percent=5))
         request = await load_request_or_404(db, request_id)
@@ -176,6 +211,7 @@ async def _tv_season_pack_generator(request_id: int, season_number: int, db: Asy
 
 
 async def _tv_multi_season_generator(request_id: int, db: AsyncSession):
+    """Compatibility/debug stream for inspecting cached/refreshed multi-season rows."""
     try:
         yield serialize_sse(build_sse_progress("starting", percent=5))
         request = await load_request_or_404(db, request_id)
@@ -207,6 +243,7 @@ async def _tv_multi_season_generator(request_id: int, db: AsyncSession):
 async def _tv_episode_generator(
     request_id: int, season_number: int, episode_number: int, db: AsyncSession
 ):
+    """Compatibility/debug stream for inspecting cached/refreshed episode rows."""
     try:
         yield serialize_sse(build_sse_progress("starting", percent=5))
         request = await load_request_or_404(db, request_id)
@@ -263,6 +300,7 @@ async def stream_search_request(
     request_id: int,
     db: AsyncSession = Depends(get_db),
 ):
+    """Primary dashboard search stream; TV requests use this as Search All."""
     return StreamingResponse(
         _search_request_generator(request_id, db),
         media_type="text/event-stream",
@@ -280,6 +318,7 @@ async def stream_tv_season_pack_search(
     season_number: int,
     db: AsyncSession = Depends(get_db),
 ):
+    """Compatibility/debug SSE endpoint; normal TV UX uses /{id}/search/stream."""
     return StreamingResponse(
         _tv_season_pack_generator(request_id, season_number, db),
         media_type="text/event-stream",
@@ -296,6 +335,7 @@ async def stream_tv_multi_season_search(
     request_id: int,
     db: AsyncSession = Depends(get_db),
 ):
+    """Compatibility/debug SSE endpoint; normal TV UX uses /{id}/search/stream."""
     return StreamingResponse(
         _tv_multi_season_generator(request_id, db),
         media_type="text/event-stream",
@@ -314,6 +354,7 @@ async def stream_tv_episode_search(
     episode_number: int,
     db: AsyncSession = Depends(get_db),
 ):
+    """Compatibility/debug SSE endpoint; normal TV UX uses /{id}/search/stream."""
     return StreamingResponse(
         _tv_episode_generator(request_id, season_number, episode_number, db),
         media_type="text/event-stream",

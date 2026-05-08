@@ -48,7 +48,6 @@ async function openRequestDetails(requestId, explicitIndex = null, options = {})
     }
     if (tvSearchBtn) {
         tvSearchBtn.classList.add('hidden');
-        window.closeTvSearchScopeMenu();
     }
     window.currentTvSeasons = [];
     window.updateActiveStageBanner({ active_staged_torrent: null });
@@ -119,7 +118,6 @@ async function openRequestDetails(requestId, explicitIndex = null, options = {})
 
         if (data.request.media_type === 'tv' && data.tv_info) {
             window.currentTvSeasons = data.tv_info.seasons || [];
-            window.populateTvSearchScopeMenu();
             document.getElementById('release-results-header').classList.add('hidden');
             document.getElementById('release-filter-input').classList.add('hidden');
             if (cacheIndicator) cacheIndicator.classList.add('hidden');
@@ -154,6 +152,30 @@ async function openRequestDetails(requestId, explicitIndex = null, options = {})
         window.setPoster(null, 'Poster unavailable');
         releases.innerHTML = '<div class="text-red-400 text-sm">Failed to load request details. Check that Overseerr is reachable.</div>';
     }
+}
+
+async function searchTvRequestAll() {
+    if (!window.currentRequestId) return;
+    const btn = document.getElementById('request-details-tv-search-btn');
+    const originalText = btn ? btn.innerHTML : '';
+    if (btn) {
+        btn.disabled = true;
+        btn.textContent = 'Searching...';
+    }
+    const detailsTitle = document.getElementById('request-details-title')?.textContent?.trim() || 'TV Search All';
+    const streamUrl = '/requests/' + window.currentRequestId + '/search/stream';
+    window.startTvSearchProgress(streamUrl, 'TV Search All: ' + detailsTitle, async function() {
+        await window.openRequestDetails(window.currentRequestId, window.currentDetailsIndex, { preserveUiState: true });
+        if (btn) {
+            btn.disabled = false;
+            btn.innerHTML = originalText || 'Refresh Search';
+        }
+    }, function() {
+        if (btn) {
+            btn.disabled = false;
+            btn.innerHTML = originalText || 'Refresh Search';
+        }
+    });
 }
 
 async function refreshPlexAndReload() {
@@ -312,3 +334,4 @@ function renderTimeline(timelineData) {
 window.openRequestDetails = openRequestDetails;
 window.refreshPlexAndReload = refreshPlexAndReload;
 window.searchRequestFromDetails = searchRequestFromDetails;
+window.searchTvRequestAll = searchTvRequestAll;

@@ -83,6 +83,8 @@ class ProwlarrSearchResult(BaseModel):
     page_count: int | None = None
     is_short_page: bool | None = None
     query_strategy: str | None = None
+    source: str | None = None
+    hit_limit: bool = False
 
 
 class ProwlarrService:
@@ -246,14 +248,15 @@ class ProwlarrService:
             cached = _cache_get(cache_key)
             if cached is not None:
                 logger.info(
-                    "Prowlarr search cache hit: type=%s query=%s categories=%s",
+                    "Prowlarr search results loaded: source=cache type=%s query=%s categories=%s count=%s",
                     params.get("type"),
                     params.get("query"),
                     params.get("categories"),
+                    len(cached.releases),
                 )
-                return cached
+                return cached.model_copy(update={"source": "cache"})
 
-        logger.info(
+        logger.debug(
             "Prowlarr search request: type=%s query=%s categories=%s",
             params.get("type"),
             params.get("query"),
@@ -274,7 +277,7 @@ class ProwlarrService:
                 results = response.json()
                 for release_data in self._extract_release_items(results):
                     releases.append(self._parse_release_info(release_data))
-                logger.info(
+                logger.debug(
                     "Prowlarr search response: type=%s query=%s releases=%s elapsed_ms=%s",
                     params.get("type"),
                     params.get("query"),
@@ -288,6 +291,7 @@ class ProwlarrService:
                         releases=releases,
                         query_time_ms=int((time_module.time() - start_time) * 1000),
                         error=None,
+                        source="prowlarr",
                     )
                     _cache_set(cache_key, result_to_cache)
             else:
@@ -310,6 +314,7 @@ class ProwlarrService:
             releases=releases,
             query_time_ms=int((time_module.time() - start_time) * 1000),
             error=error_message,
+            source="prowlarr",
         )
 
     @staticmethod
@@ -518,6 +523,7 @@ class ProwlarrService:
         tvdbid: int | None = None,
         categories: list[int] | None = None,
         cacheable: bool = True,
+        request_id: int | None = None,
     ) -> ProwlarrSearchResult:
         """Search one TV season strategy page with caller-controlled offset."""
         if categories is None:
@@ -559,6 +565,18 @@ class ProwlarrService:
         result.page_count = len(result.releases)
         result.is_short_page = len(result.releases) < page_size
         result.query_strategy = strategy
+        logger.info(
+            "TV season page received: request_id=%s title=%s season=%s strategy=%s offset=%s count=%s page_size=%s short_page=%s source=%s",
+            request_id,
+            title,
+            season,
+            strategy,
+            offset,
+            len(result.releases),
+            page_size,
+            result.is_short_page,
+            result.source or "prowlarr",
+        )
         return result
 
     async def search_tv_season_sweep(
@@ -569,6 +587,7 @@ class ProwlarrService:
         tvdbid: int | None = None,
         categories: list[int] | None = None,
         cacheable: bool = True,
+        request_id: int | None = None,
     ) -> ProwlarrSearchResult:
         """Run bounded paginated TV season strategy searches."""
         if categories is None:
@@ -579,12 +598,24 @@ class ProwlarrService:
         max_results = self.settings.prowlarr_tv_max_results_per_season
         total_query_time_ms = 0
         all_releases: list[ProwlarrRelease] = []
+        hit_limit = False
+
+        logger.info(
+            "TV season sweep started: request_id=%s title=%s season=%s source=prowlarr page_size=%s max_pages=%s max_results=%s",
+            request_id,
+            title,
+            season,
+            page_size,
+            max_pages,
+            max_results,
+        )
 
         for strategy, _, _ in self._tv_season_strategy_queries(
             title, season, imdbid=imdbid, tvdbid=tvdbid
         ):
             for page in range(max_pages):
                 if len(all_releases) >= max_results:
+                    hit_limit = True
                     break
                 result = await self.search_tv_season_page(
                     title,
@@ -595,19 +626,35 @@ class ProwlarrService:
                     tvdbid=tvdbid,
                     categories=categories,
                     cacheable=cacheable,
+                    request_id=request_id,
                 )
                 total_query_time_ms += result.query_time_ms
                 remaining = max_results - len(all_releases)
                 all_releases.extend(result.releases[:remaining])
+                if len(result.releases) > remaining or len(all_releases) >= max_results:
+                    hit_limit = True
                 if result.error or result.is_short_page:
                     break
+            else:
+                hit_limit = True
 
+        logger.info(
+            "TV season sweep done: request_id=%s title=%s season=%s total_results=%s hit_limit=%s elapsed_ms=%s source=prowlarr",
+            request_id,
+            title,
+            season,
+            len(all_releases),
+            hit_limit,
+            total_query_time_ms,
+        )
         return ProwlarrSearchResult(
             releases=all_releases,
             query_time_ms=total_query_time_ms,
             error=None if all_releases else "No releases found",
             page_size=page_size,
             page_count=len(all_releases),
+            source="prowlarr",
+            hit_limit=hit_limit,
         )
 
     async def _broad_tv_search(

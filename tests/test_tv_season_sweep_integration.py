@@ -99,6 +99,109 @@ class RejectNamedRuleEngine(RuleEngine):
         )
 
 
+class FakeCappedEpisodeGapProwlarr(ProwlarrService):
+    def __init__(self) -> None:
+        super().__init__(Settings())
+        self.swept_seasons: list[int] = []
+        self.exact_episode_calls: list[tuple[int, int]] = []
+
+    async def search_tv_season_sweep(
+        self,
+        title: str,
+        season: int,
+        imdbid: str | int | None = None,
+        tvdbid: int | None = None,
+        categories: list[int] | None = None,
+        cacheable: bool = True,
+        request_id: int | None = None,
+    ) -> ProwlarrSearchResult:
+        self.swept_seasons.append(season)
+        return ProwlarrSearchResult(
+            releases=[_release("Show.S02E02.1080p", 2, info_hash="s02e02-sweep")],
+            query_time_ms=10,
+            hit_limit=True,
+        )
+
+    async def search_by_tvdbid(
+        self,
+        tvdbid: int,
+        title: str | None = None,
+        season: int | None = None,
+        episode: int | None = None,
+        year: int | None = None,
+        categories: list[int] | None = None,
+        cacheable: bool = True,
+    ) -> ProwlarrSearchResult:
+        assert season is not None and episode is not None
+        self.exact_episode_calls.append((season, episode))
+        return ProwlarrSearchResult(
+            releases=[_release("Show.S02E01.1080p", 1, info_hash="s02e01-exact")],
+            query_time_ms=10,
+        )
+
+
+class FakeCappedGeorgieProwlarr(ProwlarrService):
+    def __init__(self) -> None:
+        super().__init__(Settings())
+        self.swept_seasons: list[int] = []
+        self.exact_episode_calls: list[tuple[int, int]] = []
+
+    async def search_tv_season_sweep(
+        self,
+        title: str,
+        season: int,
+        imdbid: str | int | None = None,
+        tvdbid: int | None = None,
+        categories: list[int] | None = None,
+        cacheable: bool = True,
+        request_id: int | None = None,
+    ) -> ProwlarrSearchResult:
+        self.swept_seasons.append(season)
+        if season == 1:
+            releases = [
+                _release(
+                    "Georgie.And.Mandys.First.Marriage.S01E01.1080p.WEB-DL",
+                    101,
+                    info_hash="georgie-s01e01",
+                )
+            ]
+        else:
+            releases = [
+                _release(
+                    f"Georgie.and.Mandys.First.Marriage.S02E{episode:02d}.1080p.WEB-DL",
+                    episode,
+                    info_hash=f"georgie-s02e{episode:02d}-sweep",
+                )
+                for episode in range(12, 19)
+            ]
+        return ProwlarrSearchResult(releases=releases, query_time_ms=10, hit_limit=True)
+
+    async def search_by_tvdbid(
+        self,
+        tvdbid: int,
+        title: str | None = None,
+        season: int | None = None,
+        episode: int | None = None,
+        year: int | None = None,
+        categories: list[int] | None = None,
+        cacheable: bool = True,
+    ) -> ProwlarrSearchResult:
+        assert season is not None and episode is not None
+        self.exact_episode_calls.append((season, episode))
+        if (season, episode) == (2, 1):
+            return ProwlarrSearchResult(
+                releases=[
+                    _release(
+                        "Georgie.And.Mandys.First.Marriage.S02E01.1080p.WEB-DL",
+                        1,
+                        info_hash="georgie-s02e01-fallback",
+                    )
+                ],
+                query_time_ms=10,
+            )
+        return ProwlarrSearchResult(releases=[], query_time_ms=10)
+
+
 @pytest.mark.asyncio
 async def test_tv_request_season_sweep_persists_buckets_and_statuses(monkeypatch) -> None:
     engine = create_async_engine("sqlite+aiosqlite:///:memory:")
@@ -181,5 +284,161 @@ async def test_tv_request_season_sweep_persists_buckets_and_statuses(monkeypatch
                 release["title"] == "Show.S01-S02.1080p"
                 for release in details.tv_info.releases_by_season["2"]
             )
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_capped_season_sweep_exact_fallback_fills_detail_episode_bucket(
+    monkeypatch,
+) -> None:
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+    session_maker = async_sessionmaker(engine, expire_on_commit=False)
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+
+    try:
+        async with session_maker() as db:
+            request = Request(
+                external_id="tv-gap",
+                media_type=MediaType.TV,
+                tmdb_id=999,
+                tvdb_id=12345,
+                title="Show",
+                year=2024,
+                status=RequestStatus.PENDING,
+            )
+            s2 = Season(season_number=2, status=RequestStatus.PENDING)
+            s3 = Season(season_number=3, status=RequestStatus.PENDING)
+            s2.episodes = [
+                Episode(episode_number=1, title="S2E1", air_date=date(2024, 2, 1)),
+                Episode(episode_number=2, title="S2E2", air_date=date(2024, 2, 8)),
+            ]
+            request.seasons = [s2, s3]
+            db.add(request)
+            await db.commit()
+
+            class FakeStagingService:
+                def __init__(self, _db):
+                    pass
+
+                async def use_releases(self, _request, _releases, *, selection_source: str):
+                    return {"status": "staged", "message": "staged"}
+
+            monkeypatch.setattr(
+                "app.siftarr.services.tv_decision_service.StagingService", FakeStagingService
+            )
+
+            prowlarr = FakeCappedEpisodeGapProwlarr()
+            service = TVDecisionService(db, prowlarr, QbittorrentService())
+
+            async def fake_rule_engine() -> RejectNamedRuleEngine:
+                return RejectNamedRuleEngine()
+
+            monkeypatch.setattr(service, "_get_rule_engine", fake_rule_engine)
+
+            result = await service.process_request(request.id)
+
+            assert result["status"] == "staged"
+            assert prowlarr.swept_seasons == [2]
+            assert prowlarr.exact_episode_calls == [(2, 1)]
+
+            stored = (await db.execute(select(Release))).scalars().all()
+            assert {release.title for release in stored} == {
+                "Show.S02E01.1080p",
+                "Show.S02E02.1080p",
+            }
+
+            details = await DetailService(db).load_request_details(
+                request,
+                request_id=request.id,
+                background_tasks=BackgroundTasks(),
+                limit=25,
+            )
+            assert details.tv_info is not None
+            assert set(details.tv_info.releases_by_episode) == {"2-1", "2-2"}
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_capped_georgie_fallback_preserves_sweep_episode_rows_in_db_and_details(
+    monkeypatch,
+) -> None:
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+    session_maker = async_sessionmaker(engine, expire_on_commit=False)
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+
+    try:
+        async with session_maker() as db:
+            request = Request(
+                external_id="tv-georgie-capped",
+                media_type=MediaType.TV,
+                tmdb_id=999,
+                tvdb_id=12345,
+                title="Georgie & Mandy's First Marriage",
+                year=2024,
+                status=RequestStatus.PENDING,
+            )
+            s1 = Season(season_number=1, status=RequestStatus.PENDING)
+            s1.episodes = [Episode(episode_number=1, title="S1E1", air_date=date(2024, 1, 1))]
+            s2 = Season(season_number=2, status=RequestStatus.PENDING)
+            s2.episodes = [
+                Episode(episode_number=i, title=f"S2E{i}", air_date=date(2024, 2, 1))
+                for i in range(1, 23)
+            ]
+            request.seasons = [s1, s2]
+            db.add(request)
+            await db.commit()
+
+            class FakeStagingService:
+                def __init__(self, _db):
+                    pass
+
+                async def use_releases(self, _request, _releases, *, selection_source: str):
+                    return {"status": "staged", "message": "staged"}
+
+            monkeypatch.setattr(
+                "app.siftarr.services.tv_decision_service.StagingService", FakeStagingService
+            )
+
+            prowlarr = FakeCappedGeorgieProwlarr()
+            service = TVDecisionService(db, prowlarr, QbittorrentService())
+
+            async def fake_rule_engine() -> RejectNamedRuleEngine:
+                return RejectNamedRuleEngine()
+
+            monkeypatch.setattr(service, "_get_rule_engine", fake_rule_engine)
+
+            result = await service.process_request(request.id)
+
+            assert result["status"] == "staged"
+            assert prowlarr.swept_seasons == [1, 2]
+            assert (2, 1) in prowlarr.exact_episode_calls
+            assert all(
+                (2, episode) not in prowlarr.exact_episode_calls for episode in range(12, 19)
+            )
+
+            stored = (await db.execute(select(Release))).scalars().all()
+            stored_titles = {release.title for release in stored}
+            assert "Georgie.And.Mandys.First.Marriage.S02E01.1080p.WEB-DL" in stored_titles
+            for episode in range(12, 19):
+                assert (
+                    f"Georgie.and.Mandys.First.Marriage.S02E{episode:02d}.1080p.WEB-DL"
+                    in stored_titles
+                )
+
+            details = await DetailService(db).load_request_details(
+                request,
+                request_id=request.id,
+                background_tasks=BackgroundTasks(),
+                limit=2,
+            )
+            assert details.tv_info is not None
+            s2_episode_keys = {
+                key for key in details.tv_info.releases_by_episode if key.startswith("2-")
+            }
+            assert {"2-1", *(f"2-{episode}" for episode in range(12, 19))} <= s2_episode_keys
     finally:
         await engine.dispose()

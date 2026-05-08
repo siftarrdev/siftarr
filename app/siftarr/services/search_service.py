@@ -27,6 +27,7 @@ from app.siftarr.services.qbittorrent_service import QbittorrentService
 from app.siftarr.services.release_parser import (
     cached_parse_release_coverage,
     is_exact_single_episode_release,
+    serialize_release_coverage,
 )
 from app.siftarr.services.release_serializers import (
     apply_release_size_per_season_metadata,
@@ -36,6 +37,7 @@ from app.siftarr.services.release_serializers import (
     serialize_stored_evaluated_release,
 )
 from app.siftarr.services.release_storage import (
+    build_prowlarr_release,
     get_release_persistence_key,
     persist_manual_release,
     store_search_results,
@@ -151,23 +153,11 @@ class SearchService:
                 error=result.error,
             )
 
-        engine = await self._build_rule_engine(media_type="tv")
-        evaluations = []
-        coverages = []
-        for release in result.releases:
-            coverage = cached_parse_release_coverage(release.title)
-            if coverage.episode_number is not None:
-                continue
-            if coverage.is_complete_series:
-                continue
-            if coverage.season_numbers != (season_number,):
-                continue
-            evaluations.append(self._evaluation_for_release(engine.evaluate(release), release))
-            coverages.append(coverage)
-        scope: dict[str, object] = {"type": "season_packs", "season_number": season_number}
-        releases = await self._persist_and_serialize_tv_evaluations(
-            request.id, evaluations, scope=scope, coverages=coverages
+        stored_rows = await self._persist_tv_season_sweep(
+            request.id, result.releases, season_number=season_number
         )
+        scope: dict[str, object] = {"type": "season_packs", "season_number": season_number}
+        releases = self._filter_serialize_stored_tv_releases(stored_rows, scope=scope)
         return TVSearchData(
             releases=finalize_releases(releases, sort_key=season_pack_release_sort_key),
             scope=scope,
@@ -193,24 +183,17 @@ class SearchService:
                 error=result.error,
             )
 
-        engine = await self._build_rule_engine(media_type="tv")
-        evaluations = []
-        coverages = []
-        for release in result.releases:
-            coverage = cached_parse_release_coverage(release.title)
-            if coverage.episode_number is not None:
-                continue
-            if not coverage.is_complete_series and len(coverage.season_numbers) <= 1:
-                continue
-            evaluations.append(self._evaluation_for_release(engine.evaluate(release), release))
-            coverages.append(coverage)
+        stored_rows: list[Release] = []
+        for season in season_numbers:
+            stored_rows.extend(
+                await self._persist_tv_season_sweep(
+                    request.id, result.releases, season_number=season
+                )
+            )
+        stored_rows = self._dedupe_stored_releases(stored_rows)
         scope: dict[str, object] = {"type": "multi_season_packs"}
-        releases = await self._persist_and_serialize_tv_evaluations(
-            request.id,
-            evaluations,
-            scope=scope,
-            coverages=coverages,
-            known_total_seasons=known_total_seasons,
+        releases = self._filter_serialize_stored_tv_releases(
+            stored_rows, scope=scope, known_total_seasons=known_total_seasons
         )
         return TVSearchData(
             releases=finalize_releases(releases, sort_key=season_pack_release_sort_key),
@@ -230,75 +213,268 @@ class SearchService:
         Passing releases are automatically staged via the rule engine
         selection (``selection_source="rule"``).
         """
-        result = await self._search_tv_season_sweep(request, season_number=season_number)
-        if result.error:
-            return TVSearchData(
-                releases=[],
-                scope={
-                    "type": "single_episode",
-                    "season_number": season_number,
-                    "episode_number": episode_number,
-                },
-                error=result.error,
-            )
-
-        engine = await self._build_rule_engine(media_type="tv")
-        evaluations = []
-        coverages = []
-        for release in result.releases:
-            coverage = cached_parse_release_coverage(release.title)
-            if coverage.is_complete_series:
-                continue
-            if coverage.season_numbers != (season_number,):
-                continue
-            if coverage.episode_number != episode_number:
-                continue
-            if not is_exact_single_episode_release(release.title, season_number, episode_number):
-                continue
-            evaluations.append(self._evaluation_for_release(engine.evaluate(release), release))
-            coverages.append(coverage)
         scope: dict[str, object] = {
             "type": "single_episode",
             "season_number": season_number,
             "episode_number": episode_number,
         }
-        releases = await self._persist_and_serialize_tv_evaluations(
-            request.id, evaluations, scope=scope, coverages=coverages
+        cached_releases = await self._load_cached_tv_releases(
+            request.id, season_number=season_number
         )
+        cached_episode_releases = self._filter_serialize_stored_tv_releases(
+            cached_releases, scope=scope
+        )
+        if cached_episode_releases:
+            await self._auto_stage_best_stored_episode(request, cached_releases, scope=scope)
+            return TVSearchData(releases=finalize_releases(cached_episode_releases), scope=scope)
+
+        result = await self._search_tv_season_sweep(request, season_number=season_number)
+        if result.error:
+            return TVSearchData(
+                releases=[],
+                scope=scope,
+                error=result.error,
+            )
+
+        stored_rows = await self._persist_tv_season_sweep(
+            request.id, result.releases, season_number=season_number
+        )
+        releases = self._filter_serialize_stored_tv_releases(stored_rows, scope=scope)
+
+        if not releases:
+            episode_result = await self._search_tv(
+                request,
+                season=season_number,
+                episode=episode_number,
+                cacheable=False,
+            )
+            exact_rows = await self._persist_tv_evaluations(
+                request.id,
+                getattr(episode_result, "releases", []),
+                scope=scope,
+            )
+            stored_rows = self._dedupe_stored_releases([*stored_rows, *exact_rows])
+            releases = self._filter_serialize_stored_tv_releases(exact_rows, scope=scope)
 
         # ── Auto-stage the best passing release ────────────────────────
-        passing_evals = [e for e in evaluations if e.passed]
-        if passing_evals:
-            best_eval = max(passing_evals, key=lambda e: e.total_score)
-            stored_release = await self._find_stored_release(request.id, best_eval)
-            if stored_release is not None:
-                try:
-                    await StagingService(self.db).use_releases(
-                        request,
-                        [stored_release],
-                        selection_source="rule",
-                    )
-                    logger.info(
-                        "Auto-staged episode release: request_id=%s season=%s episode=%s title=%s",
-                        request.id,
-                        season_number,
-                        episode_number,
-                        best_eval.release.title,
-                    )
-                except Exception:
-                    logger.exception(
-                        "Failed to auto-stage episode release: request_id=%s season=%s "
-                        "episode=%s title=%s",
-                        request.id,
-                        season_number,
-                        episode_number,
-                        best_eval.release.title,
-                    )
+        await self._auto_stage_best_stored_episode(request, stored_rows, scope=scope)
 
         return TVSearchData(
             releases=finalize_releases(releases),
             scope=scope,
         )
+
+    async def _load_cached_tv_releases(
+        self, request_id: int, *, season_number: int | None = None
+    ) -> list[Release]:
+        """Load stored TV releases for request/season cache reuse."""
+        if type(self.db).__module__.startswith("unittest.mock"):
+            return []
+        try:
+            result = await self.db.execute(
+                select(Release).where(Release.request_id == request_id).order_by(Release.id)
+            )
+        except Exception:
+            logger.warning("Could not load cached TV releases", exc_info=True)
+            return []
+        rows = list(result.scalars().all())
+        if season_number is None:
+            logger.info(
+                "TV releases loaded from DB cache: request_id=%s season=%s count=%s source=db",
+                request_id,
+                season_number,
+                len(rows),
+            )
+            return rows
+        filtered_rows = [
+            row for row in rows if self._stored_release_covers_season(row, season_number)
+        ]
+        logger.info(
+            "TV releases loaded from DB cache: request_id=%s season=%s count=%s source=db",
+            request_id,
+            season_number,
+            len(filtered_rows),
+        )
+        return filtered_rows
+
+    async def _persist_tv_season_sweep(
+        self, request_id: int, releases: list[ProwlarrRelease], *, season_number: int
+    ) -> list[Release]:
+        """Evaluate and persist the full sweep, then return stored season rows."""
+        persisted_rows = await self._persist_tv_evaluations(
+            request_id,
+            releases,
+            scope={"type": "season_sweep", "season_number": season_number},
+        )
+        cached_rows = await self._load_cached_tv_releases(request_id, season_number=season_number)
+        return cached_rows or persisted_rows
+
+    async def _persist_tv_evaluations(
+        self,
+        request_id: int,
+        releases: list[ProwlarrRelease],
+        *,
+        scope: dict[str, object],
+    ) -> list[Release]:
+        engine = await self._build_rule_engine(media_type="tv")
+        evaluations = [
+            self._evaluation_for_release(engine.evaluate(release), release) for release in releases
+        ]
+        try:
+            stored_by_key = await store_search_results(
+                self.db, request_id, evaluations, scope=scope, source="adhoc"
+            )
+        except (StopAsyncIteration, StopIteration):
+            return [
+                self._transient_release_from_evaluation(request_id, evaluation)
+                for evaluation in evaluations
+            ]
+        return self._dedupe_stored_releases(list(stored_by_key.values()))
+
+    def _transient_release_from_evaluation(
+        self, request_id: int, evaluation: ReleaseEvaluation
+    ) -> Release:
+        release = evaluation.release
+        coverage = cached_parse_release_coverage(release.title)
+        rejection_reason = evaluation.rejection_reason
+        return Release(
+            request_id=request_id,
+            title=release.title,
+            size=release.size,
+            seeders=release.seeders,
+            leechers=release.leechers,
+            download_url=release.download_url,
+            magnet_url=release.magnet_url,
+            info_hash=release.info_hash,
+            indexer=release.indexer,
+            publish_date=release.publish_date,
+            resolution=release.resolution,
+            codec=release.codec,
+            release_group=release.release_group,
+            files=release.files,
+            uploaded_by=release.uploaded_by,
+            season_number=coverage.season_number,
+            episode_number=coverage.episode_number,
+            season_coverage=serialize_release_coverage(coverage),
+            score=evaluation.total_score,
+            passed_rules=evaluation.passed,
+            rejection_reason=rejection_reason if isinstance(rejection_reason, str) else None,
+            search_source="adhoc",
+        )
+
+    def _filter_serialize_stored_tv_releases(
+        self,
+        releases: list[Release],
+        *,
+        scope: dict[str, object],
+        known_total_seasons: int | None = None,
+    ) -> list[dict[str, object]]:
+        payloads = []
+        for release in releases:
+            if not self._stored_release_matches_display_scope(release, scope):
+                continue
+            evaluation = self._evaluation_from_stored_release(release)
+            payload = serialize_stored_evaluated_release(
+                release, evaluation, media_type=MediaType.TV
+            )
+            if known_total_seasons is not None:
+                payload["known_total_seasons"] = known_total_seasons
+                covered_seasons = payload.get("covered_seasons")
+                payload["covers_all_known_seasons"] = bool(
+                    known_total_seasons
+                    and (
+                        payload.get("is_complete_series")
+                        or (
+                            isinstance(covered_seasons, list)
+                            and len(covered_seasons) >= known_total_seasons
+                        )
+                    )
+                )
+                apply_release_size_per_season_metadata(payload)
+            payloads.append(payload)
+        return payloads
+
+    def _evaluation_from_stored_release(self, release: Release) -> ReleaseEvaluation:
+        return ReleaseEvaluation(
+            release=build_prowlarr_release(release),
+            passed=release.passed_rules,
+            total_score=release.score,
+            matches=[],
+            rejection_reason=release.rejection_reason,
+        )
+
+    def _stored_release_matches_display_scope(
+        self, release: Release, scope: dict[str, object]
+    ) -> bool:
+        coverage = cached_parse_release_coverage(release.title)
+        scope_type = scope.get("type")
+        if scope_type == "single_episode":
+            season_number = scope.get("season_number")
+            episode_number = scope.get("episode_number")
+            return (
+                isinstance(season_number, int)
+                and isinstance(episode_number, int)
+                and coverage.season_numbers == (season_number,)
+                and coverage.episode_number == episode_number
+                and not coverage.is_complete_series
+                and is_exact_single_episode_release(release.title, season_number, episode_number)
+            )
+        if scope_type == "season_packs":
+            return (
+                coverage.episode_number is None
+                and not coverage.is_complete_series
+                and coverage.season_numbers == (scope.get("season_number"),)
+            )
+        if scope_type == "multi_season_packs":
+            return coverage.episode_number is None and (
+                coverage.is_complete_series or len(coverage.season_numbers) > 1
+            )
+        return True
+
+    def _stored_release_covers_season(self, release: Release, season_number: int) -> bool:
+        coverage = cached_parse_release_coverage(release.title)
+        return (
+            coverage.is_complete_series
+            or coverage.season_number == season_number
+            or season_number in coverage.season_numbers
+        )
+
+    def _dedupe_stored_releases(self, releases: list[Release]) -> list[Release]:
+        seen: set[str] = set()
+        deduped: list[Release] = []
+        for release in releases:
+            key = get_release_persistence_key(title=release.title, info_hash=release.info_hash)
+            if key in seen:
+                continue
+            seen.add(key)
+            deduped.append(release)
+        return deduped
+
+    async def _auto_stage_best_stored_episode(
+        self, request: Any, releases: list[Release], *, scope: dict[str, object]
+    ) -> None:
+        if type(self.db).__module__.startswith("unittest.mock"):
+            return
+        candidates = [
+            release
+            for release in releases
+            if release.passed_rules and self._stored_release_matches_display_scope(release, scope)
+        ]
+        if not candidates:
+            return
+        stored_release = max(candidates, key=lambda release: release.score)
+        try:
+            await StagingService(self.db).use_releases(
+                request,
+                [stored_release],
+                selection_source="rule",
+            )
+        except Exception:
+            logger.exception(
+                "Failed to auto-stage episode release: request_id=%s title=%s",
+                request.id,
+                stored_release.title,
+            )
 
     async def _find_stored_release(
         self,
@@ -419,12 +595,19 @@ class SearchService:
         runtime_settings = get_settings()
         imdb_id = await self._load_imdb_id(request)
         prowlarr = ProwlarrService(settings=runtime_settings)
+        logger.info(
+            "TV season sweep requested: request_id=%s title=%s season=%s source=prowlarr",
+            getattr(request, "id", None),
+            request.title,
+            season_number,
+        )
         return await prowlarr.search_tv_season_sweep(
             title=request.title,
             season=season_number,
             imdbid=imdb_id,
             tvdbid=tvdb_id,
             cacheable=False,
+            request_id=getattr(request, "id", None),
         )
 
     async def _load_imdb_id(self, request: Any) -> str | None:

@@ -6,11 +6,17 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from fastapi import HTTPException
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
-from app.siftarr.models.request import MediaType
+from app.siftarr.models._base import Base
+from app.siftarr.models.release import Release
+from app.siftarr.models.request import MediaType, RequestStatus
+from app.siftarr.models.request import Request as RequestModel
 from app.siftarr.routers import dashboard_api
 from app.siftarr.services import search_service
 from app.siftarr.services.prowlarr_service import ProwlarrRelease, ProwlarrSearchResult
+from app.siftarr.services.search_service import SearchService
 
 
 @pytest.mark.asyncio
@@ -496,6 +502,200 @@ async def test_search_episode_excludes_packs_and_multi_season_results(mock_db, m
     body = json.loads(cast(bytes, response.body))
     assert body["scope"] == {"type": "single_episode", "season_number": 1, "episode_number": 1}
     assert [release["title"] for release in body["releases"]] == ["Foundation.S01E01.1080p.WEB-DL"]
+
+
+@pytest.mark.asyncio
+async def test_search_episode_falls_back_to_exact_episode_when_sweep_misses_it(
+    mock_db, monkeypatch
+):
+    """Old episodes buried beyond season sweep caps should still be discoverable."""
+    request_record = MagicMock()
+    request_record.id = 12
+    request_record.media_type = MediaType.TV
+    request_record.tvdb_id = 999
+    request_record.title = "Georgie & Mandy's First Marriage"
+    request_record.year = 2024
+
+    request_result = MagicMock()
+    request_result.scalar_one_or_none.return_value = request_record
+    rules_result = MagicMock()
+    rules_result.scalars.return_value.all.return_value = []
+    mock_db.execute.side_effect = [request_result, rules_result]
+
+    later_episode = ProwlarrRelease(
+        title="Georgie.and.Mandys.First.Marriage.S02E18.1080p.WEB-DL",
+        size=2 * 1024 * 1024 * 1024,
+        indexer="IndexerA",
+        download_url="https://example.test/s02e18",
+        seeders=55,
+        leechers=4,
+    )
+    exact_episode = ProwlarrRelease(
+        title="Georgie.And.Mandys.First.Marriage.S02E01.1080p.WEB-DL",
+        size=2 * 1024 * 1024 * 1024,
+        indexer="IndexerB",
+        download_url="https://example.test/s02e01",
+        seeders=20,
+        leechers=2,
+    )
+
+    prowlarr_service = AsyncMock()
+    prowlarr_service.search_tv_season_sweep.return_value = ProwlarrSearchResult(
+        releases=[later_episode], query_time_ms=5
+    )
+    prowlarr_service.search_by_tvdbid.return_value = ProwlarrSearchResult(
+        releases=[exact_episode], query_time_ms=5
+    )
+    monkeypatch.setattr(search_service, "ProwlarrService", lambda settings: prowlarr_service)
+
+    fake_evaluation = MagicMock(total_score=12.5, passed=True)
+    fake_engine = MagicMock(evaluate=MagicMock(return_value=fake_evaluation))
+    monkeypatch.setattr(
+        search_service.RuleEngine,
+        "from_db_rules",
+        MagicMock(return_value=fake_engine),
+    )
+
+    response = await dashboard_api.search_episode(
+        request_id=12,
+        season_number=2,
+        episode_number=1,
+        db=mock_db,
+    )
+
+    body = json.loads(cast(bytes, response.body))
+    assert body["scope"] == {"type": "single_episode", "season_number": 2, "episode_number": 1}
+    assert [release["title"] for release in body["releases"]] == [exact_episode.title]
+    prowlarr_service.search_tv_season_sweep.assert_awaited_once()
+    prowlarr_service.search_by_tvdbid.assert_awaited_once_with(
+        tvdbid=999,
+        title="Georgie & Mandy's First Marriage",
+        season=2,
+        episode=1,
+        year=2024,
+        cacheable=False,
+    )
+
+
+@pytest.mark.asyncio
+async def test_search_episode_reuses_cached_sweep_exact_without_prowlarr(monkeypatch):
+    """A prior broad sweep should be the source for later exact episode searches."""
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+    session_maker = async_sessionmaker(engine, expire_on_commit=False)
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+
+    async with session_maker() as session:
+        request = RequestModel(
+            external_id="tv-georgie-1",
+            media_type=MediaType.TV,
+            title="Georgie & Mandy's First Marriage",
+            tvdb_id=12345,
+            year=2024,
+            status=RequestStatus.PENDING,
+        )
+        session.add(request)
+        await session.commit()
+
+        exact_episode = ProwlarrRelease(
+            title="Georgie.And.Mandys.First.Marriage.S02E01.1080p.WEB-DL",
+            size=2 * 1024 * 1024 * 1024,
+            indexer="IndexerA",
+            download_url="https://example.test/s02e01",
+            seeders=20,
+            leechers=2,
+        )
+        rejected_episode = ProwlarrRelease(
+            title="Georgie.And.Mandys.First.Marriage.S02E02.BADTAG.1080p.WEB-DL",
+            size=2 * 1024 * 1024 * 1024,
+            indexer="IndexerB",
+            download_url="https://example.test/s02e02",
+            seeders=1,
+            leechers=0,
+        )
+        prowlarr_service = AsyncMock()
+        prowlarr_service.search_tv_season_sweep.return_value = ProwlarrSearchResult(
+            releases=[exact_episode, rejected_episode], query_time_ms=5
+        )
+        monkeypatch.setattr(search_service, "ProwlarrService", lambda settings: prowlarr_service)
+
+        service = SearchService(session)
+        await service.search_season_packs(request, season_number=2)
+        prowlarr_service.reset_mock()
+
+        result = await service.search_episode(request, season_number=2, episode_number=1)
+
+        assert [release["title"] for release in result.releases] == [exact_episode.title]
+        assert result.releases[0]["stored_release_id"] is not None
+        prowlarr_service.search_tv_season_sweep.assert_not_awaited()
+        prowlarr_service.search_by_tvdbid.assert_not_awaited()
+        stored_titles = (
+            (await session.execute(select(Release.title).where(Release.request_id == request.id)))
+            .scalars()
+            .all()
+        )
+        assert exact_episode.title in stored_titles
+        assert rejected_episode.title in stored_titles
+
+    await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_search_episode_exact_fallback_when_cached_sweep_misses_episode(monkeypatch):
+    """If cached and refreshed sweeps lack the exact episode, use exact fallback."""
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+    session_maker = async_sessionmaker(engine, expire_on_commit=False)
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+
+    async with session_maker() as session:
+        request = RequestModel(
+            external_id="tv-georgie-2",
+            media_type=MediaType.TV,
+            title="Georgie & Mandy's First Marriage",
+            tvdb_id=12345,
+            year=2024,
+            status=RequestStatus.PENDING,
+        )
+        session.add(request)
+        await session.commit()
+
+        later_episode = ProwlarrRelease(
+            title="Georgie.And.Mandys.First.Marriage.S02E18.1080p.WEB-DL",
+            size=2 * 1024 * 1024 * 1024,
+            indexer="IndexerA",
+            download_url="https://example.test/s02e18",
+            seeders=20,
+            leechers=2,
+        )
+        exact_episode = ProwlarrRelease(
+            title="Georgie.And.Mandys.First.Marriage.S02E01.1080p.WEB-DL",
+            size=2 * 1024 * 1024 * 1024,
+            indexer="IndexerB",
+            download_url="https://example.test/s02e01",
+            seeders=10,
+            leechers=1,
+        )
+        prowlarr_service = AsyncMock()
+        prowlarr_service.search_tv_season_sweep.return_value = ProwlarrSearchResult(
+            releases=[later_episode], query_time_ms=5
+        )
+        prowlarr_service.search_by_tvdbid.return_value = ProwlarrSearchResult(
+            releases=[exact_episode], query_time_ms=5
+        )
+        monkeypatch.setattr(search_service, "ProwlarrService", lambda settings: prowlarr_service)
+
+        service = SearchService(session)
+        await service.search_season_packs(request, season_number=2)
+        prowlarr_service.reset_mock()
+
+        result = await service.search_episode(request, season_number=2, episode_number=1)
+
+        assert [release["title"] for release in result.releases] == [exact_episode.title]
+        prowlarr_service.search_tv_season_sweep.assert_awaited_once()
+        prowlarr_service.search_by_tvdbid.assert_awaited_once()
+
+    await engine.dispose()
 
 
 @pytest.mark.asyncio

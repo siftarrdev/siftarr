@@ -94,6 +94,13 @@ async def store_search_results(
         if _release_matches_source(record, source)
         and _release_matches_persistence_scope(record, scope)
     ]
+    logger.info(
+        "Stored release cache loaded: request_id=%s scope=%s source=db search_source=%s count=%s",
+        request_id,
+        scope.get("type") if scope else "all",
+        source,
+        len(existing_records),
+    )
 
     # Build lookup keyed by persistence key, handle duplicate keys
     existing_by_key: dict[str, Release] = {}
@@ -185,7 +192,19 @@ async def store_search_results(
     for record in extra_records:
         await db.delete(record)
 
+    deleted_count = sum(1 for key in existing_by_key if key not in matched_keys) + len(
+        extra_records
+    )
     await db.commit()
+    logger.info(
+        "Stored search results saved: request_id=%s scope=%s search_source=%s evaluated=%s stored=%s deleted=%s source=db",
+        request_id,
+        scope.get("type") if scope else "all",
+        source,
+        len(evaluations),
+        len(records_by_key),
+        deleted_count,
+    )
     return records_by_key
 
 
@@ -217,6 +236,15 @@ def _release_matches_persistence_scope(release: Release, scope: dict[str, object
     if scope_type == "multi_season_packs":
         return coverage.episode_number is None and (
             coverage.is_complete_series or len(coverage.season_numbers) > 1
+        )
+    if scope_type == "season_sweep":
+        season_number = scope.get("season_number")
+        if not isinstance(season_number, int):
+            return True
+        return (
+            coverage.is_complete_series
+            or coverage.season_number == season_number
+            or season_number in coverage.season_numbers
         )
     return True
 

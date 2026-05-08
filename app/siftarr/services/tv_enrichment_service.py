@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Mapping
 from typing import Any
 
@@ -22,6 +23,8 @@ from app.siftarr.services.tv_details_service import (
     load_tv_seasons_with_episodes,
 )
 from app.siftarr.services.type_utils import coerce_int_list
+
+logger = logging.getLogger(__name__)
 
 
 class TVEnrichmentService:
@@ -111,6 +114,14 @@ class TVEnrichmentService:
         self._apply_known_tv_release_metadata(releases, known_season_numbers)
         releases_by_season, releases_by_episode = self._group_tv_releases(
             releases, known_season_numbers
+        )
+        logger.info(
+            "TV detail buckets loaded from DB releases: request_id=%s seasons=%s releases=%s season_buckets=%s episode_buckets=%s source=db",
+            request_id,
+            known_season_numbers,
+            len(releases),
+            len(releases_by_season),
+            len(releases_by_episode),
         )
         return DashboardTVDetails(
             seasons=seasons_data,

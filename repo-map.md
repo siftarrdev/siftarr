@@ -32,7 +32,7 @@ Siftarr is a FastAPI application that sits between Overseerr, Prowlarr, Plex, an
 Primary flow:
 
 1. Overseerr webhook or manual action creates/syncs a request
-2. Search and decision services query Prowlarr and evaluate releases (TV automatic search runs bounded paginated season sweeps and classifies stored coverage)
+2. Search and decision services query Prowlarr and evaluate releases (TV dashboard search uses one Search All stream that runs bounded paginated season sweeps and classifies stored coverage)
 3. Winning releases are staged or sent to qBittorrent
 4. Background services track retries, lifecycle state, Plex polling, and completion
 5. Dashboard and settings UI expose control and visibility
@@ -118,7 +118,7 @@ HTTP route layer.
 - `dashboard.py` — main dashboard page routes
 - `dashboard_api.py` — dashboard JSON endpoints for details/search data
 - `dashboard_actions.py` — dashboard-triggered actions and mutations
-- `search_sse.py` — SSE streaming endpoints for live search progress and TV inspect results
+- `search_sse.py` — SSE streaming endpoints for live search progress; `/requests/{id}/search/stream` is the primary TV Search All path, while TV scope-specific streams remain compatibility/debug inspect paths
 - `rules.py` — rule management UI/API, including unified rule listing, multi-title testing, modal import/export, and create/edit actions
 - `settings.py` — settings UI (connection test/save/reset, staging toggle, Plex rescan, Overseerr sync, cache/reseed actions, SSE progress streams), uses SettingsStore for DB-backed persistence
 - `staged.py` — staged torrent review/approval endpoints
@@ -150,7 +150,7 @@ Business logic and integrations.
 - `release_parser.py`, `media_helpers.py`, `type_utils.py`, `async_utils.py` — shared parsing and utility helpers; `release_parser` classifies exact episodes, season/multi-season/complete-series packs, and multi-episode packs, with `cached_parse_release_coverage` (lru_cache, maxsize=4096)
 - `episode_derive.py` — canonical derivation functions for TV episode/season/request statuses (episode status is ground truth for TV)
 - `activity_log_service.py` / `unreleased_service.py` — supporting domain workflows (unreleased detection moved here from lifecycle_service)
-- `search_service.py` — ad hoc release evaluation/selection, request search orchestration, and TV season-pack/episode ad hoc search; TV ad hoc endpoints use explicit-refresh paginated season sweeps, while automatic TV orchestration delegates to season-sweep decision flow
+- `search_service.py` — ad hoc release evaluation/selection, request search orchestration, and TV season-pack/episode ad hoc search; TV ad hoc endpoints persist full explicit-refresh paginated season sweeps and reuse stored sweep rows for later episode/pack buckets before falling back to Prowlarr
 
 ### `app/siftarr/templates/`
 
@@ -169,7 +169,7 @@ Static assets.
 - `css/dashboard.css` — supplemental UI styling
 - `css/tailwind.css` — built Tailwind CSS output (generated, committed)
 - `css/tailwind-input.css` — Tailwind CSS input with `@tailwind` directives and custom component classes
-- `js/dashboard*.js` and `js/dashboard/` — dashboard client-side behavior, filters, details, staged actions, release search UX, and SSE progress panel
+- `js/dashboard*.js` and `js/dashboard/` — dashboard client-side behavior, filters, details, staged actions, single-action TV Search All/read-only bucket UI, movie release search UX, and SSE progress panel
 - favicon assets
 
 ## Tests map
