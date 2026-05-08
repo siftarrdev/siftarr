@@ -104,21 +104,17 @@ details[open] summary .accordion-chevron { transform: rotate(90deg); }
                             <span id="status-qbittorrent" class="text-xs font-medium"></span>
                         </div>
                     </div>
-                    <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
                         <div>
                             <label for="qbittorrent_url" class="form-label">URL</label>
                             <input type="url" id="qbittorrent_url" name="qbittorrent_url" value="{{ env.qbittorrent_url }}" placeholder="http://qbittorrent:8080" class="form-input">
                         </div>
                         <div>
-                            <label for="qbittorrent_username" class="form-label">Username</label>
-                            <input type="text" id="qbittorrent_username" name="qbittorrent_username" value="{{ env.qbittorrent_username }}" placeholder="admin" class="form-input">
-                        </div>
-                        <div>
-                            <label for="qbittorrent_password" class="form-label">Password</label>
+                            <label for="qbittorrent_api_key" class="form-label">API Key</label>
                             <div class="relative">
-                                <input type="password" id="qbittorrent_password" name="qbittorrent_password" value="{{ env.qbittorrent_password }}" placeholder="••••••••" class="form-input pr-10">
-                                <button type="button" onclick="togglePassword('qbittorrent_password')" class="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 hover:text-white transition-colors">
-                                    <svg id="eye-qbittorrent_password" class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"></path></svg>
+                                <input type="password" id="qbittorrent_api_key" name="qbittorrent_api_key" value="{{ env.qbittorrent_api_key }}" placeholder="qbt_..." class="form-input pr-10">
+                                <button type="button" onclick="togglePassword('qbittorrent_api_key')" class="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 hover:text-white transition-colors">
+                                    <svg id="eye-qbittorrent_api_key" class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"></path></svg>
                                 </button>
                             </div>
                         </div>

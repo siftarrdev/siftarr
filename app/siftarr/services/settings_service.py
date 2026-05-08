@@ -25,8 +25,7 @@ ENV_KEY_MAP: dict[str, str] = {
     "prowlarr_url": "PROWLARR_URL",
     "prowlarr_api_key": "PROWLARR_API_KEY",
     "qbittorrent_url": "QBITTORRENT_URL",
-    "qbittorrent_username": "QBITTORRENT_USERNAME",
-    "qbittorrent_password": "QBITTORRENT_PASSWORD",
+    "qbittorrent_api_key": "QBITTORRENT_API_KEY",
     "plex_url": "PLEX_URL",
     "plex_token": "PLEX_TOKEN",
     "tz": "TZ",
@@ -104,8 +103,7 @@ class SettingsStore:
             "prowlarr_url": str(env_settings.prowlarr_url or ""),
             "prowlarr_api_key": mask_secret(env_settings.prowlarr_api_key) or "",
             "qbittorrent_url": str(env_settings.qbittorrent_url or ""),
-            "qbittorrent_username": env_settings.qbittorrent_username,
-            "qbittorrent_password": mask_secret(env_settings.qbittorrent_password) or "",
+            "qbittorrent_api_key": mask_secret(env_settings.qbittorrent_api_key) or "",
             "plex_url": str(env_settings.plex_url or ""),
             "plex_token": mask_secret(env_settings.plex_token) or "",
             "tz": env_settings.tz,
@@ -177,8 +175,7 @@ async def build_effective_settings(db: AsyncSession | None = None) -> dict[str, 
         "prowlarr_url": str(effective.prowlarr_url or ""),
         "prowlarr_api_key": mask_secret(effective.prowlarr_api_key) or "",
         "qbittorrent_url": str(effective.qbittorrent_url or ""),
-        "qbittorrent_username": effective.qbittorrent_username,
-        "qbittorrent_password": mask_secret(effective.qbittorrent_password) or "",
+        "qbittorrent_api_key": mask_secret(effective.qbittorrent_api_key) or "",
         "plex_url": str(effective.plex_url or ""),
         "plex_token": mask_secret(effective.plex_token) or "",
         "tz": effective.tz,
@@ -788,7 +785,7 @@ async def prepare_overseerr_import(
     requested_by = ov_req.get("requestedBy") or {}
     username = (
         requested_by.get("username")
-        or requested_by.get("plexUsername")
+        or requested_by.get("plexAPI Key")
         or requested_by.get("displayName")
     )
     email = requested_by.get("email")

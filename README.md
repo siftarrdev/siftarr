@@ -91,8 +91,7 @@ environment:
   - PROWLARR_URL=http://prowlarr:9696
   - PROWLARR_API_KEY=your_key
   - QBITTORRENT_URL=http://qbittorrent:8080
-  - QBITTORRENT_USERNAME=admin
-  - QBITTORRENT_PASSWORD=your_password
+  - QBITTORRENT_API_KEY=your_api_key
   - PLEX_URL=http://plex:32400
   - PLEX_TOKEN=your_token
 ```
@@ -106,7 +105,7 @@ Common variables:
 | `OVERSEERR_URL` / `OVERSEERR_API_KEY` | unset | Overseerr connection. |
 | `PROWLARR_URL` / `PROWLARR_API_KEY` | unset | Prowlarr connection. |
 | `QBITTORRENT_URL` | unset | qBittorrent Web UI URL. |
-| `QBITTORRENT_USERNAME` / `QBITTORRENT_PASSWORD` | `admin` / `adminadmin` | qBittorrent credentials. |
+| `QBITTORRENT_API_KEY` | unset | qBittorrent Web API key (qBittorrent ≥ 5.2). |
 | `PLEX_URL` / `PLEX_TOKEN` | unset | Plex connection. |
 | `STAGING_MODE_ENABLED` | `true` | Stage selected torrents instead of sending directly. |
 | `RETRY_INTERVAL_HOURS` | `24` | How often pending requests are retried. |

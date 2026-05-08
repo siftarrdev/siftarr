@@ -148,8 +148,7 @@ class QbittorrentService:
         if self._client is None:
             self._client = qbittorrentapi.Client(
                 host=str(self.settings.qbittorrent_url),
-                username=self.settings.qbittorrent_username,
-                password=self.settings.qbittorrent_password,
+                EXTRA_HEADERS={"Authorization": f"Bearer {self.settings.qbittorrent_api_key}"},
             )
         return self._client
 
@@ -177,7 +176,7 @@ class QbittorrentService:
             True if authentication successful, False otherwise.
         """
         try:
-            await asyncio.to_thread(self.client.auth.log_in)
+            await asyncio.to_thread(lambda: self.client.app.web_api_version)
             return True
         except qbittorrentapi.LoginFailed:
             return False

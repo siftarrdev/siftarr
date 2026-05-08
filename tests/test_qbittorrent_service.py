@@ -27,8 +27,7 @@ class TestQbittorrentServiceUnit:
         with patch("app.siftarr.services.qbittorrent_service.get_settings") as mock_get_settings:
             mock_settings = MagicMock()
             mock_settings.qbittorrent_url = "http://localhost:8080"
-            mock_settings.qbittorrent_username = "admin"
-            mock_settings.qbittorrent_password = "admin123"
+            mock_settings.qbittorrent_api_key = "qbt_test_key"
             mock_get_settings.return_value = mock_settings
 
             with patch("qbittorrentapi.Client") as mock_client_class:
@@ -37,8 +36,7 @@ class TestQbittorrentServiceUnit:
 
                 mock_client_class.assert_called_once_with(
                     host="http://localhost:8080",
-                    username="admin",
-                    password="admin123",
+                    EXTRA_HEADERS={"Authorization": "Bearer qbt_test_key"},
                 )
 
     def test_client_property_reuses_client(self):
@@ -46,8 +44,7 @@ class TestQbittorrentServiceUnit:
         with patch("app.siftarr.services.qbittorrent_service.get_settings") as mock_get_settings:
             mock_settings = MagicMock()
             mock_settings.qbittorrent_url = "http://localhost:8080"
-            mock_settings.qbittorrent_username = "admin"
-            mock_settings.qbittorrent_password = "admin123"
+            mock_settings.qbittorrent_api_key = "qbt_test_key"
             mock_get_settings.return_value = mock_settings
 
             service = QbittorrentService()
@@ -62,16 +59,12 @@ class TestQbittorrentServiceUnit:
         with patch("app.siftarr.config.get_settings") as mock_get_settings:
             mock_settings = MagicMock()
             mock_settings.qbittorrent_url = "http://localhost:8080"
-            mock_settings.qbittorrent_username = "admin"
-            mock_settings.qbittorrent_password = "admin123"
+            mock_settings.qbittorrent_api_key = "qbt_test_key"
             mock_get_settings.return_value = mock_settings
 
             service = QbittorrentService()
-            mock_auth = MagicMock()
-            mock_auth.log_in = MagicMock()
-
             mock_client = MagicMock()
-            mock_client.auth = mock_auth
+            mock_client.app.web_api_version = "v2.0"
             service._client = mock_client
 
             with patch("asyncio.to_thread", AsyncMock()):
@@ -86,8 +79,7 @@ class TestQbittorrentServiceUnit:
         with patch("app.siftarr.config.get_settings") as mock_get_settings:
             mock_settings = MagicMock()
             mock_settings.qbittorrent_url = "http://localhost:8080"
-            mock_settings.qbittorrent_username = "admin"
-            mock_settings.qbittorrent_password = "admin123"
+            mock_settings.qbittorrent_api_key = "qbt_test_key"
             mock_get_settings.return_value = mock_settings
 
             service = QbittorrentService()
@@ -106,8 +98,7 @@ class TestQbittorrentServiceUnit:
         with patch("app.siftarr.config.get_settings") as mock_get_settings:
             mock_settings = MagicMock()
             mock_settings.qbittorrent_url = "http://localhost:8080"
-            mock_settings.qbittorrent_username = "admin"
-            mock_settings.qbittorrent_password = "admin123"
+            mock_settings.qbittorrent_api_key = "qbt_test_key"
             mock_get_settings.return_value = mock_settings
 
             service = QbittorrentService()
@@ -127,8 +118,7 @@ class TestQbittorrentServiceUnit:
         with patch("app.siftarr.config.get_settings") as mock_get_settings:
             mock_settings = MagicMock()
             mock_settings.qbittorrent_url = "http://localhost:8080"
-            mock_settings.qbittorrent_username = "admin"
-            mock_settings.qbittorrent_password = "admin123"
+            mock_settings.qbittorrent_api_key = "qbt_test_key"
             mock_get_settings.return_value = mock_settings
 
             service = QbittorrentService()
@@ -145,8 +135,7 @@ class TestQbittorrentServiceUnit:
         with patch("app.siftarr.config.get_settings") as mock_get_settings:
             mock_settings = MagicMock()
             mock_settings.qbittorrent_url = "http://localhost:8080"
-            mock_settings.qbittorrent_username = "admin"
-            mock_settings.qbittorrent_password = "admin123"
+            mock_settings.qbittorrent_api_key = "qbt_test_key"
             mock_get_settings.return_value = mock_settings
 
             service = QbittorrentService()
@@ -179,8 +168,7 @@ class TestQbittorrentServiceUnit:
         with patch("app.siftarr.config.get_settings") as mock_get_settings:
             mock_settings = MagicMock()
             mock_settings.qbittorrent_url = "http://localhost:8080"
-            mock_settings.qbittorrent_username = "admin"
-            mock_settings.qbittorrent_password = "admin123"
+            mock_settings.qbittorrent_api_key = "qbt_test_key"
             mock_get_settings.return_value = mock_settings
 
             service = QbittorrentService()
@@ -198,8 +186,7 @@ class TestQbittorrentServiceUnit:
         with patch("app.siftarr.config.get_settings") as mock_get_settings:
             mock_settings = MagicMock()
             mock_settings.qbittorrent_url = "http://localhost:8080"
-            mock_settings.qbittorrent_username = "admin"
-            mock_settings.qbittorrent_password = "admin123"
+            mock_settings.qbittorrent_api_key = "qbt_test_key"
             mock_get_settings.return_value = mock_settings
 
             service = QbittorrentService()
@@ -232,8 +219,7 @@ class TestQbittorrentServiceUnit:
         with patch("app.siftarr.config.get_settings") as mock_get_settings:
             mock_settings = MagicMock()
             mock_settings.qbittorrent_url = "http://localhost:8080"
-            mock_settings.qbittorrent_username = "admin"
-            mock_settings.qbittorrent_password = "admin123"
+            mock_settings.qbittorrent_api_key = "qbt_test_key"
             mock_get_settings.return_value = mock_settings
 
             service = QbittorrentService()
@@ -250,8 +236,7 @@ class TestQbittorrentServiceUnit:
         with patch("app.siftarr.config.get_settings") as mock_get_settings:
             mock_settings = MagicMock()
             mock_settings.qbittorrent_url = "http://localhost:8080"
-            mock_settings.qbittorrent_username = "admin"
-            mock_settings.qbittorrent_password = "admin123"
+            mock_settings.qbittorrent_api_key = "qbt_test_key"
             mock_get_settings.return_value = mock_settings
 
             service = QbittorrentService()
@@ -268,8 +253,7 @@ class TestQbittorrentServiceUnit:
         with patch("app.siftarr.config.get_settings") as mock_get_settings:
             mock_settings = MagicMock()
             mock_settings.qbittorrent_url = "http://localhost:8080"
-            mock_settings.qbittorrent_username = "admin"
-            mock_settings.qbittorrent_password = "admin123"
+            mock_settings.qbittorrent_api_key = "qbt_test_key"
             mock_get_settings.return_value = mock_settings
 
             service = QbittorrentService()
@@ -366,8 +350,7 @@ class TestQbittorrentServiceUnit:
         with patch("app.siftarr.config.get_settings") as mock_get_settings:
             mock_settings = MagicMock()
             mock_settings.qbittorrent_url = "http://localhost:8080"
-            mock_settings.qbittorrent_username = "admin"
-            mock_settings.qbittorrent_password = "admin123"
+            mock_settings.qbittorrent_api_key = "qbt_test_key"
             mock_get_settings.return_value = mock_settings
 
             service = QbittorrentService()

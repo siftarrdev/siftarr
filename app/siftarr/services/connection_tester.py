@@ -154,31 +154,20 @@ class ConnectionTester:
                 message="qBittorrent URL is not configured",
             )
 
-        if not settings.qbittorrent_username:
+        if not settings.qbittorrent_api_key:
             return ConnectionTestResult(
                 success=False,
-                message="qBittorrent username is not configured",
-            )
-
-        if not settings.qbittorrent_password:
-            return ConnectionTestResult(
-                success=False,
-                message="qBittorrent password is not configured",
+                message="qBittorrent API key is not configured",
             )
 
         try:
-            import asyncio
-
             import qbittorrentapi
 
             client = qbittorrentapi.Client(
                 host=str(settings.qbittorrent_url),
-                username=settings.qbittorrent_username,
-                password=settings.qbittorrent_password,
+                EXTRA_HEADERS={"Authorization": f"Bearer {settings.qbittorrent_api_key}"},
             )
-            # Attempt to log in synchronously
-            await asyncio.to_thread(client.auth.log_in)
-            # If we get here, login succeeded - now try to get version
+            # API-key auth is sent with each request. Try to get version.
             try:
                 version = client.app.web_api_version
                 return ConnectionTestResult(
@@ -197,7 +186,7 @@ class ConnectionTester:
             return ConnectionTestResult(
                 success=False,
                 message="Authentication failed",
-                details="Invalid username or password",
+                details="Invalid qBittorrent API key",
             )
         except Exception as e:
             return ConnectionTestResult(

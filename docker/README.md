@@ -53,7 +53,7 @@ Common variables passed by Compose:
 - `TZ` for timezone, defaulting to `UTC`.
 - `OVERSEERR_URL` and `OVERSEERR_API_KEY`.
 - `PROWLARR_URL` and `PROWLARR_API_KEY`.
-- `QBITTORRENT_URL`, `QBITTORRENT_USERNAME`, and `QBITTORRENT_PASSWORD`.
+- `QBITTORRENT_URL` and `QBITTORRENT_API_KEY`.
 - `PLEX_URL` and `PLEX_TOKEN`.
 
 Additional app settings can be supplied through the container environment, including

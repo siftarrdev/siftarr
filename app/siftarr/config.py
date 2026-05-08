@@ -39,8 +39,7 @@ class Settings(BaseSettings):
 
     # qBittorrent settings
     qbittorrent_url: str | None = None
-    qbittorrent_username: str = "admin"
-    qbittorrent_password: str = "adminadmin"
+    qbittorrent_api_key: str | None = None
 
     # Application settings (with defaults)
     staging_mode_enabled: bool = True
