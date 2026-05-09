@@ -16,9 +16,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.siftarr.models.episode import Episode
 from app.siftarr.models.request import MediaType, Request, RequestStatus
 from app.siftarr.models.season import Season
-from app.siftarr.services.episode_derive import derive_request_status_from_episodes
-from app.siftarr.services.lifecycle_service import LifecycleService
-from app.siftarr.services.overseerr_service import OverseerrService
+from app.siftarr.services.lifecycle.episode_derive import derive_request_status_from_episodes
+from app.siftarr.services.lifecycle.lifecycle_service import LifecycleService
+from app.siftarr.services.integrations.overseerr_service import OverseerrService
 
 _logger = logging.getLogger(__name__)
 

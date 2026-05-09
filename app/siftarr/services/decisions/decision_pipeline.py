@@ -18,9 +18,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.siftarr.models.activity_log import EventType
 from app.siftarr.models.rule import Rule
-from app.siftarr.services.activity_log_service import ActivityLogService
-from app.siftarr.services.pending_queue_service import PendingQueueService
-from app.siftarr.services.rule_engine import ReleaseEvaluation, RuleEngine
+from app.siftarr.services.lifecycle.activity_log_service import ActivityLogService
+from app.siftarr.services.lifecycle.pending_queue_service import PendingQueueService
+from app.siftarr.services.decisions.rule_engine import ReleaseEvaluation, RuleEngine
 
 logger = logging.getLogger(__name__)
 

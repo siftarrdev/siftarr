@@ -3,7 +3,7 @@
 import httpx
 
 from app.siftarr.config import Settings
-from app.siftarr.services.http_client import get_shared_client
+from app.siftarr.services.utils.http_client import get_shared_client
 
 
 class ConnectionTestResult:

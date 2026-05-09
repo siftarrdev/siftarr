@@ -7,8 +7,8 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.siftarr.models.rule import Rule, RuleType, TVTarget
-from app.siftarr.services.prowlarr_service import clear_search_cache
-from app.siftarr.services.rule_engine import increment_rule_version
+from app.siftarr.services.integrations.prowlarr_service import clear_search_cache
+from app.siftarr.services.decisions.rule_engine import increment_rule_version
 
 
 class RuleData(TypedDict):

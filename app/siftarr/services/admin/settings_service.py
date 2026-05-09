@@ -15,7 +15,7 @@ from app.siftarr.config import Settings, get_settings
 from app.siftarr.models.app_setting import AppSetting
 from app.siftarr.models.request import MediaType, RequestStatus
 from app.siftarr.models.request import Request as RequestModel
-from app.siftarr.services.pending_queue_service import PendingQueueService
+from app.siftarr.services.lifecycle.pending_queue_service import PendingQueueService
 
 # ── Runtime-to-environment key mapping ────────────────────────────────────
 
@@ -491,8 +491,8 @@ async def rescan_plex_tv_request(
     logger,
 ) -> bool:
     """Resync one TV request on an isolated DB session."""
-    from app.siftarr.services.episode_sync_service import EpisodeSyncService
-    from app.siftarr.services.overseerr_service import OverseerrService
+    from app.siftarr.services.lifecycle.episode_sync_service import EpisodeSyncService
+    from app.siftarr.services.integrations.overseerr_service import OverseerrService
 
     async with session_maker() as worker_db:
         overseerr = OverseerrService(settings=runtime_settings)
@@ -1027,7 +1027,7 @@ async def import_overseerr_requests(
         await db.commit()
 
         if synced_count > 0:
-            from app.siftarr.services.episode_sync_service import EpisodeSyncService
+            from app.siftarr.services.lifecycle.episode_sync_service import EpisodeSyncService
 
             plex_service = plex_service_cls(settings=runtime_settings)
             try:

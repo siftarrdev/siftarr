@@ -10,8 +10,8 @@ from app.siftarr.models.activity_log import EventType
 from app.siftarr.models.episode import Episode
 from app.siftarr.models.request import MediaType, Request, RequestStatus
 from app.siftarr.models.season import Season
-from app.siftarr.services.activity_log_service import ActivityLogService
-from app.siftarr.services.episode_derive import (
+from app.siftarr.services.lifecycle.activity_log_service import ActivityLogService
+from app.siftarr.services.lifecycle.episode_derive import (
     derive_request_status_from_episodes,
     derive_season_status,
 )

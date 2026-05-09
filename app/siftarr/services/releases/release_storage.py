@@ -7,14 +7,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.siftarr.models.release import Release
 from app.siftarr.models.request import Request
-from app.siftarr.services.prowlarr_service import ProwlarrRelease
-from app.siftarr.services.release_parser import (
+from app.siftarr.services.integrations.prowlarr_service import ProwlarrRelease
+from app.siftarr.services.releases.release_parser import (
     cached_parse_release_coverage,
     parse_season_episode,
     parse_stored_release_coverage,
     serialize_release_coverage,
 )
-from app.siftarr.services.rule_engine import ReleaseEvaluation
+from app.siftarr.services.decisions.rule_engine import ReleaseEvaluation
 
 logger = logging.getLogger(__name__)
 

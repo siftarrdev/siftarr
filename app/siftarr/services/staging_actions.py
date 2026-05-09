@@ -1,7 +1,7 @@
 """Backward-compat re-exports from ``staging_service``.
 
 New code should import directly from ``staging_service``:
-    from app.siftarr.services.staging_service import StagingService, download_torrent, ...
+    from app.siftarr.services.releases.staging_service import StagingService, download_torrent, ...
 """
 
 import logging
@@ -10,7 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.siftarr.models.release import Release
 from app.siftarr.models.request import Request
-from app.siftarr.services.staging_service import (
+from app.siftarr.services.releases.staging_service import (
     StagingService,
     download_torrent,
     validate_torrent_file,

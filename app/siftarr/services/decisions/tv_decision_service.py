@@ -29,36 +29,36 @@ from app.siftarr.models.release import Release
 from app.siftarr.models.request import MediaType, Request, RequestStatus
 from app.siftarr.models.season import Season
 from app.siftarr.models.staged_torrent import StagedTorrent
-from app.siftarr.services.decision_pipeline import (
+from app.siftarr.services.decisions.decision_pipeline import (
     add_to_pending_queue,
     build_rule_engine,
     log_release_staged,
     log_rule_evaluation,
 )
-from app.siftarr.services.episode_derive import (
+from app.siftarr.services.lifecycle.episode_derive import (
     derive_request_status_from_episodes,
     derive_season_status,
 )
 from app.siftarr.services.metadata_service import extract_imdb_id
-from app.siftarr.services.overseerr_service import OverseerrService
-from app.siftarr.services.prowlarr_service import (
+from app.siftarr.services.integrations.overseerr_service import OverseerrService
+from app.siftarr.services.integrations.prowlarr_service import (
     ProwlarrRelease,
     ProwlarrSearchResult,
     ProwlarrService,
 )
-from app.siftarr.services.qbittorrent_service import QbittorrentService
-from app.siftarr.services.release_parser import (
+from app.siftarr.services.integrations.qbittorrent_service import QbittorrentService
+from app.siftarr.services.releases.release_parser import (
     cached_parse_release_coverage,
     is_exact_single_episode_release,
 )
-from app.siftarr.services.release_storage import get_release_persistence_key, store_search_results
-from app.siftarr.services.rule_engine import (
+from app.siftarr.services.releases.release_storage import get_release_persistence_key, store_search_results
+from app.siftarr.services.decisions.rule_engine import (
     ReleaseEvaluation,
     RuleEngine,
     get_cached_engine,
     set_cached_engine,
 )
-from app.siftarr.services.staging_service import StagingService
+from app.siftarr.services.releases.staging_service import StagingService
 
 logger = logging.getLogger(__name__)
 

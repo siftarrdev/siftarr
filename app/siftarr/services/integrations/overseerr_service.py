@@ -6,7 +6,7 @@ from typing import Any
 import httpx
 
 from app.siftarr.config import Settings, get_settings
-from app.siftarr.services.http_client import get_shared_client
+from app.siftarr.services.utils.http_client import get_shared_client
 
 _MEDIA_DETAILS_CACHE: dict[tuple[str, int], tuple[float, dict]] = {}
 _MEDIA_DETAILS_CACHE_TTL = 60.0

@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from app.siftarr.services.release_serializers import (
+from app.siftarr.services.releases.release_serializers import (
     season_pack_release_sort_key,  # noqa: F401
 )
 

@@ -17,10 +17,10 @@ from sqlalchemy.orm import selectinload
 from app.siftarr.config import get_settings
 from app.siftarr.models.request import MediaType, Request, RequestStatus
 from app.siftarr.models.season import Season
-from app.siftarr.services.async_utils import gather_limited
-from app.siftarr.services.episode_sync_service import persist_episode_availability
-from app.siftarr.services.lifecycle_service import LifecycleService
-from app.siftarr.services.plex_service import PlexService, PlexTransientScanError
+from app.siftarr.services.utils.async_utils import gather_limited
+from app.siftarr.services.lifecycle.episode_sync_service import persist_episode_availability
+from app.siftarr.services.lifecycle.lifecycle_service import LifecycleService
+from app.siftarr.services.integrations.plex_service import PlexService, PlexTransientScanError
 
 logger = logging.getLogger(__name__)
 

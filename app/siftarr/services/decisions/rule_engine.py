@@ -3,8 +3,8 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 
 from app.siftarr.models.rule import TVTarget
-from app.siftarr.services.prowlarr_service import ProwlarrRelease
-from app.siftarr.services.release_parser import (
+from app.siftarr.services.integrations.prowlarr_service import ProwlarrRelease
+from app.siftarr.services.releases.release_parser import (
     cached_parse_release_coverage,
     is_exact_single_episode_release,
 )

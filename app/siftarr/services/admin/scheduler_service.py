@@ -16,23 +16,23 @@ from apscheduler.triggers.interval import IntervalTrigger
 
 from app.siftarr.config import get_settings
 from app.siftarr.models.request import MediaType, Request, RequestStatus
-from app.siftarr.services import settings_service
-from app.siftarr.services.download_completion_service import DownloadCompletionService
-from app.siftarr.services.lifecycle_service import LifecycleService
-from app.siftarr.services.media_helpers import extract_media_title_and_year
-from app.siftarr.services.movie_decision_service import MovieDecisionService
-from app.siftarr.services.overseerr_service import OverseerrService
-from app.siftarr.services.pending_queue_service import PendingQueueService
-from app.siftarr.services.plex_polling_service import (
+from app.siftarr.services.admin import settings_service
+from app.siftarr.services.lifecycle.download_completion_service import DownloadCompletionService
+from app.siftarr.services.lifecycle.lifecycle_service import LifecycleService
+from app.siftarr.services.utils.media_helpers import extract_media_title_and_year
+from app.siftarr.services.decisions.movie_decision_service import MovieDecisionService
+from app.siftarr.services.integrations.overseerr_service import OverseerrService
+from app.siftarr.services.lifecycle.pending_queue_service import PendingQueueService
+from app.siftarr.services.admin.plex_polling_service import (
     PlexJobResult,
     PlexPollingService,
     PlexPollResult,
 )
-from app.siftarr.services.plex_service import PlexService
-from app.siftarr.services.prowlarr_service import ProwlarrService
-from app.siftarr.services.qbittorrent_service import QbittorrentService
-from app.siftarr.services.tv_decision_service import TVDecisionService
-from app.siftarr.services.unreleased_service import UnreleasedEvaluator, evaluate_imported_request
+from app.siftarr.services.integrations.plex_service import PlexService
+from app.siftarr.services.integrations.prowlarr_service import ProwlarrService
+from app.siftarr.services.integrations.qbittorrent_service import QbittorrentService
+from app.siftarr.services.decisions.tv_decision_service import TVDecisionService
+from app.siftarr.services.lifecycle.unreleased_service import UnreleasedEvaluator, evaluate_imported_request
 
 PLEX_RECENT_SCAN_JOB_NAME = "plex_recent_scan"
 PLEX_POLL_JOB_NAME = "plex_poll"

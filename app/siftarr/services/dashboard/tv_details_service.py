@@ -8,11 +8,11 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.siftarr.models.request import RequestStatus
-from app.siftarr.services.background_tasks import (
+from app.siftarr.services.utils.background_tasks import (
     DETAILS_SYNC_TASKS,
     schedule_background_episode_refresh,
 )
-from app.siftarr.services.type_utils import normalize_int
+from app.siftarr.services.utils.type_utils import normalize_int
 
 
 def has_unresolved_partial_tv_data(

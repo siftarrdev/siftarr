@@ -6,7 +6,7 @@ from typing import Any
 import httpx
 
 from app.siftarr.config import Settings, get_settings
-from app.siftarr.services.http_client import get_shared_client
+from app.siftarr.services.utils.http_client import get_shared_client
 
 from .cache import PlexServiceCache
 from .episodes import PlexServiceEpisodes

@@ -16,10 +16,10 @@ from app.siftarr.models.request import (
     is_active_staging_workflow_status,
 )
 from app.siftarr.models.staged_torrent import StagedTorrent
-from app.siftarr.services.activity_log_service import ActivityLogService
-from app.siftarr.services.lifecycle_service import LifecycleService
-from app.siftarr.services.plex_polling_service import PlexPollingService
-from app.siftarr.services.qbittorrent_service import QbittorrentService, _torrent_file_info_hash
+from app.siftarr.services.lifecycle.activity_log_service import ActivityLogService
+from app.siftarr.services.lifecycle.lifecycle_service import LifecycleService
+from app.siftarr.services.admin.plex_polling_service import PlexPollingService
+from app.siftarr.services.integrations.qbittorrent_service import QbittorrentService, _torrent_file_info_hash
 
 logger = logging.getLogger(__name__)
 
