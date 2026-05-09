@@ -9,7 +9,8 @@ import pytest
 
 from app.siftarr.models.request import MediaType, RequestStatus
 from app.siftarr.routers import dashboard_api
-from app.siftarr.services import detail_service, metadata_service, tv_details_service
+from app.siftarr.services import metadata_service
+from app.siftarr.services.dashboard import detail_service, tv_details_service
 
 
 @pytest.mark.asyncio

@@ -126,31 +126,60 @@ HTTP route layer.
 
 ### `app/siftarr/services/`
 
-Business logic and integrations.
+Business logic and integrations, organized into thematic subpackages:
 
-- `dashboard_service.py` — dashboard DTOs and response serializers only (load/assembly logic moved to sub-services)
-- `detail_service.py` — request detail loading (releases, timeline, TV enrichment integration; TV bucket construction loads all stored releases independent of list pagination)
-- `tv_enrichment_service.py` — TV season/episode enrichment (season data, coverage-based release grouping, metadata)
+**Flat (cross-cutting):**
+- `auth_service.py` — API key verification
 - `metadata_service.py` — Overseerr metadata lookup for request details
+- `request_service.py` — request loading / validation
+
+**`admin/`** — Config, scheduling, polling
 - `settings_service.py` — SettingsStore (DB-backed settings persistence), SSE progress, scheduled job helpers, Plex rescan/Overseerr import orchestration
-- `request_service.py` — request creation/update orchestration
+- `scheduler_service.py` — recurring job scheduling via APScheduler
+- `plex_polling_service/` — Plex polling logic; prioritizes recent/downloading requests with periodic full reconcile every 20th poll cycle
+
+**`dashboard/`** — Dashboard, search, detail views
+- `dashboard_service.py` — dashboard DTOs and response serializers only (load/assembly logic in sub-services)
+- `detail_service.py` — request detail loading (releases, timeline, TV enrichment integration)
+- `tv_details_service.py` — TV details and sync metadata helpers
+- `tv_enrichment_service.py` — TV season/episode enrichment (season data, coverage-based release grouping)
+- `search_service.py` — ad hoc release evaluation/selection, request search orchestration
+
+**`decisions/`** — Rule engine and decision pipeline
+- `rule_engine.py` — release filtering and scoring evaluation; module-level rule version cache (`_rule_version`)
 - `rule_service.py` — CRUD/order logic for rules
-- `rule_engine.py` — release filtering and scoring evaluation; includes module-level rule version cache (`_rule_version`) for rule engine reuse across requests, invalidated on rule mutations
-- `decision_pipeline.py` — shared decision pipeline helpers (rule loading, activity logging, pending queue, best-release selection); accepts optional cached `RuleEngine` to skip DB load
-- `release_storage.py` — release persistence and reconstruction helpers; `store_search_results()` scopes stale cleanup by search source so automatic sweeps do not purge ad hoc/manual rows
-- `staging_service.py` — stage/send workflows, staged torrent handling, metadata-first staging, optional torrent download/validation, and release handoff (`use_releases`); bulk staging batches DB commits
-- `release_serializers.py` — API-facing serialization helpers
-- `scheduler_service.py` / `background_tasks.py` — recurring jobs and background orchestration
-- `pending_queue_service.py` / `lifecycle_service.py` / `download_completion_service.py` — retry, status transitions, and completion detection (unreleased detection moved to unreleased_service); pending queue methods support optional `commit=False` for batched transactions; completion service fetches qBit torrent list once per cycle for local matching; lifecycle stats cached with 30s TTL
-- `episode_sync_service.py` / `tv_details_service.py` — TV metadata and episode synchronization helpers
-- `overseerr_service.py` / `prowlarr_service.py` / `qbittorrent_service.py` — external service integrations; TV season sweeps fetch IMDb IDs from Overseerr metadata when available. Prowlarr service includes LRU search result cache (45s TTL, 50 entries, disable via `SIFTARR_DISABLE_SEARCH_CACHE`), bounded paginated TV season sweeps (`prowlarr_tv_page_size`, max-pages/results caps, title/IMDb/title-season/optional-TVDB strategies), concurrent broad TV searches via `asyncio.gather`, and cache invalidation on rule changes. IPTorrents season sweeps page by `offset` in 100-result pages and do not send `limit`.
-- `plex_service/` / `plex_polling_service.py` — Plex lookups, scans, and polling logic; polling prioritizes recent/downloading requests with periodic full reconcile every 20th poll cycle
+- `decision_pipeline.py` — shared decision pipeline helpers (rule loading, activity logging, pending queue, best-release selection)
+- `tv_decision_service.py` — TV-specific decision logic (season sweeps, episode fallback)
+- `movie_decision_service.py` — movie-specific decision logic
+
+**`integrations/`** — External service adapters
+- `prowlarr_service.py` — Prowlarr indexer integration; LRU search cache (45s TTL, 50 entries), bounded paginated TV sweeps
+- `qbittorrent_service.py` — qBittorrent download client integration
+- `overseerr_service.py` — Overseerr request management integration
 - `connection_tester.py` — external connectivity test helpers
+- `plex_service/` — Plex media server integration (lookup, scan, episode availability)
+
+**`lifecycle/`** — Request/media lifecycle and state
+- `lifecycle_service.py` — request lifecycle status transitions; 30s TTL stats cache
+- `activity_log_service.py` — activity/audit logging
+- `pending_queue_service.py` — retry pending queue management; supports optional `commit=False` for batched transactions
+- `episode_derive.py` — canonical derivation functions for TV episode/season/request statuses
+- `episode_sync_service.py` — syncing episode availability from Overseerr and Plex
+- `download_completion_service.py` — completion detection via qBit torrent list matching
+- `unreleased_service.py` — unreleased content handling
+
+**`releases/`** — Release processing and staging
+- `release_parser.py` — parse release names; classifies exact episodes, season/multi-season/complete-series packs, multi-episode packs; `cached_parse_release_coverage` (lru_cache, maxsize=4096)
+- `release_serializers.py` — API-facing serialization helpers
+- `release_storage.py` — release persistence and reconstruction helpers; `store_search_results()` scopes cleanup by search source
+- `staging_service.py` — stage/send workflows, staged torrent handling, torrent download/validation, release handoff
+
+**`utils/`** — Shared utility modules
 - `http_client.py` — shared HTTP client lifecycle
-- `release_parser.py`, `media_helpers.py`, `type_utils.py`, `async_utils.py` — shared parsing and utility helpers; `release_parser` classifies exact episodes, season/multi-season/complete-series packs, and multi-episode packs, with `cached_parse_release_coverage` (lru_cache, maxsize=4096)
-- `episode_derive.py` — canonical derivation functions for TV episode/season/request statuses (episode status is ground truth for TV)
-- `activity_log_service.py` / `unreleased_service.py` — supporting domain workflows (unreleased detection moved here from lifecycle_service)
-- `search_service.py` — ad hoc release evaluation/selection, request search orchestration, and TV season-pack/episode ad hoc search; TV ad hoc endpoints persist full explicit-refresh paginated season sweeps and reuse stored sweep rows for later episode/pack buckets before falling back to Prowlarr
+- `async_utils.py` — `gather_limited` and async helpers
+- `type_utils.py` — type conversion utilities
+- `media_helpers.py` — media title/year extraction
+- `background_tasks.py` — background orchestration (DETAILS_SYNC_TASKS)
 
 ### `app/siftarr/templates/`
 
@@ -174,13 +203,17 @@ Static assets.
 
 ## Tests map
 
+Tests mirror the service subpackage organization under `tests/services/`:
+
 - `tests/routers/dashboard/` — dashboard page/API/action coverage, including SSE search streams
 - `tests/routers/settings/` — settings page, connections, maintenance, and jobs coverage
-- `tests/services/release_selection_service/` — release persistence/staging behavior coverage
-- `tests/services/plex_service/` — Plex service unit coverage
-- `tests/services/plex_polling_service/` — Plex polling flow coverage
-- `tests/test_rules_router.py` / `tests/test_rule_engine.py` / `tests/test_rule_service.py` — rules UI/API, evaluation, and import/export coverage
-- top-level `tests/test_*.py` — service, router, parser, config, lifecycle, and integration-focused tests
+- `tests/services/admin/` — settings, scheduler, and Plex polling service tests
+- `tests/services/decisions/` — rule engine, rule service, TV/movie decision service tests
+- `tests/services/integrations/` — Prowlarr, qBittorrent, Overseerr, Plex service tests
+- `tests/services/lifecycle/` — lifecycle, activity log, episode sync, download completion tests
+- `tests/services/releases/` — release parser, serializers, staging, and release selection tests
+- `tests/services/utils/` — type utils tests
+- Top-level `tests/test_*.py` — integration tests (season sweep, torrent helpers, API, router-level, config)
 
 ## Database and operations
 

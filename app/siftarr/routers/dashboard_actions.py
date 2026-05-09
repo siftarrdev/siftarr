@@ -17,22 +17,22 @@ from app.siftarr.models.release import Release
 from app.siftarr.models.request import MediaType, RequestStatus
 from app.siftarr.models.request import Request as RequestModel
 from app.siftarr.models.season import Season
-from app.siftarr.services.activity_log_service import ActivityLogService
-from app.siftarr.services.episode_derive import (
+from app.siftarr.services.dashboard.search_service import SearchService
+from app.siftarr.services.integrations.overseerr_service import OverseerrService
+from app.siftarr.services.integrations.prowlarr_service import ProwlarrRelease
+from app.siftarr.services.lifecycle.activity_log_service import ActivityLogService
+from app.siftarr.services.lifecycle.episode_derive import (
     derive_request_status_from_episodes,
     derive_season_status,
 )
-from app.siftarr.services.lifecycle_service import LifecycleService
-from app.siftarr.services.overseerr_service import OverseerrService
-from app.siftarr.services.pending_queue_service import PendingQueueService
-from app.siftarr.services.prowlarr_service import ProwlarrRelease
+from app.siftarr.services.lifecycle.lifecycle_service import LifecycleService
+from app.siftarr.services.lifecycle.pending_queue_service import PendingQueueService
+from app.siftarr.services.releases.staging_service import StagingService
 from app.siftarr.services.request_service import (
     bulk_redirect_url,
     load_request_or_404,
     selection_redirect_url,
 )
-from app.siftarr.services.search_service import SearchService
-from app.siftarr.services.staging_service import StagingService
 
 logger = logging.getLogger(__name__)
 

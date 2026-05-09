@@ -24,12 +24,12 @@ from app.siftarr.models.request import (
 from app.siftarr.models.request import Request as RequestModel
 from app.siftarr.models.season import Season
 from app.siftarr.models.staged_torrent import StagedTorrent
-from app.siftarr.services.episode_derive import derive_tv_display_label
-from app.siftarr.services.http_client import get_shared_client
-from app.siftarr.services.lifecycle_service import LifecycleService
-from app.siftarr.services.overseerr_service import OverseerrService
-from app.siftarr.services.release_parser import movie_release_identity_rejection_reason
-from app.siftarr.services.tv_details_service import load_tv_seasons_with_episodes_bulk
+from app.siftarr.services.dashboard.tv_details_service import load_tv_seasons_with_episodes_bulk
+from app.siftarr.services.integrations.overseerr_service import OverseerrService
+from app.siftarr.services.lifecycle.episode_derive import derive_tv_display_label
+from app.siftarr.services.lifecycle.lifecycle_service import LifecycleService
+from app.siftarr.services.releases.release_parser import movie_release_identity_rejection_reason
+from app.siftarr.services.utils.http_client import get_shared_client
 
 logger = logging.getLogger(__name__)
 

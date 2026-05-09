@@ -9,9 +9,10 @@ import pytest
 from app.siftarr.models.release import Release
 from app.siftarr.models.request import MediaType, RequestStatus
 from app.siftarr.routers import dashboard_api
-from app.siftarr.services import detail_service, metadata_service
-from app.siftarr.services.release_serializers import apply_active_selection_metadata
-from app.siftarr.services.tv_enrichment_service import TVEnrichmentService
+from app.siftarr.services import metadata_service
+from app.siftarr.services.dashboard import detail_service
+from app.siftarr.services.dashboard.tv_enrichment_service import TVEnrichmentService
+from app.siftarr.services.releases.release_serializers import apply_active_selection_metadata
 
 
 def test_tv_staged_scope_helpers_cover_episode_season_multi_and_complete():

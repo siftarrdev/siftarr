@@ -4,12 +4,16 @@ Business logic, external integrations, and background workflows live here. Servi
 
 ## Responsibilities
 
-- Decision flow: `movie_decision_service.py` and `tv_decision_service.py` search, evaluate, and choose releases. TV requests prefer packs when appropriate and fall back to episode-level coverage.
-- Rules: `rule_engine.py` evaluates exclusions, requirements, scoring, and size limits; `rule_service.py` owns rule persistence behavior.
-- Release handling: `release_storage.py`, `release_serializers.py`, `staging_service.py`, `staging_actions.py`, and `torrent_service.py` persist releases, stage torrents, and hand off accepted items.
-- Request lifecycle: `request_service.py`, `pending_queue_service.py`, `lifecycle_service.py`, `download_completion_service.py`, and `unreleased_service.py` manage state transitions and retries.
-- Integrations: `overseerr_service.py`, `prowlarr_service.py`, `qbittorrent_service.py`, `plex_service/`, and `plex_polling_service.py` wrap external APIs.
-- App support: `dashboard_service.py`, `settings_service.py`, `scheduler_service.py`, `background_tasks.py`, `activity_log_service.py`, and shared helpers support UI and recurring work.
+Services are organized into thematic subpackages under `app.siftarr.services`:
+
+- **`decisions/`** — Decision flow: `movie_decision_service` and `tv_decision_service` search, evaluate, and choose releases. TV requests prefer packs when appropriate and fall back to episode-level coverage. `rule_engine` evaluates exclusions, requirements, scoring, and size limits; `rule_service` owns rule persistence behavior.
+- **`releases/`** — Release handling: `release_storage`, `release_serializers`, and `staging_service` (with integrated torrent download/validation) persist releases, stage torrents, and hand off accepted items.
+- **`lifecycle/`** — Request lifecycle: `request_service`, `pending_queue_service`, `lifecycle_service`, `download_completion_service`, `episode_sync_service`, `episode_derive`, and `unreleased_service` manage state transitions and retries.
+- **`integrations/`** — External APIs: `overseerr_service`, `prowlarr_service`, `qbittorrent_service`, `plex_service/`, `connection_tester`
+- **`admin/`** — App support: `settings_service`, `scheduler_service`, `plex_polling_service`
+- **`dashboard/`** — UI support: `dashboard_service`, `detail_service`, `tv_details_service`, `tv_enrichment_service`, `search_service`
+- **`utils/`** — Shared helpers: `http_client`, `async_utils`, `type_utils`, `media_helpers`, `background_tasks`
+- **Flat** — Cross-cutting: `auth_service`, `metadata_service`, `request_service`
 
 ## Extension points
 

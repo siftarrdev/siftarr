@@ -7,7 +7,7 @@ import pytest
 
 from app.siftarr.models.request import MediaType
 from app.siftarr.routers import search_sse
-from app.siftarr.services import search_service as search_service_mod
+from app.siftarr.services.dashboard import search_service as search_service_mod
 
 
 @pytest.mark.asyncio

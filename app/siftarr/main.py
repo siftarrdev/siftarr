@@ -22,9 +22,9 @@ from app.siftarr.routers import (
     staged,
     webhooks,
 )
+from app.siftarr.services.admin.scheduler_service import SchedulerService
 from app.siftarr.services.auth_service import verify_api_key
-from app.siftarr.services.http_client import close_shared_client
-from app.siftarr.services.scheduler_service import SchedulerService
+from app.siftarr.services.utils.http_client import close_shared_client
 from app.siftarr.version import __version__
 
 scheduler_service: SchedulerService | None = None

@@ -6,8 +6,8 @@ import asyncio
 from typing import Any, cast
 
 from app.siftarr.config import Settings
-from app.siftarr.services.dashboard_service import DashboardOverseerrDetails
-from app.siftarr.services.overseerr_service import (
+from app.siftarr.services.dashboard.dashboard_service import DashboardOverseerrDetails
+from app.siftarr.services.integrations.overseerr_service import (
     OverseerrService,
     build_overseerr_media_url,
     build_poster_url,

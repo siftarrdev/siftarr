@@ -14,8 +14,8 @@ from app.siftarr.models.request import MediaType, RequestStatus
 from app.siftarr.models.request import Request as RequestModel
 from app.siftarr.models.season import Season
 from app.siftarr.routers import settings
-from app.siftarr.services import settings_service
-from app.siftarr.services.plex_service import PlexService
+from app.siftarr.services.admin import settings_service
+from app.siftarr.services.integrations.plex_service import PlexService
 
 
 def _parse_sse_events(chunks: list[str]) -> list[dict[str, Any]]:
@@ -508,7 +508,7 @@ async def test_rescan_plex_uses_bounded_parallel_workers_and_reports_counts(
                 in_flight -= 1
                 finished += 1
 
-    import app.siftarr.services.episode_sync_service as episode_sync_module
+    import app.siftarr.services.lifecycle.episode_sync_service as episode_sync_module
 
     monkeypatch.setattr(episode_sync_module, "EpisodeSyncService", FakeEpisodeSyncService)
 
@@ -736,7 +736,7 @@ async def test_sync_overseerr_prefetches_with_bounded_parallelism(monkeypatch, b
         async def sync_request(self, request_id):
             synced_episode_ids.append(request_id)
 
-    import app.siftarr.services.episode_sync_service as episode_sync_module
+    import app.siftarr.services.lifecycle.episode_sync_service as episode_sync_module
 
     monkeypatch.setattr(episode_sync_module, "EpisodeSyncService", FakeEpisodeSyncService)
 
@@ -989,7 +989,7 @@ async def test_sync_overseerr_logs_request_level_degraded_tv_sync_once(
                 "Show One",
             )
 
-    import app.siftarr.services.episode_sync_service as episode_sync_module
+    import app.siftarr.services.lifecycle.episode_sync_service as episode_sync_module
 
     monkeypatch.setattr(episode_sync_module, "EpisodeSyncService", FakeEpisodeSyncService)
 

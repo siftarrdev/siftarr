@@ -9,7 +9,7 @@ if sys.version_info < (3, 11):  # noqa: UP036
     pytest.skip("Requires Python 3.11+ for StrEnum", allow_module_level=True)
 
 from app.siftarr.models.request import RequestStatus
-from app.siftarr.services.episode_derive import (
+from app.siftarr.services.lifecycle.episode_derive import (
     derive_request_status_from_episodes,
     derive_season_status,
 )
