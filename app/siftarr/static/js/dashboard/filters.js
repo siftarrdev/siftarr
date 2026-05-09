@@ -144,7 +144,7 @@ function filterReleaseCards() {
         .join('');
 }
 
-function sortTable(tableName, sortKey) {
+function sortTable(tableName, sortKey, preserveDirection = false) {
     const tableIdMap = {
         active: 'active-requests-table',
         pending: 'pending-requests-table',
@@ -163,14 +163,18 @@ function sortTable(tableName, sortKey) {
         finished: 'finished-requests-body',
         rejected: 'rejected-requests-body',
     };
-    const numericKeys = new Set(['ovrank', 'retrycount', 'size', 'score', 'progress', 'eta']);
+    const numericKeys = new Set(['ovrank', 'retrycount', 'year', 'size', 'score', 'progress', 'eta']);
     const state = window.tableSortState[tableName];
     const tbody = document.getElementById(bodyIdMap[tableName]);
     const table = document.getElementById(tableIdMap[tableName]);
     if (!tbody || !table || !state) return;
 
     if (state.column === sortKey) {
-        state.direction = state.direction === 'asc' ? 'desc' : 'asc';
+        // preserveDirection is used by restoreTabState to re-sort rows
+        // without flipping the sort direction on every tab refresh.
+        if (!preserveDirection) {
+            state.direction = state.direction === 'asc' ? 'desc' : 'asc';
+        }
     } else {
         state.column = sortKey;
         state.direction = 'asc';
@@ -263,8 +267,8 @@ function restoreTabState(tabName) {
                 indicator.textContent = sortState.direction === 'asc' ? ' \u25B2' : ' \u25BC';
             }
         }
-        // Re-sort rows
-        window.sortTable(tabName, sortState.column);
+        // Re-sort rows without toggling direction (preserveDirection=true)
+        window.sortTable(tabName, sortState.column, true);
     } else {
         // No saved sort, just re-apply filters
         applyAllFilters(tabName);

@@ -105,7 +105,10 @@ class ColumnResizer {
 }
 
 // Initialize on DOM ready
-document.addEventListener('DOMContentLoaded', () => {
+// Note: because this module uses top-level await import(), DOMContentLoaded
+// may fire before the dynamic imports resolve, so we use the readyState
+// guard pattern (same as modals.js).
+function initDashboard() {
     // Initialize column resizer
     new ColumnResizer();
 
@@ -162,12 +165,13 @@ document.addEventListener('DOMContentLoaded', () => {
         window.sortTable('unreleased', 'releasedate');
     }
 
-    // Bind sort handlers
+    // Bind sort handlers to the full sortable header cell. This keeps sorting reliable
+    // when users click header padding, labels, or sort indicators, while leaving the
+    // column resize handle reserved for resizing only.
     document.addEventListener('click', (e) => {
-        const sortTitle = e.target.closest('.sort-title');
-        if (!sortTitle) return;
-        const th = sortTitle.closest('th');
-        if (!th || !th.dataset.sort) return;
+        if (e.target.closest('.resize-handle')) return;
+        const th = e.target.closest('th[data-table][data-sort]');
+        if (!th) return;
         const sortKey = th.dataset.sort === 'ovstatus' ? 'ovrank' : th.dataset.sort;
         window.sortTable(th.dataset.table, sortKey);
     });
@@ -200,4 +204,10 @@ document.addEventListener('DOMContentLoaded', () => {
             window.closeTvSearchScopeMenu();
         }
     });
-});
+}
+
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', initDashboard);
+} else {
+    initDashboard();
+}
