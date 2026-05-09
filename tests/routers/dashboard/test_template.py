@@ -172,13 +172,29 @@ def test_dashboard_template_search_actions_use_progress_helpers(dashboard_templa
     assert "disableSearchControls(form);" in js
 
 
-def test_dashboard_template_deny_actions_use_modal_and_bulk_path(dashboard_template_path):
-    """All/Pending single deny uses the modal while bulk deny stays separate."""
+def test_dashboard_template_removes_all_requests_and_conditionally_shows_staging(
+    dashboard_template_path,
+):
+    """Dashboard tabs should omit All Requests and gate staging navigation."""
     with open(dashboard_template_path, encoding="utf-8") as handle:
         template = handle.read()
     js = _read_dashboard_js()
 
-    assert "openDenyModal({{ req.id }}, '/?tab=active')" in template
+    assert "All Requests" not in template
+    assert "content-active" not in template
+    assert "tab-active" not in template
+    assert "showTab('active')" not in template
+    assert "if staging_mode_enabled" in template
+    assert "showTab('pending');" in js
+
+
+def test_dashboard_template_deny_actions_use_modal_and_bulk_path(dashboard_template_path):
+    """Pending single deny uses the modal while bulk deny stays separate."""
+    with open(dashboard_template_path, encoding="utf-8") as handle:
+        template = handle.read()
+    js = _read_dashboard_js()
+
+    assert "openDenyModal({{ req.id }}, '/?tab=active')" not in template
     assert "openDenyModal({{ req.id }}, '/?tab=pending')" in template
     assert 'id="deny-submit-btn" onclick="submitDenyRequest()"' in template
     assert 'name="action" value="deny" class="btn-danger btn-sm"' in template

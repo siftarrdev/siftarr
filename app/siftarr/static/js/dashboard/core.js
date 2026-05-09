@@ -41,14 +41,19 @@ function setActiveTab(tabName) {
 }
 
 function showTab(tabName) {
+    const content = document.getElementById('content-' + tabName);
+    const tab = document.getElementById('tab-' + tabName);
+    if (!content || !tab) {
+        showTab('pending');
+        return;
+    }
     closeRequestDetails();
     document.querySelectorAll('.tab-content').forEach(el => el.classList.add('hidden'));
     document.querySelectorAll('.tab-button').forEach(el => {
         el.classList.remove('border-brand-500', 'text-brand-400');
         el.classList.add('border-transparent', 'text-gray-500');
     });
-    document.getElementById('content-' + tabName).classList.remove('hidden');
-    const tab = document.getElementById('tab-' + tabName);
+    content.classList.remove('hidden');
     tab.classList.remove('border-transparent', 'text-gray-500');
     tab.classList.add('border-brand-500', 'text-brand-400');
     setActiveTab(tabName);
