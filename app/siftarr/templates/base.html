@@ -21,8 +21,8 @@
                         <img src="/static/favicon-32.png" alt="" class="h-7 w-7 rounded-lg transition-transform group-hover:scale-105">
                         <span class="text-lg font-bold text-white tracking-tight">Siftarr</span>
                     </a>
+                    {% set current_path = request.url.path if request else '/' %}
                     <div class="hidden md:flex items-center gap-1">
-                        {% set current_path = request.url.path if request else '/' %}
                         <a href="/"
                            class="px-3 py-1.5 rounded-lg text-sm font-medium transition-colors {{ 'bg-gray-700/60 text-white' if current_path == '/' else 'text-gray-400 hover:text-white hover:bg-gray-700/40' }}">
                             Dashboard
@@ -36,6 +36,20 @@
                             Settings
                         </a>
                     </div>
+                </div>
+                <div class="flex md:hidden items-center gap-1 overflow-x-auto">
+                    <a href="/"
+                       class="px-2.5 py-1.5 rounded-lg text-xs font-medium whitespace-nowrap transition-colors {{ 'bg-gray-700/60 text-white' if current_path == '/' else 'text-gray-400 hover:text-white hover:bg-gray-700/40' }}">
+                        Dashboard
+                    </a>
+                    <a href="/rules"
+                       class="px-2.5 py-1.5 rounded-lg text-xs font-medium whitespace-nowrap transition-colors {{ 'bg-gray-700/60 text-white' if current_path.startswith('/rules') else 'text-gray-400 hover:text-white hover:bg-gray-700/40' }}">
+                        Rules
+                    </a>
+                    <a href="/settings"
+                       class="px-2.5 py-1.5 rounded-lg text-xs font-medium whitespace-nowrap transition-colors {{ 'bg-gray-700/60 text-white' if current_path.startswith('/settings') else 'text-gray-400 hover:text-white hover:bg-gray-700/40' }}">
+                        Settings
+                    </a>
                 </div>
             </div>
         </div>

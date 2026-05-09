@@ -30,7 +30,10 @@ class ActivityLogService:
         rolls back only the log entry, not the caller's transaction.
         """
         try:
-            async with self.db.begin_nested():
+            transaction = self.db.begin_nested()
+            if inspect.isawaitable(transaction):
+                transaction = await transaction
+            async with transaction:
                 entry = ActivityLog(
                     event_type=event_type.value,
                     request_id=request_id,

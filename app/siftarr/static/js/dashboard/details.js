@@ -70,7 +70,7 @@ async function openRequestDetails(requestId, explicitIndex = null, options = {})
         const data = await response.json();
 
         title.textContent = data.request.title;
-        meta.textContent = `${data.request.media_type || 'unknown'} \u00B7 ${data.request.status || 'unknown'} \u00B7 ${data.overseerr?.status || 'unknown'} in Overseerr`;
+        meta.textContent = data.request.title;
         overview.textContent = data.overseerr?.overview || 'No synopsis available.';
         const metaRow = document.getElementById('request-details-meta-row');
         if (metaRow) {

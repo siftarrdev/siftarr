@@ -55,3 +55,113 @@ details[open] summary .accordion-chevron { transform: rotate(90deg); }
     padding: 1rem;
     box-shadow: 0 18px 40px rgba(15, 23, 42, 0.2);
 }
+
+@media (max-width: 640px) {
+    #request-details-modal > .absolute.inset-4,
+    #request-details-modal > .absolute.md\:inset-10 {
+        inset: 0.5rem;
+        border-radius: 1rem;
+    }
+
+    #request-details-modal .form-input,
+    #deny-modal .form-input,
+    #replace-modal .form-input {
+        min-height: 2.75rem;
+        font-size: 16px;
+    }
+
+    #request-details-modal > .absolute.inset-4 > div:first-child,
+    #request-details-modal > .absolute.md\:inset-10 > div:first-child {
+        padding: 0.875rem 1rem;
+    }
+
+    #request-details-title {
+        font-size: 1.125rem;
+        line-height: 1.5rem;
+        overflow-wrap: anywhere;
+    }
+
+    #request-details-modal .grid {
+        gap: 1rem;
+        padding: 1rem;
+    }
+
+    #request-details-poster,
+    #request-details-poster-fallback {
+        max-height: 14rem;
+        width: auto;
+        max-width: 100%;
+        margin-inline: auto;
+    }
+
+    #request-details-poster-fallback {
+        min-height: 10rem;
+    }
+
+    #request-details-overview {
+        display: block;
+        width: 100%;
+        max-height: 11rem;
+        overflow-y: auto;
+        padding-right: 0.25rem;
+    }
+
+    #request-details-actions .btn-ghost {
+        flex: 1 1 10rem;
+    }
+
+    #request-details-releases .rounded-xl,
+    #request-details-releases details,
+    #request-details-timeline,
+    #timeline-entries,
+    #request-details-releases [data-release-size="true"],
+    #request-details-releases [data-release-indexer="true"],
+    #request-details-releases [data-release-resolution="true"],
+    #request-details-releases [data-release-codec="true"],
+    #request-details-releases [data-release-group="true"] {
+        min-width: 0;
+        overflow-wrap: anywhere;
+    }
+
+    #request-details-releases .badge,
+    #request-details-meta-row .badge {
+        white-space: normal;
+        overflow-wrap: anywhere;
+        text-align: left;
+    }
+
+    #request-details-releases [data-release-status-column="true"] {
+        align-items: stretch;
+        width: 100%;
+        text-align: left;
+    }
+
+    #request-details-releases [data-release-status-column="true"] .btn-primary,
+    #request-details-releases [data-release-status-column="true"] .btn-disabled {
+        width: 100%;
+        justify-content: center;
+        white-space: normal;
+        min-height: 2.5rem;
+    }
+
+    #request-details-releases [data-release-rejection-reason="true"] {
+        max-width: none;
+        text-align: left;
+        overflow-wrap: anywhere;
+    }
+
+    #request-details-releases summary {
+        flex-wrap: wrap;
+    }
+
+    #request-details-releases summary > div:first-child,
+    #request-details-releases summary > div:last-child {
+        width: 100%;
+        min-width: 0;
+    }
+
+    #request-details-releases summary > div:last-child {
+        justify-content: flex-start;
+        flex-wrap: wrap;
+    }
+}
