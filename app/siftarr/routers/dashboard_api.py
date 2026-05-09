@@ -10,16 +10,16 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.siftarr.config import get_settings
 from app.siftarr.database import get_db
 from app.siftarr.models.request import MediaType
-from app.siftarr.services.dashboard_service import (
+from app.siftarr.services.dashboard.dashboard_service import (
     serialize_request_details_response,
     serialize_request_search_response,
     serialize_tv_search_response,
 )
-from app.siftarr.services.detail_service import DetailService
-from app.siftarr.services.plex_service import PlexService
+from app.siftarr.services.dashboard.detail_service import DetailService
+from app.siftarr.services.integrations.plex_service import PlexService
 from app.siftarr.services.request_service import load_request_or_404, validate_tv_request
-from app.siftarr.services.search_service import SearchService
-from app.siftarr.services.tv_details_service import (
+from app.siftarr.services.dashboard.search_service import SearchService
+from app.siftarr.services.dashboard.tv_details_service import (
     compute_sync_metadata,
     count_season_episode_states,
     load_tv_seasons_with_episodes,
@@ -185,7 +185,7 @@ async def refresh_plex(
     db: AsyncSession = Depends(get_db),
 ) -> JSONResponse:
     """Run the simplified TV sync flow for one request."""
-    from app.siftarr.services.episode_sync_service import EpisodeSyncService
+    from app.siftarr.services.lifecycle.episode_sync_service import EpisodeSyncService
 
     request = await load_request_or_404(db, request_id)
 

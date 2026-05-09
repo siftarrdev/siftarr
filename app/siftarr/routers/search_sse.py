@@ -12,12 +12,12 @@ from app.siftarr.database import get_db
 from app.siftarr.models.request import MediaType
 from app.siftarr.models.request import Request as RequestModel
 from app.siftarr.routers.dashboard_actions import _load_all_pending_search_requests
-from app.siftarr.services.dashboard_service import (
+from app.siftarr.services.dashboard.dashboard_service import (
     serialize_tv_search_response,
 )
 from app.siftarr.services.request_service import load_request_or_404, validate_tv_request
-from app.siftarr.services.search_service import SearchService
-from app.siftarr.services.settings_service import build_sse_progress, serialize_sse
+from app.siftarr.services.dashboard.search_service import SearchService
+from app.siftarr.services.admin.settings_service import build_sse_progress, serialize_sse
 
 logger = logging.getLogger(__name__)
 

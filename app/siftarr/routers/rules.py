@@ -10,9 +10,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.siftarr.database import get_db
 from app.siftarr.models.rule import RuleType, TVTarget
-from app.siftarr.services.prowlarr_service import ProwlarrRelease
-from app.siftarr.services.rule_engine import RuleEngine
-from app.siftarr.services.rule_service import RuleImportPreview, RuleService
+from app.siftarr.services.integrations.prowlarr_service import ProwlarrRelease
+from app.siftarr.services.decisions.rule_engine import RuleEngine
+from app.siftarr.services.decisions.rule_service import RuleImportPreview, RuleService
 
 router = APIRouter(prefix="/rules", tags=["rules"])
 templates = Jinja2Templates(directory="app/siftarr/templates")
