@@ -50,6 +50,7 @@
     }
     .badge {
         @apply inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium;
+        max-width: 100%;
     }
     .badge-green  { @apply bg-emerald-900/60 text-emerald-300 ring-1 ring-inset ring-emerald-700/40; }
     .badge-yellow { @apply bg-amber-900/60 text-amber-300 ring-1 ring-inset ring-amber-700/40; }
@@ -66,5 +67,57 @@
     }
     .section-subtitle {
         @apply text-sm text-gray-400 mt-0.5;
+    }
+}
+
+@layer utilities {
+    .overflow-wrap-anywhere {
+        overflow-wrap: anywhere;
+    }
+
+    @media (max-width: 640px) {
+        .card-header,
+        .card-body {
+            @apply px-4 py-3;
+        }
+
+        .btn,
+        .btn-primary,
+        .btn-success,
+        .btn-danger,
+        .btn-warning,
+        .btn-ghost {
+            min-height: 2.5rem;
+            white-space: normal;
+            text-align: center;
+        }
+
+        .btn-sm {
+            min-height: 2.25rem;
+        }
+
+        .form-input,
+        .form-select {
+            min-height: 2.75rem;
+            font-size: 16px;
+        }
+
+        .badge {
+            white-space: normal;
+            overflow-wrap: anywhere;
+            text-align: left;
+        }
+
+        .page-title {
+            @apply text-xl;
+        }
+
+        .section-title {
+            @apply text-base;
+        }
+
+        .section-subtitle {
+            @apply text-xs;
+        }
     }
 }

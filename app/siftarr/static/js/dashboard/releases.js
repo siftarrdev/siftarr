@@ -210,15 +210,7 @@ function renderSeasonAccordion(data) {
         return '<div class="text-gray-500 text-sm">' + window.escapeHtml(emptyState) + '</div>';
     }
 
-    const syncBanner = syncState.stale || syncState.refresh_in_progress || syncState.needs_plex_enrichment
-        ? '<div class="rounded-lg border border-blue-500/30 bg-blue-500/10 px-3 py-2 text-xs text-blue-200">' +
-            (syncState.refresh_in_progress
-                ? 'Showing cached TV details while a background refresh updates Plex/Overseerr data.'
-                : syncState.needs_plex_enrichment
-                    ? 'Showing cached TV details while Plex episode availability is being resolved for partial seasons.'
-                    : 'Showing cached TV details. Reopen after a background refresh for newer availability.') +
-          '</div>'
-        : '';
+    const syncBanner = '';
 
     const seenMultiSeasonReleases = new Set();
     const multiSeasonReleases = [];
@@ -236,10 +228,10 @@ function renderSeasonAccordion(data) {
     });
     const multiSeasonSection = '<div class="rounded-xl border border-gray-700/60 bg-surface-800 p-3 space-y-3">' +
         '<div>' +
-            '<div class="text-white font-medium">Multi-season and complete-series buckets</div>' +
-            '<div class="text-xs text-gray-500">Read-only cached results. Refresh Search sweeps requested seasons and fills episode, season-pack, and multi-season buckets from stored DB results.</div>' +
+            '<div class="text-white font-medium">Season packs and complete series</div>' +
+            '<div class="text-xs text-gray-500">Larger releases that may cover more than one requested season.</div>' +
         '</div>' +
-        '<div class="space-y-1">' + (multiSeasonReleases.map(function(r) { return renderReleaseCard(r, requestId); }).join('') || '<div class="text-gray-500 text-sm py-2">No cached multi-season or complete-series results yet. Use Refresh Search to sweep requested seasons.</div>') + '</div>' +
+        '<div class="space-y-1">' + (multiSeasonReleases.map(function(r) { return renderReleaseCard(r, requestId); }).join('') || '<div class="text-gray-500 text-sm py-2">No season pack or complete-series results yet. Use Refresh Search to look again.</div>') + '</div>' +
     '</div>';
 
     return '<div class="space-y-3">' + syncBanner + multiSeasonSection + tvInfo.seasons.map(function(season) {

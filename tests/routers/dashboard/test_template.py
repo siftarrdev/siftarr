@@ -102,13 +102,9 @@ def test_dashboard_js_includes_read_only_tv_buckets():
     """Dashboard JS should show read-only TV buckets filled by Search All."""
     js = _read_dashboard_js()
 
-    assert "Multi-season and complete-series buckets" in js
-    assert "Read-only cached results" in js
-    assert (
-        "Refresh Search sweeps requested seasons and fills episode, season-pack, and multi-season buckets"
-        in js
-    )
-    assert "No cached multi-season or complete-series results yet" in js
+    assert "Season packs and complete series" in js
+    assert "Larger releases that may cover more than one requested season" in js
+    assert "No season pack or complete-series results yet. Use Refresh Search to look again." in js
     assert "No cached episode results yet" in js
     assert "No cached season-pack results yet" in js
     assert "function searchTvRequestAll()" in js
@@ -235,8 +231,8 @@ def test_dashboard_js_includes_release_status_column_and_upload_age():
     assert "function formatRelativePublishAge(publishDate)" in js
     assert "window.siftarrStagingModeEnabled" in js
     assert "/manual-release/use" in js
-    assert "background refresh updates Plex/Overseerr data" in js
-    assert "Plex episode availability is being resolved for partial seasons" in js
+    assert "background refresh updates Plex/Overseerr data" not in js
+    assert "Plex episode availability is being resolved for partial seasons" not in js
 
 
 def test_dashboard_js_supports_annotation_highlighting():
