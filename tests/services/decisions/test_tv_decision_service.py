@@ -5,9 +5,9 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from app.siftarr.models.request import MediaType, Request, RequestStatus
-from app.siftarr.services.integrations.prowlarr_service import ProwlarrRelease, ProwlarrSearchResult
 from app.siftarr.services.decisions.rule_engine import ReleaseEvaluation
 from app.siftarr.services.decisions.tv_decision_service import TVDecisionService
+from app.siftarr.services.integrations.prowlarr_service import ProwlarrRelease, ProwlarrSearchResult
 
 
 def _make_release(title="Test.S01E05.1080p", size=1000000000, seeders=10, info_hash=None):
@@ -127,7 +127,9 @@ class TestProcessRequest:
             releases=[release], query_time_ms=1
         )
 
-        with patch("app.siftarr.services.tv_decision_service.OverseerrService") as overseerr_cls:
+        with patch(
+            "app.siftarr.services.decisions.tv_decision_service.OverseerrService"
+        ) as overseerr_cls:
             overseerr_cls.return_value.get_media_details = AsyncMock(
                 return_value={"externalIds": {"imdbId": "tt1234567"}}
             )
@@ -188,12 +190,12 @@ class TestProcessRequest:
                 service, "_get_rule_engine", new_callable=AsyncMock, return_value=rule_engine
             ),
             patch(
-                "app.siftarr.services.tv_decision_service.store_search_results",
+                "app.siftarr.services.decisions.tv_decision_service.store_search_results",
                 new_callable=AsyncMock,
                 return_value={"Show.S01.1080p": stored_pack_release},
             ),
             patch(
-                "app.siftarr.services.tv_decision_service.StagingService",
+                "app.siftarr.services.decisions.tv_decision_service.StagingService",
                 return_value=mock_staging,
             ),
         ):
@@ -223,11 +225,11 @@ class TestProcessRequest:
                 return_value=[1, 2, 3],
             ),
             patch(
-                "app.siftarr.services.tv_decision_service.store_search_results",
+                "app.siftarr.services.decisions.tv_decision_service.store_search_results",
                 new_callable=AsyncMock,
             ),
             patch(
-                "app.siftarr.services.decision_pipeline.PendingQueueService",
+                "app.siftarr.services.decisions.decision_pipeline.PendingQueueService",
                 lambda db: MagicMock(add_to_queue=AsyncMock()),
             ),
         ):
@@ -261,11 +263,11 @@ class TestProcessRequest:
                 return_value=[],
             ),
             patch(
-                "app.siftarr.services.tv_decision_service.store_search_results",
+                "app.siftarr.services.decisions.tv_decision_service.store_search_results",
                 new_callable=AsyncMock,
             ),
             patch(
-                "app.siftarr.services.decision_pipeline.PendingQueueService",
+                "app.siftarr.services.decisions.decision_pipeline.PendingQueueService",
                 lambda db: MagicMock(add_to_queue=AsyncMock()),
             ),
         ):
@@ -304,12 +306,12 @@ class TestProcessRequest:
                 service, "_get_rule_engine", new_callable=AsyncMock, return_value=rule_engine
             ),
             patch(
-                "app.siftarr.services.tv_decision_service.store_search_results",
+                "app.siftarr.services.decisions.tv_decision_service.store_search_results",
                 new_callable=AsyncMock,
                 return_value={"Show.S01-S02.1080p": stored_broad_pack},
             ),
             patch(
-                "app.siftarr.services.tv_decision_service.StagingService",
+                "app.siftarr.services.decisions.tv_decision_service.StagingService",
                 return_value=mock_staging,
             ),
         ):
@@ -355,12 +357,12 @@ class TestProcessRequest:
                 service, "_get_rule_engine", new_callable=AsyncMock, return_value=rule_engine
             ),
             patch(
-                "app.siftarr.services.tv_decision_service.store_search_results",
+                "app.siftarr.services.decisions.tv_decision_service.store_search_results",
                 new_callable=AsyncMock,
                 return_value={"s02e02-sweep": stored_ep2, "s02e01-exact": stored_ep1},
             ) as store_mock,
             patch(
-                "app.siftarr.services.tv_decision_service.StagingService",
+                "app.siftarr.services.decisions.tv_decision_service.StagingService",
                 return_value=mock_staging,
             ),
         ):
@@ -406,12 +408,12 @@ class TestProcessRequest:
                 service, "_get_rule_engine", new_callable=AsyncMock, return_value=rule_engine
             ),
             patch(
-                "app.siftarr.services.tv_decision_service.store_search_results",
+                "app.siftarr.services.decisions.tv_decision_service.store_search_results",
                 new_callable=AsyncMock,
                 return_value={"s02e01-sweep": stored_ep1},
             ),
             patch(
-                "app.siftarr.services.tv_decision_service.StagingService",
+                "app.siftarr.services.decisions.tv_decision_service.StagingService",
                 return_value=mock_staging,
             ),
         ):
@@ -461,7 +463,7 @@ class TestProcessRequest:
                 service, "_get_rule_engine", new_callable=AsyncMock, return_value=rule_engine
             ),
             patch(
-                "app.siftarr.services.tv_decision_service.store_search_results",
+                "app.siftarr.services.decisions.tv_decision_service.store_search_results",
                 new_callable=AsyncMock,
                 return_value={
                     "s02e01-sweep": stored_ep1,
@@ -470,7 +472,7 @@ class TestProcessRequest:
                 },
             ),
             patch(
-                "app.siftarr.services.tv_decision_service.StagingService",
+                "app.siftarr.services.decisions.tv_decision_service.StagingService",
                 return_value=mock_staging,
             ),
         ):
@@ -516,7 +518,7 @@ class TestProcessRequest:
                 service, "_get_rule_engine", new_callable=AsyncMock, return_value=rule_engine
             ),
             patch(
-                "app.siftarr.services.tv_decision_service.store_search_results",
+                "app.siftarr.services.decisions.tv_decision_service.store_search_results",
                 new_callable=AsyncMock,
                 return_value={
                     "Show.S01.1080p": stored_pack_release,
@@ -524,7 +526,7 @@ class TestProcessRequest:
                 },
             ),
             patch(
-                "app.siftarr.services.tv_decision_service.StagingService",
+                "app.siftarr.services.decisions.tv_decision_service.StagingService",
                 return_value=mock_staging,
             ),
         ):
@@ -572,12 +574,12 @@ class TestProcessRequest:
                 service, "_get_rule_engine", new_callable=AsyncMock, return_value=rule_engine
             ),
             patch(
-                "app.siftarr.services.tv_decision_service.store_search_results",
+                "app.siftarr.services.decisions.tv_decision_service.store_search_results",
                 new_callable=AsyncMock,
                 return_value={"season-episode": stored_episode_release},
             ),
             patch(
-                "app.siftarr.services.tv_decision_service.StagingService",
+                "app.siftarr.services.decisions.tv_decision_service.StagingService",
                 return_value=mock_staging,
             ),
         ):
@@ -630,12 +632,12 @@ class TestProcessRequest:
                 service, "_get_rule_engine", new_callable=AsyncMock, return_value=rule_engine
             ),
             patch(
-                "app.siftarr.services.tv_decision_service.store_search_results",
+                "app.siftarr.services.decisions.tv_decision_service.store_search_results",
                 new_callable=AsyncMock,
                 return_value={"broad-complete-series": stored_complete_series},
             ),
             patch(
-                "app.siftarr.services.tv_decision_service.StagingService",
+                "app.siftarr.services.decisions.tv_decision_service.StagingService",
                 return_value=mock_staging,
             ),
         ):
@@ -683,7 +685,7 @@ class TestProcessRequest:
                 service, "_get_rule_engine", new_callable=AsyncMock, return_value=rule_engine
             ),
             patch(
-                "app.siftarr.services.tv_decision_service.store_search_results",
+                "app.siftarr.services.decisions.tv_decision_service.store_search_results",
                 new_callable=AsyncMock,
                 return_value={
                     "fallback-s01-pack": stored_season_one_pack,
@@ -691,7 +693,7 @@ class TestProcessRequest:
                 },
             ),
             patch(
-                "app.siftarr.services.tv_decision_service.StagingService",
+                "app.siftarr.services.decisions.tv_decision_service.StagingService",
                 return_value=mock_staging,
             ),
         ):
@@ -739,12 +741,12 @@ class TestProcessRequest:
                 service, "_get_rule_engine", new_callable=AsyncMock, return_value=rule_engine
             ),
             patch(
-                "app.siftarr.services.tv_decision_service.store_search_results",
+                "app.siftarr.services.decisions.tv_decision_service.store_search_results",
                 new_callable=AsyncMock,
                 return_value={"complete-fallback": stored_episode_release},
             ),
             patch(
-                "app.siftarr.services.tv_decision_service.StagingService",
+                "app.siftarr.services.decisions.tv_decision_service.StagingService",
                 return_value=mock_staging,
             ),
         ):
@@ -773,11 +775,11 @@ class TestProcessRequest:
                     return_value=[1, 2, 3, 4],
                 ),
                 patch(
-                    "app.siftarr.services.tv_decision_service.store_search_results",
+                    "app.siftarr.services.decisions.tv_decision_service.store_search_results",
                     new_callable=AsyncMock,
                 ),
                 patch(
-                    "app.siftarr.services.decision_pipeline.PendingQueueService",
+                    "app.siftarr.services.decisions.decision_pipeline.PendingQueueService",
                     lambda db: MagicMock(add_to_queue=AsyncMock()),
                 ),
             ):
@@ -821,12 +823,12 @@ class TestProcessRequest:
                 service, "_get_rule_engine", new_callable=AsyncMock, return_value=rule_engine
             ),
             patch(
-                "app.siftarr.services.tv_decision_service.store_search_results",
+                "app.siftarr.services.decisions.tv_decision_service.store_search_results",
                 new_callable=AsyncMock,
                 return_value={"Show.S01.1080p": stored_release},
             ),
             patch(
-                "app.siftarr.services.tv_decision_service.StagingService",
+                "app.siftarr.services.decisions.tv_decision_service.StagingService",
                 return_value=mock_staging,
             ),
             patch.object(
@@ -880,7 +882,7 @@ class TestProcessRequest:
                 service, "_get_rule_engine", new_callable=AsyncMock, return_value=rule_engine
             ),
             patch(
-                "app.siftarr.services.tv_decision_service.store_search_results",
+                "app.siftarr.services.decisions.tv_decision_service.store_search_results",
                 new_callable=AsyncMock,
                 return_value={
                     "selected-hash": stored_release,
@@ -888,7 +890,7 @@ class TestProcessRequest:
                 },
             ),
             patch(
-                "app.siftarr.services.tv_decision_service.StagingService",
+                "app.siftarr.services.decisions.tv_decision_service.StagingService",
                 return_value=mock_staging,
             ),
         ):
@@ -921,11 +923,11 @@ class TestProcessRequest:
                 service, "_get_rule_engine", new_callable=AsyncMock, return_value=rule_engine
             ),
             patch(
-                "app.siftarr.services.tv_decision_service.store_search_results",
+                "app.siftarr.services.decisions.tv_decision_service.store_search_results",
                 new_callable=AsyncMock,
             ),
             patch(
-                "app.siftarr.services.decision_pipeline.PendingQueueService",
+                "app.siftarr.services.decisions.decision_pipeline.PendingQueueService",
                 lambda db: MagicMock(add_to_queue=AsyncMock()),
             ),
         ):
@@ -952,11 +954,11 @@ class TestProcessRequest:
                 service, "_get_rule_engine", new_callable=AsyncMock, return_value=MagicMock()
             ),
             patch(
-                "app.siftarr.services.tv_decision_service.store_search_results",
+                "app.siftarr.services.decisions.tv_decision_service.store_search_results",
                 new_callable=AsyncMock,
             ),
             patch(
-                "app.siftarr.services.decision_pipeline.PendingQueueService",
+                "app.siftarr.services.decisions.decision_pipeline.PendingQueueService",
                 lambda db: MagicMock(add_to_queue=AsyncMock()),
             ),
         ):
@@ -997,12 +999,12 @@ class TestProcessRequest:
                 service, "_get_rule_engine", new_callable=AsyncMock, return_value=rule_engine
             ),
             patch(
-                "app.siftarr.services.tv_decision_service.store_search_results",
+                "app.siftarr.services.decisions.tv_decision_service.store_search_results",
                 new_callable=AsyncMock,
                 return_value={"Show.S01.1080p": stored_pack_release},
             ),
             patch(
-                "app.siftarr.services.tv_decision_service.StagingService",
+                "app.siftarr.services.decisions.tv_decision_service.StagingService",
                 return_value=mock_staging,
             ),
         ):
@@ -1032,11 +1034,11 @@ class TestProcessRequest:
                 service, "_get_rule_engine", new_callable=AsyncMock, return_value=rule_engine
             ),
             patch(
-                "app.siftarr.services.tv_decision_service.store_search_results",
+                "app.siftarr.services.decisions.tv_decision_service.store_search_results",
                 new_callable=AsyncMock,
             ),
             patch(
-                "app.siftarr.services.decision_pipeline.PendingQueueService",
+                "app.siftarr.services.decisions.decision_pipeline.PendingQueueService",
                 lambda db: MagicMock(add_to_queue=AsyncMock()),
             ),
         ):

@@ -14,13 +14,19 @@ from app.siftarr.config import Settings, get_settings
 from app.siftarr.models.request import MediaType, RequestStatus, is_active_staging_workflow_status
 from app.siftarr.models.rule import Rule
 from app.siftarr.models.staged_torrent import StagedTorrent
-from app.siftarr.services.lifecycle.activity_log_service import ActivityLogService
 from app.siftarr.services.dashboard.dashboard_service import (
     DashboardRequestSummary,
     DashboardTimelineEntry,
     RequestDetailsData,
     RequestSearchData,
 )
+from app.siftarr.services.dashboard.tv_enrichment_service import TVEnrichmentService
+from app.siftarr.services.decisions.rule_engine import (
+    RuleEngine,
+    get_cached_engine,
+    set_cached_engine,
+)
+from app.siftarr.services.lifecycle.activity_log_service import ActivityLogService
 from app.siftarr.services.metadata_service import MetadataService
 from app.siftarr.services.releases.release_serializers import (
     apply_active_selection_metadata,
@@ -29,8 +35,6 @@ from app.siftarr.services.releases.release_serializers import (
     serialize_stored_evaluated_release,
 )
 from app.siftarr.services.releases.release_storage import build_prowlarr_release
-from app.siftarr.services.decisions.rule_engine import RuleEngine, get_cached_engine, set_cached_engine
-from app.siftarr.services.dashboard.tv_enrichment_service import TVEnrichmentService
 
 logger = logging.getLogger(__name__)
 

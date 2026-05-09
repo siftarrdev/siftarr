@@ -14,14 +14,14 @@ from app.siftarr.models.release import Release
 from app.siftarr.models.request import MediaType, Request, RequestStatus
 from app.siftarr.models.season import Season
 from app.siftarr.services.dashboard.detail_service import DetailService
+from app.siftarr.services.decisions.rule_engine import ReleaseEvaluation, RuleEngine
+from app.siftarr.services.decisions.tv_decision_service import TVDecisionService
 from app.siftarr.services.integrations.prowlarr_service import (
     ProwlarrRelease,
     ProwlarrSearchResult,
     ProwlarrService,
 )
 from app.siftarr.services.integrations.qbittorrent_service import QbittorrentService
-from app.siftarr.services.decisions.rule_engine import ReleaseEvaluation, RuleEngine
-from app.siftarr.services.decisions.tv_decision_service import TVDecisionService
 
 
 def _release(title: str, index: int, *, info_hash: str | None = None) -> ProwlarrRelease:
@@ -239,7 +239,8 @@ async def test_tv_request_season_sweep_persists_buckets_and_statuses(monkeypatch
                     return {"status": "staged", "message": "staged"}
 
             monkeypatch.setattr(
-                "app.siftarr.services.tv_decision_service.StagingService", FakeStagingService
+                "app.siftarr.services.decisions.tv_decision_service.StagingService",
+                FakeStagingService,
             )
 
             prowlarr = FakeIPTProwlarr()
@@ -326,7 +327,8 @@ async def test_capped_season_sweep_exact_fallback_fills_detail_episode_bucket(
                     return {"status": "staged", "message": "staged"}
 
             monkeypatch.setattr(
-                "app.siftarr.services.tv_decision_service.StagingService", FakeStagingService
+                "app.siftarr.services.decisions.tv_decision_service.StagingService",
+                FakeStagingService,
             )
 
             prowlarr = FakeCappedEpisodeGapProwlarr()
@@ -400,7 +402,8 @@ async def test_capped_georgie_fallback_preserves_sweep_episode_rows_in_db_and_de
                     return {"status": "staged", "message": "staged"}
 
             monkeypatch.setattr(
-                "app.siftarr.services.tv_decision_service.StagingService", FakeStagingService
+                "app.siftarr.services.decisions.tv_decision_service.StagingService",
+                FakeStagingService,
             )
 
             prowlarr = FakeCappedGeorgieProwlarr()

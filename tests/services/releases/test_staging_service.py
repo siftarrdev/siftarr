@@ -157,7 +157,7 @@ class TestStagingServiceIntegration:
             indexer="Indexer A",
         )
 
-        with patch("app.siftarr.services.staging_service.STAGING_DIR", tmp_path):
+        with patch("app.siftarr.services.releases.staging_service.STAGING_DIR", tmp_path):
             saved = await service.save_release(
                 release,
                 request,
@@ -190,8 +190,8 @@ class TestStagingServiceIntegration:
         )
 
         with (
-            patch("app.siftarr.services.staging_service.STAGING_DIR", tmp_path),
-            patch("app.siftarr.services.staging_service.get_shared_client") as get_client,
+            patch("app.siftarr.services.releases.staging_service.STAGING_DIR", tmp_path),
+            patch("app.siftarr.services.releases.staging_service.get_shared_client") as get_client,
         ):
             await service.save_release(release, request)
 
@@ -221,7 +221,7 @@ class TestStagingServiceIntegration:
             indexer="Indexer A",
         )
 
-        with patch("app.siftarr.services.staging_service.STAGING_DIR", tmp_path):
+        with patch("app.siftarr.services.releases.staging_service.STAGING_DIR", tmp_path):
             await service.save_release(release, request, commit=False)
 
         service.db.flush.assert_awaited_once()

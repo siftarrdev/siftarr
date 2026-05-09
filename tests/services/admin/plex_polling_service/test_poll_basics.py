@@ -80,7 +80,7 @@ async def test_poll_tv_all_episodes_available(service, mock_db, mock_plex):
 
     with (
         patch(
-            "app.siftarr.services.plex_polling_service.persist_episode_availability",
+            "app.siftarr.services.admin.plex_polling_service.persist_episode_availability",
             new_callable=AsyncMock,
         ) as mock_reconcile,
         patch.object(service.lifecycle, "transition", new_callable=AsyncMock) as mock_transition,
@@ -129,7 +129,7 @@ async def test_apply_decisions_counts_only_completed_tv_requests(service, mock_d
         request.status = RequestStatus.DOWNLOADING
 
     with patch(
-        "app.siftarr.services.plex_polling_service.persist_episode_availability",
+        "app.siftarr.services.admin.plex_polling_service.persist_episode_availability",
         new_callable=AsyncMock,
     ) as mock_reconcile:
         mock_reconcile.side_effect = reconcile_partial
@@ -174,7 +174,7 @@ async def test_poll_pending_request_can_complete(service, mock_db, mock_plex):
 
     with (
         patch(
-            "app.siftarr.services.plex_polling_service.persist_episode_availability",
+            "app.siftarr.services.admin.plex_polling_service.persist_episode_availability",
             new_callable=AsyncMock,
         ) as mock_reconcile,
         patch.object(service.lifecycle, "transition", new_callable=AsyncMock) as mock_transition,
@@ -225,7 +225,7 @@ async def test_poll_tv_fallback_to_tvdb(service, mock_db, mock_plex):
 
     with (
         patch(
-            "app.siftarr.services.plex_polling_service.persist_episode_availability",
+            "app.siftarr.services.admin.plex_polling_service.persist_episode_availability",
             new_callable=AsyncMock,
         ) as mock_reconcile,
         patch.object(service.lifecycle, "transition", new_callable=AsyncMock) as mock_transition,
@@ -324,7 +324,7 @@ async def test_check_request_tv_partial_availability(service, mock_db, mock_plex
         return await set_request_status(request, RequestStatus.PENDING, seasons, availability)
 
     with patch(
-        "app.siftarr.services.plex_polling_service.persist_episode_availability",
+        "app.siftarr.services.admin.plex_polling_service.persist_episode_availability",
         new_callable=AsyncMock,
     ) as mock_reconcile:
         mock_reconcile.side_effect = reconcile_to_pending

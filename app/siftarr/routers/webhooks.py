@@ -13,15 +13,15 @@ from app.siftarr import database as db_mod
 from app.siftarr.config import get_settings
 from app.siftarr.database import get_db, init_engine
 from app.siftarr.models import MediaType, Request, RequestStatus
-from app.siftarr.services.lifecycle.episode_sync_service import EpisodeSyncService
-from app.siftarr.services.utils.media_helpers import extract_media_title_and_year
 from app.siftarr.services.decisions.movie_decision_service import MovieDecisionService
+from app.siftarr.services.decisions.tv_decision_service import TVDecisionService
 from app.siftarr.services.integrations.overseerr_service import OverseerrService
 from app.siftarr.services.integrations.plex_service import PlexService
 from app.siftarr.services.integrations.prowlarr_service import ProwlarrService
 from app.siftarr.services.integrations.qbittorrent_service import QbittorrentService
-from app.siftarr.services.decisions.tv_decision_service import TVDecisionService
+from app.siftarr.services.lifecycle.episode_sync_service import EpisodeSyncService
 from app.siftarr.services.lifecycle.unreleased_service import UnreleasedEvaluator
+from app.siftarr.services.utils.media_helpers import extract_media_title_and_year
 
 logger = logging.getLogger(__name__)
 

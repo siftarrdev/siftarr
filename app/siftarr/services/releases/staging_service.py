@@ -22,14 +22,13 @@ from app.siftarr.models.release import Release
 from app.siftarr.models.request import MediaType, Request, RequestStatus
 from app.siftarr.models.season import Season
 from app.siftarr.models.staged_torrent import StagedTorrent
+from app.siftarr.services.integrations.prowlarr_service import ProwlarrRelease
+from app.siftarr.services.integrations.qbittorrent_service import MediaCategory, QbittorrentService
 from app.siftarr.services.lifecycle.episode_derive import (
     derive_request_status_from_episodes,
     derive_season_status,
 )
-from app.siftarr.services.utils.http_client import get_shared_client
 from app.siftarr.services.lifecycle.pending_queue_service import PendingQueueService
-from app.siftarr.services.integrations.prowlarr_service import ProwlarrRelease
-from app.siftarr.services.integrations.qbittorrent_service import MediaCategory, QbittorrentService
 from app.siftarr.services.releases.release_parser import (
     cached_parse_release_coverage,
 )
@@ -38,6 +37,7 @@ from app.siftarr.services.releases.release_serializers import (
     tv_target_scopes_overlap,
 )
 from app.siftarr.services.releases.release_storage import build_prowlarr_release
+from app.siftarr.services.utils.http_client import get_shared_client
 
 STAGING_DIR = Path("/data/staging")
 
@@ -380,11 +380,15 @@ class StagingService:
         info_hash: str | None = release.info_hash
         if not info_hash:
             if release.magnet_url:
-                from app.siftarr.services.integrations.qbittorrent_service import _parse_magnet_info_hash
+                from app.siftarr.services.integrations.qbittorrent_service import (
+                    _parse_magnet_info_hash,
+                )
 
                 info_hash = _parse_magnet_info_hash(release.magnet_url)
             if not info_hash and torrent_path and torrent_path.exists():
-                from app.siftarr.services.integrations.qbittorrent_service import _torrent_file_info_hash
+                from app.siftarr.services.integrations.qbittorrent_service import (
+                    _torrent_file_info_hash,
+                )
 
                 info_hash = _torrent_file_info_hash(str(torrent_path))
 

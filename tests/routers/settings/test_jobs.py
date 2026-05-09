@@ -206,7 +206,7 @@ async def test_rescan_plex_route_reports_success(monkeypatch, mock_db, base_cont
         async def sync_request(self, request_id):
             assert request_id == 12
 
-    import app.siftarr.services.episode_sync_service as episode_sync_module
+    import app.siftarr.services.lifecycle.episode_sync_service as episode_sync_module
 
     monkeypatch.setattr(episode_sync_module, "EpisodeSyncService", FakeEpisodeSyncService)
 

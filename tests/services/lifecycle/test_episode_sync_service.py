@@ -9,6 +9,7 @@ import pytest
 from app.siftarr.models.episode import Episode
 from app.siftarr.models.request import MediaType, Request, RequestStatus
 from app.siftarr.models.season import Season
+from app.siftarr.services.integrations.plex_service import PlexEpisodeAvailabilityResult
 from app.siftarr.services.lifecycle.episode_derive import (
     derive_episode_status,
     derive_request_status_from_episodes,
@@ -17,7 +18,6 @@ from app.siftarr.services.lifecycle.episode_derive import (
 from app.siftarr.services.lifecycle.episode_sync_service import (
     EpisodeSyncService,
 )
-from app.siftarr.services.integrations.plex_service import PlexEpisodeAvailabilityResult
 
 
 def _make_request(**overrides):
@@ -325,7 +325,9 @@ class TestEpisodeSyncService:
 
         service = EpisodeSyncService(mock_db, overseerr=mock_overseerr)
 
-        with patch("app.siftarr.services.episode_sync_service.get_settings") as mock_get_settings:
+        with patch(
+            "app.siftarr.services.lifecycle.episode_sync_service.get_settings"
+        ) as mock_get_settings:
             mock_get_settings.return_value = MagicMock(
                 overseerr_sync_concurrency=2,
             )
@@ -540,7 +542,7 @@ class TestEpisodeSyncService:
         # Mock _load_season_episodes to return the test episodes directly
         # (avoids needing a full DB query setup for unit tests)
         with patch(
-            "app.siftarr.services.episode_sync_service._load_season_episodes",
+            "app.siftarr.services.lifecycle.episode_sync_service._load_season_episodes",
             new_callable=AsyncMock,
         ) as mock_load:
             mock_load.return_value = [available_episode, pending_episode, future_episode]
@@ -571,7 +573,7 @@ class TestEpisodeSyncService:
         mock_db.commit = AsyncMock()
 
         with patch(
-            "app.siftarr.services.episode_sync_service._load_season_episodes",
+            "app.siftarr.services.lifecycle.episode_sync_service._load_season_episodes",
             new_callable=AsyncMock,
         ) as mock_load:
             mock_load.return_value = [episode_one, episode_two]
@@ -607,7 +609,7 @@ class TestEpisodeSyncService:
         mock_db.commit = AsyncMock()
 
         with patch(
-            "app.siftarr.services.episode_sync_service._load_season_episodes",
+            "app.siftarr.services.lifecycle.episode_sync_service._load_season_episodes",
             new_callable=AsyncMock,
         ) as mock_load:
             mock_load.return_value = [aired_episode, future_episode]
@@ -645,7 +647,7 @@ class TestEpisodeSyncService:
         mock_db.commit = AsyncMock()
 
         with patch(
-            "app.siftarr.services.episode_sync_service._load_season_episodes",
+            "app.siftarr.services.lifecycle.episode_sync_service._load_season_episodes",
             new_callable=AsyncMock,
         ) as mock_load:
             mock_load.side_effect = [[available_episode], [future_episode]]

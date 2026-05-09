@@ -491,8 +491,8 @@ async def rescan_plex_tv_request(
     logger,
 ) -> bool:
     """Resync one TV request on an isolated DB session."""
-    from app.siftarr.services.lifecycle.episode_sync_service import EpisodeSyncService
     from app.siftarr.services.integrations.overseerr_service import OverseerrService
+    from app.siftarr.services.lifecycle.episode_sync_service import EpisodeSyncService
 
     async with session_maker() as worker_db:
         overseerr = OverseerrService(settings=runtime_settings)

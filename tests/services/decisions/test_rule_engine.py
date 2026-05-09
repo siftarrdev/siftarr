@@ -3,8 +3,13 @@
 from unittest.mock import MagicMock
 
 from app.siftarr.models.rule import Rule, RuleType, TVTarget
+from app.siftarr.services.decisions.rule_engine import (
+    ReleaseEvaluation,
+    RuleEngine,
+    RuleMatch,
+    SizeLimitRule,
+)
 from app.siftarr.services.integrations.prowlarr_service import ProwlarrRelease
-from app.siftarr.services.decisions.rule_engine import ReleaseEvaluation, RuleEngine, RuleMatch, SizeLimitRule
 
 
 class TestRuleEngine:

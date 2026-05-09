@@ -7,9 +7,9 @@ from app.siftarr.models.episode import Episode
 from app.siftarr.models.release import Release
 from app.siftarr.models.request import MediaType, Request, RequestStatus
 from app.siftarr.models.season import Season
-from app.siftarr.services.releases import release_storage
-from app.siftarr.services.integrations.prowlarr_service import ProwlarrRelease
 from app.siftarr.services.decisions.rule_engine import ReleaseEvaluation
+from app.siftarr.services.integrations.prowlarr_service import ProwlarrRelease
+from app.siftarr.services.releases import release_storage
 
 
 @pytest.mark.asyncio

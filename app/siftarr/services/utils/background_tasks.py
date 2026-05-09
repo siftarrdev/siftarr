@@ -26,8 +26,8 @@ async def run_background_episode_refresh(request_id: int) -> None:
             effective_settings = get_settings()
             plex_service = None
             try:
-                from app.siftarr.services.lifecycle.episode_sync_service import EpisodeSyncService
                 from app.siftarr.services.integrations.plex_service import PlexService
+                from app.siftarr.services.lifecycle.episode_sync_service import EpisodeSyncService
 
                 plex_service = PlexService(settings=effective_settings)
                 episode_sync = EpisodeSyncService(db, plex=plex_service)

@@ -14,16 +14,23 @@ from app.siftarr.models.request import MediaType
 from app.siftarr.models.request import Request as RequestModel
 from app.siftarr.models.rule import Rule
 from app.siftarr.models.season import Season
-from app.siftarr.services.lifecycle.activity_log_service import ActivityLogService
 from app.siftarr.services.dashboard.dashboard_service import TVSearchData
-from app.siftarr.services.lifecycle.lifecycle_service import LifecycleService
-from app.siftarr.services.utils.media_helpers import extract_media_title_and_year
-from app.siftarr.services.metadata_service import extract_imdb_id
+from app.siftarr.services.dashboard.tv_enrichment_service import TVEnrichmentService
 from app.siftarr.services.decisions.movie_decision_service import MovieDecisionService
+from app.siftarr.services.decisions.rule_engine import (
+    ReleaseEvaluation,
+    RuleEngine,
+    get_cached_engine,
+    set_cached_engine,
+)
+from app.siftarr.services.decisions.tv_decision_service import TVDecisionService
 from app.siftarr.services.integrations.overseerr_service import OverseerrService
-from app.siftarr.services.lifecycle.pending_queue_service import PendingQueueService
 from app.siftarr.services.integrations.prowlarr_service import ProwlarrRelease, ProwlarrService
 from app.siftarr.services.integrations.qbittorrent_service import QbittorrentService
+from app.siftarr.services.lifecycle.activity_log_service import ActivityLogService
+from app.siftarr.services.lifecycle.lifecycle_service import LifecycleService
+from app.siftarr.services.lifecycle.pending_queue_service import PendingQueueService
+from app.siftarr.services.metadata_service import extract_imdb_id
 from app.siftarr.services.releases.release_parser import (
     cached_parse_release_coverage,
     is_exact_single_episode_release,
@@ -42,15 +49,8 @@ from app.siftarr.services.releases.release_storage import (
     persist_manual_release,
     store_search_results,
 )
-from app.siftarr.services.decisions.rule_engine import (
-    ReleaseEvaluation,
-    RuleEngine,
-    get_cached_engine,
-    set_cached_engine,
-)
 from app.siftarr.services.releases.staging_service import StagingService
-from app.siftarr.services.decisions.tv_decision_service import TVDecisionService
-from app.siftarr.services.dashboard.tv_enrichment_service import TVEnrichmentService
+from app.siftarr.services.utils.media_helpers import extract_media_title_and_year
 
 logger = logging.getLogger(__name__)
 

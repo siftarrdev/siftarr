@@ -12,11 +12,18 @@ from app.siftarr.services.decisions.decision_pipeline import (
     log_release_staged,
     log_rule_evaluation,
 )
+from app.siftarr.services.decisions.rule_engine import (
+    RuleEngine,
+    get_cached_engine,
+    set_cached_engine,
+)
 from app.siftarr.services.integrations.prowlarr_service import ProwlarrService
 from app.siftarr.services.integrations.qbittorrent_service import QbittorrentService
 from app.siftarr.services.releases.release_parser import movie_release_identity_rejection_reason
-from app.siftarr.services.releases.release_storage import get_release_persistence_key, store_search_results
-from app.siftarr.services.decisions.rule_engine import RuleEngine, get_cached_engine, set_cached_engine
+from app.siftarr.services.releases.release_storage import (
+    get_release_persistence_key,
+    store_search_results,
+)
 from app.siftarr.services.releases.staging_service import StagingService
 
 logger = logging.getLogger(__name__)

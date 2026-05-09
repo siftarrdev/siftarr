@@ -24,7 +24,9 @@ class TestQbittorrentServiceUnit:
 
     def test_client_property_creates_client(self):
         """Test client property creates qbittorrent client when accessed."""
-        with patch("app.siftarr.services.qbittorrent_service.get_settings") as mock_get_settings:
+        with patch(
+            "app.siftarr.services.integrations.qbittorrent_service.get_settings"
+        ) as mock_get_settings:
             mock_settings = MagicMock()
             mock_settings.qbittorrent_url = "http://localhost:8080"
             mock_settings.qbittorrent_api_key = "qbt_test_key"
@@ -41,7 +43,9 @@ class TestQbittorrentServiceUnit:
 
     def test_client_property_reuses_client(self):
         """Test client property reuses existing client."""
-        with patch("app.siftarr.services.qbittorrent_service.get_settings") as mock_get_settings:
+        with patch(
+            "app.siftarr.services.integrations.qbittorrent_service.get_settings"
+        ) as mock_get_settings:
             mock_settings = MagicMock()
             mock_settings.qbittorrent_url = "http://localhost:8080"
             mock_settings.qbittorrent_api_key = "qbt_test_key"

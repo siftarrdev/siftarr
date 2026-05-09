@@ -30,7 +30,7 @@ async def test_movie_identity_mismatch_is_persisted_and_not_selected(monkeypatch
             return {"status": "staged", "message": "staged"}
 
     monkeypatch.setattr(
-        "app.siftarr.services.movie_decision_service.StagingService",
+        "app.siftarr.services.decisions.movie_decision_service.StagingService",
         FakeStaging,
     )
 
@@ -100,7 +100,7 @@ async def test_movie_identity_filter_allows_exact_title_missing_release_year(mon
             return {"status": "staged", "message": "staged"}
 
     monkeypatch.setattr(
-        "app.siftarr.services.movie_decision_service.StagingService",
+        "app.siftarr.services.decisions.movie_decision_service.StagingService",
         FakeStaging,
     )
 

@@ -18,7 +18,9 @@ class TestOverseerrService:
 
     def test_init(self):
         """Test service initialization."""
-        with patch("app.siftarr.services.overseerr_service.get_settings") as mock_get_settings:
+        with patch(
+            "app.siftarr.services.integrations.overseerr_service.get_settings"
+        ) as mock_get_settings:
             mock_settings = MagicMock()
             mock_settings.overseerr_url = "http://localhost:5055"
             mock_settings.overseerr_api_key = "test_api_key"
@@ -31,7 +33,9 @@ class TestOverseerrService:
 
     def test_init_strips_trailing_slash(self):
         """Test that URL trailing slash is stripped."""
-        with patch("app.siftarr.services.overseerr_service.get_settings") as mock_get_settings:
+        with patch(
+            "app.siftarr.services.integrations.overseerr_service.get_settings"
+        ) as mock_get_settings:
             mock_settings = MagicMock()
             mock_settings.overseerr_url = "http://localhost:5055/"
             mock_settings.overseerr_api_key = "test_api_key"
@@ -44,7 +48,9 @@ class TestOverseerrService:
     @pytest.mark.asyncio
     async def test_close_is_noop(self):
         """Test closing is a no-op with shared client."""
-        with patch("app.siftarr.services.overseerr_service.get_settings") as mock_get_settings:
+        with patch(
+            "app.siftarr.services.integrations.overseerr_service.get_settings"
+        ) as mock_get_settings:
             mock_settings = MagicMock()
             mock_settings.overseerr_url = "http://localhost:5055"
             mock_settings.overseerr_api_key = "test"
@@ -56,7 +62,9 @@ class TestOverseerrService:
     @pytest.mark.asyncio
     async def test_get_requests_no_url(self):
         """Test get_requests when URL is empty."""
-        with patch("app.siftarr.services.overseerr_service.get_settings") as mock_get_settings:
+        with patch(
+            "app.siftarr.services.integrations.overseerr_service.get_settings"
+        ) as mock_get_settings:
             mock_settings = MagicMock()
             mock_settings.overseerr_url = ""
             mock_settings.overseerr_api_key = "test"
@@ -70,7 +78,9 @@ class TestOverseerrService:
     @pytest.mark.asyncio
     async def test_get_requests_no_api_key(self):
         """Test get_requests when API key is empty."""
-        with patch("app.siftarr.services.overseerr_service.get_settings") as mock_get_settings:
+        with patch(
+            "app.siftarr.services.integrations.overseerr_service.get_settings"
+        ) as mock_get_settings:
             mock_settings = MagicMock()
             mock_settings.overseerr_url = "http://localhost:5055"
             mock_settings.overseerr_api_key = ""
@@ -84,7 +94,9 @@ class TestOverseerrService:
     @pytest.mark.asyncio
     async def test_get_requests_success(self):
         """Test successful get_requests."""
-        with patch("app.siftarr.services.overseerr_service.get_settings") as mock_get_settings:
+        with patch(
+            "app.siftarr.services.integrations.overseerr_service.get_settings"
+        ) as mock_get_settings:
             mock_settings = MagicMock()
             mock_settings.overseerr_url = "http://localhost:5055"
             mock_settings.overseerr_api_key = "test"
@@ -98,7 +110,7 @@ class TestOverseerrService:
             mock_client.get = AsyncMock(return_value=mock_response)
 
             with patch(
-                "app.siftarr.services.overseerr_service.get_shared_client",
+                "app.siftarr.services.integrations.overseerr_service.get_shared_client",
                 return_value=mock_client,
             ):
                 result = await service.get_requests()
@@ -111,7 +123,9 @@ class TestOverseerrService:
     @pytest.mark.asyncio
     async def test_get_requests_without_filter(self):
         """Test get_requests omits filter when status is not provided."""
-        with patch("app.siftarr.services.overseerr_service.get_settings") as mock_get_settings:
+        with patch(
+            "app.siftarr.services.integrations.overseerr_service.get_settings"
+        ) as mock_get_settings:
             mock_settings = MagicMock()
             mock_settings.overseerr_url = "http://localhost:5055"
             mock_settings.overseerr_api_key = "test"
@@ -125,7 +139,7 @@ class TestOverseerrService:
             mock_client.get = AsyncMock(return_value=mock_response)
 
             with patch(
-                "app.siftarr.services.overseerr_service.get_shared_client",
+                "app.siftarr.services.integrations.overseerr_service.get_shared_client",
                 return_value=mock_client,
             ):
                 await service.get_requests(status=None, limit=50, skip=100)
@@ -135,7 +149,9 @@ class TestOverseerrService:
     @pytest.mark.asyncio
     async def test_get_all_requests_paginates(self):
         """Test get_all_requests aggregates paginated responses."""
-        with patch("app.siftarr.services.overseerr_service.get_settings") as mock_get_settings:
+        with patch(
+            "app.siftarr.services.integrations.overseerr_service.get_settings"
+        ) as mock_get_settings:
             mock_settings = MagicMock()
             mock_settings.overseerr_url = "http://localhost:5055"
             mock_settings.overseerr_api_key = "test"
@@ -168,7 +184,9 @@ class TestOverseerrService:
     @pytest.mark.asyncio
     async def test_get_requests_unauthorized(self):
         """Test get_requests with 401 response."""
-        with patch("app.siftarr.services.overseerr_service.get_settings") as mock_get_settings:
+        with patch(
+            "app.siftarr.services.integrations.overseerr_service.get_settings"
+        ) as mock_get_settings:
             mock_settings = MagicMock()
             mock_settings.overseerr_url = "http://localhost:5055"
             mock_settings.overseerr_api_key = "test"
@@ -181,7 +199,7 @@ class TestOverseerrService:
             mock_client.get = AsyncMock(return_value=mock_response)
 
             with patch(
-                "app.siftarr.services.overseerr_service.get_shared_client",
+                "app.siftarr.services.integrations.overseerr_service.get_shared_client",
                 return_value=mock_client,
             ):
                 result = await service.get_requests()
@@ -193,7 +211,9 @@ class TestOverseerrService:
         """Test get_requests with network error."""
         import httpx
 
-        with patch("app.siftarr.services.overseerr_service.get_settings") as mock_get_settings:
+        with patch(
+            "app.siftarr.services.integrations.overseerr_service.get_settings"
+        ) as mock_get_settings:
             mock_settings = MagicMock()
             mock_settings.overseerr_url = "http://localhost:5055"
             mock_settings.overseerr_api_key = "test"
@@ -204,7 +224,7 @@ class TestOverseerrService:
             mock_client.get = AsyncMock(side_effect=httpx.RequestError("Network error"))
 
             with patch(
-                "app.siftarr.services.overseerr_service.get_shared_client",
+                "app.siftarr.services.integrations.overseerr_service.get_shared_client",
                 return_value=mock_client,
             ):
                 result = await service.get_requests()
@@ -214,7 +234,9 @@ class TestOverseerrService:
     @pytest.mark.asyncio
     async def test_get_request_no_url(self):
         """Test get_request when not configured."""
-        with patch("app.siftarr.services.overseerr_service.get_settings") as mock_get_settings:
+        with patch(
+            "app.siftarr.services.integrations.overseerr_service.get_settings"
+        ) as mock_get_settings:
             mock_settings = MagicMock()
             mock_settings.overseerr_url = ""
             mock_settings.overseerr_api_key = "test"
@@ -228,7 +250,9 @@ class TestOverseerrService:
     @pytest.mark.asyncio
     async def test_get_media_details_no_url(self):
         """Test get_media_details when not configured."""
-        with patch("app.siftarr.services.overseerr_service.get_settings") as mock_get_settings:
+        with patch(
+            "app.siftarr.services.integrations.overseerr_service.get_settings"
+        ) as mock_get_settings:
             mock_settings = MagicMock()
             mock_settings.overseerr_url = ""
             mock_settings.overseerr_api_key = "test"
@@ -242,7 +266,9 @@ class TestOverseerrService:
     @pytest.mark.asyncio
     async def test_get_media_details_success(self):
         """Test successful get_media_details."""
-        with patch("app.siftarr.services.overseerr_service.get_settings") as mock_get_settings:
+        with patch(
+            "app.siftarr.services.integrations.overseerr_service.get_settings"
+        ) as mock_get_settings:
             mock_settings = MagicMock()
             mock_settings.overseerr_url = "http://localhost:5055"
             mock_settings.overseerr_api_key = "test"
@@ -256,7 +282,7 @@ class TestOverseerrService:
             mock_client.get = AsyncMock(return_value=mock_response)
 
             with patch(
-                "app.siftarr.services.overseerr_service.get_shared_client",
+                "app.siftarr.services.integrations.overseerr_service.get_shared_client",
                 return_value=mock_client,
             ):
                 result = await service.get_media_details("movie", 123)
@@ -267,7 +293,9 @@ class TestOverseerrService:
     @pytest.mark.asyncio
     async def test_get_media_details_not_found(self):
         """Test get_media_details with 404 response."""
-        with patch("app.siftarr.services.overseerr_service.get_settings") as mock_get_settings:
+        with patch(
+            "app.siftarr.services.integrations.overseerr_service.get_settings"
+        ) as mock_get_settings:
             mock_settings = MagicMock()
             mock_settings.overseerr_url = "http://localhost:5055"
             mock_settings.overseerr_api_key = "test"
@@ -280,7 +308,7 @@ class TestOverseerrService:
             mock_client.get = AsyncMock(return_value=mock_response)
 
             with patch(
-                "app.siftarr.services.overseerr_service.get_shared_client",
+                "app.siftarr.services.integrations.overseerr_service.get_shared_client",
                 return_value=mock_client,
             ):
                 result = await service.get_media_details("movie", 999)
@@ -290,7 +318,9 @@ class TestOverseerrService:
     @pytest.mark.asyncio
     async def test_decline_request_success(self):
         """Test declining a request successfully."""
-        with patch("app.siftarr.services.overseerr_service.get_settings") as mock_get_settings:
+        with patch(
+            "app.siftarr.services.integrations.overseerr_service.get_settings"
+        ) as mock_get_settings:
             mock_settings = MagicMock()
             mock_settings.overseerr_url = "http://localhost:5055"
             mock_settings.overseerr_api_key = "test"
@@ -303,7 +333,7 @@ class TestOverseerrService:
             mock_client.post = AsyncMock(return_value=mock_response)
 
             with patch(
-                "app.siftarr.services.overseerr_service.get_shared_client",
+                "app.siftarr.services.integrations.overseerr_service.get_shared_client",
                 return_value=mock_client,
             ):
                 result = await service.decline_request(123)
@@ -314,7 +344,9 @@ class TestOverseerrService:
     @pytest.mark.asyncio
     async def test_decline_request_with_reason(self):
         """Test decline with reason in body."""
-        with patch("app.siftarr.services.overseerr_service.get_settings") as mock_get_settings:
+        with patch(
+            "app.siftarr.services.integrations.overseerr_service.get_settings"
+        ) as mock_get_settings:
             mock_settings = MagicMock()
             mock_settings.overseerr_url = "http://localhost:5055"
             mock_settings.overseerr_api_key = "test"
@@ -327,7 +359,7 @@ class TestOverseerrService:
             mock_client.post = AsyncMock(return_value=mock_response)
 
             with patch(
-                "app.siftarr.services.overseerr_service.get_shared_client",
+                "app.siftarr.services.integrations.overseerr_service.get_shared_client",
                 return_value=mock_client,
             ):
                 result = await service.decline_request(123, reason="Test reason")
@@ -340,7 +372,9 @@ class TestOverseerrService:
     @pytest.mark.asyncio
     async def test_decline_request_failure(self):
         """Test decline returns False on failure."""
-        with patch("app.siftarr.services.overseerr_service.get_settings") as mock_get_settings:
+        with patch(
+            "app.siftarr.services.integrations.overseerr_service.get_settings"
+        ) as mock_get_settings:
             mock_settings = MagicMock()
             mock_settings.overseerr_url = "http://localhost:5055"
             mock_settings.overseerr_api_key = "test"
@@ -353,7 +387,7 @@ class TestOverseerrService:
             mock_client.post = AsyncMock(return_value=mock_response)
 
             with patch(
-                "app.siftarr.services.overseerr_service.get_shared_client",
+                "app.siftarr.services.integrations.overseerr_service.get_shared_client",
                 return_value=mock_client,
             ):
                 result = await service.decline_request(123)
@@ -364,7 +398,9 @@ class TestOverseerrService:
     async def test_get_media_details_uses_ttl_cache(self):
         """Media details should reuse a cached response within the TTL window."""
         overseerr_service._MEDIA_DETAILS_CACHE.clear()
-        with patch("app.siftarr.services.overseerr_service.get_settings") as mock_get_settings:
+        with patch(
+            "app.siftarr.services.integrations.overseerr_service.get_settings"
+        ) as mock_get_settings:
             mock_settings = MagicMock()
             mock_settings.overseerr_url = "http://localhost:5055"
             mock_settings.overseerr_api_key = "test"
@@ -378,7 +414,7 @@ class TestOverseerrService:
             mock_client.get = AsyncMock(return_value=mock_response)
 
             with patch(
-                "app.siftarr.services.overseerr_service.get_shared_client",
+                "app.siftarr.services.integrations.overseerr_service.get_shared_client",
                 return_value=mock_client,
             ):
                 first = await service.get_media_details("tv", 123)

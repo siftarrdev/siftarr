@@ -15,8 +15,8 @@ from app.siftarr.models.request import MediaType, RequestStatus
 from app.siftarr.models.request import Request as RequestModel
 from app.siftarr.routers import dashboard_api
 from app.siftarr.services.dashboard import search_service
-from app.siftarr.services.integrations.prowlarr_service import ProwlarrRelease, ProwlarrSearchResult
 from app.siftarr.services.dashboard.search_service import SearchService
+from app.siftarr.services.integrations.prowlarr_service import ProwlarrRelease, ProwlarrSearchResult
 
 
 @pytest.mark.asyncio

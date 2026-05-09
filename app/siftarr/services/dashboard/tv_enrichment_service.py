@@ -12,15 +12,15 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.siftarr.models.request import RequestStatus
 from app.siftarr.services.dashboard.dashboard_service import DashboardTVDetails
-from app.siftarr.services.releases.release_serializers import (
-    apply_release_size_per_season_metadata,
-    scope_to_episode_set,
-)
 from app.siftarr.services.dashboard.tv_details_service import (
     compute_sync_metadata,
     count_request_episode_states,
     count_season_episode_states,
     load_tv_seasons_with_episodes,
+)
+from app.siftarr.services.releases.release_serializers import (
+    apply_release_size_per_season_metadata,
+    scope_to_episode_set,
 )
 from app.siftarr.services.utils.type_utils import coerce_int_list
 

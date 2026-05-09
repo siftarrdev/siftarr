@@ -47,7 +47,7 @@ async def test_check_request_tv_loads_request_and_reuses_episode_sync_path(
         return seasons
 
     with patch(
-        "app.siftarr.services.plex_polling_service.persist_episode_availability",
+        "app.siftarr.services.admin.plex_polling_service.persist_episode_availability",
         new_callable=AsyncMock,
     ) as mock_reconcile:
         mock_reconcile.side_effect = reconcile_to_pending
@@ -85,7 +85,7 @@ async def test_check_request_tv_full_availability(service, mock_db, mock_plex):
         return seasons
 
     with patch(
-        "app.siftarr.services.plex_polling_service.persist_episode_availability",
+        "app.siftarr.services.admin.plex_polling_service.persist_episode_availability",
         new_callable=AsyncMock,
     ) as mock_reconcile:
         mock_reconcile.side_effect = reconcile_to_completed

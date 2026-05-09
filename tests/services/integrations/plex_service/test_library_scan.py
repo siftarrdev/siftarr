@@ -3,7 +3,10 @@ from unittest.mock import AsyncMock, MagicMock
 import httpx
 import pytest
 
-from app.siftarr.services.integrations.plex_service import PlexLibraryScanResult, PlexTransientScanError
+from app.siftarr.services.integrations.plex_service import (
+    PlexLibraryScanResult,
+    PlexTransientScanError,
+)
 
 
 @pytest.fixture

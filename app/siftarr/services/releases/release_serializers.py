@@ -8,6 +8,7 @@ from datetime import UTC, datetime
 from typing import Any, cast
 
 from app.siftarr.models.request import MediaType
+from app.siftarr.services.decisions.rule_engine import ReleaseEvaluation
 from app.siftarr.services.integrations.prowlarr_service import ProwlarrRelease
 from app.siftarr.services.releases.release_parser import (
     ParsedReleaseCoverage,
@@ -16,7 +17,6 @@ from app.siftarr.services.releases.release_parser import (
     is_multi_episode_release,
     parse_stored_release_coverage,
 )
-from app.siftarr.services.decisions.rule_engine import ReleaseEvaluation
 from app.siftarr.services.utils.type_utils import (
     coerce_int_list,
     normalize_float,

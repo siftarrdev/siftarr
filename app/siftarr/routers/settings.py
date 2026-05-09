@@ -16,12 +16,7 @@ from app.siftarr.config import get_settings, reload_settings
 from app.siftarr.database import get_db
 from app.siftarr.models.request import Request as RequestModel
 from app.siftarr.models.request import RequestStatus
-from app.siftarr.services.integrations.connection_tester import ConnectionTester, ConnectionTestResult
-from app.siftarr.services.integrations.overseerr_service import OverseerrService
 from app.siftarr.services.admin.plex_polling_service import PlexPollingService
-from app.siftarr.services.integrations.plex_service import PlexService
-from app.siftarr.services.releases.release_storage import clear_release_search_cache
-from app.siftarr.services.decisions.rule_service import RuleService
 from app.siftarr.services.admin.scheduler_service import (
     PLEX_POLL_JOB_NAME,
     PLEX_RECENT_SCAN_JOB_NAME,
@@ -58,7 +53,15 @@ from app.siftarr.services.admin.settings_service import (
 from app.siftarr.services.admin.settings_service import (
     sync_overseerr_generator as sync_overseerr_generator_svc,
 )
+from app.siftarr.services.decisions.rule_service import RuleService
+from app.siftarr.services.integrations.connection_tester import (
+    ConnectionTester,
+    ConnectionTestResult,
+)
+from app.siftarr.services.integrations.overseerr_service import OverseerrService
+from app.siftarr.services.integrations.plex_service import PlexService
 from app.siftarr.services.lifecycle.unreleased_service import evaluate_imported_request
+from app.siftarr.services.releases.release_storage import clear_release_search_cache
 
 router = APIRouter(prefix="/settings", tags=["settings"])
 templates = Jinja2Templates(directory="app/siftarr/templates")

@@ -72,7 +72,7 @@ async def test_scan_recent_applies_completion_updates(service, mock_db, mock_ple
 
     with (
         patch(
-            "app.siftarr.services.plex_polling_service.persist_episode_availability",
+            "app.siftarr.services.admin.plex_polling_service.persist_episode_availability",
             side_effect=persist_episode_availability_side_effect,
         ) as mock_reconcile,
         patch.object(service.lifecycle, "transition", new_callable=AsyncMock) as mock_transition,
@@ -194,7 +194,7 @@ async def test_scan_recent_processes_recent_matches_and_skips_unmatched_items(
 
     with (
         patch(
-            "app.siftarr.services.plex_polling_service.persist_episode_availability",
+            "app.siftarr.services.admin.plex_polling_service.persist_episode_availability",
             new_callable=AsyncMock,
         ) as mock_reconcile,
         patch.object(service.lifecycle, "transition", new_callable=AsyncMock) as mock_transition,
@@ -276,7 +276,7 @@ async def test_scan_recent_reuses_recent_item_data_before_lookup_fallback(
 
     with (
         patch(
-            "app.siftarr.services.plex_polling_service.persist_episode_availability",
+            "app.siftarr.services.admin.plex_polling_service.persist_episode_availability",
             new_callable=AsyncMock,
         ) as mock_reconcile,
         patch.object(service.lifecycle, "transition", new_callable=AsyncMock) as mock_transition,

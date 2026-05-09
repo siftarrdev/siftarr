@@ -16,14 +16,14 @@ from app.siftarr.services.dashboard.dashboard_service import (
     serialize_tv_search_response,
 )
 from app.siftarr.services.dashboard.detail_service import DetailService
-from app.siftarr.services.integrations.plex_service import PlexService
-from app.siftarr.services.request_service import load_request_or_404, validate_tv_request
 from app.siftarr.services.dashboard.search_service import SearchService
 from app.siftarr.services.dashboard.tv_details_service import (
     compute_sync_metadata,
     count_season_episode_states,
     load_tv_seasons_with_episodes,
 )
+from app.siftarr.services.integrations.plex_service import PlexService
+from app.siftarr.services.request_service import load_request_or_404, validate_tv_request
 
 logger = logging.getLogger(__name__)
 
