@@ -1,11 +1,13 @@
 """SSE streaming endpoints for search and TV inspect operations."""
 
+import asyncio
 import logging
 
 from fastapi import APIRouter, Depends, Query
 from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.siftarr import database
 from app.siftarr.database import get_db
 from app.siftarr.models.request import MediaType
 from app.siftarr.models.request import Request as RequestModel
@@ -22,9 +24,108 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/requests", tags=["search-sse"])
 
 
+async def _new_detached_session() -> AsyncSession:
+    if database.async_session_maker is None:
+        database.init_engine()
+    assert database.async_session_maker is not None
+    return database.async_session_maker()
+
+
+async def _run_request_search_detached(
+    request_id: int, fallback_db: AsyncSession | None = None
+) -> dict:
+    if database.async_session_maker is None and fallback_db is not None:
+        request = await load_request_or_404(fallback_db, request_id)
+        service = SearchService(fallback_db)
+        result = await service.process_request_search(request)
+        return {
+            "request_id": request_id,
+            "title": request.title,
+            "media_type": request.media_type.value,
+            **result,
+        }
+
+    async with await _new_detached_session() as db:
+        request = await load_request_or_404(db, request_id)
+        service = SearchService(db)
+        result = await service.process_request_search(request)
+        await db.commit()
+        return {
+            "request_id": request_id,
+            "title": request.title,
+            "media_type": request.media_type.value,
+            **result,
+        }
+
+
+async def _run_bulk_search_detached(
+    request_ids: list[int],
+    *,
+    search_all_pending: bool = False,
+    fallback_db: AsyncSession | None = None,
+    fallback_request_items: list[tuple[int | None, RequestModel | None]] | None = None,
+) -> list[dict]:
+    if database.async_session_maker is None and fallback_db is not None:
+        return await _run_bulk_search_with_session(
+            request_ids,
+            fallback_db,
+            search_all_pending=search_all_pending,
+            commit_each=False,
+            request_items=fallback_request_items,
+        )
+
+    async with await _new_detached_session() as db:
+        return await _run_bulk_search_with_session(
+            request_ids, db, search_all_pending=search_all_pending, commit_each=True
+        )
+
+
+async def _run_bulk_search_with_session(
+    request_ids: list[int],
+    db: AsyncSession,
+    *,
+    search_all_pending: bool = False,
+    commit_each: bool = True,
+    request_items: list[tuple[int | None, RequestModel | None]] | None = None,
+) -> list[dict]:
+    if request_items is not None:
+        pass
+    elif search_all_pending is True:
+        requests = await _load_all_pending_search_requests(db)
+        request_items: list[tuple[int | None, RequestModel | None]] = [
+            (request.id, request) for request in requests
+        ]
+    else:
+        request_items = [(req_id, None) for req_id in request_ids]
+
+    results: list[dict] = []
+    for req_id, loaded_request in request_items:
+        try:
+            request = loaded_request or await load_request_or_404(db, req_id or 0)
+            service = SearchService(db)
+            result = await service.process_request_search(request)
+            if commit_each:
+                await db.commit()
+        except Exception as exc:
+            logger.exception("Detached bulk search failed for request_id=%s", req_id)
+            result = {"status": "failed", "message": str(exc)}
+            request = loaded_request
+            if commit_each:
+                await db.rollback()
+        results.append(
+            {
+                "request_id": request.id if request else req_id,
+                "title": request.title if request else None,
+                **result,
+            }
+        )
+    return results
+
+
 async def _search_request_generator(request_id: int, db: AsyncSession):
     try:
         request = await load_request_or_404(db, request_id)
+        search_task = asyncio.create_task(_run_request_search_detached(request_id, db))
         if request.media_type == MediaType.TV:
             logger.info(
                 "TV Search All stream started: request_id=%s title=%s source=prowlarr",
@@ -54,8 +155,7 @@ async def _search_request_generator(request_id: int, db: AsyncSession):
                 else "Querying indexers and evaluating releases…",
             )
         )
-        service = SearchService(db)
-        result = await service.process_request_search(request)
+        result = await asyncio.shield(search_task)
         if request.media_type == MediaType.TV:
             complete_message = (
                 "TV Search All complete: evaluated releases, applied auto-stage/select rules, "
@@ -110,9 +210,19 @@ async def _bulk_search_generator(
                 (request.id, request) for request in requests
             ]
         else:
-            request_items = [(req_id, None) for req_id in request_ids]
+            request_items: list[tuple[int | None, RequestModel | None]] = [
+                (req_id, None) for req_id in request_ids
+            ]
 
         total = len(request_items)
+        search_task = asyncio.create_task(
+            _run_bulk_search_detached(
+                request_ids,
+                search_all_pending=search_all_pending,
+                fallback_db=db,
+                fallback_request_items=request_items,
+            )
+        )
         yield serialize_sse(
             build_sse_progress(
                 "starting",
@@ -120,22 +230,7 @@ async def _bulk_search_generator(
                 total=total,
             )
         )
-        results: list[dict] = []
-        for index, (req_id, loaded_request) in enumerate(request_items):
-            try:
-                request = loaded_request or await load_request_or_404(db, req_id or 0)
-            except Exception as exc:
-                logger.exception("SSE bulk search failed to load request_id=%s", req_id)
-                results.append(
-                    {
-                        "request_id": req_id,
-                        "title": None,
-                        "status": "failed",
-                        "message": str(exc),
-                    }
-                )
-                continue
-
+        for index, (_req_id, loaded_request) in enumerate(request_items):
             percent = int(5 + ((index + 1) / total) * 90) if total else 5
             yield serialize_sse(
                 build_sse_progress(
@@ -143,22 +238,10 @@ async def _bulk_search_generator(
                     percent=percent,
                     current=index + 1,
                     total=total,
-                    title=request.title,
+                    title=loaded_request.title if loaded_request else None,
                 )
             )
-            try:
-                service = SearchService(db)
-                result = await service.process_request_search(request)
-            except Exception as exc:
-                logger.exception("SSE bulk search failed for request_id=%s", request.id)
-                result = {"status": "failed", "message": str(exc)}
-            results.append(
-                {
-                    "request_id": request.id,
-                    "title": request.title,
-                    **result,
-                }
-            )
+        results = await asyncio.shield(search_task)
         yield serialize_sse(
             build_sse_progress(
                 "complete",

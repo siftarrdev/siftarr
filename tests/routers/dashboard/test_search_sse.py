@@ -1,5 +1,6 @@
 """Tests for SSE streaming search endpoints."""
 
+import asyncio
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -76,6 +77,41 @@ async def test_stream_search_request_tv_search_all_reload_signal(mock_db, monkey
     assert "evaluated releases, applied auto-stage/select rules" in body
     assert '"reload_details": true' in body
     assert '"buckets_source": "db"' in body
+
+
+@pytest.mark.asyncio
+async def test_stream_search_request_continues_after_client_disconnect(mock_db, monkeypatch):
+    request_record = MagicMock()
+    request_record.title = "Test Movie"
+    request_record.year = 2020
+    request_record.tmdb_id = 123
+    request_record.media_type.value = "movie"
+
+    async def fake_load(db, req_id):
+        return request_record
+
+    search_started = asyncio.Event()
+    allow_search_finish = asyncio.Event()
+
+    async def fake_process(request):
+        search_started.set()
+        await allow_search_finish.wait()
+        return {"status": "completed"}
+
+    monkeypatch.setattr(search_sse, "load_request_or_404", fake_load)
+    process_search = AsyncMock(side_effect=fake_process)
+    monkeypatch.setattr(search_service_mod.SearchService, "process_request_search", process_search)
+
+    generator = search_sse._search_request_generator(1, mock_db)
+    first_chunk = await generator.__anext__()
+    assert '"phase": "starting"' in first_chunk
+
+    await search_started.wait()
+    await generator.aclose()
+    allow_search_finish.set()
+    await asyncio.sleep(0)
+
+    process_search.assert_awaited_once_with(request_record)
 
 
 @pytest.mark.asyncio
