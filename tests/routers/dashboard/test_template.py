@@ -385,6 +385,17 @@ def test_dashboard_template_updates_pending_and_unreleased_columns(dashboard_tem
     assert "event.target?.id === 'downloading-filter-input'" in entry_js
 
 
+def test_dashboard_column_sorting_uses_full_header_cell_and_numeric_year():
+    """Dashboard table sorting should work from the full header cell."""
+    js = _read_dashboard_js()
+    entry_js = _read_dashboard_entry_js()
+
+    assert "th[data-table][data-sort]" in entry_js
+    assert "e.target.closest('.resize-handle')" in entry_js
+    assert "window.sortTable(th.dataset.table, sortKey);" in entry_js
+    assert "'year'" in js
+
+
 def test_dashboard_details_navigation_uses_visible_filtered_rows():
     """Details previous/next navigation should follow only displayed rows in the current tab."""
     js = _read_dashboard_js()
