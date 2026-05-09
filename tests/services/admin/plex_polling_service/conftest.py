@@ -4,7 +4,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from app.siftarr.services.plex_polling_service import PlexPollingService
+from app.siftarr.services.admin.plex_polling_service import PlexPollingService
 
 
 @pytest.fixture

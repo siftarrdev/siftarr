@@ -9,6 +9,6 @@ def pytest_report_teststatus(report, config):
 @pytest.fixture(autouse=True)
 def _clear_rule_engine_caches() -> None:
     """Clear rule engine caches before each test to avoid cross-test pollution."""
-    from app.siftarr.services.rule_engine import clear_engine_caches
+    from app.siftarr.services.decisions.rule_engine import clear_engine_caches
 
     clear_engine_caches()

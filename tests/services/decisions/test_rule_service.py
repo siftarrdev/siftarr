@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from app.siftarr.models.rule import Rule, RuleType, TVTarget
-from app.siftarr.services.rule_service import DEFAULT_RULES, RuleImportPreview, RuleService
+from app.siftarr.services.decisions.rule_service import DEFAULT_RULES, RuleImportPreview, RuleService
 
 
 class TestRuleService:

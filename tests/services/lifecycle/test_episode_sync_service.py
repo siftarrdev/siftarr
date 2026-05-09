@@ -9,15 +9,15 @@ import pytest
 from app.siftarr.models.episode import Episode
 from app.siftarr.models.request import MediaType, Request, RequestStatus
 from app.siftarr.models.season import Season
-from app.siftarr.services.episode_derive import (
+from app.siftarr.services.lifecycle.episode_derive import (
     derive_episode_status,
     derive_request_status_from_episodes,
     derive_season_status,
 )
-from app.siftarr.services.episode_sync_service import (
+from app.siftarr.services.lifecycle.episode_sync_service import (
     EpisodeSyncService,
 )
-from app.siftarr.services.plex_service import PlexEpisodeAvailabilityResult
+from app.siftarr.services.integrations.plex_service import PlexEpisodeAvailabilityResult
 
 
 def _make_request(**overrides):

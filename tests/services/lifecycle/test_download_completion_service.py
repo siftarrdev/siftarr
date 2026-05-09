@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from app.siftarr.services.download_completion_service import (
+from app.siftarr.services.lifecycle.download_completion_service import (
     DownloadCompletionService,
     _extract_hash,
 )
@@ -87,7 +87,7 @@ class TestDownloadCompletionService:
     async def test_torrent_not_in_qbit_treated_as_done(self, mock_db, mock_qbit, mock_plex_polling):
         """A torrent not found in qBit is treated as completed."""
         from app.siftarr.models.request import MediaType, RequestStatus
-        from app.siftarr.services.plex_polling_service import CheckRequestResult
+        from app.siftarr.services.admin.plex_polling_service import CheckRequestResult
 
         torrent = MagicMock()
         torrent.id = 1
@@ -131,7 +131,7 @@ class TestDownloadCompletionService:
     ):
         """Name-only approved torrents should persist qBit state/progress evidence."""
         from app.siftarr.models.request import MediaType, RequestStatus
-        from app.siftarr.services.plex_polling_service import CheckRequestResult
+        from app.siftarr.services.admin.plex_polling_service import CheckRequestResult
 
         torrent = MagicMock()
         torrent.id = 2
@@ -185,7 +185,7 @@ class TestDownloadCompletionService:
     async def test_plex_confirms_completion(self, mock_db, mock_qbit, mock_plex_polling):
         """When Plex confirms, request is completed through Plex polling."""
         from app.siftarr.models.request import MediaType, RequestStatus
-        from app.siftarr.services.plex_polling_service import CheckRequestResult
+        from app.siftarr.services.admin.plex_polling_service import CheckRequestResult
 
         torrent = MagicMock()
         torrent.id = 1
@@ -228,7 +228,7 @@ class TestDownloadCompletionService:
     ):
         """TV download completion should reuse the Plex reconciliation path, not force completed."""
         from app.siftarr.models.request import MediaType, RequestStatus
-        from app.siftarr.services.plex_polling_service import CheckRequestResult
+        from app.siftarr.services.admin.plex_polling_service import CheckRequestResult
 
         torrent = MagicMock()
         torrent.id = 1
@@ -271,7 +271,7 @@ class TestDownloadCompletionService:
     ):
         """Completion logging should explain the Plex reconciliation outcome."""
         from app.siftarr.models.request import MediaType, RequestStatus
-        from app.siftarr.services.plex_polling_service import CheckRequestResult
+        from app.siftarr.services.admin.plex_polling_service import CheckRequestResult
 
         torrent = MagicMock()
         torrent.id = 1
@@ -403,7 +403,7 @@ class TestDownloadCompletionService:
     ):
         """A completed TV episode should trigger Plex reconciliation even if siblings still download."""
         from app.siftarr.models.request import MediaType, RequestStatus
-        from app.siftarr.services.plex_polling_service import CheckRequestResult
+        from app.siftarr.services.admin.plex_polling_service import CheckRequestResult
 
         completed_torrent = MagicMock()
         completed_torrent.id = 1
@@ -470,7 +470,7 @@ class TestDownloadCompletionService:
     ):
         """S01 qBit completion must not complete/hide still-downloading S02."""
         from app.siftarr.models.request import MediaType, RequestStatus
-        from app.siftarr.services.plex_polling_service import CheckRequestResult
+        from app.siftarr.services.admin.plex_polling_service import CheckRequestResult
 
         season_one = MagicMock()
         season_one.id = 11
@@ -537,7 +537,7 @@ class TestDownloadCompletionService:
     ):
         """Existing download_completed activity for the same torrent should not be logged again."""
         from app.siftarr.models.request import MediaType, RequestStatus
-        from app.siftarr.services.plex_polling_service import CheckRequestResult
+        from app.siftarr.services.admin.plex_polling_service import CheckRequestResult
 
         torrent = MagicMock()
         torrent.id = 1
@@ -586,7 +586,7 @@ class TestDownloadCompletionService:
     ):
         """Two approved TV episode torrents on one request should log completion independently."""
         from app.siftarr.models.request import MediaType, RequestStatus
-        from app.siftarr.services.plex_polling_service import CheckRequestResult
+        from app.siftarr.services.admin.plex_polling_service import CheckRequestResult
 
         first = MagicMock()
         first.id = 1
@@ -652,7 +652,7 @@ class TestDownloadCompletionService:
     ):
         """qBit progress 1.0 should log once and leave request downloading until Plex confirms."""
         from app.siftarr.models.request import MediaType, RequestStatus
-        from app.siftarr.services.plex_polling_service import CheckRequestResult
+        from app.siftarr.services.admin.plex_polling_service import CheckRequestResult
 
         torrent = MagicMock()
         torrent.id = 1

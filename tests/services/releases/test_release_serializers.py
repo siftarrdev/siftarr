@@ -2,9 +2,9 @@
 
 from datetime import UTC, datetime
 
-from app.siftarr.services.prowlarr_service import ProwlarrRelease
-from app.siftarr.services.release_parser import ParsedReleaseCoverage
-from app.siftarr.services.release_serializers import (
+from app.siftarr.services.integrations.prowlarr_service import ProwlarrRelease
+from app.siftarr.services.releases.release_parser import ParsedReleaseCoverage
+from app.siftarr.services.releases.release_serializers import (
     apply_release_size_per_season_metadata,
     dashboard_release_sort_key,
     finalize_releases,
@@ -13,7 +13,7 @@ from app.siftarr.services.release_serializers import (
     season_pack_release_sort_key,
     serialize_evaluated_release,
 )
-from app.siftarr.services.rule_engine import ReleaseEvaluation
+from app.siftarr.services.decisions.rule_engine import ReleaseEvaluation
 
 # -- format_release_size -------------------------------------------------------
 

@@ -14,8 +14,8 @@ from app.siftarr.models.request import MediaType, RequestStatus
 from app.siftarr.models.request import Request as RequestModel
 from app.siftarr.models.season import Season
 from app.siftarr.routers import settings
-from app.siftarr.services import settings_service
-from app.siftarr.services.plex_service import PlexService
+from app.siftarr.services.admin import settings_service
+from app.siftarr.services.integrations.plex_service import PlexService
 
 
 def _parse_sse_events(chunks: list[str]) -> list[dict[str, Any]]:

@@ -4,7 +4,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from app.siftarr.models.request import MediaType, RequestStatus
-from app.siftarr.services.plex_service import (
+from app.siftarr.services.integrations.plex_service import (
     PlexEpisodeAvailabilityResult,
     PlexLookupResult,
     PlexTransientScanError,

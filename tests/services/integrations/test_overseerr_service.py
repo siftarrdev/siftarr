@@ -4,8 +4,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from app.siftarr.services import overseerr_service
-from app.siftarr.services.overseerr_service import (
+from app.siftarr.services.integrations import overseerr_service
+from app.siftarr.services.integrations.overseerr_service import (
     OverseerrService,
     build_overseerr_media_url,
     build_poster_url,

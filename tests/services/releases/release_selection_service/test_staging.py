@@ -4,8 +4,8 @@ import pytest
 
 from app.siftarr.models.request import MediaType, RequestStatus
 from app.siftarr.models.staged_torrent import StagedTorrent
-from app.siftarr.services import staging_service as svc
-from app.siftarr.services.staging_service import StagingService
+from app.siftarr.services.releases import staging_service as svc
+from app.siftarr.services.releases.staging_service import StagingService
 
 
 @patch.object(svc, "PendingQueueService")

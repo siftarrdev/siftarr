@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from app.siftarr.routers import settings
-from app.siftarr.services.connection_tester import ConnectionTestResult
+from app.siftarr.services.integrations.connection_tester import ConnectionTestResult
 
 
 @pytest.mark.asyncio

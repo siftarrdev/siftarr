@@ -4,7 +4,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from app.siftarr.services.qbittorrent_service import MediaCategory, QbittorrentService
+from app.siftarr.services.integrations.qbittorrent_service import MediaCategory, QbittorrentService
 
 
 class TestMediaCategory:

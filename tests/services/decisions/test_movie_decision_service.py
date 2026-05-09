@@ -7,8 +7,8 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from app.siftarr.models._base import Base
 from app.siftarr.models.release import Release
 from app.siftarr.models.request import MediaType, Request, RequestStatus
-from app.siftarr.services.movie_decision_service import MovieDecisionService
-from app.siftarr.services.prowlarr_service import ProwlarrRelease, ProwlarrSearchResult
+from app.siftarr.services.decisions.movie_decision_service import MovieDecisionService
+from app.siftarr.services.integrations.prowlarr_service import ProwlarrRelease, ProwlarrSearchResult
 
 
 @pytest.mark.asyncio

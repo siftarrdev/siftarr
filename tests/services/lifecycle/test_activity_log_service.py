@@ -11,7 +11,7 @@ if sys.version_info < (3, 11):  # noqa: UP036
     pytest.skip("Requires Python 3.11+ for StrEnum", allow_module_level=True)
 
 from app.siftarr.models import ActivityLog, EventType  # noqa: E402
-from app.siftarr.services.activity_log_service import ActivityLogService  # noqa: E402
+from app.siftarr.services.lifecycle.activity_log_service import ActivityLogService  # noqa: E402
 
 
 class TestActivityLogService:

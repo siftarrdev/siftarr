@@ -13,15 +13,15 @@ from app.siftarr.models.episode import Episode
 from app.siftarr.models.release import Release
 from app.siftarr.models.request import MediaType, Request, RequestStatus
 from app.siftarr.models.season import Season
-from app.siftarr.services.detail_service import DetailService
-from app.siftarr.services.prowlarr_service import (
+from app.siftarr.services.dashboard.detail_service import DetailService
+from app.siftarr.services.integrations.prowlarr_service import (
     ProwlarrRelease,
     ProwlarrSearchResult,
     ProwlarrService,
 )
-from app.siftarr.services.qbittorrent_service import QbittorrentService
-from app.siftarr.services.rule_engine import ReleaseEvaluation, RuleEngine
-from app.siftarr.services.tv_decision_service import TVDecisionService
+from app.siftarr.services.integrations.qbittorrent_service import QbittorrentService
+from app.siftarr.services.decisions.rule_engine import ReleaseEvaluation, RuleEngine
+from app.siftarr.services.decisions.tv_decision_service import TVDecisionService
 
 
 def _release(title: str, index: int, *, info_hash: str | None = None) -> ProwlarrRelease:

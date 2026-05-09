@@ -2,7 +2,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from app.siftarr.services.plex_service import PlexService
+from app.siftarr.services.integrations.plex_service import PlexService
 
 
 def build_settings(*, concurrency: int | None = None):

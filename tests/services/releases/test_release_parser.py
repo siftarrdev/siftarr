@@ -3,7 +3,7 @@
 import pytest
 
 from app.siftarr.models.request import MediaType
-from app.siftarr.services.release_parser import (
+from app.siftarr.services.releases.release_parser import (
     ParsedReleaseCoverage,
     ParsedSeasonEpisode,
     is_exact_single_episode_release,
@@ -13,7 +13,7 @@ from app.siftarr.services.release_parser import (
     parse_release_coverage,
     parse_season_episode,
 )
-from app.siftarr.services.release_serializers import serialize_target_scope
+from app.siftarr.services.releases.release_serializers import serialize_target_scope
 
 
 class TestParseSeasonEpisode:

@@ -12,7 +12,7 @@ from starlette.responses import RedirectResponse
 
 from app.siftarr.models.rule import RuleType, TVTarget
 from app.siftarr.routers import rules
-from app.siftarr.services.rule_service import RuleImportPreview
+from app.siftarr.services.decisions.rule_service import RuleImportPreview
 
 
 class TestRulesRouter:

@@ -9,7 +9,7 @@ from fastapi import HTTPException
 
 from app.siftarr.models.request import RequestStatus
 from app.siftarr.routers import dashboard_actions
-from app.siftarr.services import search_service as search_service_mod
+from app.siftarr.services.dashboard import search_service as search_service_mod
 
 
 @pytest.mark.asyncio

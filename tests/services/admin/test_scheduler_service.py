@@ -15,8 +15,8 @@ from app.siftarr.models._base import Base
 from app.siftarr.models.episode import Episode
 from app.siftarr.models.request import MediaType, Request, RequestStatus
 from app.siftarr.models.season import Season
-from app.siftarr.services import scheduler_service
-from app.siftarr.services.scheduler_service import (
+from app.siftarr.services.admin import scheduler_service
+from app.siftarr.services.admin.scheduler_service import (
     PLEX_POLL_JOB_NAME,
     PLEX_RECENT_SCAN_JOB_NAME,
     SchedulerService,

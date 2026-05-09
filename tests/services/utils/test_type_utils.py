@@ -1,6 +1,6 @@
 """Unit tests for app.siftarr.services.type_utils."""
 
-from app.siftarr.services.type_utils import (
+from app.siftarr.services.utils.type_utils import (
     coerce_int_list,
     normalize_float,
     normalize_int,

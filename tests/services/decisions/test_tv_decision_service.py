@@ -5,9 +5,9 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from app.siftarr.models.request import MediaType, Request, RequestStatus
-from app.siftarr.services.prowlarr_service import ProwlarrRelease, ProwlarrSearchResult
-from app.siftarr.services.rule_engine import ReleaseEvaluation
-from app.siftarr.services.tv_decision_service import TVDecisionService
+from app.siftarr.services.integrations.prowlarr_service import ProwlarrRelease, ProwlarrSearchResult
+from app.siftarr.services.decisions.rule_engine import ReleaseEvaluation
+from app.siftarr.services.decisions.tv_decision_service import TVDecisionService
 
 
 def _make_release(title="Test.S01E05.1080p", size=1000000000, seeders=10, info_hash=None):

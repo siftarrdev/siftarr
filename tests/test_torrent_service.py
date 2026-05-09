@@ -5,7 +5,7 @@ from unittest.mock import AsyncMock, MagicMock, mock_open, patch
 
 import pytest
 
-from app.siftarr.services.staging_service import StagingService
+from app.siftarr.services.releases.staging_service import StagingService
 
 
 class TestStagingTorrentHelpers:

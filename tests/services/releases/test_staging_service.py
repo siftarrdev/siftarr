@@ -7,8 +7,8 @@ import pytest
 
 from app.siftarr.models.request import MediaType, Request
 from app.siftarr.models.staged_torrent import StagedTorrent
-from app.siftarr.services.prowlarr_service import ProwlarrRelease
-from app.siftarr.services.staging_service import StagingService
+from app.siftarr.services.integrations.prowlarr_service import ProwlarrRelease
+from app.siftarr.services.releases.staging_service import StagingService
 
 
 class TestStagingServiceUnit:

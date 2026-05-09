@@ -175,7 +175,7 @@ class TestCheckNow:
     async def test_check_now_complete_triggers_plex(self):
         """check-now with complete download should attempt Plex check."""
         from app.siftarr.routers.staged import check_now
-        from app.siftarr.services.plex_polling_service import CheckRequestResult
+        from app.siftarr.services.admin.plex_polling_service import CheckRequestResult
 
         mock_db = AsyncMock()
         torrent = _make_torrent()

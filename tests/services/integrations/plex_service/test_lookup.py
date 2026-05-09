@@ -3,7 +3,7 @@ from unittest.mock import AsyncMock, MagicMock
 import httpx
 import pytest
 
-from app.siftarr.services.plex_service import PlexService
+from app.siftarr.services.integrations.plex_service import PlexService
 
 
 def test_direct_metadata_format():

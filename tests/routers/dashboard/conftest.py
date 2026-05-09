@@ -6,8 +6,8 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 from fastapi import BackgroundTasks
 
-from app.siftarr.services import detail_service
-from app.siftarr.services.background_tasks import DETAILS_SYNC_TASKS
+from app.siftarr.services.dashboard import detail_service
+from app.siftarr.services.utils.background_tasks import DETAILS_SYNC_TASKS
 
 
 @pytest.fixture(autouse=True)

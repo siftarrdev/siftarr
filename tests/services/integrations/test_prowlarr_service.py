@@ -3,7 +3,7 @@
 import pytest
 
 from app.siftarr.config import Settings
-from app.siftarr.services.prowlarr_service import (
+from app.siftarr.services.integrations.prowlarr_service import (
     ProwlarrRelease,
     ProwlarrSearchResult,
     ProwlarrService,
