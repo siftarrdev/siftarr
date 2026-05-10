@@ -139,13 +139,32 @@ details[open] summary .accordion-chevron { transform: rotate(90deg); }
                             <input type="url" id="plex_url" name="plex_url" value="{{ env.plex_url }}" placeholder="http://plex:32400" class="form-input">
                         </div>
                         <div>
-                            <label for="plex_token" class="form-label">Token</label>
-                            <div class="relative">
-                                <input type="password" id="plex_token" name="plex_token" value="{{ env.plex_token }}" placeholder="Your Plex token" class="form-input pr-10">
-                                <button type="button" onclick="togglePassword('plex_token')" class="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 hover:text-white transition-colors">
-                                    <svg id="eye-plex_token" class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"></path></svg>
-                                </button>
+                            <label class="form-label">Plex Authentication</label>
+                            {% if plex_sso_connected %}
+                            <div class="flex items-center gap-3 rounded-lg bg-surface-900/70 p-3">
+                                {% if plex_sso_thumb %}
+                                <img src="{{ plex_sso_thumb }}" alt="" class="w-8 h-8 rounded-full object-cover shrink-0">
+                                {% endif %}
+                                <div class="min-w-0">
+                                    <div class="flex items-center gap-2">
+                                        <span class="text-sm font-medium text-white truncate">Connected as {{ plex_sso_username }}</span>
+                                        <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold bg-emerald-900/40 text-emerald-300 border border-emerald-700/50">
+                                            <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
+                                            Connected
+                                        </span>
+                                    </div>
+                                </div>
                             </div>
+                            {% else %}
+                            <div class="flex items-center gap-3 rounded-lg bg-surface-900/70 p-3">
+                                <div class="flex items-center gap-2">
+                                    <span class="text-sm text-gray-400">Not connected</span>
+                                    <a href="/auth/login" class="btn-primary btn-sm">Login with Plex</a>
+                                </div>
+                            </div>
+                            {% endif %}
+                            {# Keep the token field hidden so the save form doesn't clear it #}
+                            <input type="hidden" id="plex_token" name="plex_token" value="{{ env.plex_token }}">
                         </div>
                     </div>
                 </div>
@@ -331,6 +350,37 @@ details[open] summary .accordion-chevron { transform: rotate(90deg); }
                 </div>
                 <button type="submit" class="btn-danger btn-sm shrink-0">Clear Cache</button>
             </form>
+        </div>
+    </details>
+
+    {# ── API Access ── #}
+    <details open class="card">
+        <summary class="card-header flex items-center gap-3 cursor-pointer select-none">
+            <svg class="accordion-chevron w-4 h-4 text-gray-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
+            <div>
+                <h2 class="section-title">API Access</h2>
+                <p class="section-subtitle">Manage your API key for programmatic access</p>
+            </div>
+        </summary>
+        <div class="card-body">
+            <div class="rounded-xl border border-gray-700/60 bg-surface-850 p-5 space-y-4">
+                <p class="text-sm text-gray-400">Use this key to authenticate API requests via <code class="text-xs bg-surface-700 px-1.5 py-0.5 rounded">X-API-Key</code> or <code class="text-xs bg-surface-700 px-1.5 py-0.5 rounded">Authorization: Bearer &lt;key&gt;</code> header.</p>
+
+                <div>
+                    <label class="form-label">API Key</label>
+                    <div class="flex items-center gap-2">
+                        <div class="relative flex-1">
+                            <input type="password" id="api_key_display" value="{{ api_key }}" readonly class="form-input pr-10 font-mono text-sm cursor-text">
+                            <button type="button" onclick="togglePassword('api_key_display')" class="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 hover:text-white transition-colors">
+                                <svg id="eye-api_key_display" class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"></path></svg>
+                            </button>
+                        </div>
+                        <button type="button" onclick="copyApiKey()" class="btn-primary btn-sm shrink-0">Copy</button>
+                        <button type="button" onclick="regenerateApiKey()" class="btn-warning btn-sm shrink-0">Regenerate</button>
+                    </div>
+                    <p id="api-key-feedback" class="text-xs mt-2 hidden"></p>
+                </div>
+            </div>
         </div>
     </details>
 </div>
@@ -716,6 +766,47 @@ function closePlexRescan() {
         plexEventSource.close();
         plexEventSource = null;
     }
+}
+
+async function copyApiKey() {
+    const input = document.getElementById('api_key_display');
+    const feedback = document.getElementById('api-key-feedback');
+
+    // Temporarily reveal to copy
+    const wasPassword = input.type === 'password';
+    input.type = 'text';
+    try {
+        await navigator.clipboard.writeText(input.value);
+        feedback.textContent = 'Copied to clipboard';
+        feedback.className = 'text-xs mt-2 text-emerald-400';
+    } catch {
+        feedback.textContent = 'Failed to copy';
+        feedback.className = 'text-xs mt-2 text-red-400';
+    } finally {
+        if (wasPassword) input.type = 'password';
+    }
+    feedback.classList.remove('hidden');
+    setTimeout(() => feedback.classList.add('hidden'), 3000);
+}
+
+async function regenerateApiKey() {
+    if (!confirm('Regenerate API key? Any systems using the current key will stop working.')) {
+        return;
+    }
+
+    const feedback = document.getElementById('api-key-feedback');
+    try {
+        const resp = await fetch('/settings/api/api-key/regenerate', { method: 'POST' });
+        const data = await resp.json();
+        document.getElementById('api_key_display').value = data.api_key;
+        feedback.textContent = 'New API key generated';
+        feedback.className = 'text-xs mt-2 text-emerald-400';
+    } catch (err) {
+        feedback.textContent = 'Failed to regenerate: ' + err.message;
+        feedback.className = 'text-xs mt-2 text-red-400';
+    }
+    feedback.classList.remove('hidden');
+    setTimeout(() => feedback.classList.add('hidden'), 5000);
 }
 </script>
 {% endblock %}

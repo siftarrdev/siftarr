@@ -14,6 +14,19 @@ def mock_db() -> AsyncMock:
     return AsyncMock()
 
 
+@pytest.fixture(autouse=True)
+def mock_settings_store_get(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Ensure SettingsStore.get returns None for SSO lookups in all tests."""
+
+    async def fake_get(self, key: str) -> str | None:
+        # Only intercept known DB-backed keys that don't exist in mocks
+        if key in ("plex_username", "plex_thumb", "plex_claimed_id"):
+            return None
+        return None
+
+    monkeypatch.setattr("app.siftarr.services.admin.settings_service.SettingsStore.get", fake_get)
+
+
 @pytest.fixture
 def base_context() -> Callable[[], dict[str, Any]]:
     """Build the default settings page context."""

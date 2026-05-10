@@ -59,7 +59,7 @@ class Settings(BaseSettings):
     )
 
     # Authentication settings
-    api_key: str = "dev-key-change-me"
+    api_key: str = Field(default="dev-key-change-me", validation_alias="SIFTARR_API_KEY")
     auth_enabled: bool = False
 
     # Session secret key (auto-generated if not set)

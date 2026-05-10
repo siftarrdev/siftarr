@@ -28,6 +28,7 @@ ENV_KEY_MAP: dict[str, str] = {
     "qbittorrent_api_key": "QBITTORRENT_API_KEY",
     "plex_url": "PLEX_URL",
     "plex_token": "PLEX_TOKEN",
+    "api_key": "SIFTARR_API_KEY",
     "tz": "TZ",
     "staging_mode_enabled": "STAGING_MODE_ENABLED",
 }
@@ -106,6 +107,7 @@ class SettingsStore:
             "qbittorrent_api_key": mask_secret(env_settings.qbittorrent_api_key) or "",
             "plex_url": str(env_settings.plex_url or ""),
             "plex_token": mask_secret(env_settings.plex_token) or "",
+            "api_key": mask_secret(env_settings.api_key) or "",
             "tz": env_settings.tz,
         }
         db_overrides = await self.get_all()
@@ -178,6 +180,7 @@ async def build_effective_settings(db: AsyncSession | None = None) -> dict[str, 
         "qbittorrent_api_key": mask_secret(effective.qbittorrent_api_key) or "",
         "plex_url": str(effective.plex_url or ""),
         "plex_token": mask_secret(effective.plex_token) or "",
+        "api_key": mask_secret(effective.api_key) or "",
         "tz": effective.tz,
     }
 
