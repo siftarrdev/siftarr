@@ -115,12 +115,13 @@ Database entities and enums.
 
 HTTP route layer.
 
+- `auth_router.py` — Plex SSO auth endpoints (login page, plex auth, logout, session info); included without global auth dependency
 - `dashboard.py` — main dashboard page routes
 - `dashboard_api.py` — dashboard JSON endpoints for details/search data
 - `dashboard_actions.py` — dashboard-triggered actions and mutations
 - `search_sse.py` — SSE streaming endpoints for live search progress; `/requests/{id}/search/stream` is the primary TV Search All path, while TV scope-specific streams remain compatibility/debug inspect paths
 - `rules.py` — rule management UI/API, including unified rule listing, multi-title testing, modal import/export, and create/edit actions
-- `settings.py` — settings UI (connection test/save/reset, staging toggle, Plex rescan, Overseerr sync, cache/reseed actions, SSE progress streams), uses SettingsStore for DB-backed persistence
+- `settings.py` — settings UI (connection test/save/reset, staging toggle, Plex rescan, Overseerr sync, cache/reseed actions, SSE progress streams, API key management, Plex SSO status), uses SettingsStore for DB-backed persistence
 - `staged.py` — staged torrent review/approval endpoints
 - `webhooks.py` — inbound webhook handling
 
@@ -129,9 +130,12 @@ HTTP route layer.
 Business logic and integrations, organized into thematic subpackages:
 
 **Flat (cross-cutting):**
-- `auth_service.py` — API key verification
+- `auth_service.py` — authentication dependencies: `require_auth` (session-first with API key fallback), `get_session_user` helper, `verify_api_key`
 - `metadata_service.py` — Overseerr metadata lookup for request details
 - `request_service.py` — request loading / validation
+
+**`auth/`** — Plex SSO authentication
+- `plex_oauth_service.py` — `PlexOAuthService` wrapping plex.tv API calls (PIN flow, user identity, token validation)
 
 **`admin/`** — Config, scheduling, polling
 - `settings_service.py` — SettingsStore (DB-backed settings persistence), SSE progress, scheduled job helpers, Plex rescan/Overseerr import orchestration
@@ -185,11 +189,12 @@ Business logic and integrations, organized into thematic subpackages:
 
 Server-rendered HTML templates.
 
-- `base.html` — shared layout
+- `base.html` — shared layout (nav bar shows user avatar/name + logout when logged in)
 - `dashboard.html` — main dashboard UI
+- `login.html` — Plex SSO login page with JS-driven OAuth PIN flow
 - `rules.html` — single-pane rules UI with unified rule table, multi-title tester, modal create/edit wizard, and modal import/export
 - `rule_form.html` — fallback full-page create/edit rule form
-- `settings.html` — settings UI
+- `settings.html` — settings UI (includes Plex SSO connection status, API Access section with reveal/copy/regenerate)
 
 ### `app/siftarr/static/`
 
@@ -205,8 +210,10 @@ Static assets.
 
 Tests mirror the service subpackage organization under `tests/services/`:
 
+- `tests/routers/auth/` — auth router coverage (login, plex auth, logout, session info)
 - `tests/routers/dashboard/` — dashboard page/API/action coverage, including SSE search streams
 - `tests/routers/settings/` — settings page, connections, maintenance, and jobs coverage
+- `tests/services/auth/` — PlexOAuthService unit tests and auth_service (require_auth, get_session_user) tests
 - `tests/services/admin/` — settings, scheduler, and Plex polling service tests
 - `tests/services/decisions/` — rule engine, rule service, TV/movie decision service tests
 - `tests/services/integrations/` — Prowlarr, qBittorrent, Overseerr, Plex service tests
