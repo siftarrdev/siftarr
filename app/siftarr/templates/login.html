@@ -1,0 +1,295 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="icon" type="image/png" sizes="32x32" href="/static/favicon-32.png">
+    <link rel="icon" type="image/png" sizes="16x16" href="/static/favicon-16.png">
+    <link rel="shortcut icon" href="/static/favicon.ico">
+    <title>Login - Siftarr</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/css/tailwind.css">
+    <style>
+        .plex-btn {
+            background-color: #E5A00D;
+            transition: background-color 0.15s ease, transform 0.1s ease;
+        }
+        .plex-btn:hover {
+            background-color: #cc8e0b;
+        }
+        .plex-btn:active {
+            transform: scale(0.98);
+        }
+        .plex-btn:focus {
+            outline: none;
+            box-shadow: 0 0 0 3px rgba(229, 160, 13, 0.4);
+        }
+        .spinner {
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin {
+            from { transform: rotate(0deg); }
+            to { transform: rotate(360deg); }
+        }
+    </style>
+</head>
+<body class="bg-surface-900 min-h-screen flex flex-col items-center justify-center px-4 font-sans antialiased">
+    <div class="w-full max-w-sm">
+        <!-- Login Card -->
+        <div class="bg-surface-800 rounded-2xl border border-gray-700/60 shadow-xl p-8 text-center">
+            <!-- Logo -->
+            <div class="flex justify-center">
+                <div class="h-14 w-14 rounded-2xl bg-surface-850 border border-gray-700/60 flex items-center justify-center">
+                    <img src="/static/favicon-32.png" alt="Siftarr" class="h-8 w-8">
+                </div>
+            </div>
+
+            <!-- Brand -->
+            <h1 class="mt-4 text-2xl font-bold text-white tracking-tight">Siftarr</h1>
+            <p class="mt-1.5 text-sm text-gray-400">Sign in to continue to your dashboard</p>
+
+            <!-- Login Button -->
+            <div id="login-button-area" class="mt-8">
+                <button id="login-btn" onclick="startPlexAuth()" class="plex-btn w-full flex items-center justify-center gap-3 rounded-xl px-6 py-3 text-sm font-semibold text-white shadow-lg">
+                    <!-- Plex icon SVG -->
+                    <svg class="w-5 h-5 shrink-0" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                        <path d="M11.377 0C6.81 0 3.096 3.634 3.096 8.105v7.79C3.096 20.366 6.81 24 11.377 24s8.28-3.634 8.28-8.105v-7.79C19.657 3.634 15.943 0 11.377 0zm4.972 15.366c0 2.622-2.246 4.75-5.017 4.75-2.772 0-5.018-2.128-5.018-4.75V8.634c0-2.622 2.246-4.75 5.018-4.75 2.771 0 5.017 2.128 5.017 4.75v6.732z"/>
+                    </svg>
+                    Login with Plex
+                </button>
+            </div>
+
+            <!-- Loading State -->
+            <div id="login-loading" class="mt-8 hidden">
+                <div class="flex flex-col items-center gap-4">
+                    <svg class="spinner h-8 w-8 text-brand-500" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                        <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                        <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                    </svg>
+                    <div>
+                        <p class="text-sm text-gray-300">Authenticating with Plex...</p>
+                        <p id="auth-hint-text" class="text-xs text-gray-600 mt-1.5">A popup window should have opened. Complete the login there.</p>
+                    </div>
+                    <button onclick="cancelPlexAuth()" class="text-xs text-gray-500 hover:text-gray-400 transition-colors mt-2">Cancel</button>
+                </div>
+            </div>
+
+            <!-- Error State -->
+            <div id="login-error" class="mt-6 hidden">
+                <div class="rounded-xl bg-red-900/40 border border-red-700/50 p-4 text-sm text-red-200">
+                    <p id="error-message">An unexpected error occurred.</p>
+                </div>
+                <button onclick="resetLoginForm()" class="mt-4 text-sm text-gray-500 hover:text-white transition-colors">
+                    Try Again
+                </button>
+            </div>
+        </div>
+
+        <!-- Version -->
+        <p class="text-center text-xs text-gray-700 mt-6">Siftarr &middot; Media search middleware</p>
+    </div>
+
+    <script>
+        (function() {
+            'use strict';
+
+            let pollingTimer = null;
+            let cancelled = false;
+
+            function getClientId() {
+                let id = localStorage.getItem('plexClientId');
+                if (!id) {
+                    id = crypto.randomUUID();
+                    localStorage.setItem('plexClientId', id);
+                }
+                return id;
+            }
+
+            function buildHeaders(clientId) {
+                return {
+                    'X-Plex-Product': 'Siftarr',
+                    'X-Plex-Version': '0.1.0',
+                    'X-Plex-Client-Identifier': clientId,
+                    'X-Plex-Platform': 'Web',
+                    'X-Plex-Platform-Version': '1.0',
+                    'X-Plex-Device': 'Browser',
+                    'X-Plex-Device-Name': 'Siftarr',
+                    'X-Plex-Model': 'Siftarr SSO',
+                    'X-Plex-Language': 'en',
+                    'Accept': 'application/json',
+                };
+            }
+
+            function showElement(id) {
+                document.getElementById(id).classList.remove('hidden');
+            }
+
+            function hideElement(id) {
+                document.getElementById(id).classList.add('hidden');
+            }
+
+            function setError(message) {
+                document.getElementById('error-message').textContent = message;
+                hideElement('login-button-area');
+                hideElement('login-loading');
+                showElement('login-error');
+            }
+
+            function resetLoginForm() {
+                hideElement('login-loading');
+                hideElement('login-error');
+                showElement('login-button-area');
+                cancelled = false;
+            }
+
+            function cancelPlexAuth() {
+                cancelled = true;
+                if (pollingTimer) {
+                    clearTimeout(pollingTimer);
+                    pollingTimer = null;
+                }
+                resetLoginForm();
+            }
+
+            window.startPlexAuth = async function() {
+                // Reset state
+                cancelled = false;
+                hideElement('login-error');
+                hideElement('login-button-area');
+                showElement('login-loading');
+                document.getElementById('auth-hint-text').textContent = 'Connecting to Plex...';
+
+                try {
+                    const clientId = getClientId();
+                    const headers = buildHeaders(clientId);
+
+                    // Step 1: Request a PIN from plex.tv
+                    document.getElementById('auth-hint-text').textContent = 'Requesting authentication code...';
+                    const pinResp = await fetch('https://plex.tv/api/v2/pins?strong=true', {
+                        method: 'POST',
+                        headers: headers,
+                    });
+
+                    if (!pinResp.ok) {
+                        throw new Error('Failed to contact Plex authentication servers. Please try again.');
+                    }
+
+                    const pinData = await pinResp.json();
+
+                    if (!pinData.id || !pinData.code) {
+                        throw new Error('Unexpected response from Plex. Please try again.');
+                    }
+
+                    // Step 2: Open the Plex auth popup
+                    document.getElementById('auth-hint-text').textContent = 'Opening Plex login window...';
+                    const authUrl = 'https://app.plex.tv/auth/#!?code=' +
+                        encodeURIComponent(pinData.code) +
+                        '&clientID=' + encodeURIComponent(clientId) +
+                        '&context[device][product]=Siftarr';
+
+                    const popup = window.open(authUrl, 'plex-auth', 'width=600,height=700');
+
+                    if (!popup || popup.closed || typeof popup.closed === 'undefined') {
+                        // Popup was blocked
+                        hideElement('login-loading');
+                        setError('Popup was blocked. Please allow popups for this site and click "Login with Plex" again.');
+                        showElement('login-button-area');
+                        return;
+                    }
+
+                    document.getElementById('auth-hint-text').textContent = 'Complete the login in the Plex window that opened.';
+
+                    // Step 3: Poll for authToken
+                    const startTime = Date.now();
+                    const maxWait = 5 * 60 * 1000; // 5 minutes
+                    let authToken = null;
+
+                    while (Date.now() - startTime < maxWait) {
+                        if (cancelled) return;
+
+                        await new Promise(function(resolve) {
+                            pollingTimer = setTimeout(resolve, 1500);
+                        });
+
+                        if (cancelled) return;
+
+                        try {
+                            const checkResp = await fetch('https://plex.tv/api/v2/pins/' + pinData.id, {
+                                headers: headers,
+                            });
+
+                            if (checkResp.ok) {
+                                const checkData = await checkResp.json();
+                                if (checkData.authToken) {
+                                    authToken = checkData.authToken;
+                                    break;
+                                }
+                            }
+                        } catch (e) {
+                            // Network error during poll - continue silently
+                            console.warn('Plex poll error:', e);
+                        }
+
+                        // Check if popup was closed by the user
+                        if (popup.closed) {
+                            document.getElementById('auth-hint-text').textContent = 'Login window closed.';
+                            break;
+                        }
+                    }
+
+                    if (!authToken) {
+                        if (popup.closed) {
+                            throw new Error('Authentication cancelled. Please click "Login with Plex" to try again.');
+                        } else {
+                            throw new Error('Authentication timed out after 5 minutes. Please try again.');
+                        }
+                    }
+
+                    // Close popup if still open
+                    try { popup.close(); } catch (e) { /* ignore */ }
+
+                    document.getElementById('auth-hint-text').textContent = 'Verifying with server...';
+
+                    // Step 4: Send authToken to our backend
+                    const authResp = await fetch('/auth/plex', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ authToken: authToken }),
+                    });
+
+                    if (!authResp.ok) {
+                        let errDetail = 'Authentication failed on server.';
+                        try {
+                            const errData = await authResp.json();
+                            if (errData.detail) {
+                                errDetail = errData.detail;
+                            }
+                        } catch (e) { /* ignore */ }
+                        throw new Error(errDetail);
+                    }
+
+                    // Step 5: Success - redirect to dashboard
+                    window.location.href = '/dashboard';
+
+                } catch (error) {
+                    if (cancelled) return;
+                    setError(error.message || 'An unexpected error occurred. Please try again.');
+                }
+            };
+
+            // Check if already authenticated on page load
+            fetch('/auth/me', { credentials: 'same-origin' })
+                .then(function(r) {
+                    if (r.ok) {
+                        window.location.href = '/dashboard';
+                    }
+                })
+                .catch(function() {
+                    // Not authenticated - show login form (already visible by default)
+                });
+        })();
+    </script>
+</body>
+</html>
