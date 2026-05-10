@@ -62,6 +62,12 @@ class Settings(BaseSettings):
     api_key: str = "dev-key-change-me"
     auth_enabled: bool = False
 
+    # Session secret key (auto-generated if not set)
+    secret_key: str = Field(
+        default_factory=lambda: os.urandom(32).hex(),
+        description="Secret key for session signing. Auto-generated if not provided.",
+    )
+
     cache_static_assets: bool = True
 
     # Search result caching (Prowlarr)
