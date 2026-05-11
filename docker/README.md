@@ -54,7 +54,8 @@ Common variables passed by Compose:
 - `OVERSEERR_URL` and `OVERSEERR_API_KEY`.
 - `PROWLARR_URL` and `PROWLARR_API_KEY`.
 - `QBITTORRENT_URL` and `QBITTORRENT_API_KEY`.
-- `PLEX_URL` and `PLEX_TOKEN`.
+- `PLEX_URL` and optional `PLEX_TOKEN`. Leaving `PLEX_TOKEN` unset is expected
+  when using the Plex login flow.
 
 Additional app settings can be supplied through the container environment, including
 `SIFTARR_DB_PATH`, `DATABASE_URL`, `STAGING_MODE_ENABLED`, retry settings,

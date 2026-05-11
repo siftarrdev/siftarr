@@ -2,6 +2,7 @@
 
 import logging
 import os
+import secrets
 from collections.abc import AsyncGenerator
 from typing import Any
 
@@ -27,6 +28,7 @@ from app.siftarr.services.admin.settings_service import (
     build_effective_settings,
     build_manual_plex_job_message,
     build_sse_progress,
+    mask_secret,
     prepare_overseerr_import,
 )
 from app.siftarr.services.admin.settings_service import (
@@ -94,6 +96,13 @@ class ConnectionTestResponse(BaseModel):
     success: bool
     message: str
     details: str | None = None
+
+
+class ApiKeyResponse(BaseModel):
+    """Response model for API key operations."""
+
+    api_key: str
+    api_key_masked: str
 
 
 # ── Convenience helpers (not pass-through; provide router-level defaults) ──
@@ -201,6 +210,12 @@ async def _clear_runtime_settings(store: SettingsStore, *keys: str) -> None:
     reload_settings()
 
 
+async def _get_runtime_settings(db: AsyncSession):
+    """Return settings after applying DB overrides to the runtime environment."""
+    await SettingsStore(db).load_into_environ()
+    return get_settings()
+
+
 # ── Page routes ────────────────────────────────────────────────────────────
 
 
@@ -213,6 +228,16 @@ async def get_settings_page(
     rule_service = RuleService(db)
     await rule_service.ensure_default_rules()
     context = await _build_settings_page_context(request, db)
+
+    # Add Plex SSO status
+    store = SettingsStore(db)
+    context["plex_sso_username"] = await store.get("plex_username")
+    context["plex_sso_thumb"] = await store.get("plex_thumb")
+    context["plex_sso_connected"] = context["plex_sso_username"] is not None
+
+    # Add API key (plaintext for the settings page)
+    context["api_key"] = get_settings().api_key
+
     return templates.TemplateResponse(request, "settings.html", context)
 
 
@@ -293,7 +318,9 @@ async def get_connections_api(db: AsyncSession = Depends(get_db)) -> dict:
 @router.post("/api/test/overseerr", response_model=ConnectionTestResponse)
 async def test_overseerr_connection(db: AsyncSession = Depends(get_db)) -> ConnectionTestResponse:
     """Test connection to Overseerr."""
-    result: ConnectionTestResult = await ConnectionTester.test_overseerr(get_settings())
+    result: ConnectionTestResult = await ConnectionTester.test_overseerr(
+        await _get_runtime_settings(db)
+    )
     return ConnectionTestResponse(
         service="overseerr",
         success=result.success,
@@ -305,7 +332,9 @@ async def test_overseerr_connection(db: AsyncSession = Depends(get_db)) -> Conne
 @router.post("/api/test/prowlarr", response_model=ConnectionTestResponse)
 async def test_prowlarr_connection(db: AsyncSession = Depends(get_db)) -> ConnectionTestResponse:
     """Test connection to Prowlarr."""
-    result: ConnectionTestResult = await ConnectionTester.test_prowlarr(get_settings())
+    result: ConnectionTestResult = await ConnectionTester.test_prowlarr(
+        await _get_runtime_settings(db)
+    )
     return ConnectionTestResponse(
         service="prowlarr",
         success=result.success,
@@ -317,7 +346,9 @@ async def test_prowlarr_connection(db: AsyncSession = Depends(get_db)) -> Connec
 @router.post("/api/test/qbittorrent", response_model=ConnectionTestResponse)
 async def test_qbittorrent_connection(db: AsyncSession = Depends(get_db)) -> ConnectionTestResponse:
     """Test connection to qBittorrent."""
-    result: ConnectionTestResult = await ConnectionTester.test_qbittorrent(get_settings())
+    result: ConnectionTestResult = await ConnectionTester.test_qbittorrent(
+        await _get_runtime_settings(db)
+    )
     return ConnectionTestResponse(
         service="qbittorrent",
         success=result.success,
@@ -329,7 +360,7 @@ async def test_qbittorrent_connection(db: AsyncSession = Depends(get_db)) -> Con
 @router.post("/api/test/plex", response_model=ConnectionTestResponse)
 async def test_plex_connection(db: AsyncSession = Depends(get_db)) -> ConnectionTestResponse:
     """Test connection to Plex."""
-    result: ConnectionTestResult = await ConnectionTester.test_plex(get_settings())
+    result: ConnectionTestResult = await ConnectionTester.test_plex(await _get_runtime_settings(db))
     return ConnectionTestResponse(
         service="plex",
         success=result.success,
@@ -341,7 +372,7 @@ async def test_plex_connection(db: AsyncSession = Depends(get_db)) -> Connection
 @router.post("/api/test/all", response_model=list[ConnectionTestResponse])
 async def test_all_connections(db: AsyncSession = Depends(get_db)) -> list[ConnectionTestResponse]:
     """Test connections to all services."""
-    effective_settings = get_settings()
+    effective_settings = await _get_runtime_settings(db)
     results = []
     for service_name, tester in [
         ("overseerr", ConnectionTester.test_overseerr),
@@ -359,6 +390,40 @@ async def test_all_connections(db: AsyncSession = Depends(get_db)) -> list[Conne
             )
         )
     return results
+
+
+# ── API Key management ────────────────────────────────────────────────────
+
+
+@router.get("/api/api-key", response_model=ApiKeyResponse)
+async def get_api_key(db: AsyncSession = Depends(get_db)) -> ApiKeyResponse:
+    """Get the current API key."""
+    settings = get_settings()
+    return ApiKeyResponse(
+        api_key=settings.api_key,
+        api_key_masked=mask_secret(settings.api_key) or "",
+    )
+
+
+@router.post("/api/api-key/regenerate", response_model=ApiKeyResponse)
+async def regenerate_api_key(db: AsyncSession = Depends(get_db)) -> ApiKeyResponse:
+    """Generate a new API key and persist it."""
+    new_key = secrets.token_urlsafe(32)
+    store = SettingsStore(db)
+    await store.set("api_key", new_key)
+
+    # Push to runtime environment
+    env_name = ENV_KEY_MAP.get("api_key", "SIFTARR_API_KEY")
+    os.environ[env_name] = new_key
+
+    # Reload settings so the app uses the new key
+    reload_settings()
+
+    await db.commit()
+    return ApiKeyResponse(
+        api_key=new_key,
+        api_key_masked=mask_secret(new_key) or "",
+    )
 
 
 # ── Plex rescan / sync routes ──────────────────────────────────────────────

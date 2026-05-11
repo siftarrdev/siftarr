@@ -3,7 +3,7 @@
 import pytest
 from pydantic import ValidationError
 
-from app.siftarr.config import Settings
+from app.siftarr.config import PLACEHOLDER_API_KEY, Settings, generate_api_key
 
 
 def test_database_url_defaults_to_data_volume(monkeypatch):
@@ -22,6 +22,22 @@ def test_database_url_honors_override(monkeypatch):
     settings = Settings()
 
     assert settings.database_url == "sqlite+aiosqlite:////tmp/custom.db"
+
+
+def test_default_api_key_is_placeholder_constant(monkeypatch):
+    monkeypatch.delenv("SIFTARR_API_KEY", raising=False)
+
+    assert Settings().api_key == PLACEHOLDER_API_KEY
+
+
+def test_generate_api_key_is_random_and_not_placeholder():
+    first = generate_api_key()
+    second = generate_api_key()
+
+    assert first != PLACEHOLDER_API_KEY
+    assert second != PLACEHOLDER_API_KEY
+    assert first != second
+    assert len(first) >= 32
 
 
 def test_prowlarr_tv_sweep_defaults():

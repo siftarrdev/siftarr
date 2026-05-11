@@ -51,9 +51,40 @@
                         Settings
                     </a>
                 </div>
+                <div class="flex items-center gap-4">
+                    <div id="user-area" class="hidden items-center gap-3">
+                        <div class="flex items-center gap-2">
+                            <img id="user-avatar" src="" alt="" class="h-7 w-7 rounded-full bg-surface-850 ring-1 ring-gray-700/60 hidden">
+                            <span id="user-name" class="text-sm font-medium text-gray-300"></span>
+                        </div>
+                        <a href="/auth/logout" class="text-sm text-gray-500 hover:text-white transition-colors">Logout</a>
+                    </div>
+                </div>
             </div>
         </div>
     </nav>
+
+    <script>
+        (function() {
+            fetch('/auth/me', { credentials: 'same-origin' })
+                .then(function(r) { return r.ok ? r.json() : null; })
+                .then(function(user) {
+                    if (user) {
+                        var area = document.getElementById('user-area');
+                        area.classList.remove('hidden');
+                        area.classList.add('flex');
+                        var nameEl = document.getElementById('user-name');
+                        if (user.username) nameEl.textContent = user.username;
+                        var avatarEl = document.getElementById('user-avatar');
+                        if (user.thumb) {
+                            avatarEl.src = user.thumb;
+                            avatarEl.classList.remove('hidden');
+                        }
+                    }
+                })
+                .catch(function() { /* not logged in */ });
+        })();
+    </script>
 
     <main class="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-8">
         {% if message %}

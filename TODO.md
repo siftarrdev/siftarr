@@ -6,5 +6,7 @@
 - Authentication & Authorization — Zero auth on any endpoint today. Add API-key header auth at minimum; ideally integrate with Overseerr's SSO or support basic auth. This is a critical gap
 - Make the UI more responsive and user-friendly, with better feedback during searches and actions, and a more intuitive layout for rules and request management.
 
+- Cleanup the setting section.
+
 ## Bugs
 

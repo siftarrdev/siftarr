@@ -3,6 +3,7 @@
 import asyncio
 import contextlib
 import json
+import os
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
@@ -11,7 +12,13 @@ from sqlalchemy import delete as sa_delete
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.siftarr.config import Settings, get_settings
+from app.siftarr.config import (
+    PLACEHOLDER_API_KEY,
+    Settings,
+    generate_api_key,
+    get_settings,
+    reload_settings,
+)
 from app.siftarr.models.app_setting import AppSetting
 from app.siftarr.models.request import MediaType, RequestStatus
 from app.siftarr.models.request import Request as RequestModel
@@ -28,6 +35,7 @@ ENV_KEY_MAP: dict[str, str] = {
     "qbittorrent_api_key": "QBITTORRENT_API_KEY",
     "plex_url": "PLEX_URL",
     "plex_token": "PLEX_TOKEN",
+    "api_key": "SIFTARR_API_KEY",
     "tz": "TZ",
     "staging_mode_enabled": "STAGING_MODE_ENABLED",
 }
@@ -106,6 +114,7 @@ class SettingsStore:
             "qbittorrent_api_key": mask_secret(env_settings.qbittorrent_api_key) or "",
             "plex_url": str(env_settings.plex_url or ""),
             "plex_token": mask_secret(env_settings.plex_token) or "",
+            "api_key": mask_secret(env_settings.api_key) or "",
             "tz": env_settings.tz,
         }
         db_overrides = await self.get_all()
@@ -114,17 +123,14 @@ class SettingsStore:
                 base[key] = value
         return base
 
-    async def load_into_environ(self, clear_existing: bool = True) -> None:
+    async def load_into_environ(self, clear_existing: bool = False) -> None:
         """Load all DB-stored settings into ``os.environ``.
 
         Call this once at startup so services that read from
         ``os.environ`` / :func:`get_settings` see the persisted
-        values.  When *clear_existing* is ``True`` environment variables
-        for **all** known keys are removed first, so deleted DB rows
-        properly fall back to the image-level default.
+        values.  DB values override existing process environment values, but
+        missing DB rows must not erase values provided by Docker/Compose.
         """
-        import os
-
         if clear_existing:
             for env_name in ENV_KEY_MAP.values():
                 os.environ.pop(env_name, None)
@@ -137,7 +143,36 @@ class SettingsStore:
 
         # Invalidate the cached Settings singleton so the next caller of
         # get_settings() re-reads from the updated environ.
-        get_settings.cache_clear()
+        reload_settings()
+
+    async def ensure_runtime_api_key(self) -> str:
+        """Load settings and ensure runtime auth never uses the placeholder key.
+
+        A non-placeholder ``SIFTARR_API_KEY`` explicitly supplied in the process
+        environment wins for API auth. Otherwise, the DB-stored key is used; if
+        it is missing or still the placeholder, a random key is generated and
+        persisted.
+        """
+        explicit_api_key = os.environ.get("SIFTARR_API_KEY")
+        explicit_override_key: str | None = None
+        if explicit_api_key and explicit_api_key != PLACEHOLDER_API_KEY:
+            explicit_override_key = explicit_api_key
+
+        await self.load_into_environ(clear_existing=False)
+
+        if explicit_override_key is not None:
+            os.environ["SIFTARR_API_KEY"] = explicit_override_key
+            reload_settings()
+            return explicit_override_key
+
+        effective_api_key = get_settings().api_key.strip()
+        if not effective_api_key or effective_api_key == PLACEHOLDER_API_KEY:
+            effective_api_key = generate_api_key()
+            await self.set("api_key", effective_api_key)
+            os.environ["SIFTARR_API_KEY"] = effective_api_key
+            reload_settings()
+
+        return effective_api_key
 
 
 def mask_secret(value: str | None, visible_chars: int = 4) -> str | None:
@@ -178,6 +213,7 @@ async def build_effective_settings(db: AsyncSession | None = None) -> dict[str, 
         "qbittorrent_api_key": mask_secret(effective.qbittorrent_api_key) or "",
         "plex_url": str(effective.plex_url or ""),
         "plex_token": mask_secret(effective.plex_token) or "",
+        "api_key": mask_secret(effective.api_key) or "",
         "tz": effective.tz,
     }
 

@@ -9,10 +9,12 @@ from urllib.parse import urlparse
 from fastapi import Depends, FastAPI, Request
 from fastapi.responses import JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
+from starlette.middleware.sessions import SessionMiddleware
 
 from app.siftarr import database as db_mod
 from app.siftarr.config import get_settings
 from app.siftarr.routers import (
+    auth_router,
     dashboard,
     dashboard_actions,
     dashboard_api,
@@ -23,7 +25,8 @@ from app.siftarr.routers import (
     webhooks,
 )
 from app.siftarr.services.admin.scheduler_service import SchedulerService
-from app.siftarr.services.auth_service import verify_api_key
+from app.siftarr.services.admin.settings_service import SettingsStore
+from app.siftarr.services.auth_service import require_auth
 from app.siftarr.services.utils.http_client import close_shared_client
 from app.siftarr.version import __version__
 
@@ -111,6 +114,10 @@ async def lifespan(app: FastAPI):
     # Verify database readiness before starting background work.
     await db_mod.init_db()
 
+    assert db_mod.async_session_maker is not None
+    async with db_mod.async_session_maker() as session, session.begin():
+        await SettingsStore(session).ensure_runtime_api_key()
+
     scheduler_service = SchedulerService(db_mod.async_session_maker, logger=logger)
     scheduler_service.start()
     yield
@@ -131,9 +138,22 @@ def create_app() -> FastAPI:
 
     app.mount("/static", StaticFiles(directory=Path(__file__).parent / "static"), name="static")
 
-    # Authentication dependency applied to all routers.
+    # Session middleware for Plex SSO login
+    app.add_middleware(
+        SessionMiddleware,
+        secret_key=get_settings().secret_key,
+        max_age=86400 * 30,  # 30 days
+        same_site="lax",
+        https_only=False,  # Set to True in production behind HTTPS
+    )
+
+    # Auth router is included BEFORE the auth dependency so its endpoints
+    # (login, plex auth, logout, me) are accessible without authentication.
+    app.include_router(auth_router.router, tags=["auth"])
+
+    # Authentication dependency applied to all other routers.
     # The root "/" and "/health" endpoints defined directly on the app are excluded.
-    auth = [Depends(verify_api_key)]
+    auth = [Depends(require_auth)]
 
     # Include routers with authentication
     app.include_router(dashboard.router, dependencies=auth)
@@ -149,6 +169,11 @@ def create_app() -> FastAPI:
     async def root() -> RedirectResponse:
         """Root endpoint redirecting to dashboard."""
         return RedirectResponse(url="/dashboard")
+
+    @app.get("/login")
+    async def login_redirect() -> RedirectResponse:
+        """Redirect to the login page."""
+        return RedirectResponse(url="/auth/login")
 
     @app.get("/health")
     async def health_check() -> JSONResponse:

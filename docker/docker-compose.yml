@@ -21,7 +21,7 @@ services:
       - QBITTORRENT_URL=${QBITTORRENT_URL}
       - QBITTORRENT_API_KEY=${QBITTORRENT_API_KEY}
       - PLEX_URL=${PLEX_URL}
-      - PLEX_TOKEN=${PLEX_TOKEN}
+      - PLEX_TOKEN=${PLEX_TOKEN:-}
     healthcheck:
       test: ["CMD", "/app/.venv/bin/python", "-c", "import httpx; httpx.get('http://localhost:8000/health')"]
       interval: 30s
