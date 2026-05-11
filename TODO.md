@@ -10,3 +10,4 @@
 
 ## Bugs
 
+ - requests in overseerr arent being marked as approved/denied when they are approved/downloading/downloaded in siftarr. If a request is in overseerr and we detect it is in qbittorrent and or available in plex, we should mark it as approved in overseerr. This is a critical gap in the user experience and workflow.
