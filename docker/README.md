@@ -54,13 +54,26 @@ Common variables passed by Compose:
 - `OVERSEERR_URL` and `OVERSEERR_API_KEY`.
 - `PROWLARR_URL` and `PROWLARR_API_KEY`.
 - `QBITTORRENT_URL` and `QBITTORRENT_API_KEY`.
-- `PLEX_URL` and optional `PLEX_TOKEN`. Leaving `PLEX_TOKEN` unset is expected
-  when using the Plex login flow.
+- `PLEX_URL`. `PLEX_TOKEN` is normally managed by Plex SSO after first login.
+- `SECRET_KEY` for stable Plex SSO sessions across container restarts.
+- `SIFTARR_API_KEY` for programmatic/webhook access; generated and persisted on
+  first startup when unset.
 
 Additional app settings can be supplied through the container environment, including
 `SIFTARR_DB_PATH`, `DATABASE_URL`, `STAGING_MODE_ENABLED`, retry settings,
 `MAX_EPISODE_DISCOVERY`, Plex polling intervals, and sync concurrency settings. The
 entrypoint also honors `PUID` and `PGID` for runtime file ownership.
+
+## Plex SSO claim
+
+The first browser login with Plex claims the instance and becomes the only
+allowed web admin/user. Other Plex accounts are denied with a clear admin-account
+message. API-key auth remains available for integrations such as webhooks.
+
+Claim metadata and the Plex token are stored in the SQLite `app_settings` table
+under `/data/db`. To reclaim after a mistaken first login, stop the container,
+back up the database, remove or edit `plex_claimed_id`, `plex_username`,
+`plex_thumb`, and `plex_token`, then restart and log in with the intended admin.
 
 ## Rebuild and logs helper
 
