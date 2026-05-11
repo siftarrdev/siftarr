@@ -34,11 +34,49 @@ async def session_maker():
 def _clean_api_key_env(monkeypatch):
     monkeypatch.delenv("SIFTARR_API_KEY", raising=False)
     monkeypatch.delenv("PLEX_CLAIMED_ID", raising=False)
+    monkeypatch.delenv("OVERSEERR_POLL_INTERVAL_MINUTES", raising=False)
+    monkeypatch.delenv("QBITTORRENT_COMPLETION_POLL_INTERVAL_SECONDS", raising=False)
+    monkeypatch.delenv("PLEX_FAST_SYNC_INTERVAL_MINUTES", raising=False)
+    monkeypatch.delenv("PLEX_FULL_SYNC_FREQUENCY", raising=False)
+    monkeypatch.delenv("PLEX_FULL_SYNC_TIME", raising=False)
     reload_settings()
     yield
-    for key in ("SIFTARR_API_KEY", "PLEX_CLAIMED_ID", "PLEX_USERNAME", "PLEX_THUMB", "PLEX_TOKEN"):
+    for key in (
+        "SIFTARR_API_KEY",
+        "PLEX_CLAIMED_ID",
+        "PLEX_USERNAME",
+        "PLEX_THUMB",
+        "PLEX_TOKEN",
+        "OVERSEERR_POLL_INTERVAL_MINUTES",
+        "QBITTORRENT_COMPLETION_POLL_INTERVAL_SECONDS",
+        "PLEX_FAST_SYNC_INTERVAL_MINUTES",
+        "PLEX_FULL_SYNC_FREQUENCY",
+        "PLEX_FULL_SYNC_TIME",
+    ):
         os.environ.pop(key, None)
     reload_settings()
+
+
+@pytest.mark.asyncio
+async def test_scheduler_settings_load_into_environ_and_effective_dict(session_maker):
+    async with session_maker() as session, session.begin():
+        store = SettingsStore(session)
+        await store.set("overseerr_poll_interval_minutes", "15")
+        await store.set("qbittorrent_completion_poll_interval_seconds", "45")
+        await store.set("plex_fast_sync_interval_minutes", "7")
+        await store.set("plex_full_sync_frequency", "weekly")
+        await store.set("plex_full_sync_time", "04:30")
+        await store.load_into_environ()
+        effective = await store.get_effective_dict()
+
+    assert os.environ["OVERSEERR_POLL_INTERVAL_MINUTES"] == "15"
+    assert get_settings().overseerr_poll_interval_minutes == 15
+    assert get_settings().qbittorrent_completion_poll_interval_seconds == 45
+    assert get_settings().plex_fast_sync_interval_minutes == 7
+    assert get_settings().plex_full_sync_frequency == "weekly"
+    assert get_settings().plex_full_sync_time == "04:30"
+    assert effective["overseerr_poll_interval_minutes"] == 15
+    assert effective["qbittorrent_completion_poll_interval_seconds"] == 45
 
 
 @pytest.mark.asyncio

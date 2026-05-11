@@ -9,7 +9,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from sqlalchemy import delete as sa_delete
-from sqlalchemy import func, select
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.siftarr.config import (
@@ -42,6 +42,11 @@ ENV_KEY_MAP: dict[str, str] = {
     "api_key": "SIFTARR_API_KEY",
     "tz": "TZ",
     "staging_mode_enabled": "STAGING_MODE_ENABLED",
+    "overseerr_poll_interval_minutes": "OVERSEERR_POLL_INTERVAL_MINUTES",
+    "qbittorrent_completion_poll_interval_seconds": "QBITTORRENT_COMPLETION_POLL_INTERVAL_SECONDS",
+    "plex_fast_sync_interval_minutes": "PLEX_FAST_SYNC_INTERVAL_MINUTES",
+    "plex_full_sync_frequency": "PLEX_FULL_SYNC_FREQUENCY",
+    "plex_full_sync_time": "PLEX_FULL_SYNC_TIME",
 }
 
 # Keys that are persisted and used as runtime connection/scheduling settings.
@@ -121,11 +126,20 @@ class SettingsStore:
             "plex_token": mask_secret(env_settings.plex_token) or "",
             "api_key": mask_secret(env_settings.api_key) or "",
             "tz": env_settings.tz,
+            "overseerr_poll_interval_minutes": env_settings.overseerr_poll_interval_minutes,
+            "qbittorrent_completion_poll_interval_seconds": env_settings.qbittorrent_completion_poll_interval_seconds,
+            "plex_fast_sync_interval_minutes": env_settings.plex_fast_sync_interval_minutes,
+            "plex_full_sync_frequency": env_settings.plex_full_sync_frequency,
+            "plex_full_sync_time": env_settings.plex_full_sync_time,
         }
         db_overrides = await self.get_all()
         for key, value in db_overrides.items():
             if key in base and value:
-                base[key] = mask_secret(value) if key == "plex_token" else value
+                base[key] = (
+                    mask_secret(value)
+                    if key == "plex_token"
+                    else _coerce_setting_type(base[key], value)
+                )
         base.update(await self.get_plex_sso_status(db_overrides))
         return base
 
@@ -293,6 +307,11 @@ async def build_effective_settings(db: AsyncSession | None = None) -> dict[str, 
         "plex_token_present": bool(effective.plex_token),
         "api_key": mask_secret(effective.api_key) or "",
         "tz": effective.tz,
+        "overseerr_poll_interval_minutes": effective.overseerr_poll_interval_minutes,
+        "qbittorrent_completion_poll_interval_seconds": effective.qbittorrent_completion_poll_interval_seconds,
+        "plex_fast_sync_interval_minutes": effective.plex_fast_sync_interval_minutes,
+        "plex_full_sync_frequency": effective.plex_full_sync_frequency,
+        "plex_full_sync_time": effective.plex_full_sync_time,
     }
 
 
@@ -306,8 +325,6 @@ async def build_settings_page_context(
     request,
     db: AsyncSession,
     *,
-    request_model,
-    request_status_enum,
     build_plex_job_statuses_func,
     effective_settings_override: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
@@ -328,21 +345,10 @@ async def build_settings_page_context(
     queue_service = PendingQueueService(db)
     pending_count = len(await queue_service.get_ready_for_retry())
 
-    status_counts = (
-        await db.execute(select(request_model.status, func.count()).group_by(request_model.status))
-    ).all()
-    stats_by_status = {status.value: count for status, count in status_counts}
-
     return {
         "request": request,
         "staging_enabled": staging_enabled,
         "pending_count": pending_count,
-        "stats": {
-            "total_requests": sum(stats_by_status.values()),
-            "completed": stats_by_status.get(request_status_enum.COMPLETED.value, 0),
-            "pending": stats_by_status.get(request_status_enum.PENDING.value, 0),
-            "failed": stats_by_status.get(request_status_enum.FAILED.value, 0),
-        },
         "plex_jobs": await build_plex_job_statuses_func(db),
         "env": effective_settings,
     }

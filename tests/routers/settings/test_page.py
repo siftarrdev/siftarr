@@ -8,6 +8,51 @@ import pytest
 from app.siftarr.routers import settings
 
 
+async def _render_settings_page(monkeypatch, mock_db, context):
+    rule_service = MagicMock()
+    rule_service.ensure_default_rules = AsyncMock()
+    monkeypatch.setattr(settings, "RuleService", lambda db: rule_service)
+    monkeypatch.setattr(
+        settings,
+        "_build_settings_page_context",
+        AsyncMock(return_value=context),
+    )
+    response = await settings.get_settings_page(MagicMock(), db=mock_db)
+    return cast(bytes, response.body).decode()
+
+
+@pytest.mark.asyncio
+async def test_settings_page_layout_defaults_and_connections(monkeypatch, mock_db, base_context):
+    """Settings page should prioritize manual actions and collapse other sections."""
+
+    body = await _render_settings_page(monkeypatch, mock_db, base_context())
+
+    assert body.count('<details open class="card">') == 1
+    assert body.index("Manual Actions") < body.index("Connection Settings")
+
+    connection_start = body.index("Connection Settings")
+    connection_details_start = body.rindex("<details", 0, connection_start)
+    connection_summary_start = body.rindex("<summary", 0, connection_start)
+    assert "open" not in body[connection_details_start:connection_summary_start]
+
+    connection_end = body.index("Advanced / Scheduler")
+    connection_section = body[connection_start:connection_end]
+    assert connection_section.index("Plex") < connection_section.index("Overseerr")
+    assert connection_section.index("Overseerr") < connection_section.index("Prowlarr")
+    assert connection_section.index("Prowlarr") < connection_section.index("qBittorrent")
+    assert "For scripts, webhooks, and direct API clients" in connection_section
+    assert "X-API-Key" in connection_section
+
+    assert "Database Statistics" not in body
+    assert "Total Requests" not in body
+    assert "Staging Mode" in body
+    assert "Scheduler Settings" in body
+    assert 'name="overseerr_poll_interval_minutes" value="60"' in body
+    assert 'name="qbittorrent_completion_poll_interval_seconds" value="30"' in body
+    assert 'name="plex_fast_sync_interval_minutes" value="5"' in body
+    assert 'name="plex_full_sync_time" value="03:00"' in body
+
+
 @pytest.mark.asyncio
 async def test_get_settings_page_includes_clear_cache_scope_copy(monkeypatch, mock_db):
     """Settings page should describe the app-side cache-clearing scope and limits."""

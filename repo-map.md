@@ -124,7 +124,7 @@ HTTP route layer.
 - `dashboard_actions.py` — dashboard-triggered actions and mutations
 - `search_sse.py` — SSE streaming endpoints for live search progress; `/requests/{id}/search/stream` is the primary TV Search All path, while TV scope-specific streams remain compatibility/debug inspect paths
 - `rules.py` — rule management UI/API, including unified rule listing, multi-title testing, modal import/export, and create/edit actions
-- `settings.py` — settings UI (connection test/save/reset, staging toggle, Plex rescan, Overseerr sync, cache/reseed actions, SSE progress streams, API key management, Plex SSO status), uses SettingsStore for DB-backed persistence and keeps the SSO-managed Plex token out of connection saves/resets
+- `settings.py` — settings UI (connection test/save/reset, scheduler interval save/reset, staging toggle, Plex rescan, Overseerr sync, cache/reseed actions, SSE progress streams, API key management, Plex SSO status), uses SettingsStore for DB-backed persistence and keeps the SSO-managed Plex token out of connection saves/resets
 - `staged.py` — staged torrent review/approval endpoints
 - `webhooks.py` — inbound webhook handling
 
@@ -142,7 +142,7 @@ Business logic and integrations, organized into thematic subpackages:
 
 **`admin/`** — Config, scheduling, polling
 - `settings_service.py` — SettingsStore (DB-backed settings persistence, startup API key generation, runtime env loading, sync success timestamps, Plex SSO claim/token status without exposing token), SSE progress, scheduled job helpers, Plex rescan/Overseerr import orchestration
-- `scheduler_service.py` — recurring job scheduling via APScheduler plus startup catch-up orchestration for stale Overseerr/Plex syncs and the guarded Plex sign-in full-sync trigger
+- `scheduler_service.py` — recurring job scheduling via APScheduler using runtime-configurable sync/completion intervals, plus startup catch-up orchestration for stale Overseerr/Plex syncs and the guarded Plex sign-in full-sync trigger
 - `plex_polling_service/` — Plex polling logic; prioritizes recent/downloading requests with periodic full reconcile every 20th poll cycle
 
 **`dashboard/`** — Dashboard, search, detail views
@@ -198,7 +198,7 @@ Server-rendered HTML templates.
 - `login.html` — Plex SSO login page with JS-driven OAuth PIN flow, denied-admin message, and safe next redirect handling
 - `rules.html` — single-pane rules UI with unified rule table, multi-title tester, modal create/edit wizard, and modal import/export
 - `rule_form.html` — fallback full-page create/edit rule form
-- `settings.html` — settings UI (includes Plex SSO connection status, API Access section with reveal/copy/regenerate)
+- `settings.html` — settings UI (manual actions, connection settings with Plex SSO status and API key reveal/copy/regenerate, scheduler interval controls/status, staging toggle)
 
 ### `app/siftarr/static/`
 

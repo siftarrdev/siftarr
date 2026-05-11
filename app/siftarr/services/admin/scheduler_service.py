@@ -41,6 +41,18 @@ PLEX_RECENT_SCAN_JOB_NAME = "plex_recent_scan"
 PLEX_POLL_JOB_NAME = "plex_poll"
 
 
+def _parse_full_sync_time(value: str) -> tuple[int, int]:
+    try:
+        hour_str, minute_str = value.split(":", maxsplit=1)
+        hour = int(hour_str)
+        minute = int(minute_str)
+    except (ValueError, AttributeError):
+        return 3, 0
+    if 0 <= hour <= 23 and 0 <= minute <= 59:
+        return hour, minute
+    return 3, 0
+
+
 @dataclass(frozen=True)
 class PlexJobRunResult:
     """Outcome of a manually or automatically triggered Plex scan job."""
@@ -527,35 +539,32 @@ class SchedulerService:
             replace_existing=True,
         )
 
+        settings = get_settings()
+
         self.scheduler.add_job(
             self._poll_overseerr,
-            trigger=IntervalTrigger(hours=1),
+            trigger=IntervalTrigger(minutes=settings.overseerr_poll_interval_minutes),
             id="poll_overseerr",
             name="Poll Overseerr for new requests",
             replace_existing=True,
         )
 
-        settings = get_settings()
         self.scheduler.add_job(
             self._run_recent_plex_scan_job,
-            trigger=IntervalTrigger(minutes=settings.plex_recent_scan_interval_minutes),
+            trigger=IntervalTrigger(minutes=settings.plex_fast_sync_interval_minutes),
             kwargs={"trigger_source": "scheduler"},
             id="plex_recent_scan",
             name="Run recent Plex scan",
             replace_existing=True,
         )
 
-        full_sync_time = getattr(settings, "plex_full_sync_time", "03:00")
-        try:
-            hour_str, minute_str = full_sync_time.split(":")
-            full_sync_hour = int(hour_str)
-            full_sync_minute = int(minute_str)
-        except (ValueError, AttributeError):
-            full_sync_hour = 3
-            full_sync_minute = 0
+        full_sync_hour, full_sync_minute = _parse_full_sync_time(settings.plex_full_sync_time)
+        full_sync_kwargs: dict[str, Any] = {"hour": full_sync_hour, "minute": full_sync_minute}
+        if settings.plex_full_sync_frequency == "weekly":
+            full_sync_kwargs["day_of_week"] = "sun"
         self.scheduler.add_job(
             self._run_plex_poll_job,
-            trigger=CronTrigger(hour=full_sync_hour, minute=full_sync_minute),
+            trigger=CronTrigger(**full_sync_kwargs),
             kwargs={"trigger_source": "scheduler"},
             id="plex_poll",
             name="Run full Plex sync",
@@ -572,7 +581,7 @@ class SchedulerService:
 
         self.scheduler.add_job(
             self._check_download_completion,
-            trigger=IntervalTrigger(seconds=30),
+            trigger=IntervalTrigger(seconds=settings.qbittorrent_completion_poll_interval_seconds),
             id="check_download_completion",
             name="Check qBittorrent download completion",
             replace_existing=True,
