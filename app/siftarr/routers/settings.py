@@ -318,7 +318,9 @@ async def get_connections_api(db: AsyncSession = Depends(get_db)) -> dict:
 @router.post("/api/test/overseerr", response_model=ConnectionTestResponse)
 async def test_overseerr_connection(db: AsyncSession = Depends(get_db)) -> ConnectionTestResponse:
     """Test connection to Overseerr."""
-    result: ConnectionTestResult = await ConnectionTester.test_overseerr(await _get_runtime_settings(db))
+    result: ConnectionTestResult = await ConnectionTester.test_overseerr(
+        await _get_runtime_settings(db)
+    )
     return ConnectionTestResponse(
         service="overseerr",
         success=result.success,
@@ -330,7 +332,9 @@ async def test_overseerr_connection(db: AsyncSession = Depends(get_db)) -> Conne
 @router.post("/api/test/prowlarr", response_model=ConnectionTestResponse)
 async def test_prowlarr_connection(db: AsyncSession = Depends(get_db)) -> ConnectionTestResponse:
     """Test connection to Prowlarr."""
-    result: ConnectionTestResult = await ConnectionTester.test_prowlarr(await _get_runtime_settings(db))
+    result: ConnectionTestResult = await ConnectionTester.test_prowlarr(
+        await _get_runtime_settings(db)
+    )
     return ConnectionTestResponse(
         service="prowlarr",
         success=result.success,
@@ -342,7 +346,9 @@ async def test_prowlarr_connection(db: AsyncSession = Depends(get_db)) -> Connec
 @router.post("/api/test/qbittorrent", response_model=ConnectionTestResponse)
 async def test_qbittorrent_connection(db: AsyncSession = Depends(get_db)) -> ConnectionTestResponse:
     """Test connection to qBittorrent."""
-    result: ConnectionTestResult = await ConnectionTester.test_qbittorrent(await _get_runtime_settings(db))
+    result: ConnectionTestResult = await ConnectionTester.test_qbittorrent(
+        await _get_runtime_settings(db)
+    )
     return ConnectionTestResponse(
         service="qbittorrent",
         success=result.success,
