@@ -613,3 +613,7 @@ class SchedulerService:
     async def trigger_plex_poll_now(self) -> PlexJobRunResult:
         """Manually trigger the Plex poll job."""
         return await self._run_plex_poll_job(trigger_source="manual")
+
+    async def trigger_plex_sign_in_sync(self) -> PlexJobRunResult:
+        """Trigger a guarded full Plex poll after successful Plex admin sign-in."""
+        return await self._run_plex_poll_job(trigger_source="plex_sign_in")

@@ -207,6 +207,19 @@ async def test_plex_poll_records_success_timestamp_and_skips_failed_or_locked(mo
 
 
 @pytest.mark.asyncio
+async def test_plex_sign_in_sync_uses_full_poll_with_distinct_trigger(monkeypatch):
+    """Plex admin sign-in sync should reuse the guarded full poll path."""
+    service = SchedulerService(lambda: _FakeSessionContext(AsyncMock()), logger=MagicMock())
+    run_poll = AsyncMock(return_value=SimpleNamespace(status="completed", error=None))
+    monkeypatch.setattr(service, "_run_plex_poll_job", run_poll)
+
+    result = await service.trigger_plex_sign_in_sync()
+
+    assert result.status == "completed"
+    run_poll.assert_awaited_once_with(trigger_source="plex_sign_in")
+
+
+@pytest.mark.asyncio
 async def test_startup_catchup_runs_overseerr_before_plex_when_both_stale(monkeypatch):
     engine = create_async_engine("sqlite+aiosqlite:///:memory:")
     session_maker = async_sessionmaker(engine, expire_on_commit=False)
