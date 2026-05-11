@@ -165,9 +165,9 @@ async function refreshDownloadingTabData() {
 }
 
 function bindStagedSelectionHandlers() {
-    document.querySelectorAll('.staged-torrent-checkbox').forEach((checkbox) => {
-        checkbox.addEventListener('click', (event) => event.stopPropagation());
-    });
+    if (window.bindCheckboxRangeSelection) {
+        window.bindCheckboxRangeSelection('.staged-torrent-checkbox');
+    }
 }
 
 async function checkNow(torrentId) {
