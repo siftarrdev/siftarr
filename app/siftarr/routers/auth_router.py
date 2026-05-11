@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import inspect
 import logging
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from fastapi.responses import RedirectResponse
@@ -35,6 +37,25 @@ class PlexAuthRequest(BaseModel):
     """Request body for Plex SSO authentication."""
 
     authToken: str
+    next: str | None = None
+
+
+ADMIN_LOGIN_MESSAGE = "please login with the admin plex account"
+
+
+def _safe_next_url(value: str | None) -> str:
+    """Return a safe local redirect target, defaulting to dashboard."""
+    if not value:
+        return "/"
+    parsed = urlparse(value)
+    if parsed.scheme or parsed.netloc or not value.startswith("/") or value.startswith("//"):
+        return "/"
+    return value
+
+
+async def _maybe_await(value: Any) -> None:
+    if inspect.isawaitable(value):
+        await value
 
 
 @router.get("/login")
@@ -45,11 +66,17 @@ async def login_page(request: Request) -> Response:
     """
     from app.siftarr.services.auth_service import get_session_user
 
+    next_url = _safe_next_url(request.query_params.get("next"))
     if get_session_user(request) is not None:
-        return RedirectResponse(url="/")
+        return RedirectResponse(url=next_url)
 
     templates = _get_templates()
-    return templates.TemplateResponse(request, "login.html")
+    message = ADMIN_LOGIN_MESSAGE if request.query_params.get("denied") else None
+    return templates.TemplateResponse(
+        request,
+        "login.html",
+        {"next_url": next_url, "message": message},
+    )
 
 
 @router.post("/plex")
@@ -70,9 +97,11 @@ async def plex_auth(
             detail="Invalid Plex auth token",
         )
 
-    user_id = str(user_info.get("id", ""))
-    username = user_info.get("username", "")
-    thumb = user_info.get("thumb", "")
+    user_id = str(user_info.get("id") or "").strip()
+    username = str(user_info.get("username") or "")
+    thumb = str(user_info.get("thumb") or "")
+    if not user_id:
+        raise HTTPException(status_code=401, detail="Invalid Plex user identity")
 
     settings_store = SettingsStore(db)
 
@@ -81,19 +110,31 @@ async def plex_auth(
 
     if claimed_id is None:
         # First-time claim — persist user info and token
-        await settings_store.set("plex_claimed_id", user_id)
-        await settings_store.set("plex_username", username)
-        await settings_store.set("plex_thumb", thumb)
-        await settings_store.set("plex_token", body.authToken)
-        # Push token into runtime environment so PlexService picks it up
+        try:
+            await settings_store.set("plex_claimed_id", user_id)
+            await settings_store.set("plex_username", username)
+            await settings_store.set("plex_thumb", thumb)
+            await settings_store.set("plex_token", body.authToken)
+            await _maybe_await(db.flush())
+        except Exception:
+            await _maybe_await(db.rollback())
+            claimed_id = await settings_store.get("plex_claimed_id")
+            if claimed_id != user_id:
+                raise HTTPException(status_code=403, detail=ADMIN_LOGIN_MESSAGE) from None
+            await settings_store.set("plex_username", username)
+            await settings_store.set("plex_thumb", thumb)
+            await settings_store.set("plex_token", body.authToken)
+        # Push token and claim into runtime environment so auth/Plex services see it
         await settings_store.load_into_environ()
         logger.info("Instance claimed by Plex user %s (id=%s)", username, user_id)
     elif claimed_id != user_id:
         # Instance already claimed by a different user — reject
-        raise HTTPException(
-            status_code=403,
-            detail="This instance is already claimed by another Plex user",
-        )
+        raise HTTPException(status_code=403, detail=ADMIN_LOGIN_MESSAGE)
+    else:
+        await settings_store.set("plex_username", username)
+        await settings_store.set("plex_thumb", thumb)
+        await settings_store.set("plex_token", body.authToken)
+        await settings_store.load_into_environ()
 
     # Create session
     request.session["plex_user_id"] = user_id
@@ -102,7 +143,7 @@ async def plex_auth(
 
     logger.info("Plex user %s logged in (id=%s)", username, user_id)
 
-    return {"username": username, "thumb": thumb}
+    return {"username": username, "thumb": thumb, "redirect_url": _safe_next_url(body.next)}
 
 
 @router.post("/logout")
@@ -110,6 +151,12 @@ async def logout(request: Request) -> RedirectResponse:
     """Clear the session and redirect to the login page."""
     request.session.clear()
     return RedirectResponse(url="/auth/login")
+
+
+@router.get("/logout")
+async def logout_get(request: Request) -> RedirectResponse:
+    """Safe browser logout wrapper for the navbar link."""
+    return await logout(request)
 
 
 @router.get("/me")

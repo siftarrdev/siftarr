@@ -6,6 +6,7 @@ import pytest
 from fastapi import HTTPException, Request
 
 from app.siftarr.services.auth_service import (
+    BrowserAuthRequired,
     _extract_api_key,
     get_session_user,
     require_auth,
@@ -84,7 +85,9 @@ class TestRequireAuth:
     async def test_auth_disabled_passes(self, mock_get_settings):
         """Should pass when auth is disabled."""
         mock_get_settings.return_value.auth_enabled = False
-        request = Request(scope={"type": "http", "session": {}})
+        request = Request(
+            scope={"type": "http", "session": {}, "headers": [(b"accept", b"application/json")]}
+        )
         await require_auth(request)
 
     @patch("app.siftarr.services.auth_service.get_settings")
@@ -136,7 +139,7 @@ class TestRequireAuth:
             scope={
                 "type": "http",
                 "session": {},
-                "headers": [],
+                "headers": [(b"accept", b"application/json")],
             }
         )
         with pytest.raises(HTTPException) as exc:
@@ -175,3 +178,50 @@ class TestRequireAuth:
         with pytest.raises(HTTPException) as exc:
             await require_auth(request)
         assert exc.value.status_code == 401
+
+    @patch("app.siftarr.services.auth_service.get_settings")
+    async def test_browser_request_redirects_to_login(self, mock_get_settings):
+        """Unauthenticated HTML requests should trigger login redirect handling."""
+        mock_get_settings.return_value.auth_enabled = True
+        mock_get_settings.return_value.api_key = "secret"
+        request = Request(
+            scope={
+                "type": "http",
+                "method": "GET",
+                "path": "/dashboard",
+                "query_string": b"tab=all",
+                "session": {},
+                "headers": [(b"accept", b"text/html")],
+            }
+        )
+
+        with pytest.raises(BrowserAuthRequired):
+            await require_auth(request)
+
+    @patch("app.siftarr.services.auth_service.get_settings")
+    async def test_api_route_with_wildcard_accept_gets_401(self, mock_get_settings):
+        """API-like route prefixes should not be classified as browser redirects."""
+        mock_get_settings.return_value.auth_enabled = True
+        mock_get_settings.return_value.api_key = "secret"
+        request = Request(
+            scope={
+                "type": "http",
+                "method": "GET",
+                "path": "/requests/1/details",
+                "session": {},
+                "headers": [(b"accept", b"*/*")],
+            }
+        )
+
+        with pytest.raises(HTTPException) as exc:
+            await require_auth(request)
+        assert exc.value.status_code == 401
+
+    async def test_stale_session_is_cleared(self, monkeypatch):
+        """Session user id must match the claimed admin id."""
+        monkeypatch.setenv("PLEX_CLAIMED_ID", "admin")
+        session = {"plex_user_id": "other", "plex_username": "intruder"}
+        request = Request(scope={"type": "http", "session": session})
+
+        assert get_session_user(request) is None
+        assert session == {}

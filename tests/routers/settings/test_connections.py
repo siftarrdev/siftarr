@@ -27,7 +27,6 @@ async def test_save_connections_persists_values_and_redirects(monkeypatch, mock_
         qbittorrent_url="https://qb",
         qbittorrent_api_key="qbt_test_key",
         plex_url="https://plex",
-        plex_token="plex-token",
         tz="America/New_York",
     )
 
@@ -41,7 +40,6 @@ async def test_save_connections_persists_values_and_redirects(monkeypatch, mock_
         ("qbittorrent_url", "https://qb"),
         ("qbittorrent_api_key", "qbt_test_key"),
         ("plex_url", "https://plex"),
-        ("plex_token", "plex-token"),
         ("tz", "America/New_York"),
     ]
     mock_db.commit.assert_awaited_once()
@@ -73,6 +71,10 @@ async def test_reset_connections_redirects_back_to_settings(monkeypatch, mock_db
     response = await settings.reset_connections(MagicMock(), db=mock_db)
 
     clear_runtime.assert_awaited_once()
+    clear_args = clear_runtime.await_args
+    assert clear_args is not None
+    assert "plex_token" not in clear_args.args
+    assert "plex_claimed_id" not in clear_args.args
     mock_db.commit.assert_awaited_once()
     assert response.status_code == 303
     assert response.headers["location"] == "/settings?reset=true"

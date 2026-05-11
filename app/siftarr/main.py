@@ -26,7 +26,11 @@ from app.siftarr.routers import (
 )
 from app.siftarr.services.admin.scheduler_service import SchedulerService
 from app.siftarr.services.admin.settings_service import SettingsStore
-from app.siftarr.services.auth_service import require_auth
+from app.siftarr.services.auth_service import (
+    BrowserAuthRequired,
+    build_login_redirect_url,
+    require_auth,
+)
 from app.siftarr.services.utils.http_client import close_shared_client
 from app.siftarr.version import __version__
 
@@ -165,7 +169,7 @@ def create_app() -> FastAPI:
     app.include_router(settings.router, dependencies=auth)
     app.include_router(staged.router, dependencies=auth)
 
-    @app.get("/")
+    @app.get("/", dependencies=auth)
     async def root() -> RedirectResponse:
         """Root endpoint redirecting to dashboard."""
         return RedirectResponse(url="/dashboard")
@@ -179,6 +183,14 @@ def create_app() -> FastAPI:
     async def health_check() -> JSONResponse:
         """Health check endpoint."""
         return JSONResponse(content={"status": "ok"})
+
+    @app.exception_handler(BrowserAuthRequired)
+    async def browser_auth_redirect_handler(
+        request: Request, exc: BrowserAuthRequired
+    ) -> RedirectResponse:
+        """Redirect unauthenticated browser requests to Plex login."""
+        del exc
+        return RedirectResponse(url=build_login_redirect_url(request), status_code=303)
 
     @app.exception_handler(Exception)
     async def global_exception_handler(request: Request, exc: Exception) -> JSONResponse:

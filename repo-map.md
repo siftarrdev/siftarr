@@ -32,10 +32,11 @@ Siftarr is a FastAPI application that sits between Overseerr, Prowlarr, Plex, an
 Primary flow:
 
 1. Overseerr webhook or manual action creates/syncs a request
-2. Search and decision services query Prowlarr and evaluate releases (TV dashboard search uses one Search All stream that runs bounded paginated season sweeps and classifies stored coverage)
-3. Winning releases are staged or sent to qBittorrent
-4. Background services track retries, lifecycle state, Plex polling, and completion
-5. Dashboard and settings UI expose control and visibility
+2. Browser access is gated by Plex SSO; the first Plex login claims the instance as the sole admin, while API-key auth remains for webhooks/integrations
+3. Search and decision services query Prowlarr and evaluate releases (TV dashboard search uses one Search All stream that runs bounded paginated season sweeps and classifies stored coverage)
+4. Winning releases are staged or sent to qBittorrent
+5. Background services track retries, lifecycle state, Plex polling, and completion
+6. Dashboard and settings UI expose control and visibility
 
 ## Top-level repository layout
 
@@ -87,6 +88,7 @@ The old duplicated developer guide and stale product specification under `docs/`
 - `get_settings()` — cached singleton accessor
 - `reload_settings()` — invalidates the cached singleton (called after runtime setting changes)
 - first-run API key safety helpers (placeholder constant and secure key generation)
+- `SECRET_KEY` controls browser session signing; set a stable value in production
 - `get_static_version()` — cache-busting value for static assets
 
 ### `app/siftarr/version.py`
@@ -109,20 +111,20 @@ Database entities and enums.
 - `season.py` / `episode.py` — TV coverage and availability tracking
 - `staged_torrent.py` — staged torrent persistence; indexed on `request_id` and `status`
 - `activity_log.py` — activity/audit history; indexed on `event_type`
-- `app_setting.py` — key-value store for runtime-configurable settings (persisted across restarts)
+- `app_setting.py` — key-value store for runtime-configurable settings, generated API key, and Plex SSO claim metadata (persisted across restarts)
 - `_base.py` — declarative base
 
 ### `app/siftarr/routers/`
 
 HTTP route layer.
 
-- `auth_router.py` — Plex SSO auth endpoints (login page, plex auth, logout, session info); included without global auth dependency
+- `auth_router.py` — Plex SSO auth endpoints (login page, first-login admin claim, same-admin token refresh, non-admin denial UX, logout, session info); included without global auth dependency
 - `dashboard.py` — main dashboard page routes
 - `dashboard_api.py` — dashboard JSON endpoints for details/search data
 - `dashboard_actions.py` — dashboard-triggered actions and mutations
 - `search_sse.py` — SSE streaming endpoints for live search progress; `/requests/{id}/search/stream` is the primary TV Search All path, while TV scope-specific streams remain compatibility/debug inspect paths
 - `rules.py` — rule management UI/API, including unified rule listing, multi-title testing, modal import/export, and create/edit actions
-- `settings.py` — settings UI (connection test/save/reset, staging toggle, Plex rescan, Overseerr sync, cache/reseed actions, SSE progress streams, API key management, Plex SSO status), uses SettingsStore for DB-backed persistence
+- `settings.py` — settings UI (connection test/save/reset, staging toggle, Plex rescan, Overseerr sync, cache/reseed actions, SSE progress streams, API key management, Plex SSO status), uses SettingsStore for DB-backed persistence and keeps the SSO-managed Plex token out of connection saves/resets
 - `staged.py` — staged torrent review/approval endpoints
 - `webhooks.py` — inbound webhook handling
 
@@ -131,7 +133,7 @@ HTTP route layer.
 Business logic and integrations, organized into thematic subpackages:
 
 **Flat (cross-cutting):**
-- `auth_service.py` — authentication dependencies: `require_auth` (session-first with API key fallback), `get_session_user` helper, `verify_api_key`
+- `auth_service.py` — authentication dependencies: `require_auth` (browser Plex SSO redirect with API-key fallback for programmatic requests), claimed-admin session validation/cleanup, request classification, `get_session_user` helper, `verify_api_key`
 - `metadata_service.py` — Overseerr metadata lookup for request details
 - `request_service.py` — request loading / validation
 
@@ -139,7 +141,7 @@ Business logic and integrations, organized into thematic subpackages:
 - `plex_oauth_service.py` — `PlexOAuthService` wrapping plex.tv API calls (PIN flow, user identity, token validation)
 
 **`admin/`** — Config, scheduling, polling
-- `settings_service.py` — SettingsStore (DB-backed settings persistence and startup API key generation), SSE progress, scheduled job helpers, Plex rescan/Overseerr import orchestration
+- `settings_service.py` — SettingsStore (DB-backed settings persistence, startup API key generation, runtime env loading, Plex SSO claim/token status without exposing token), SSE progress, scheduled job helpers, Plex rescan/Overseerr import orchestration
 - `scheduler_service.py` — recurring job scheduling via APScheduler
 - `plex_polling_service/` — Plex polling logic; prioritizes recent/downloading requests with periodic full reconcile every 20th poll cycle
 
@@ -192,7 +194,7 @@ Server-rendered HTML templates.
 
 - `base.html` — shared layout (nav bar shows user avatar/name + logout when logged in)
 - `dashboard.html` — main dashboard UI
-- `login.html` — Plex SSO login page with JS-driven OAuth PIN flow
+- `login.html` — Plex SSO login page with JS-driven OAuth PIN flow, denied-admin message, and safe next redirect handling
 - `rules.html` — single-pane rules UI with unified rule table, multi-title tester, modal create/edit wizard, and modal import/export
 - `rule_form.html` — fallback full-page create/edit rule form
 - `settings.html` — settings UI (includes Plex SSO connection status, API Access section with reveal/copy/regenerate)

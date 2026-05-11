@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import logging
+import os
 from typing import Any
+from urllib.parse import quote
 
 from fastapi import HTTPException, Request, status
 
@@ -12,6 +14,18 @@ from app.siftarr.config import PLACEHOLDER_API_KEY, get_settings
 logger = logging.getLogger(__name__)
 
 AUTHORIZATION_SCHEME = "Bearer"
+
+
+class BrowserAuthRequired(Exception):
+    """Raised when a browser request should be redirected to Plex login."""
+
+
+def build_login_redirect_url(request: Request) -> str:
+    """Return the login URL with a safe local next path for this request."""
+    path = request.url.path or "/"
+    query = request.url.query
+    next_path = f"{path}?{query}" if query else path
+    return f"/auth/login?next={quote(next_path, safe='')}"
 
 
 def _api_key_matches(provided_key: str | None, configured_key: str) -> bool:
@@ -45,11 +59,41 @@ def get_session_user(request: Request) -> dict[str, Any] | None:
     plex_user_id = request.session.get("plex_user_id")
     if plex_user_id is None:
         return None
+
+    claimed_id = os.environ.get("PLEX_CLAIMED_ID")
+    if claimed_id and str(plex_user_id) != claimed_id:
+        logger.info("Clearing stale Plex session for user id %s", plex_user_id)
+        request.session.clear()
+        return None
+
     return {
-        "plex_user_id": plex_user_id,
+        "plex_user_id": str(plex_user_id),
         "plex_username": request.session.get("plex_username"),
         "plex_thumb": request.session.get("plex_thumb"),
     }
+
+
+def is_browser_request(request: Request) -> bool:
+    """Classify unauthenticated requests that should redirect to login."""
+    if request.scope.get("method", "GET") not in {"GET", "HEAD"}:
+        return False
+    if _extract_api_key(request) is not None or request.headers.get("Authorization"):
+        return False
+
+    path = request.scope.get("path", "/")
+    if path.startswith(("/api", "/requests", "/settings/api", "/staged", "/webhook")):
+        return False
+
+    accept = request.headers.get("accept", "")
+    content_type = request.headers.get("content-type", "")
+    if "text/event-stream" in accept or "application/json" in accept:
+        return False
+    if content_type.startswith(
+        ("application/json", "application/x-www-form-urlencoded", "multipart/form-data")
+    ):
+        return False
+
+    return "text/html" in accept or accept in {"", "*/*"}
 
 
 async def verify_api_key(request: Request) -> None:
@@ -78,17 +122,20 @@ async def require_auth(request: Request) -> None:
     then falls back to the API key header (for programmatic/automated access).
     Returns 401 if neither is valid (unless auth is disabled).
     """
-    settings = get_settings()
-    if not settings.auth_enabled:
-        return
-
     # Check session first (browser users)
     if get_session_user(request) is not None:
         return
 
     # Fall back to API key (programmatic access)
+    settings = get_settings()
     key = _extract_api_key(request)
     if _api_key_matches(key, settings.api_key):
+        return
+
+    if is_browser_request(request):
+        raise BrowserAuthRequired()
+
+    if not settings.auth_enabled:
         return
 
     raise HTTPException(

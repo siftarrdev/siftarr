@@ -42,6 +42,7 @@ ENV_KEY_MAP: dict[str, str] = {
 
 # Keys that are persisted and used as runtime connection/scheduling settings.
 SETTINGS_KEYS = frozenset(ENV_KEY_MAP)
+SSO_CLAIM_KEYS = frozenset({"plex_claimed_id", "plex_username", "plex_thumb", "plex_token"})
 
 
 class SettingsStore:
@@ -120,8 +121,20 @@ class SettingsStore:
         db_overrides = await self.get_all()
         for key, value in db_overrides.items():
             if key in base and value:
-                base[key] = value
+                base[key] = mask_secret(value) if key == "plex_token" else value
+        base.update(await self.get_plex_sso_status(db_overrides))
         return base
+
+    async def get_plex_sso_status(self, db_values: dict[str, str] | None = None) -> dict[str, Any]:
+        """Return Plex SSO claim metadata without exposing the stored token."""
+        values = db_values if db_values is not None else await self.get_all()
+        token = values.get("plex_token") or os.environ.get("PLEX_TOKEN")
+        return {
+            "plex_claimed_id": values.get("plex_claimed_id") or os.environ.get("PLEX_CLAIMED_ID"),
+            "plex_username": values.get("plex_username") or os.environ.get("PLEX_USERNAME"),
+            "plex_thumb": values.get("plex_thumb") or os.environ.get("PLEX_THUMB"),
+            "plex_token_present": bool(token),
+        }
 
     async def load_into_environ(self, clear_existing: bool = False) -> None:
         """Load all DB-stored settings into ``os.environ``.
@@ -213,6 +226,7 @@ async def build_effective_settings(db: AsyncSession | None = None) -> dict[str, 
         "qbittorrent_api_key": mask_secret(effective.qbittorrent_api_key) or "",
         "plex_url": str(effective.plex_url or ""),
         "plex_token": mask_secret(effective.plex_token) or "",
+        "plex_token_present": bool(effective.plex_token),
         "api_key": mask_secret(effective.api_key) or "",
         "tz": effective.tz,
     }

@@ -58,6 +58,7 @@ def _download_completed_torrent_ids(details: str | None) -> set[int]:
 
 
 @router.get("/")
+@router.get("/dashboard")
 async def dashboard(
     request: FastAPIRequest,
     db: AsyncSession = Depends(get_db),

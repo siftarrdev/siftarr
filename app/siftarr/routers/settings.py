@@ -229,10 +229,11 @@ async def get_settings_page(
     await rule_service.ensure_default_rules()
     context = await _build_settings_page_context(request, db)
 
-    # Add Plex SSO status
-    store = SettingsStore(db)
-    context["plex_sso_username"] = await store.get("plex_username")
-    context["plex_sso_thumb"] = await store.get("plex_thumb")
+    # Add Plex SSO status without exposing the stored Plex token.
+    effective = context["env"]
+    context["plex_sso_username"] = effective.get("plex_username")
+    context["plex_sso_thumb"] = effective.get("plex_thumb")
+    context["plex_sso_token_present"] = bool(effective.get("plex_token_present"))
     context["plex_sso_connected"] = context["plex_sso_username"] is not None
 
     # Add API key (plaintext for the settings page)
@@ -252,7 +253,6 @@ async def save_connections(
     qbittorrent_url: str | None = Form(None),
     qbittorrent_api_key: str | None = Form(None),
     plex_url: str | None = Form(None),
-    plex_token: str | None = Form(None),
     tz: str | None = Form(None),
 ) -> RedirectResponse:
     """Save connection settings as runtime environment overrides."""
@@ -265,7 +265,6 @@ async def save_connections(
     await _apply_runtime_setting(store, "qbittorrent_url", qbittorrent_url or "")
     await _apply_runtime_setting(store, "qbittorrent_api_key", qbittorrent_api_key or "")
     await _apply_runtime_setting(store, "plex_url", plex_url or "")
-    await _apply_runtime_setting(store, "plex_token", plex_token or "")
     if tz:
         await _apply_runtime_setting(store, "tz", tz)
     await db.commit()
@@ -289,7 +288,6 @@ async def reset_connections(
         "qbittorrent_url",
         "qbittorrent_api_key",
         "plex_url",
-        "plex_token",
         "tz",
     )
     await db.commit()

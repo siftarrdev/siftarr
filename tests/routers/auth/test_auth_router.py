@@ -37,6 +37,7 @@ class TestLoginPage:
         """Should render login.html for unauthenticated users."""
         request = MagicMock()
         request.session = {}
+        request.query_params = {}
 
         result = await auth_router.login_page(request)
 
@@ -50,6 +51,33 @@ class TestLoginPage:
 
         request = MagicMock()
         request.session = {"plex_user_id": "123"}
+        request.query_params = {}
+
+        result = await auth_router.login_page(request)
+        assert isinstance(result, RedirectResponse)
+        assert result.headers.get("location") == "/"
+
+    @pytest.mark.asyncio
+    async def test_authenticated_redirects_to_safe_next(self):
+        """Safe local next targets should be preserved."""
+        from starlette.responses import RedirectResponse
+
+        request = MagicMock()
+        request.session = {"plex_user_id": "123"}
+        request.query_params = {"next": "/settings?tab=api"}
+
+        result = await auth_router.login_page(request)
+        assert isinstance(result, RedirectResponse)
+        assert result.headers.get("location") == "/settings?tab=api"
+
+    @pytest.mark.asyncio
+    async def test_authenticated_blocks_external_next(self):
+        """External next targets must not create open redirects."""
+        from starlette.responses import RedirectResponse
+
+        request = MagicMock()
+        request.session = {"plex_user_id": "123"}
+        request.query_params = {"next": "https://evil.example/"}
 
         result = await auth_router.login_page(request)
         assert isinstance(result, RedirectResponse)
@@ -60,8 +88,8 @@ def test_login_template_redirects_to_existing_dashboard_route():
     """Login JS should redirect to the mounted dashboard route."""
     template = (Path(auth_router.__file__).parent.parent / "templates" / "login.html").read_text()
 
-    assert "window.location.href = '/';" in template
     assert "window.location.href = '/dashboard';" not in template
+    assert "authData.redirect_url || '/'" in template
 
 
 class TestPlexAuth:
@@ -92,12 +120,13 @@ class TestPlexAuth:
 
         request = MagicMock()
         request.session = {}
-        body = PlexAuthRequest(authToken="valid-token")
+        body = PlexAuthRequest(authToken="valid-token", next="/settings")
 
         result = await auth_router.plex_auth(request, body, db=MagicMock())
 
         assert result["username"] == "testuser"
         assert result["thumb"] == "http://example.com/thumb.jpg"
+        assert result["redirect_url"] == "/settings"
         # Should have persisted user info and token
         assert mock_store.set.call_count >= 4
         mock_store.set.assert_any_call("plex_claimed_id", "12345")
@@ -136,9 +165,11 @@ class TestPlexAuth:
         result = await auth_router.plex_auth(request, body, db=MagicMock())
 
         assert result["username"] == "testuser"
-        # Should NOT re-persist settings for existing user
-        mock_store.set.assert_not_called()
-        mock_store.load_into_environ.assert_not_called()
+        # Should refresh metadata/token for existing admin
+        mock_store.set.assert_any_call("plex_username", "testuser")
+        mock_store.set.assert_any_call("plex_thumb", "")
+        mock_store.set.assert_any_call("plex_token", "valid-token")
+        mock_store.load_into_environ.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_second_user_rejected(self, monkeypatch):
@@ -167,7 +198,7 @@ class TestPlexAuth:
             await auth_router.plex_auth(request, body, db=MagicMock())
 
         assert exc.value.status_code == 403
-        assert "already claimed" in str(exc.value.detail).lower()
+        assert str(exc.value.detail) == auth_router.ADMIN_LOGIN_MESSAGE
 
     @pytest.mark.asyncio
     async def test_invalid_token_returns_401(self, monkeypatch):
@@ -205,6 +236,20 @@ class TestLogout:
         assert result.headers.get("location") == "/auth/login"
         # Session should be cleared after logout
         assert len(request.session) == 0
+
+    @pytest.mark.asyncio
+    async def test_logout_get_clears_session(self):
+        """GET logout wrapper should clear browser session."""
+        from starlette.responses import RedirectResponse
+
+        request = MagicMock()
+        request.session = {"plex_user_id": "123"}
+
+        result = await auth_router.logout_get(request)
+
+        assert isinstance(result, RedirectResponse)
+        assert result.headers.get("location") == "/auth/login"
+        assert request.session == {}
 
 
 class TestMe:

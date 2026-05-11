@@ -93,7 +93,8 @@ environment:
   - QBITTORRENT_URL=http://qbittorrent:8080
   - QBITTORRENT_API_KEY=your_api_key
   - PLEX_URL=http://plex:32400
-  - PLEX_TOKEN=your_token
+  - SECRET_KEY=change-to-a-stable-random-value
+  - SIFTARR_API_KEY=optional_integration_key
 ```
 
 Common variables:
@@ -107,6 +108,7 @@ Common variables:
 | `QBITTORRENT_URL` | unset | qBittorrent Web UI URL. |
 | `QBITTORRENT_API_KEY` | unset | qBittorrent Web API key (qBittorrent ≥ 5.2). |
 | `PLEX_URL` / `PLEX_TOKEN` | unset | Plex connection. |
+| `SECRET_KEY` | generated per process | Session signing key for Plex SSO. Set a stable random value in production so browser sessions survive restarts. |
 | `STAGING_MODE_ENABLED` | `true` | Stage selected torrents instead of sending directly. |
 | `RETRY_INTERVAL_HOURS` | `24` | How often pending requests are retried. |
 | `MAX_RETRY_DURATION_DAYS` | `7` | How long pending requests remain retryable. |
@@ -122,17 +124,31 @@ Common variables:
 On startup, Siftarr loads persisted runtime settings and generates a random API key if the
 effective key is missing or still `dev-key-change-me`; the generated key is stored in the
 database and shown masked in **Settings**. Set `SIFTARR_API_KEY` to a non-placeholder value
-to explicitly override the persisted API key for non-interactive deployments.
+to explicitly override the persisted API key for non-interactive deployments. Browser access
+uses Plex SSO; API keys remain available for webhooks and other programmatic integrations.
+
+### Browser auth and instance claim
+
+The first successful Plex login claims the Siftarr instance. That Plex account becomes the
+only browser admin/user. Later Plex logins from any other account are rejected with
+“please login with the admin plex account”. Plex SSO stores claim metadata and the Plex token
+in `app_settings`; the settings form can edit the Plex URL but does not expose or overwrite
+the SSO-managed token.
+
+To recover from a mistaken claim, stop Siftarr, back up `/data/db/siftarr.db`, then edit or
+remove the `app_settings` rows for `plex_claimed_id`, `plex_username`, `plex_thumb`, and
+`plex_token` using SQLite tooling. Restart Siftarr and log in with the intended Plex admin.
 
 ## First-run setup
 
 1. Open Siftarr at `http://localhost:8000`.
-2. Go to **Settings**.
-3. Enter URLs and credentials for Overseerr, Prowlarr, qBittorrent, and optionally Plex.
-4. Use **Test** beside each service, or **Test All**, to confirm connectivity.
-5. Save settings.
-6. Keep staging mode enabled for the first few requests so you can verify release decisions before downloads start.
-7. Go to **Rules** and review or create your filtering and scoring rules.
+2. Log in with the Plex account that should own/administer this Siftarr instance.
+3. Go to **Settings**.
+4. Enter URLs and credentials for Overseerr, Prowlarr, qBittorrent, and optionally Plex URL.
+5. Use **Test** beside each service, or **Test All**, to confirm connectivity.
+6. Save settings.
+7. Keep staging mode enabled for the first few requests so you can verify release decisions before downloads start.
+8. Go to **Rules** and review or create your filtering and scoring rules.
 
 ## Overseerr webhook setup
 

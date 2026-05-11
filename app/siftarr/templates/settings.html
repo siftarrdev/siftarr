@@ -146,15 +146,16 @@ details[open] summary .accordion-chevron { transform: rotate(90deg); }
                                 <img src="{{ plex_sso_thumb }}" alt="" class="w-8 h-8 rounded-full object-cover shrink-0">
                                 {% endif %}
                                 <div class="min-w-0">
-                                    <div class="flex items-center gap-2">
-                                        <span class="text-sm font-medium text-white truncate">Connected as {{ plex_sso_username }}</span>
-                                        <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold bg-emerald-900/40 text-emerald-300 border border-emerald-700/50">
+                                     <div class="flex items-center gap-2">
+                                         <span class="text-sm font-medium text-white truncate">Connected as {{ plex_sso_username }}</span>
+                                         <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold bg-emerald-900/40 text-emerald-300 border border-emerald-700/50">
                                             <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
-                                            Connected
-                                        </span>
-                                    </div>
-                                </div>
-                            </div>
+                                             Connected
+                                         </span>
+                                     </div>
+                                    <p class="text-xs text-gray-500 mt-1">Plex token is managed by Plex SSO{% if plex_sso_token_present %} and stored securely{% endif %}.</p>
+                                 </div>
+                             </div>
                             {% else %}
                             <div class="flex items-center gap-3 rounded-lg bg-surface-900/70 p-3">
                                 <div class="flex items-center gap-2">
@@ -163,8 +164,6 @@ details[open] summary .accordion-chevron { transform: rotate(90deg); }
                                 </div>
                             </div>
                             {% endif %}
-                            {# Keep the token field hidden so the save form doesn't clear it #}
-                            <input type="hidden" id="plex_token" name="plex_token" value="{{ env.plex_token }}">
                         </div>
                     </div>
                 </div>
