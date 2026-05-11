@@ -1,9 +1,17 @@
 """Tests for configuration defaults."""
 
+import os
+import stat
+
 import pytest
 from pydantic import ValidationError
 
-from app.siftarr.config import PLACEHOLDER_API_KEY, Settings, generate_api_key
+from app.siftarr.config import (
+    PLACEHOLDER_API_KEY,
+    Settings,
+    default_session_secret_file_path,
+    generate_api_key,
+)
 
 
 def test_database_url_defaults_to_data_volume(monkeypatch):
@@ -22,6 +30,46 @@ def test_database_url_honors_override(monkeypatch):
     settings = Settings()
 
     assert settings.database_url == "sqlite+aiosqlite:////tmp/custom.db"
+
+
+def test_default_session_secret_file_path_uses_db_directory(monkeypatch, tmp_path):
+    db_path = tmp_path / "db" / "siftarr.db"
+    monkeypatch.setenv("SIFTARR_DB_PATH", str(db_path))
+    monkeypatch.delenv("SIFTARR_SECRET_KEY_FILE", raising=False)
+
+    assert default_session_secret_file_path() == db_path.parent / "session_secret"
+
+
+def test_secret_key_fallback_is_persisted_and_reused(monkeypatch, tmp_path):
+    secret_file = tmp_path / "db" / "session_secret"
+    monkeypatch.delenv("SECRET_KEY", raising=False)
+    monkeypatch.setenv("SIFTARR_SECRET_KEY_FILE", str(secret_file))
+
+    first = Settings().secret_key
+    second = Settings().secret_key
+
+    assert first == second
+    assert secret_file.read_text(encoding="utf-8").strip() == first
+    if os.name == "posix":
+        assert stat.S_IMODE(secret_file.stat().st_mode) == 0o600
+
+
+def test_secret_key_fallback_reuses_existing_file(monkeypatch, tmp_path):
+    secret_file = tmp_path / "session_secret"
+    secret_file.write_text("existing-secret\n", encoding="utf-8")
+    monkeypatch.delenv("SECRET_KEY", raising=False)
+    monkeypatch.setenv("SIFTARR_SECRET_KEY_FILE", str(secret_file))
+
+    assert Settings().secret_key == "existing-secret"
+
+
+def test_explicit_secret_key_takes_precedence(monkeypatch, tmp_path):
+    secret_file = tmp_path / "session_secret"
+    secret_file.write_text("file-secret\n", encoding="utf-8")
+    monkeypatch.setenv("SECRET_KEY", "explicit-secret")
+    monkeypatch.setenv("SIFTARR_SECRET_KEY_FILE", str(secret_file))
+
+    assert Settings().secret_key == "explicit-secret"
 
 
 def test_default_api_key_is_placeholder_constant(monkeypatch):

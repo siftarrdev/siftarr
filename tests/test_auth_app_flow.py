@@ -139,3 +139,42 @@ def test_stale_non_admin_session_is_cleared_and_redirected(client, monkeypatch):
     response = client.get("/dashboard", headers={"accept": "text/html"}, follow_redirects=False)
     assert response.status_code == 303
     assert response.headers["location"].startswith("/auth/login")
+
+
+def test_session_cookie_survives_restart_like_app_reload(monkeypatch, tmp_path):
+    async def validate_token(token: str):
+        del token
+        return {"id": "admin-id", "username": "admin", "thumb": "https://thumb"}
+
+    monkeypatch.delenv("SECRET_KEY", raising=False)
+    monkeypatch.setenv("SIFTARR_SECRET_KEY_FILE", str(tmp_path / "session_secret"))
+    monkeypatch.setenv("SIFTARR_API_KEY", "valid-api-key")
+    monkeypatch.setenv("AUTH_ENABLED", "true")
+    monkeypatch.delenv("PLEX_CLAIMED_ID", raising=False)
+    reload_settings()
+    MemorySettingsStore.values = {}
+    monkeypatch.setattr(auth_router, "SettingsStore", MemorySettingsStore)
+    monkeypatch.setattr(settings_router, "SettingsStore", MemorySettingsStore)
+    monkeypatch.setattr(auth_router.PlexOAuthService, "validate_token", validate_token)
+
+    try:
+        first_app = create_app()
+        first_app.dependency_overrides[auth_router.get_db] = _fake_db
+        first_client = TestClient(first_app, raise_server_exceptions=False)
+        login = first_client.post("/auth/plex", json={"authToken": "admin-token"})
+        assert login.status_code == 200
+        assert first_client.get("/auth/me").status_code == 200
+
+        reload_settings()
+        second_app = create_app()
+        second_app.dependency_overrides[auth_router.get_db] = _fake_db
+        second_client = TestClient(second_app, raise_server_exceptions=False)
+        second_client.cookies.update(first_client.cookies)
+
+        response = second_client.get("/auth/me")
+        assert response.status_code == 200
+        assert response.json()["username"] == "admin"
+    finally:
+        for key in ("PLEX_CLAIMED_ID", "PLEX_USERNAME", "PLEX_THUMB", "PLEX_TOKEN"):
+            os.environ.pop(key, None)
+        reload_settings()

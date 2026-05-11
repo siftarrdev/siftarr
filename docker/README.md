@@ -42,6 +42,8 @@ state is stored under `docker/data/`.
 Inside the container:
 
 - `/data/db` stores the SQLite database by default.
+- `/data/db/session_secret` stores the generated browser session signing secret when
+  `SECRET_KEY` is unset.
 - `/data/staging` is the default staging area for staged download data.
 
 The entrypoint adjusts `/data` ownership for the runtime user before starting the app.
@@ -55,7 +57,10 @@ Common variables passed by Compose:
 - `PROWLARR_URL` and `PROWLARR_API_KEY`.
 - `QBITTORRENT_URL` and `QBITTORRENT_API_KEY`.
 - `PLEX_URL`. `PLEX_TOKEN` is normally managed by Plex SSO after first login.
-- `SECRET_KEY` for stable Plex SSO sessions across container restarts.
+- `SECRET_KEY` to explicitly provide the Plex SSO browser session signing secret.
+  When unset, Siftarr generates and persists one in the mounted data volume so
+  browser sessions survive container restarts.
+- `SIFTARR_SECRET_KEY_FILE` to override where that generated secret file is stored.
 - `SIFTARR_API_KEY` for programmatic/webhook access; generated and persisted on
   first startup when unset.
 
