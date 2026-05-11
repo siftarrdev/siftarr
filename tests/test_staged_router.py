@@ -187,7 +187,30 @@ class TestStagedRouter:
 
         torrent_result = MagicMock()
         torrent_result.scalars.return_value.all.return_value = [torrent_one, torrent_two]
-        mock_db.execute.return_value = torrent_result
+
+        request_one = MagicMock()
+        request_one.id = 10
+        request_one.media_type = MediaType.MOVIE
+        request_one.status = RequestStatus.STAGED
+        request_two = MagicMock()
+        request_two.id = 11
+        request_two.media_type = MediaType.MOVIE
+        request_two.status = RequestStatus.STAGED
+        request_one_result = MagicMock()
+        request_one_result.scalar_one_or_none.return_value = request_one
+        request_two_result = MagicMock()
+        request_two_result.scalar_one_or_none.return_value = request_two
+        rule_one_result = MagicMock()
+        rule_one_result.scalars.return_value.first.return_value = torrent_one
+        rule_two_result = MagicMock()
+        rule_two_result.scalars.return_value.first.return_value = torrent_two
+        mock_db.execute.side_effect = [
+            torrent_result,
+            request_one_result,
+            rule_one_result,
+            request_two_result,
+            rule_two_result,
+        ]
 
         qbittorrent = AsyncMock()
         qbittorrent.add_torrent.side_effect = ["hash1", "hash2"]
@@ -209,6 +232,17 @@ class TestStagedRouter:
         assert torrent_one.status == "approved"
         assert torrent_two.status == "approved"
         assert lifecycle_service.transition.await_count == 2
+        lifecycle_service.transition.assert_any_await(
+            request_one.id,
+            RequestStatus.DOWNLOADING,
+            commit=False,
+        )
+        lifecycle_service.transition.assert_any_await(
+            request_two.id,
+            RequestStatus.DOWNLOADING,
+            commit=False,
+        )
+        mock_db.commit.assert_awaited_once()
 
     @pytest.mark.asyncio
     async def test_bulk_staged_action_discards_selected(self, mock_db, monkeypatch):
@@ -442,6 +476,44 @@ class TestDownloadStatusEndpoint:
         assert body["torrents"][0]["qbit_eta_seconds"] == 120
         assert body["torrents"][0]["qbit_download_speed"] == 2048
         assert body["torrents"][0]["refresh_staged_tab"] is False
+
+    @pytest.mark.asyncio
+    async def test_download_status_keeps_active_torrent_when_qbit_info_missing(
+        self, mock_db, monkeypatch
+    ):
+        """Active approved torrents remain visible even before qBit reports progress."""
+        import json
+
+        from app.siftarr.routers import staged as staged_module
+        from app.siftarr.routers.staged import get_download_status
+
+        torrent = MagicMock()
+        torrent.id = 15
+        torrent.title = "Missing Progress Movie"
+        torrent.request_id = 199
+        torrent.magnet_url = "magnet:?xt=urn:btih:ca39a3ee5e6b4b0d3255bfef95601890afd80709"
+        torrent.status = "approved"
+
+        torrent_result = MagicMock()
+        torrent_result.scalars.return_value.all.return_value = [torrent]
+        request_status_result = MagicMock()
+        request_status_result.all.return_value = [(199, RequestStatus.DOWNLOADING)]
+        logs_result = MagicMock()
+        logs_result.all.return_value = []
+        mock_db.execute.side_effect = [torrent_result, request_status_result, logs_result]
+
+        qbit = AsyncMock()
+        qbit.get_torrent_info = AsyncMock(return_value=None)
+        monkeypatch.setattr(staged, "get_settings", lambda: MagicMock())
+        monkeypatch.setattr(staged_module, "QbittorrentService", MagicMock(return_value=qbit))
+
+        response = await get_download_status(db=mock_db)
+
+        body = json.loads(bytes(response.body))  # type: ignore[arg-type]
+        assert [item["id"] for item in body["torrents"]] == [15]
+        assert body["torrents"][0]["qbit_progress"] is None
+        assert body["torrents"][0]["qbit_state"] is None
+        assert body["torrents"][0]["request_status"] == RequestStatus.DOWNLOADING.value
 
     @pytest.mark.asyncio
     async def test_ignores_resolved_request_torrents(self, mock_db, monkeypatch):

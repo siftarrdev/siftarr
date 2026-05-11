@@ -188,7 +188,12 @@ async def _finalize_action_response(
     return RedirectResponse(url=redirect_url, status_code=303)
 
 
-async def _approve_torrent(torrent: StagedTorrent, db: AsyncSession) -> bool:
+async def _approve_torrent(
+    torrent: StagedTorrent,
+    db: AsyncSession,
+    *,
+    commit_transition: bool = True,
+) -> bool:
     request = None
     if torrent.request_id:
         result = await db.execute(select(Request).where(Request.id == torrent.request_id))
@@ -264,7 +269,14 @@ async def _approve_torrent(torrent: StagedTorrent, db: AsyncSession) -> bool:
             RequestStatus.FAILED,
             RequestStatus.DENIED,
         ):
-            await lifecycle_service.transition(request.id, RequestStatus.DOWNLOADING)
+            if commit_transition:
+                await lifecycle_service.transition(request.id, RequestStatus.DOWNLOADING)
+            else:
+                await lifecycle_service.transition(
+                    request.id,
+                    RequestStatus.DOWNLOADING,
+                    commit=False,
+                )
 
     try:
         if os.path.exists(torrent_path):
@@ -441,7 +453,7 @@ async def bulk_staged_action(
     processed = 0
     for torrent in torrents:
         if action == "approve":
-            success = await _approve_torrent(torrent, db)
+            success = await _approve_torrent(torrent, db, commit_transition=False)
         else:
             success = await _discard_torrent(torrent, db)
         if success:

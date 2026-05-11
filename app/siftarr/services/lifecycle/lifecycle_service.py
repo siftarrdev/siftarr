@@ -51,6 +51,8 @@ class LifecycleService:
         request_id: int,
         new_status: RequestStatus,
         reason: str | None = None,
+        *,
+        commit: bool = True,
     ) -> Request | None:
         """
         Transition a request to a new status.
@@ -128,8 +130,9 @@ class LifecycleService:
                 "reason": reason,
             },
         )
-        await self.db.commit()
-        await self.db.refresh(request)
+        if commit:
+            await self.db.commit()
+            await self.db.refresh(request)
 
         return request
 

@@ -153,9 +153,21 @@ class RuleEngine:
 
     @staticmethod
     def _scope_matches(rule_scope: str, media_type: str | None) -> bool:
+        rule_scope = RuleEngine._enum_or_string_value(rule_scope).lower()
         if not rule_scope or rule_scope == "both" or media_type is None:
             return True
-        return rule_scope == media_type
+        return rule_scope == media_type.lower()
+
+    @staticmethod
+    def _enum_or_string_value(value: object, default: str = "") -> str:
+        if value is None:
+            return default
+        enum_value = getattr(value, "value", None)
+        if isinstance(enum_value, str):
+            return enum_value
+        if isinstance(value, str):
+            return value
+        return default
 
     @staticmethod
     def _size_rule_applies_to_release(rule: SizeLimitRule, release: ProwlarrRelease) -> bool:
@@ -205,10 +217,15 @@ class RuleEngine:
             for rule in rules:
                 if not rule.is_enabled:
                     continue
-                if not cls._scope_matches(getattr(rule, "media_scope", "both"), media_type):
+                media_scope = cls._enum_or_string_value(
+                    getattr(rule, "media_scope", "both"),
+                    "both",
+                )
+                if not cls._scope_matches(media_scope, media_type):
                     continue
                 pattern = rule.pattern
-                if rule.rule_type.value == "size_limit":
+                rule_type = cls._enum_or_string_value(getattr(rule, "rule_type", None)).lower()
+                if rule_type == "size_limit":
                     min_bytes = (
                         int(rule.min_size_gb * 1024 * 1024 * 1024)
                         if getattr(rule, "min_size_gb", None) is not None
@@ -226,14 +243,14 @@ class RuleEngine:
                             min_size_bytes=min_bytes,
                             max_size_bytes=max_bytes,
                             tv_target=getattr(rule, "tv_target", None),
-                            media_scope=getattr(rule, "media_scope", "both"),
+                            media_scope=media_scope,
                         )
                     )
-                elif rule.rule_type.value == "exclusion":
+                elif rule_type == "exclusion":
                     exclusions.append((rule.id, rule.name, pattern))
-                elif rule.rule_type.value == "requirement":
+                elif rule_type == "requirement":
                     requirements.append((rule.id, rule.name, pattern))
-                elif rule.rule_type.value == "scorer":
+                elif rule_type == "scorer":
                     scorers.append((rule.id, rule.name, pattern, rule.score))
 
         return cls(
