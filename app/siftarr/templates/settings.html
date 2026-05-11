@@ -18,8 +18,60 @@ details[open] summary .accordion-chevron { transform: rotate(90deg); }
     </div>
     {% endif %}
 
-    {# ── Connection Settings ── #}
+    {# ── Manual Actions ── #}
     <details open class="card">
+        <summary class="card-header flex items-center gap-3 cursor-pointer select-none">
+            <svg class="accordion-chevron w-4 h-4 text-gray-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
+            <h2 class="section-title">Manual Actions</h2>
+        </summary>
+        <div class="card-body divide-y divide-gray-700/40">
+            <form action="/settings/retry-pending" method="post" class="flex items-center justify-between gap-4 py-3 first:pt-0 last:pb-0">
+                <div class="min-w-0">
+                    <div class="text-sm font-semibold text-white">Retry Pending</div>
+                    <div class="text-xs text-gray-500">{{ pending_count }} items ready for retry</div>
+                </div>
+                <button type="submit" class="btn-primary btn-sm shrink-0">Retry Now</button>
+            </form>
+
+            <div class="flex items-center justify-between gap-4 py-3 first:pt-0 last:pb-0">
+                <div class="min-w-0">
+                    <div class="text-sm font-semibold text-white">Sync Overseerr</div>
+                    <div class="text-xs text-gray-500">Fetch new approved or pending requests</div>
+                </div>
+                <button type="button" onclick="startOverseerrSync()" class="btn-primary btn-sm shrink-0">Sync</button>
+            </div>
+
+            <div class="flex items-center justify-between gap-4 py-3 first:pt-0 last:pb-0">
+                <div class="min-w-0">
+                    <div class="text-sm font-semibold text-white">Plex Sync</div>
+                    <div class="text-xs text-gray-500">Partial sync scans recently added Plex items for matching requests; full sync refreshes all active TV metadata and polls Plex availability</div>
+                </div>
+                <div class="flex items-center gap-2 shrink-0">
+                    <button type="button" onclick="startPlexRescan(true)" class="btn-primary btn-sm shrink-0">Partial Sync</button>
+                    <button type="button" onclick="startPlexRescan(false)" class="btn-primary btn-sm shrink-0">Full Sync</button>
+                </div>
+            </div>
+
+            <form action="/settings/reseed-rules" method="post" class="flex items-center justify-between gap-4 py-3 first:pt-0 last:pb-0">
+                <div class="min-w-0">
+                    <div class="text-sm font-semibold text-white">Reseed Default Rules</div>
+                    <div class="text-xs text-gray-500">Restore the checked-in 12-rule default snapshot without deleting custom rules</div>
+                </div>
+                <button type="submit" class="btn-warning btn-sm shrink-0">Reseed</button>
+            </form>
+
+            <form action="/settings/clear-cache" method="post" class="flex items-center justify-between gap-4 py-3 first:pt-0 last:pb-0">
+                <div class="min-w-0">
+                    <div class="text-sm font-semibold text-white">Clear App Search Cache</div>
+                    <div class="text-xs text-gray-500">Clears stored releases and Siftarr's app-side Overseerr status cache. Requests stay intact.</div>
+                </div>
+                <button type="submit" class="btn-danger btn-sm shrink-0">Clear Cache</button>
+            </form>
+        </div>
+    </details>
+
+    {# ── Connection Settings ── #}
+    <details class="card">
         <summary class="card-header flex items-center justify-between gap-4 cursor-pointer select-none">
             <div class="flex items-center gap-3">
                 <svg class="accordion-chevron w-4 h-4 text-gray-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
@@ -34,6 +86,53 @@ details[open] summary .accordion-chevron { transform: rotate(90deg); }
         </summary>
         <div class="card-body">
             <form action="/settings/connections" method="post" class="space-y-6">
+                {# Plex #}
+                <div class="rounded-xl border border-gray-700/60 bg-surface-850 p-5 space-y-4">
+                    <div class="flex items-center justify-between gap-4">
+                        <div>
+                            <h3 class="text-sm font-semibold text-white">Plex</h3>
+                            <p class="text-xs text-gray-500 mt-0.5">Media server for availability checking</p>
+                        </div>
+                        <div class="flex items-center gap-3 shrink-0">
+                            <button type="button" onclick="testConnection('plex')" id="btn-test-plex" class="btn-primary btn-sm">Test</button>
+                            <span id="status-plex" class="text-xs font-medium"></span>
+                        </div>
+                    </div>
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div>
+                            <label for="plex_url" class="form-label">URL</label>
+                            <input type="url" id="plex_url" name="plex_url" value="{{ env.plex_url }}" placeholder="http://plex:32400" class="form-input">
+                        </div>
+                        <div>
+                            <label class="form-label">Plex Authentication</label>
+                            {% if plex_sso_connected %}
+                            <div class="flex items-center gap-3 rounded-lg bg-surface-900/70 p-3">
+                                {% if plex_sso_thumb %}
+                                <img src="{{ plex_sso_thumb }}" alt="" class="w-8 h-8 rounded-full object-cover shrink-0">
+                                {% endif %}
+                                <div class="min-w-0">
+                                     <div class="flex items-center gap-2">
+                                         <span class="text-sm font-medium text-white truncate">Connected as {{ plex_sso_username }}</span>
+                                         <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold bg-emerald-900/40 text-emerald-300 border border-emerald-700/50">
+                                            <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
+                                             Connected
+                                         </span>
+                                     </div>
+                                    <p class="text-xs text-gray-500 mt-1">Plex token is managed by Plex SSO{% if plex_sso_token_present %} and stored securely{% endif %}.</p>
+                                 </div>
+                             </div>
+                            {% else %}
+                            <div class="flex items-center gap-3 rounded-lg bg-surface-900/70 p-3">
+                                <div class="flex items-center gap-2">
+                                    <span class="text-sm text-gray-400">Not connected</span>
+                                    <a href="/auth/login" class="btn-primary btn-sm">Login with Plex</a>
+                                </div>
+                            </div>
+                            {% endif %}
+                        </div>
+                    </div>
+                </div>
+
                 {# Overseerr #}
                 <div class="rounded-xl border border-gray-700/60 bg-surface-850 p-5 space-y-4">
                     <div class="flex items-center justify-between gap-4">
@@ -121,52 +220,30 @@ details[open] summary .accordion-chevron { transform: rotate(90deg); }
                     </div>
                 </div>
 
-                {# Plex #}
+                {# API Access #}
                 <div class="rounded-xl border border-gray-700/60 bg-surface-850 p-5 space-y-4">
-                    <div class="flex items-center justify-between gap-4">
-                        <div>
-                            <h3 class="text-sm font-semibold text-white">Plex</h3>
-                            <p class="text-xs text-gray-500 mt-0.5">Media server for availability checking</p>
-                        </div>
-                        <div class="flex items-center gap-3 shrink-0">
-                            <button type="button" onclick="testConnection('plex')" id="btn-test-plex" class="btn-primary btn-sm">Test</button>
-                            <span id="status-plex" class="text-xs font-medium"></span>
-                        </div>
+                    <div>
+                        <h3 class="text-sm font-semibold text-white">API Access</h3>
+                        <p class="text-xs text-gray-500 mt-0.5">Programmatic access for API clients, scripts, and webhooks</p>
                     </div>
-                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        <div>
-                            <label for="plex_url" class="form-label">URL</label>
-                            <input type="url" id="plex_url" name="plex_url" value="{{ env.plex_url }}" placeholder="http://plex:32400" class="form-input">
-                        </div>
-                        <div>
-                            <label class="form-label">Plex Authentication</label>
-                            {% if plex_sso_connected %}
-                            <div class="flex items-center gap-3 rounded-lg bg-surface-900/70 p-3">
-                                {% if plex_sso_thumb %}
-                                <img src="{{ plex_sso_thumb }}" alt="" class="w-8 h-8 rounded-full object-cover shrink-0">
-                                {% endif %}
-                                <div class="min-w-0">
-                                     <div class="flex items-center gap-2">
-                                         <span class="text-sm font-medium text-white truncate">Connected as {{ plex_sso_username }}</span>
-                                         <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold bg-emerald-900/40 text-emerald-300 border border-emerald-700/50">
-                                            <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
-                                             Connected
-                                         </span>
-                                     </div>
-                                    <p class="text-xs text-gray-500 mt-1">Plex token is managed by Plex SSO{% if plex_sso_token_present %} and stored securely{% endif %}.</p>
-                                 </div>
-                             </div>
-                            {% else %}
-                            <div class="flex items-center gap-3 rounded-lg bg-surface-900/70 p-3">
-                                <div class="flex items-center gap-2">
-                                    <span class="text-sm text-gray-400">Not connected</span>
-                                    <a href="/auth/login" class="btn-primary btn-sm">Login with Plex</a>
-                                </div>
+                    <p class="text-sm text-gray-400">For scripts, webhooks, and direct API clients, use this key to authenticate requests via <code class="text-xs bg-surface-700 px-1.5 py-0.5 rounded">X-API-Key</code> or <code class="text-xs bg-surface-700 px-1.5 py-0.5 rounded">Authorization: Bearer &lt;key&gt;</code> header.</p>
+
+                    <div>
+                        <label class="form-label">API Key</label>
+                        <div class="flex items-center gap-2">
+                            <div class="relative flex-1">
+                                <input type="password" id="api_key_display" value="{{ api_key }}" readonly class="form-input pr-10 font-mono text-sm cursor-text">
+                                <button type="button" onclick="togglePassword('api_key_display')" class="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 hover:text-white transition-colors">
+                                    <svg id="eye-api_key_display" class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"></path></svg>
+                                </button>
                             </div>
-                            {% endif %}
+                            <button type="button" onclick="copyApiKey()" class="btn-primary btn-sm shrink-0">Copy</button>
+                            <button type="button" onclick="regenerateApiKey()" class="btn-warning btn-sm shrink-0">Regenerate</button>
                         </div>
+                        <p id="api-key-feedback" class="text-xs mt-2 hidden"></p>
                     </div>
                 </div>
+
 
                 <div class="grid grid-cols-1 md:grid-cols-[220px_auto] gap-4 items-end">
                     <div>
@@ -187,10 +264,49 @@ details[open] summary .accordion-chevron { transform: rotate(90deg); }
             <svg class="accordion-chevron w-4 h-4 text-gray-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
             <div>
                 <h2 class="section-title">Advanced / Scheduler</h2>
-                <p class="section-subtitle">Manual scheduler triggers and in-memory status for recent scan and poll Plex jobs</p>
+                <p class="section-subtitle">Edit recurring scheduler intervals and run Plex scheduler actions manually</p>
             </div>
         </summary>
         <div class="card-body space-y-4">
+            <form action="/settings/scheduler" method="post" class="rounded-xl border border-gray-700/60 bg-surface-850 p-5 space-y-4">
+                <div>
+                    <h3 class="text-sm font-semibold text-white">Scheduler Settings</h3>
+                    <p class="text-xs text-gray-500 mt-1">Defaults: Overseerr every 60 minutes, qBittorrent completion every 30 seconds, Plex fast sync every 5 minutes, full sync daily at 03:00.</p>
+                </div>
+                <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-5 gap-4">
+                    <div>
+                        <label for="overseerr_poll_interval_minutes" class="form-label">Overseerr Poll (minutes)</label>
+                        <input type="number" min="1" id="overseerr_poll_interval_minutes" name="overseerr_poll_interval_minutes" value="{{ env.overseerr_poll_interval_minutes }}" class="form-input">
+                    </div>
+                    <div>
+                        <label for="qbittorrent_completion_poll_interval_seconds" class="form-label">qBittorrent Completion (seconds)</label>
+                        <input type="number" min="5" id="qbittorrent_completion_poll_interval_seconds" name="qbittorrent_completion_poll_interval_seconds" value="{{ env.qbittorrent_completion_poll_interval_seconds }}" class="form-input">
+                    </div>
+                    <div>
+                        <label for="plex_fast_sync_interval_minutes" class="form-label">Plex Fast Sync (minutes)</label>
+                        <input type="number" min="1" id="plex_fast_sync_interval_minutes" name="plex_fast_sync_interval_minutes" value="{{ env.plex_fast_sync_interval_minutes }}" class="form-input">
+                    </div>
+                    <div>
+                        <label for="plex_full_sync_frequency" class="form-label">Plex Full Sync Frequency</label>
+                        <select id="plex_full_sync_frequency" name="plex_full_sync_frequency" class="form-input">
+                            <option value="daily" {% if env.plex_full_sync_frequency == 'daily' %}selected{% endif %}>Daily</option>
+                            <option value="weekly" {% if env.plex_full_sync_frequency == 'weekly' %}selected{% endif %}>Weekly (Sunday)</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label for="plex_full_sync_time" class="form-label">Plex Full Sync Time</label>
+                        <input type="time" id="plex_full_sync_time" name="plex_full_sync_time" value="{{ env.plex_full_sync_time }}" class="form-input">
+                    </div>
+                </div>
+                <div class="flex flex-wrap items-center gap-2">
+                    <button type="submit" class="btn-success btn-sm">Save Scheduler Settings</button>
+                </div>
+            </form>
+            <div class="flex flex-wrap items-center gap-2">
+                    <form action="/settings/scheduler/reset" method="post">
+                        <button type="submit" class="btn-secondary btn-sm">Reset Scheduler Defaults</button>
+                    </form>
+            </div>
             <div class="flex flex-wrap items-center gap-2">
                 <form action="/settings/run-recent-plex-scan" method="post">
                     <button type="submit" class="btn-primary btn-sm shrink-0">Run Recent Plex Scan</button>
@@ -244,142 +360,23 @@ details[open] summary .accordion-chevron { transform: rotate(90deg); }
         </div>
     </details>
 
-    {# ── Staging Mode & DB Stats ── #}
-    <details open class="card">
+    {# ── Staging Mode ── #}
+    <details class="card">
         <summary class="card-header flex items-center gap-3 cursor-pointer select-none">
             <svg class="accordion-chevron w-4 h-4 text-gray-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
             <div>
-                <h2 class="section-title">Staging Mode & DB Stats</h2>
-                <p class="section-subtitle">Toggle staging mode and view database statistics</p>
-            </div>
-        </summary>
-        <div class="card-body">
-    <div class="grid grid-cols-1 lg:grid-cols-[1.2fr_1fr] gap-6">
-        <div class="card">
-            <div class="card-header">
                 <h2 class="section-title">Staging Mode</h2>
-                <p class="section-subtitle">Save torrents to staging instead of sending them directly to qBittorrent</p>
-            </div>
-            <div class="card-body">
-                <form action="/settings/staging" method="post" class="flex items-center justify-between gap-4">
-                    <div>
-                        <div class="text-sm font-semibold {% if staging_enabled %}text-emerald-400{% else %}text-gray-500{% endif %}">{{ 'Enabled' if staging_enabled else 'Disabled' }}</div>
-                        <div class="text-xs text-gray-500 mt-1">Default is enabled for safer review-first downloads.</div>
-                    </div>
-                    <button type="submit" class="{{ 'btn-danger' if staging_enabled else 'btn-success' }} btn-sm">{{ 'Disable' if staging_enabled else 'Enable' }}</button>
-                </form>
-            </div>
-        </div>
-
-        <div class="card">
-            <div class="card-header">
-                <h2 class="section-title">Database Statistics</h2>
-            </div>
-            <div class="card-body">
-                <div class="grid grid-cols-2 gap-3">
-                    <div class="rounded-xl bg-surface-850 p-4">
-                        <div class="text-xl font-bold text-white tabular-nums">{{ stats.total_requests }}</div>
-                        <div class="text-xs text-gray-500 mt-0.5">Total Requests</div>
-                    </div>
-                    <div class="rounded-xl bg-surface-850 p-4">
-                        <div class="text-xl font-bold text-emerald-400 tabular-nums">{{ stats.completed }}</div>
-                        <div class="text-xs text-gray-500 mt-0.5">Completed</div>
-                    </div>
-                    <div class="rounded-xl bg-surface-850 p-4">
-                        <div class="text-xl font-bold text-amber-400 tabular-nums">{{ stats.pending }}</div>
-                        <div class="text-xs text-gray-500 mt-0.5">Pending</div>
-                    </div>
-                    <div class="rounded-xl bg-surface-850 p-4">
-                        <div class="text-xl font-bold text-red-400 tabular-nums">{{ stats.failed }}</div>
-                        <div class="text-xs text-gray-500 mt-0.5">Failed</div>
-                    </div>
-                </div>
-            </div>
-        </div>
-    </div>
-        </div>
-    </details>
-
-    {# ── Manual Actions ── #}
-    <details open class="card">
-        <summary class="card-header flex items-center gap-3 cursor-pointer select-none">
-            <svg class="accordion-chevron w-4 h-4 text-gray-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
-            <h2 class="section-title">Manual Actions</h2>
-        </summary>
-        <div class="card-body divide-y divide-gray-700/40">
-            <form action="/settings/retry-pending" method="post" class="flex items-center justify-between gap-4 py-3 first:pt-0 last:pb-0">
-                <div class="min-w-0">
-                    <div class="text-sm font-semibold text-white">Retry Pending</div>
-                    <div class="text-xs text-gray-500">{{ pending_count }} items ready for retry</div>
-                </div>
-                <button type="submit" class="btn-primary btn-sm shrink-0">Retry Now</button>
-            </form>
-
-            <div class="flex items-center justify-between gap-4 py-3 first:pt-0 last:pb-0">
-                <div class="min-w-0">
-                    <div class="text-sm font-semibold text-white">Sync Overseerr</div>
-                    <div class="text-xs text-gray-500">Fetch new approved or pending requests</div>
-                </div>
-                <button type="button" onclick="startOverseerrSync()" class="btn-primary btn-sm shrink-0">Sync</button>
-            </div>
-
-            <div class="flex items-center justify-between gap-4 py-3 first:pt-0 last:pb-0">
-                <div class="min-w-0">
-                    <div class="text-sm font-semibold text-white">Plex Sync</div>
-                    <div class="text-xs text-gray-500">Partial sync scans recently added Plex items for matching requests; full sync refreshes all active TV metadata and polls Plex availability</div>
-                </div>
-                <div class="flex items-center gap-2 shrink-0">
-                    <button type="button" onclick="startPlexRescan(true)" class="btn-primary btn-sm shrink-0">Partial Sync</button>
-                    <button type="button" onclick="startPlexRescan(false)" class="btn-primary btn-sm shrink-0">Full Sync</button>
-                </div>
-            </div>
-
-            <form action="/settings/reseed-rules" method="post" class="flex items-center justify-between gap-4 py-3 first:pt-0 last:pb-0">
-                <div class="min-w-0">
-                    <div class="text-sm font-semibold text-white">Reseed Default Rules</div>
-                    <div class="text-xs text-gray-500">Restore the checked-in 12-rule default snapshot without deleting custom rules</div>
-                </div>
-                <button type="submit" class="btn-warning btn-sm shrink-0">Reseed</button>
-            </form>
-
-            <form action="/settings/clear-cache" method="post" class="flex items-center justify-between gap-4 py-3 first:pt-0 last:pb-0">
-                <div class="min-w-0">
-                    <div class="text-sm font-semibold text-white">Clear App Search Cache</div>
-                    <div class="text-xs text-gray-500">Clears stored releases and Siftarr's app-side Overseerr status cache. Requests stay intact.</div>
-                </div>
-                <button type="submit" class="btn-danger btn-sm shrink-0">Clear Cache</button>
-            </form>
-        </div>
-    </details>
-
-    {# ── API Access ── #}
-    <details open class="card">
-        <summary class="card-header flex items-center gap-3 cursor-pointer select-none">
-            <svg class="accordion-chevron w-4 h-4 text-gray-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
-            <div>
-                <h2 class="section-title">API Access</h2>
-                <p class="section-subtitle">Manage your API key for programmatic access</p>
+                <p class="section-subtitle">Review torrents before sending them to qBittorrent</p>
             </div>
         </summary>
         <div class="card-body">
-            <div class="rounded-xl border border-gray-700/60 bg-surface-850 p-5 space-y-4">
-                <p class="text-sm text-gray-400">Use this key to authenticate API requests via <code class="text-xs bg-surface-700 px-1.5 py-0.5 rounded">X-API-Key</code> or <code class="text-xs bg-surface-700 px-1.5 py-0.5 rounded">Authorization: Bearer &lt;key&gt;</code> header.</p>
-
+            <form action="/settings/staging" method="post" class="flex items-center justify-between gap-4">
                 <div>
-                    <label class="form-label">API Key</label>
-                    <div class="flex items-center gap-2">
-                        <div class="relative flex-1">
-                            <input type="password" id="api_key_display" value="{{ api_key }}" readonly class="form-input pr-10 font-mono text-sm cursor-text">
-                            <button type="button" onclick="togglePassword('api_key_display')" class="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 hover:text-white transition-colors">
-                                <svg id="eye-api_key_display" class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"></path></svg>
-                            </button>
-                        </div>
-                        <button type="button" onclick="copyApiKey()" class="btn-primary btn-sm shrink-0">Copy</button>
-                        <button type="button" onclick="regenerateApiKey()" class="btn-warning btn-sm shrink-0">Regenerate</button>
-                    </div>
-                    <p id="api-key-feedback" class="text-xs mt-2 hidden"></p>
+                    <div class="text-sm font-semibold {% if staging_enabled %}text-emerald-400{% else %}text-gray-500{% endif %}">{{ 'Enabled' if staging_enabled else 'Disabled' }}</div>
+                    <div class="text-xs text-gray-500 mt-1">Default is enabled for safer review-first downloads.</div>
                 </div>
-            </div>
+                <button type="submit" class="{{ 'btn-danger' if staging_enabled else 'btn-success' }} btn-sm">{{ 'Disable' if staging_enabled else 'Enable' }}</button>
+            </form>
         </div>
     </details>
 </div>
@@ -476,7 +473,7 @@ async function testConnection(service) {
 }
 
 async function testAllConnections() {
-    const services = ['overseerr', 'prowlarr', 'qbittorrent', 'plex'];
+    const services = ['plex', 'overseerr', 'prowlarr', 'qbittorrent'];
     for (const service of services) {
         await testConnection(service);
     }

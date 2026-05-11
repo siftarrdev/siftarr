@@ -15,8 +15,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.siftarr import database as db_mod
 from app.siftarr.config import get_settings, reload_settings
 from app.siftarr.database import get_db
-from app.siftarr.models.request import Request as RequestModel
-from app.siftarr.models.request import RequestStatus
 from app.siftarr.services.admin.plex_polling_service import PlexPollingService
 from app.siftarr.services.admin.scheduler_service import (
     PLEX_POLL_JOB_NAME,
@@ -130,8 +128,6 @@ async def _build_settings_page_context(
     return await build_settings_page_context_svc(
         request,
         db,
-        request_model=RequestModel,
-        request_status_enum=RequestStatus,
         build_plex_job_statuses_func=_build_plex_job_statuses,
         effective_settings_override=effective_settings,
     )
@@ -143,6 +139,38 @@ async def _apply_runtime_setting(store: SettingsStore, key: str, value: str) -> 
     env_name = ENV_KEY_MAP.get(key, key.upper())
     os.environ[env_name] = value
     reload_settings()
+
+
+def _coerce_positive_int(value: str | None, default: int, *, minimum: int = 1) -> str:
+    try:
+        parsed = int(str(value or "").strip())
+    except ValueError:
+        parsed = default
+    return str(max(parsed, minimum))
+
+
+def _coerce_full_sync_frequency(value: str | None) -> str:
+    normalized = (value or "daily").strip().lower()
+    return normalized if normalized in {"daily", "weekly"} else "daily"
+
+
+def _coerce_time(value: str | None, default: str = "03:00") -> str:
+    try:
+        hour_str, minute_str = (value or default).strip().split(":", maxsplit=1)
+        hour = int(hour_str)
+        minute = int(minute_str)
+    except ValueError:
+        return default
+    if 0 <= hour <= 23 and 0 <= minute <= 59:
+        return f"{hour:02d}:{minute:02d}"
+    return default
+
+
+def _restart_scheduler_if_running() -> None:
+    scheduler_service = _get_scheduler_service()
+    if scheduler_service is not None and scheduler_service.scheduler is not None:
+        scheduler_service.stop()
+        scheduler_service.start()
 
 
 async def _run_bounded_with_progress(
@@ -294,6 +322,75 @@ async def reset_connections(
     return RedirectResponse(url="/settings?reset=true", status_code=303)
 
 
+@router.post("/scheduler")
+async def save_scheduler_settings(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    overseerr_poll_interval_minutes: str | None = Form(None),
+    qbittorrent_completion_poll_interval_seconds: str | None = Form(None),
+    plex_fast_sync_interval_minutes: str | None = Form(None),
+    plex_full_sync_frequency: str | None = Form(None),
+    plex_full_sync_time: str | None = Form(None),
+) -> RedirectResponse:
+    """Save scheduler runtime settings."""
+    del request
+    current = get_settings()
+    store = SettingsStore(db)
+    await _apply_runtime_setting(
+        store,
+        "overseerr_poll_interval_minutes",
+        _coerce_positive_int(
+            overseerr_poll_interval_minutes, current.overseerr_poll_interval_minutes
+        ),
+    )
+    await _apply_runtime_setting(
+        store,
+        "qbittorrent_completion_poll_interval_seconds",
+        _coerce_positive_int(
+            qbittorrent_completion_poll_interval_seconds,
+            current.qbittorrent_completion_poll_interval_seconds,
+            minimum=5,
+        ),
+    )
+    await _apply_runtime_setting(
+        store,
+        "plex_fast_sync_interval_minutes",
+        _coerce_positive_int(
+            plex_fast_sync_interval_minutes, current.plex_fast_sync_interval_minutes
+        ),
+    )
+    await _apply_runtime_setting(
+        store,
+        "plex_full_sync_frequency",
+        _coerce_full_sync_frequency(plex_full_sync_frequency),
+    )
+    await _apply_runtime_setting(store, "plex_full_sync_time", _coerce_time(plex_full_sync_time))
+    await db.commit()
+    _restart_scheduler_if_running()
+    return RedirectResponse(url="/settings?scheduler_saved=true", status_code=303)
+
+
+@router.post("/scheduler/reset")
+async def reset_scheduler_settings(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+) -> RedirectResponse:
+    """Reset scheduler runtime settings to configured defaults."""
+    del request
+    store = SettingsStore(db)
+    await _clear_runtime_settings(
+        store,
+        "overseerr_poll_interval_minutes",
+        "qbittorrent_completion_poll_interval_seconds",
+        "plex_fast_sync_interval_minutes",
+        "plex_full_sync_frequency",
+        "plex_full_sync_time",
+    )
+    await db.commit()
+    _restart_scheduler_if_running()
+    return RedirectResponse(url="/settings?scheduler_reset=true", status_code=303)
+
+
 # ── Connection testing API routes ─────────────────────────────────────────
 
 
@@ -373,10 +470,10 @@ async def test_all_connections(db: AsyncSession = Depends(get_db)) -> list[Conne
     effective_settings = await _get_runtime_settings(db)
     results = []
     for service_name, tester in [
+        ("plex", ConnectionTester.test_plex),
         ("overseerr", ConnectionTester.test_overseerr),
         ("prowlarr", ConnectionTester.test_prowlarr),
         ("qbittorrent", ConnectionTester.test_qbittorrent),
-        ("plex", ConnectionTester.test_plex),
     ]:
         result: ConnectionTestResult = await tester(effective_settings)
         results.append(

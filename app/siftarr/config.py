@@ -5,7 +5,7 @@ import secrets
 import time
 from functools import lru_cache
 
-from pydantic import Field, model_validator
+from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from app.siftarr.version import __version__
@@ -53,9 +53,11 @@ class Settings(BaseSettings):
     staging_mode_enabled: bool = True
     retry_interval_hours: int = 24
     max_retry_duration_days: int = 7
-    plex_poll_interval_minutes: int = 360
+    overseerr_poll_interval_minutes: int = Field(default=60, ge=1)
+    qbittorrent_completion_poll_interval_seconds: int = Field(default=30, ge=5)
+    plex_fast_sync_interval_minutes: int = Field(default=5, ge=1)
+    plex_full_sync_frequency: str = "daily"
     max_episode_discovery: int = 30
-    plex_recent_scan_interval_minutes: int = 5
     plex_full_sync_time: str = "03:00"
     overseerr_sync_concurrency: int = 16
     plex_sync_concurrency: int = 16
@@ -102,6 +104,25 @@ class Settings(BaseSettings):
         ):
             raise ValueError("at least one Prowlarr TV season strategy must be enabled")
         return self
+
+    @field_validator("plex_full_sync_frequency")
+    @classmethod
+    def _validate_plex_full_sync_frequency(cls, value: str) -> str:
+        normalized = (value or "daily").strip().lower()
+        return normalized if normalized in {"daily", "weekly"} else "daily"
+
+    @field_validator("plex_full_sync_time")
+    @classmethod
+    def _validate_plex_full_sync_time(cls, value: str) -> str:
+        try:
+            hour_str, minute_str = (value or "03:00").strip().split(":", maxsplit=1)
+            hour = int(hour_str)
+            minute = int(minute_str)
+        except (TypeError, ValueError):
+            return "03:00"
+        if 0 <= hour <= 23 and 0 <= minute <= 59:
+            return f"{hour:02d}:{minute:02d}"
+        return "03:00"
 
 
 @lru_cache

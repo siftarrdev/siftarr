@@ -10,6 +10,49 @@ from app.siftarr.routers import settings
 
 
 @pytest.mark.asyncio
+async def test_save_scheduler_settings_persists_coerced_values(monkeypatch, mock_db):
+    store = MagicMock()
+    store.set = AsyncMock()
+    monkeypatch.setattr(settings, "SettingsStore", lambda db: store)
+    monkeypatch.setattr(settings, "_restart_scheduler_if_running", MagicMock())
+
+    response = await settings.save_scheduler_settings(
+        MagicMock(),
+        db=mock_db,
+        overseerr_poll_interval_minutes="0",
+        qbittorrent_completion_poll_interval_seconds="bad",
+        plex_fast_sync_interval_minutes="9",
+        plex_full_sync_frequency="weekly",
+        plex_full_sync_time="4:05",
+    )
+
+    assert response.status_code == 303
+    assert response.headers["location"] == "/settings?scheduler_saved=true"
+    store.set.assert_any_await("overseerr_poll_interval_minutes", "1")
+    store.set.assert_any_await("qbittorrent_completion_poll_interval_seconds", "30")
+    store.set.assert_any_await("plex_fast_sync_interval_minutes", "9")
+    store.set.assert_any_await("plex_full_sync_frequency", "weekly")
+    store.set.assert_any_await("plex_full_sync_time", "04:05")
+    mock_db.commit.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_reset_scheduler_settings_clears_runtime_keys(monkeypatch, mock_db):
+    clear = AsyncMock()
+    monkeypatch.setattr(settings, "_clear_runtime_settings", clear)
+    monkeypatch.setattr(settings, "_restart_scheduler_if_running", MagicMock())
+
+    response = await settings.reset_scheduler_settings(MagicMock(), db=mock_db)
+
+    assert response.status_code == 303
+    clear.assert_awaited_once()
+    await_args = clear.await_args
+    assert await_args is not None
+    assert "overseerr_poll_interval_minutes" in await_args.args
+    assert "plex_full_sync_time" in await_args.args
+
+
+@pytest.mark.asyncio
 async def test_run_recent_plex_scan_reports_success(monkeypatch, mock_db, base_context):
     """Manual recent Plex scan should report scheduler success."""
 

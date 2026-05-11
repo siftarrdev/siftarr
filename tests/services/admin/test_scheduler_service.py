@@ -70,10 +70,14 @@ async def test_start_registers_recent_scan_and_poll_jobs(monkeypatch):
 
     monkeypatch.setattr(scheduler_service, "AsyncIOScheduler", fake_scheduler)
     monkeypatch.setattr(
-        "app.siftarr.config.get_settings",
+        scheduler_service,
+        "get_settings",
         lambda: SimpleNamespace(
-            plex_poll_interval_minutes=360,
-            plex_recent_scan_interval_minutes=5,
+            overseerr_poll_interval_minutes=17,
+            qbittorrent_completion_poll_interval_seconds=45,
+            plex_fast_sync_interval_minutes=7,
+            plex_full_sync_frequency="weekly",
+            plex_full_sync_time="04:30",
         ),
     )
 
@@ -88,9 +92,12 @@ async def test_start_registers_recent_scan_and_poll_jobs(monkeypatch):
     assert "poll_plex_availability" not in job_ids
 
     job_kwargs = {job["id"]: job for job in fake.jobs}
+    assert job_kwargs["poll_overseerr"]["trigger"].interval.total_seconds() == 17 * 60
+    assert job_kwargs["plex_recent_scan"]["trigger"].interval.total_seconds() == 7 * 60
     assert job_kwargs["plex_recent_scan"]["kwargs"] == {"trigger_source": "scheduler"}
     assert job_kwargs["plex_poll"]["kwargs"] == {"trigger_source": "scheduler"}
-    assert job_kwargs["check_download_completion"]["trigger"].interval.total_seconds() == 30
+    assert job_kwargs["check_download_completion"]["trigger"].interval.total_seconds() == 45
+    assert "sun" in str(job_kwargs["plex_poll"]["trigger"])
     assert fake.started is True
 
 

@@ -44,10 +44,14 @@ def base_context() -> Callable[[], dict[str, Any]]:
                 "plex_url": "",
                 "plex_token": "",
                 "tz": "UTC",
+                "overseerr_poll_interval_minutes": 60,
+                "qbittorrent_completion_poll_interval_seconds": 30,
+                "plex_fast_sync_interval_minutes": 5,
+                "plex_full_sync_frequency": "daily",
+                "plex_full_sync_time": "03:00",
             },
             "staging_enabled": True,
             "pending_count": 0,
-            "stats": {"total_requests": 0, "completed": 0, "pending": 0, "failed": 0},
             "plex_jobs": [],
         }
 

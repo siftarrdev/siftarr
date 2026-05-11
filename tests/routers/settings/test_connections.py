@@ -222,13 +222,13 @@ async def test_test_all_connections_runs_each_tester_in_order(monkeypatch, mock_
     response = await settings.test_all_connections(db=mock_db)
 
     get_runtime_settings.assert_awaited_once_with(mock_db)
+    plex.assert_awaited_once_with(effective_settings)
     overseerr.assert_awaited_once_with(effective_settings)
     prowlarr.assert_awaited_once_with(effective_settings)
     qbittorrent.assert_awaited_once_with(effective_settings)
-    plex.assert_awaited_once_with(effective_settings)
     assert [(item.service, item.success, item.message, item.details) for item in response] == [
+        ("plex", True, "plex ok", None),
         ("overseerr", True, "overseerr ok", "ov"),
         ("prowlarr", False, "prowlarr bad", "pr"),
         ("qbittorrent", True, "qb ok", "qb"),
-        ("plex", True, "plex ok", None),
     ]
