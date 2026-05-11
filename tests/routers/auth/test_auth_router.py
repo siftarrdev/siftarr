@@ -117,6 +117,8 @@ class TestPlexAuth:
         mock_store.set = AsyncMock()
         mock_store.load_into_environ = AsyncMock()
         monkeypatch.setattr(auth_router, "SettingsStore", MagicMock(return_value=mock_store))
+        launch_sync = MagicMock()
+        monkeypatch.setattr(auth_router, "_launch_plex_sign_in_sync", launch_sync)
 
         request = MagicMock()
         request.session = {}
@@ -134,6 +136,7 @@ class TestPlexAuth:
         mock_store.set.assert_any_call("plex_thumb", "http://example.com/thumb.jpg")
         mock_store.set.assert_any_call("plex_token", "valid-token")
         mock_store.load_into_environ.assert_called_once()
+        launch_sync.assert_called_once()
         # Session should be set
         assert request.session["plex_user_id"] == "12345"
 
@@ -157,6 +160,8 @@ class TestPlexAuth:
         mock_store.set = AsyncMock()
         mock_store.load_into_environ = AsyncMock()
         monkeypatch.setattr(auth_router, "SettingsStore", MagicMock(return_value=mock_store))
+        launch_sync = MagicMock()
+        monkeypatch.setattr(auth_router, "_launch_plex_sign_in_sync", launch_sync)
 
         request = MagicMock()
         request.session = {}
@@ -170,6 +175,112 @@ class TestPlexAuth:
         mock_store.set.assert_any_call("plex_thumb", "")
         mock_store.set.assert_any_call("plex_token", "valid-token")
         mock_store.load_into_environ.assert_called_once()
+        launch_sync.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_successful_sign_in_launches_scheduler_sync_non_blocking(self, monkeypatch):
+        """Successful admin auth should schedule the guarded Plex sign-in sync."""
+        monkeypatch.setattr(
+            auth_router.PlexOAuthService,
+            "validate_token",
+            AsyncMock(return_value={"id": "12345", "username": "testuser", "thumb": ""}),
+        )
+
+        mock_store = MagicMock()
+        mock_store.get = AsyncMock(return_value="12345")
+        mock_store.set = AsyncMock()
+        mock_store.load_into_environ = AsyncMock()
+        monkeypatch.setattr(auth_router, "SettingsStore", MagicMock(return_value=mock_store))
+
+        async def sign_in_sync():
+            return None
+
+        scheduler = MagicMock()
+        scheduler.trigger_plex_sign_in_sync = MagicMock(return_value=sign_in_sync())
+        monkeypatch.setattr(auth_router, "_get_active_scheduler_service", lambda: scheduler)
+
+        scheduled = []
+
+        def fake_create_task(work):
+            scheduled.append(work)
+            work.close()
+            return MagicMock()
+
+        monkeypatch.setattr(auth_router.asyncio, "create_task", fake_create_task)
+
+        request = MagicMock()
+        request.session = {}
+
+        result = await auth_router.plex_auth(
+            request, PlexAuthRequest(authToken="valid-token"), db=MagicMock()
+        )
+
+        assert result["username"] == "testuser"
+        scheduler.trigger_plex_sign_in_sync.assert_called_once_with()
+        assert len(scheduled) == 1
+
+    @pytest.mark.asyncio
+    async def test_successful_sign_in_skips_sync_when_scheduler_unavailable(self, monkeypatch):
+        """Missing scheduler should not prevent session creation."""
+        monkeypatch.setattr(
+            auth_router.PlexOAuthService,
+            "validate_token",
+            AsyncMock(return_value={"id": "12345", "username": "testuser", "thumb": ""}),
+        )
+
+        mock_store = MagicMock()
+        mock_store.get = AsyncMock(return_value="12345")
+        mock_store.set = AsyncMock()
+        mock_store.load_into_environ = AsyncMock()
+        monkeypatch.setattr(auth_router, "SettingsStore", MagicMock(return_value=mock_store))
+        monkeypatch.setattr(auth_router, "_get_active_scheduler_service", lambda: None)
+
+        request = MagicMock()
+        request.session = {}
+
+        result = await auth_router.plex_auth(
+            request, PlexAuthRequest(authToken="valid-token"), db=MagicMock()
+        )
+
+        assert result["username"] == "testuser"
+        assert request.session["plex_user_id"] == "12345"
+
+    @pytest.mark.asyncio
+    async def test_sign_in_sync_launch_failure_does_not_block_session(self, monkeypatch):
+        """Scheduler launch errors should be logged but auth should succeed."""
+        monkeypatch.setattr(
+            auth_router.PlexOAuthService,
+            "validate_token",
+            AsyncMock(return_value={"id": "12345", "username": "testuser", "thumb": ""}),
+        )
+
+        mock_store = MagicMock()
+        mock_store.get = AsyncMock(return_value="12345")
+        mock_store.set = AsyncMock()
+        mock_store.load_into_environ = AsyncMock()
+        monkeypatch.setattr(auth_router, "SettingsStore", MagicMock(return_value=mock_store))
+
+        async def sign_in_sync():
+            return None
+
+        scheduler = MagicMock()
+        scheduler.trigger_plex_sign_in_sync = MagicMock(return_value=sign_in_sync())
+        monkeypatch.setattr(auth_router, "_get_active_scheduler_service", lambda: scheduler)
+        monkeypatch.setattr(
+            auth_router.asyncio,
+            "create_task",
+            MagicMock(side_effect=RuntimeError("no loop")),
+        )
+
+        request = MagicMock()
+        request.session = {}
+
+        result = await auth_router.plex_auth(
+            request, PlexAuthRequest(authToken="valid-token"), db=MagicMock()
+        )
+
+        assert result["username"] == "testuser"
+        assert request.session["plex_user_id"] == "12345"
 
     @pytest.mark.asyncio
     async def test_second_user_rejected(self, monkeypatch):
@@ -189,6 +300,8 @@ class TestPlexAuth:
         mock_store = MagicMock()
         mock_store.get = AsyncMock(return_value="12345")  # Already claimed by user 12345
         monkeypatch.setattr(auth_router, "SettingsStore", MagicMock(return_value=mock_store))
+        launch_sync = MagicMock()
+        monkeypatch.setattr(auth_router, "_launch_plex_sign_in_sync", launch_sync)
 
         request = MagicMock()
         request.session = {}
@@ -199,6 +312,7 @@ class TestPlexAuth:
 
         assert exc.value.status_code == 403
         assert str(exc.value.detail) == auth_router.ADMIN_LOGIN_MESSAGE
+        launch_sync.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_invalid_token_returns_401(self, monkeypatch):
@@ -212,11 +326,14 @@ class TestPlexAuth:
         request = MagicMock()
         request.session = {}
         body = PlexAuthRequest(authToken="bad-token")
+        launch_sync = MagicMock()
+        monkeypatch.setattr(auth_router, "_launch_plex_sign_in_sync", launch_sync)
 
         with pytest.raises(HTTPException) as exc:
             await auth_router.plex_auth(request, body, db=MagicMock())
 
         assert exc.value.status_code == 401
+        launch_sync.assert_not_called()
 
 
 class TestLogout:

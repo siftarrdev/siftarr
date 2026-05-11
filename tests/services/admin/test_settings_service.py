@@ -1,4 +1,5 @@
 import os
+from datetime import UTC, datetime, timedelta
 from typing import Any, cast
 
 import pytest
@@ -8,7 +9,13 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from app.siftarr.config import PLACEHOLDER_API_KEY, get_settings, reload_settings
 from app.siftarr.models import Base
 from app.siftarr.models.app_setting import AppSetting
-from app.siftarr.services.admin.settings_service import SettingsStore
+from app.siftarr.services.admin.settings_service import (
+    PLEX_LAST_SYNC_SUCCESS_KEY,
+    SettingsStore,
+    is_sync_timestamp_stale,
+    parse_sync_timestamp,
+    serialize_sync_timestamp,
+)
 from app.siftarr.services.auth_service import require_auth
 
 
@@ -155,3 +162,37 @@ async def test_startup_loaded_api_key_authenticates_programmatic_requests(sessio
     assert get_settings().api_key == "persisted-api-key"
     assert os.environ["PLEX_CLAIMED_ID"] == "admin-id"
     await require_auth(cast(Any, Request()))
+
+
+def test_sync_timestamp_helpers_handle_never_stale_and_fresh():
+    now = datetime(2026, 1, 2, 12, tzinfo=UTC)
+
+    assert parse_sync_timestamp(None) is None
+    assert parse_sync_timestamp("not-a-date") is None
+    assert is_sync_timestamp_stale(None, now=now) is True
+    assert is_sync_timestamp_stale(now - timedelta(hours=25), now=now) is True
+    assert is_sync_timestamp_stale(now - timedelta(hours=2), now=now) is False
+
+    serialized = serialize_sync_timestamp(now)
+    assert parse_sync_timestamp(serialized) == now
+
+
+@pytest.mark.asyncio
+async def test_settings_store_records_and_checks_sync_staleness(session_maker):
+    now = datetime(2026, 1, 2, 12, tzinfo=UTC)
+    async with session_maker() as session:
+        async with session.begin():
+            store = SettingsStore(session)
+            assert await store.is_sync_stale("plex", now=now) is True
+            await store.record_sync_success("plex", now - timedelta(hours=1))
+
+        persisted = await session.scalar(
+            select(AppSetting).where(AppSetting.key == PLEX_LAST_SYNC_SUCCESS_KEY)
+        )
+        assert persisted is not None
+        assert parse_sync_timestamp(persisted.value) == now - timedelta(hours=1)
+        await session.rollback()
+
+        async with session.begin():
+            store = SettingsStore(session)
+            assert await store.is_sync_stale("plex", now=now) is False

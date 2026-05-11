@@ -5,7 +5,7 @@ import contextlib
 import json
 import os
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from sqlalchemy import delete as sa_delete
@@ -23,6 +23,10 @@ from app.siftarr.models.app_setting import AppSetting
 from app.siftarr.models.request import MediaType, RequestStatus
 from app.siftarr.models.request import Request as RequestModel
 from app.siftarr.services.lifecycle.pending_queue_service import PendingQueueService
+
+OVERSEERR_LAST_SYNC_SUCCESS_KEY = "overseerr_last_sync_success_at"
+PLEX_LAST_SYNC_SUCCESS_KEY = "plex_last_sync_success_at"
+SYNC_STALE_AFTER = 24 * 60 * 60
 
 # ── Runtime-to-environment key mapping ────────────────────────────────────
 
@@ -186,6 +190,66 @@ class SettingsStore:
             reload_settings()
 
         return effective_api_key
+
+    async def get_last_sync_success_at(self, service: str) -> datetime | None:
+        """Return the persisted last successful sync timestamp for *service*."""
+        return parse_sync_timestamp(await self.get(_sync_success_key(service)))
+
+    async def record_sync_success(self, service: str, when: datetime | None = None) -> datetime:
+        """Persist a successful sync timestamp for *service*."""
+        synced_at = when or datetime.now(UTC)
+        await self.set(_sync_success_key(service), serialize_sync_timestamp(synced_at))
+        return synced_at
+
+    async def is_sync_stale(self, service: str, now: datetime | None = None) -> bool:
+        """Return True when *service* has never synced or is older than 24 hours."""
+        return is_sync_timestamp_stale(await self.get_last_sync_success_at(service), now=now)
+
+
+def _sync_success_key(service: str) -> str:
+    if service == "overseerr":
+        return OVERSEERR_LAST_SYNC_SUCCESS_KEY
+    if service == "plex":
+        return PLEX_LAST_SYNC_SUCCESS_KEY
+    raise ValueError(f"Unknown sync service: {service}")
+
+
+def serialize_sync_timestamp(value: datetime) -> str:
+    """Serialize a sync timestamp as UTC ISO-8601."""
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=UTC)
+    return value.astimezone(UTC).isoformat()
+
+
+def parse_sync_timestamp(value: str | None) -> datetime | None:
+    """Parse a persisted sync timestamp, returning None for missing/invalid values."""
+    if not value:
+        return None
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=UTC)
+    return parsed.astimezone(UTC)
+
+
+def is_sync_timestamp_stale(
+    last_success_at: datetime | None,
+    *,
+    now: datetime | None = None,
+) -> bool:
+    """Return True when timestamp is missing or more than 24 hours old."""
+    if last_success_at is None:
+        return True
+    current = now or datetime.now(UTC)
+    if current.tzinfo is None:
+        current = current.replace(tzinfo=UTC)
+    if last_success_at.tzinfo is None:
+        last_success_at = last_success_at.replace(tzinfo=UTC)
+    return current.astimezone(UTC) - last_success_at.astimezone(UTC) > timedelta(
+        seconds=SYNC_STALE_AFTER
+    )
 
 
 def mask_secret(value: str | None, visible_chars: int = 4) -> str | None:
@@ -923,6 +987,8 @@ async def import_overseerr_requests(
         )
         overseerr_requests = await overseerr_service.get_all_requests(status=None)
         if not overseerr_requests:
+            await SettingsStore(db).record_sync_success("overseerr")
+            await db.commit()
             return 0, 0
 
         result = await db.execute(
@@ -1074,6 +1140,7 @@ async def import_overseerr_requests(
                 logger.exception("Overseerr request import failed during sync")
                 skipped_count += 1
 
+        await SettingsStore(db).record_sync_success("overseerr")
         await db.commit()
 
         if synced_count > 0:

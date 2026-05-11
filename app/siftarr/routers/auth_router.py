@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import inspect
 import logging
 from pathlib import Path
@@ -56,6 +57,39 @@ def _safe_next_url(value: str | None) -> str:
 async def _maybe_await(value: Any) -> None:
     if inspect.isawaitable(value):
         await value
+
+
+def _get_active_scheduler_service() -> Any | None:
+    """Return the active app scheduler service when available."""
+    from app.siftarr import main
+
+    return main.scheduler_service
+
+
+def _launch_plex_sign_in_sync() -> None:
+    """Launch non-blocking Plex sign-in full sync if a scheduler is active."""
+    scheduler_service = _get_active_scheduler_service()
+    if scheduler_service is None:
+        logger.info("Plex sign-in sync skipped; scheduler unavailable")
+        return
+
+    trigger = getattr(scheduler_service, "trigger_plex_sign_in_sync", None)
+    if trigger is None:
+        logger.info("Plex sign-in sync skipped; scheduler does not support trigger")
+        return
+
+    sync_work = trigger()
+    if not inspect.isawaitable(sync_work):
+        logger.info("Plex sign-in sync skipped; scheduler returned no awaitable")
+        return
+
+    try:
+        asyncio.create_task(sync_work)
+    except Exception:
+        close = getattr(sync_work, "close", None)
+        if callable(close):
+            close()
+        logger.exception("Failed to launch Plex sign-in sync")
 
 
 @router.get("/login")
@@ -126,6 +160,7 @@ async def plex_auth(
             await settings_store.set("plex_token", body.authToken)
         # Push token and claim into runtime environment so auth/Plex services see it
         await settings_store.load_into_environ()
+        _launch_plex_sign_in_sync()
         logger.info("Instance claimed by Plex user %s (id=%s)", username, user_id)
     elif claimed_id != user_id:
         # Instance already claimed by a different user — reject
@@ -135,6 +170,7 @@ async def plex_auth(
         await settings_store.set("plex_thumb", thumb)
         await settings_store.set("plex_token", body.authToken)
         await settings_store.load_into_environ()
+        _launch_plex_sign_in_sync()
 
     # Create session
     request.session["plex_user_id"] = user_id
