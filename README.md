@@ -93,7 +93,7 @@ environment:
   - QBITTORRENT_URL=http://qbittorrent:8080
   - QBITTORRENT_API_KEY=your_api_key
   - PLEX_URL=http://plex:32400
-  - SECRET_KEY=change-to-a-stable-random-value
+  - SECRET_KEY=optional_explicit_session_secret
   - SIFTARR_API_KEY=optional_integration_key
 ```
 
@@ -108,7 +108,8 @@ Common variables:
 | `QBITTORRENT_URL` | unset | qBittorrent Web UI URL. |
 | `QBITTORRENT_API_KEY` | unset | qBittorrent Web API key (qBittorrent ≥ 5.2). |
 | `PLEX_URL` / `PLEX_TOKEN` | unset | Plex connection. |
-| `SECRET_KEY` | generated per process | Session signing key for Plex SSO. Set a stable random value in production so browser sessions survive restarts. |
+| `SECRET_KEY` | generated and persisted under `/data/db/` | Session signing key for Plex SSO browser sessions. Set explicitly to override the persisted generated secret. |
+| `SIFTARR_SECRET_KEY_FILE` | beside `SIFTARR_DB_PATH` | Optional path override for the generated session secret file when `SECRET_KEY` is unset. |
 | `STAGING_MODE_ENABLED` | `true` | Stage selected torrents instead of sending directly. |
 | `RETRY_INTERVAL_HOURS` | `24` | How often pending requests are retried. |
 | `MAX_RETRY_DURATION_DAYS` | `7` | How long pending requests remain retryable. |
@@ -126,6 +127,11 @@ effective key is missing or still `dev-key-change-me`; the generated key is stor
 database and shown masked in **Settings**. Set `SIFTARR_API_KEY` to a non-placeholder value
 to explicitly override the persisted API key for non-interactive deployments. Browser access
 uses Plex SSO; API keys remain available for webhooks and other programmatic integrations.
+
+If `SECRET_KEY` is not set, Siftarr generates a session signing secret once and persists it
+in the data volume, next to the SQLite database by default. This keeps Plex SSO browser
+sessions valid across app or container restarts. Use `SECRET_KEY` when you want to provide
+and rotate the session secret yourself.
 
 ### Browser auth and instance claim
 
@@ -215,7 +221,7 @@ Mount `/data` somewhere persistent. Do not store it only inside the container fi
 
 | Container path | Contents |
 |----------------|----------|
-| `/data/db/` | SQLite database and persisted app settings. |
+| `/data/db/` | SQLite database, persisted app settings, and generated session secret. |
 | `/data/staging/` | Staged torrent files and staging artifacts. |
 
 Back up `/data/db/` before upgrades or major rule changes if you need rollback safety.
@@ -228,6 +234,7 @@ Back up `/data/db/` before upgrades or major rule changes if you need rollback s
 - **qBittorrent send fails**: confirm the Web UI URL, credentials, and network path from Siftarr to qBittorrent.
 - **Plex status is empty or stale**: verify the Plex URL/token and check the Plex scheduler status on the Settings page.
 - **Staged files are missing after restart**: ensure `/data` is mounted to persistent storage.
+- **Browser sessions reset after restart**: ensure `/data` is persistent, or set an explicit stable `SECRET_KEY`.
 - **Database or permission errors**: check ownership and write access for the host directory mounted to `/data`.
 
 For development setup and contribution workflow, see [CONTRIBUTING.md](CONTRIBUTING.md). For the documentation index and component guides, see [docs/README.md](docs/README.md).

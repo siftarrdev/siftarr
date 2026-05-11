@@ -2,8 +2,11 @@
 
 import os
 import secrets
+import stat
 import time
+from contextlib import suppress
 from functools import lru_cache
+from pathlib import Path
 
 from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -11,11 +14,81 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 from app.siftarr.version import __version__
 
 PLACEHOLDER_API_KEY = "dev-key-change-me"
+SESSION_SECRET_FILE_ENV = "SIFTARR_SECRET_KEY_FILE"
 
 
 def generate_api_key() -> str:
     """Generate a secure random API key for persisted runtime auth."""
     return secrets.token_urlsafe(32)
+
+
+def default_session_secret_file_path() -> Path:
+    """Return the default persistent generated session secret path."""
+    db_path = Path(os.getenv("SIFTARR_DB_PATH", "/data/db/siftarr.db"))
+    return db_path.parent / "session_secret"
+
+
+def get_session_secret_file_path() -> Path:
+    """Return the generated session secret path, honoring the env override."""
+    override = os.getenv(SESSION_SECRET_FILE_ENV)
+    if override:
+        return Path(override)
+    return default_session_secret_file_path()
+
+
+def _local_session_secret_file_path() -> Path:
+    """Return local-dev fallback path when the container data volume is unavailable."""
+    return Path("data/db/session_secret")
+
+
+def _read_secret_file(path: Path) -> str | None:
+    if not path.exists():
+        return None
+    secret = path.read_text(encoding="utf-8").strip()
+    return secret or None
+
+
+def _write_secret_file(path: Path, secret: str) -> None:
+    path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
+    fd = os.open(path, flags, 0o600)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as file:
+            file.write(f"{secret}\n")
+    finally:
+        with suppress(OSError):
+            path.chmod(stat.S_IRUSR | stat.S_IWUSR)
+
+
+def resolve_session_secret() -> str:
+    """Resolve the session signing secret with persistent generated fallback."""
+    explicit = os.getenv("SECRET_KEY")
+    if explicit:
+        return explicit
+
+    path = get_session_secret_file_path()
+    existing = _read_secret_file(path)
+    if existing:
+        return existing
+
+    generated = secrets.token_urlsafe(48)
+    try:
+        _write_secret_file(path, generated)
+    except PermissionError:
+        if os.getenv(SESSION_SECRET_FILE_ENV) or os.getenv("SIFTARR_DB_PATH"):
+            raise
+        path = _local_session_secret_file_path()
+        existing = _read_secret_file(path)
+        if existing:
+            return existing
+        _write_secret_file(path, generated)
+    except FileExistsError:
+        existing = _read_secret_file(path)
+        if existing:
+            return existing
+        raise
+    return generated
 
 
 class Settings(BaseSettings):
@@ -74,8 +147,8 @@ class Settings(BaseSettings):
 
     # Session secret key (auto-generated if not set)
     secret_key: str = Field(
-        default_factory=lambda: os.urandom(32).hex(),
-        description="Secret key for session signing. Auto-generated if not provided.",
+        default_factory=resolve_session_secret,
+        description="Secret key for session signing. Auto-generated and persisted if not provided.",
     )
 
     cache_static_assets: bool = True
