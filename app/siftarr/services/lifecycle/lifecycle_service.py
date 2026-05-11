@@ -81,31 +81,34 @@ class LifecycleService:
         if request.media_type == MediaType.TV:
             # For TV, apply transition at the episode level and derive request.status
             all_episodes = await self._load_all_episodes(request)
-            if new_status == RequestStatus.DENIED:
-                for ep in all_episodes:
-                    ep.status = RequestStatus.DENIED
-            elif new_status == RequestStatus.UNRELEASED:
-                for ep in all_episodes:
-                    if ep.status == RequestStatus.PENDING:
-                        ep.status = RequestStatus.UNRELEASED
-            elif new_status == RequestStatus.FAILED:
-                for ep in all_episodes:
-                    if ep.status in (
-                        RequestStatus.PENDING,
-                        RequestStatus.SEARCHING,
-                        RequestStatus.DOWNLOADING,
-                    ):
-                        ep.status = RequestStatus.FAILED
-            elif new_status == RequestStatus.DOWNLOADING:
-                for ep in all_episodes:
-                    if ep.status == RequestStatus.STAGED:
-                        ep.status = RequestStatus.DOWNLOADING
-            # COMPLETED, PENDING, SEARCHING — no episode-level changes needed
-            # Recompute season statuses and derive request status from episodes
-            for season in request.seasons:
-                season_eps = [ep for ep in all_episodes if ep.season_id == season.id]
-                season.status = derive_season_status(season_eps)
-            request.status = derive_request_status_from_episodes(all_episodes)
+            if not all_episodes and new_status == RequestStatus.DOWNLOADING:
+                request.status = RequestStatus.DOWNLOADING
+            else:
+                if new_status == RequestStatus.DENIED:
+                    for ep in all_episodes:
+                        ep.status = RequestStatus.DENIED
+                elif new_status == RequestStatus.UNRELEASED:
+                    for ep in all_episodes:
+                        if ep.status == RequestStatus.PENDING:
+                            ep.status = RequestStatus.UNRELEASED
+                elif new_status == RequestStatus.FAILED:
+                    for ep in all_episodes:
+                        if ep.status in (
+                            RequestStatus.PENDING,
+                            RequestStatus.SEARCHING,
+                            RequestStatus.DOWNLOADING,
+                        ):
+                            ep.status = RequestStatus.FAILED
+                elif new_status == RequestStatus.DOWNLOADING:
+                    for ep in all_episodes:
+                        if ep.status == RequestStatus.STAGED:
+                            ep.status = RequestStatus.DOWNLOADING
+                # COMPLETED, PENDING, SEARCHING — no episode-level changes needed
+                # Recompute season statuses and derive request status from episodes
+                for season in request.seasons:
+                    season_eps = [ep for ep in all_episodes if ep.season_id == season.id]
+                    season.status = derive_season_status(season_eps)
+                request.status = derive_request_status_from_episodes(all_episodes)
         else:
             request.status = new_status
 

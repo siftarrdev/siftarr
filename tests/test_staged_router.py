@@ -5,7 +5,10 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from fastapi import HTTPException
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
+from app.siftarr.models import Base, Request, StagedTorrent
 from app.siftarr.models.request import MediaType, RequestStatus
 from app.siftarr.routers import staged
 
@@ -289,6 +292,101 @@ class TestStagedRouter:
             commit=False,
         )
         mock_db.commit.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_bulk_staged_action_persists_downloading_and_download_status(self, monkeypatch):
+        """Bulk approval should persist approved/downloading rows visible to polling."""
+        engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+
+        session_maker = async_sessionmaker(engine, expire_on_commit=False)
+        async with session_maker() as db:
+            request_one = Request(
+                external_id="bulk-tv-1",
+                media_type=MediaType.TV,
+                title="Bulk Show One",
+                status=RequestStatus.STAGED,
+            )
+            request_two = Request(
+                external_id="bulk-tv-2",
+                media_type=MediaType.TV,
+                title="Bulk Show Two",
+                status=RequestStatus.STAGED,
+            )
+            db.add_all([request_one, request_two])
+            await db.flush()
+            db.add_all(
+                [
+                    StagedTorrent(
+                        request_id=request_one.id,
+                        torrent_path="/tmp/bulk-one.torrent",
+                        json_path="/tmp/bulk-one.json",
+                        original_filename="bulk-one.torrent",
+                        title="Bulk Show One S01",
+                        size=100,
+                        indexer="test",
+                        score=90,
+                        magnet_url="magnet:?xt=urn:btih:1111111111111111111111111111111111111111",
+                        selection_source="rule",
+                    ),
+                    StagedTorrent(
+                        request_id=request_two.id,
+                        torrent_path="/tmp/bulk-two.torrent",
+                        json_path="/tmp/bulk-two.json",
+                        original_filename="bulk-two.torrent",
+                        title="Bulk Show Two S01",
+                        size=200,
+                        indexer="test",
+                        score=80,
+                        magnet_url="magnet:?xt=urn:btih:2222222222222222222222222222222222222222",
+                        selection_source="rule",
+                    ),
+                ]
+            )
+            await db.commit()
+
+            qbit = AsyncMock()
+            qbit.add_torrent.side_effect = ["hash1", "hash2"]
+            qbit.get_torrent_info.return_value = None
+            commit_spy = AsyncMock(wraps=db.commit)
+            monkeypatch.setattr(db, "commit", commit_spy)
+            monkeypatch.setattr(staged, "get_settings", lambda: MagicMock())
+            monkeypatch.setattr(staged, "QbittorrentService", MagicMock(return_value=qbit))
+            monkeypatch.setattr(staged, "log_staging_decision", MagicMock())
+            monkeypatch.setattr(staged, "approve_overseerr_request_best_effort", AsyncMock())
+            monkeypatch.setattr(staged.os.path, "exists", MagicMock(return_value=False))
+
+            response = await staged.bulk_staged_action(
+                action="approve",
+                torrent_ids=[1, 2],
+                http_request=MagicMock(headers={"accept": "application/json"}),
+                db=db,
+            )
+
+            assert response.status_code == 200
+            commit_spy.assert_awaited_once()
+
+            request_rows = (await db.execute(select(Request).order_by(Request.id))).scalars().all()
+            torrent_rows = (
+                (await db.execute(select(StagedTorrent).order_by(StagedTorrent.id))).scalars().all()
+            )
+            assert [row.status for row in request_rows] == [
+                RequestStatus.DOWNLOADING,
+                RequestStatus.DOWNLOADING,
+            ]
+            assert [row.status for row in torrent_rows] == ["approved", "approved"]
+
+            status_response = await staged.get_download_status(db=db)
+            body = json.loads(bytes(status_response.body))  # type: ignore[arg-type]
+            assert [item["id"] for item in body["torrents"]] == [1, 2]
+            assert [item["request_status"] for item in body["torrents"]] == [
+                RequestStatus.DOWNLOADING.value,
+                RequestStatus.DOWNLOADING.value,
+            ]
+            assert [item["qbit_progress"] for item in body["torrents"]] == [None, None]
+
+        await engine.dispose()
 
     @pytest.mark.asyncio
     async def test_bulk_staged_action_discards_selected(self, mock_db, monkeypatch):
