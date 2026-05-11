@@ -1,5 +1,7 @@
 """FastAPI application for Siftarr."""
 
+import asyncio
+import inspect
 import logging
 import sys
 from contextlib import asynccontextmanager
@@ -35,6 +37,15 @@ from app.siftarr.services.utils.http_client import close_shared_client
 from app.siftarr.version import __version__
 
 scheduler_service: SchedulerService | None = None
+
+
+def _launch_startup_catchup_syncs(service: SchedulerService, logger: logging.Logger) -> None:
+    """Launch startup catch-up syncs when the service returns an awaitable."""
+    startup_syncs = service.run_startup_catchup_syncs()
+    if inspect.isawaitable(startup_syncs):
+        asyncio.create_task(startup_syncs)
+    else:
+        logger.debug("Startup catch-up sync launch skipped; service returned no awaitable")
 
 
 def _configure_logging() -> None:
@@ -124,6 +135,7 @@ async def lifespan(app: FastAPI):
 
     scheduler_service = SchedulerService(db_mod.async_session_maker, logger=logger)
     scheduler_service.start()
+    _launch_startup_catchup_syncs(scheduler_service, logger)
     yield
     await close_shared_client()
     if scheduler_service:

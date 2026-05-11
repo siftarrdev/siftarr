@@ -218,6 +218,13 @@ class SchedulerService:
                 state.last_error = last_error if isinstance(last_error, str) else None
                 state.metrics_payload = deepcopy(metrics_payload)
 
+            if job_name == PLEX_POLL_JOB_NAME and result.clean_run and not last_error:
+                async with self.db_session_factory() as db:
+                    await settings_service.SettingsStore(db).record_sync_success(
+                        "plex", finished_at
+                    )
+                    await db.commit()
+
             return PlexJobRunResult(
                 job_name=job_name,
                 status="completed",
@@ -410,7 +417,7 @@ class SchedulerService:
             except Exception:
                 logger.exception("Error during download completion check")
 
-    async def _poll_overseerr(self) -> None:
+    async def _poll_overseerr(self) -> bool:
         """
         Poll Overseerr for new approved requests.
 
@@ -423,7 +430,7 @@ class SchedulerService:
                 runtime_settings = get_settings()
                 if not runtime_settings.overseerr_url or not runtime_settings.overseerr_api_key:
                     logger.debug("Overseerr not configured, skipping poll")
-                    return
+                    return False
                 synced, skipped = await settings_service.import_overseerr_requests(
                     db,
                     runtime_settings,
@@ -433,6 +440,11 @@ class SchedulerService:
                     prepare_overseerr_import_func=settings_service.prepare_overseerr_import,
                     logger=logger,
                 )
+                try:
+                    await settings_service.SettingsStore(db).record_sync_success("overseerr")
+                    await db.commit()
+                except Exception:
+                    logger.exception("Failed to record Overseerr sync success timestamp")
                 if synced:
                     logger.info(
                         "Overseerr poll: synced %d new request(s) (%d skipped/existing)",
@@ -441,8 +453,57 @@ class SchedulerService:
                     )
                 else:
                     logger.debug("Overseerr poll: no new requests found (%d skipped)", skipped)
+                return True
         except Exception:
             logger.exception("Error during Overseerr background poll")
+            return False
+
+    async def run_startup_catchup_syncs(self) -> None:
+        """Run stale startup syncs in dependency order without crashing startup."""
+        logger = self._logger
+        runtime_settings = get_settings()
+
+        try:
+            async with self.db_session_factory() as db:
+                store = settings_service.SettingsStore(db)
+                overseerr_stale = await store.is_sync_stale("overseerr")
+                plex_stale = await store.is_sync_stale("plex")
+        except Exception:
+            logger.exception("Startup catch-up sync staleness check failed")
+            return
+
+        if overseerr_stale:
+            if runtime_settings.overseerr_url and runtime_settings.overseerr_api_key:
+                try:
+                    logger.info("Startup catch-up: running stale Overseerr sync")
+                    if await self._poll_overseerr():
+                        logger.info("Startup catch-up: Overseerr sync finished")
+                    else:
+                        logger.error("Startup catch-up: Overseerr sync failed or was skipped")
+                except Exception:
+                    logger.exception("Startup catch-up: Overseerr sync failed")
+            else:
+                logger.info("Startup catch-up: Overseerr not configured; skipping")
+        else:
+            logger.debug("Startup catch-up: Overseerr sync is fresh; skipping")
+
+        if plex_stale:
+            if runtime_settings.plex_url and runtime_settings.plex_token:
+                try:
+                    logger.info("Startup catch-up: running stale Plex poll")
+                    result = await self._run_plex_poll_job(trigger_source="startup")
+                    if result.status == "completed":
+                        logger.info("Startup catch-up: Plex poll finished")
+                    elif result.status == "locked":
+                        logger.info("Startup catch-up: Plex poll already running; skipping")
+                    else:
+                        logger.error("Startup catch-up: Plex poll failed: %s", result.error)
+                except Exception:
+                    logger.exception("Startup catch-up: Plex poll failed")
+            else:
+                logger.info("Startup catch-up: Plex not configured; skipping")
+        else:
+            logger.debug("Startup catch-up: Plex sync is fresh; skipping")
 
     def start(self) -> None:
         """Start the background scheduler."""

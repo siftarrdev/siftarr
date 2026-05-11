@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 from datetime import UTC, date, datetime, timedelta
 from types import SimpleNamespace
+from typing import cast
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -12,6 +13,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from app.siftarr.models._base import Base
+from app.siftarr.models.app_setting import AppSetting
 from app.siftarr.models.episode import Episode
 from app.siftarr.models.request import MediaType, Request, RequestStatus
 from app.siftarr.models.season import Season
@@ -20,6 +22,12 @@ from app.siftarr.services.admin.scheduler_service import (
     PLEX_POLL_JOB_NAME,
     PLEX_RECENT_SCAN_JOB_NAME,
     SchedulerService,
+)
+from app.siftarr.services.admin.settings_service import (
+    OVERSEERR_LAST_SYNC_SUCCESS_KEY,
+    PLEX_LAST_SYNC_SUCCESS_KEY,
+    SettingsStore,
+    parse_sync_timestamp,
 )
 
 
@@ -120,6 +128,201 @@ async def test_poll_overseerr_uses_settings_service_import_helper(monkeypatch):
         2,
         1,
     )
+
+
+@pytest.mark.asyncio
+async def test_overseerr_poll_records_success_timestamp(monkeypatch):
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+    session_maker = async_sessionmaker(engine, expire_on_commit=False)
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+
+    runtime_settings = SimpleNamespace(overseerr_url="https://overseerr", overseerr_api_key="key")
+    monkeypatch.setattr(scheduler_service, "get_settings", lambda: runtime_settings)
+    monkeypatch.setattr(
+        scheduler_service.settings_service,
+        "import_overseerr_requests",
+        AsyncMock(return_value=(0, 0)),
+    )
+
+    logger = MagicMock()
+    service = SchedulerService(session_maker, logger=logger)
+    await service._poll_overseerr()
+
+    async with session_maker() as session:
+        setting = await session.get(AppSetting, OVERSEERR_LAST_SYNC_SUCCESS_KEY)
+        assert setting is not None
+        assert parse_sync_timestamp(cast("str | None", setting.value)) is not None
+
+    await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_plex_poll_records_success_timestamp_and_skips_failed_or_locked(monkeypatch):
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+    session_maker = async_sessionmaker(engine, expire_on_commit=False)
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+
+    monkeypatch.setattr(scheduler_service, "get_settings", lambda: SimpleNamespace())
+    poll = AsyncMock(return_value=0)
+
+    class FakePlexService:
+        def __init__(self, settings):
+            self.settings = settings
+
+    class FakePollingService:
+        def __init__(self, db_session, plex):
+            self.poll = poll
+
+    monkeypatch.setattr(scheduler_service, "PlexService", FakePlexService)
+    monkeypatch.setattr(scheduler_service, "PlexPollingService", FakePollingService)
+
+    logger = MagicMock()
+    service = SchedulerService(session_maker, logger=logger)
+    assert (await service.trigger_plex_poll_now()).status == "completed"
+
+    async with session_maker() as session:
+        setting = await session.get(AppSetting, PLEX_LAST_SYNC_SUCCESS_KEY)
+        assert setting is not None
+        first_success = parse_sync_timestamp(cast("str | None", setting.value))
+        assert first_success is not None
+
+    poll.side_effect = RuntimeError("boom")
+    assert (await service.trigger_plex_poll_now()).status == "failed"
+    async with session_maker() as session:
+        setting = await session.get(AppSetting, PLEX_LAST_SYNC_SUCCESS_KEY)
+        assert setting is not None
+        assert parse_sync_timestamp(cast("str | None", setting.value)) == first_success
+
+    async with service._plex_job_state_guard:
+        service._get_plex_job_state(PLEX_POLL_JOB_NAME).locked = True
+    assert (await service.trigger_plex_poll_now()).status == "locked"
+    async with session_maker() as session:
+        setting = await session.get(AppSetting, PLEX_LAST_SYNC_SUCCESS_KEY)
+        assert setting is not None
+        assert parse_sync_timestamp(cast("str | None", setting.value)) == first_success
+
+    await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_startup_catchup_runs_overseerr_before_plex_when_both_stale(monkeypatch):
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+    session_maker = async_sessionmaker(engine, expire_on_commit=False)
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+
+    monkeypatch.setattr(
+        scheduler_service,
+        "get_settings",
+        lambda: SimpleNamespace(
+            overseerr_url="https://overseerr",
+            overseerr_api_key="key",
+            plex_url="https://plex",
+            plex_token="token",
+        ),
+    )
+    order = []
+    logger = MagicMock()
+    service = SchedulerService(session_maker, logger=logger)
+
+    async def poll_overseerr():
+        order.append("overseerr")
+
+    async def poll_plex(*, trigger_source):
+        order.append(f"plex:{trigger_source}")
+        return SimpleNamespace(status="completed", error=None)
+
+    monkeypatch.setattr(service, "_poll_overseerr", poll_overseerr)
+    monkeypatch.setattr(service, "_run_plex_poll_job", poll_plex)
+
+    await service.run_startup_catchup_syncs()
+
+    assert order == ["overseerr", "plex:startup"]
+    await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_startup_catchup_runs_only_stale_service(monkeypatch):
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+    session_maker = async_sessionmaker(engine, expire_on_commit=False)
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+
+    now = datetime.now(UTC)
+    async with session_maker() as session, session.begin():
+        await SettingsStore(session).record_sync_success("overseerr", now)
+
+    monkeypatch.setattr(
+        scheduler_service,
+        "get_settings",
+        lambda: SimpleNamespace(
+            overseerr_url="https://overseerr",
+            overseerr_api_key="key",
+            plex_url="https://plex",
+            plex_token="token",
+        ),
+    )
+    service = SchedulerService(session_maker, logger=MagicMock())
+    overseerr = AsyncMock()
+    plex = AsyncMock(return_value=SimpleNamespace(status="completed", error=None))
+    monkeypatch.setattr(service, "_poll_overseerr", overseerr)
+    monkeypatch.setattr(service, "_run_plex_poll_job", plex)
+
+    await service.run_startup_catchup_syncs()
+
+    overseerr.assert_not_awaited()
+    plex.assert_awaited_once_with(trigger_source="startup")
+    await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_startup_catchup_skips_unconfigured_and_continues_after_overseerr_failure(
+    monkeypatch,
+):
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+    session_maker = async_sessionmaker(engine, expire_on_commit=False)
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+
+    logger = MagicMock()
+    service = SchedulerService(session_maker, logger=logger)
+    plex = AsyncMock(return_value=SimpleNamespace(status="completed", error=None))
+    overseerr = AsyncMock(side_effect=RuntimeError("overseerr boom"))
+    monkeypatch.setattr(service, "_poll_overseerr", overseerr)
+    monkeypatch.setattr(service, "_run_plex_poll_job", plex)
+
+    monkeypatch.setattr(
+        scheduler_service,
+        "get_settings",
+        lambda: SimpleNamespace(
+            overseerr_url="",
+            overseerr_api_key="",
+            plex_url="https://plex",
+            plex_token="token",
+        ),
+    )
+    await service.run_startup_catchup_syncs()
+    overseerr.assert_not_awaited()
+    plex.assert_awaited_once_with(trigger_source="startup")
+
+    plex.reset_mock()
+    monkeypatch.setattr(
+        scheduler_service,
+        "get_settings",
+        lambda: SimpleNamespace(
+            overseerr_url="https://overseerr",
+            overseerr_api_key="key",
+            plex_url="https://plex",
+            plex_token="token",
+        ),
+    )
+    await service.run_startup_catchup_syncs()
+    overseerr.assert_awaited_once()
+    plex.assert_awaited_once_with(trigger_source="startup")
+    logger.exception.assert_called_with("Startup catch-up: Overseerr sync failed")
+    await engine.dispose()
 
 
 @pytest.mark.asyncio
