@@ -36,6 +36,31 @@ async def test_poll_movie_available(service, mock_db, mock_plex):
 
 
 @pytest.mark.asyncio
+async def test_poll_movie_overseerr_sync_failure_does_not_block(service, mock_db, mock_plex):
+    req = make_request()
+    req.overseerr_request_id = 123
+    mock_result = MagicMock()
+    mock_result.scalars.return_value.all.return_value = [req]
+    mock_db.execute.return_value = mock_result
+    mock_plex.check_movie_available.return_value = True
+
+    with (
+        patch.object(service.lifecycle, "transition", new_callable=AsyncMock) as mock_transition,
+        patch(
+            "app.siftarr.services.admin.plex_polling_service.approve_overseerr_request_best_effort",
+            new_callable=AsyncMock,
+        ) as mock_sync,
+    ):
+        mock_transition.return_value = req
+        mock_sync.return_value = False
+        completed = await service.poll()
+
+    assert completed == 1
+    mock_transition.assert_awaited_once_with(1, RequestStatus.COMPLETED, reason="Found on Plex")
+    mock_sync.assert_awaited_once_with(mock_db, req, reason="plex_available")
+
+
+@pytest.mark.asyncio
 async def test_poll_movie_not_available(service, mock_db, mock_plex):
     req = make_request()
     mock_result = MagicMock()

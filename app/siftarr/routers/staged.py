@@ -30,6 +30,9 @@ from app.siftarr.services.integrations.plex_service import PlexService
 from app.siftarr.services.integrations.qbittorrent_service import MediaCategory, QbittorrentService
 from app.siftarr.services.lifecycle.activity_log_service import ActivityLogService
 from app.siftarr.services.lifecycle.lifecycle_service import LifecycleService
+from app.siftarr.services.lifecycle.overseerr_sync_service import (
+    approve_overseerr_request_best_effort,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -238,6 +241,8 @@ async def _approve_torrent(
 
     if torrent_hash is None:
         return False
+
+    await approve_overseerr_request_best_effort(db, request, reason="staged_approval_qbit_sent")
 
     activity_log = ActivityLogService(db)
     await activity_log.log(

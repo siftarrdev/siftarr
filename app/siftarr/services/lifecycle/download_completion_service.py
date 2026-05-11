@@ -23,6 +23,9 @@ from app.siftarr.services.integrations.qbittorrent_service import (
 )
 from app.siftarr.services.lifecycle.activity_log_service import ActivityLogService
 from app.siftarr.services.lifecycle.lifecycle_service import LifecycleService
+from app.siftarr.services.lifecycle.overseerr_sync_service import (
+    approve_overseerr_request_best_effort,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -193,6 +196,14 @@ class DownloadCompletionService:
                 request_map[request.id] = (request, [])
             request_map[request.id][1].append(torrent)
 
+        for request, torrents in request_map.values():
+            if any(qbit_evidence_by_torrent_id[t.id]["qbit_found"] for t in torrents):
+                await approve_overseerr_request_best_effort(
+                    self.db,
+                    request,
+                    reason="qbit_present_evidence",
+                )
+
         completed = 0
         activity_log = ActivityLogService(self.db)
         ready_request_map: dict[int, tuple[Request, list[StagedTorrent], list[StagedTorrent]]] = {}
@@ -229,6 +240,12 @@ class DownloadCompletionService:
                 len(torrents),
                 request_id,
                 request.title,
+            )
+
+            await approve_overseerr_request_best_effort(
+                self.db,
+                request,
+                reason="qbit_completion_evidence",
             )
 
             existing_torrent_ids = completed_torrent_ids_by_request.setdefault(request_id, set())

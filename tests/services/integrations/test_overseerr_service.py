@@ -395,6 +395,98 @@ class TestOverseerrService:
             assert result is False
 
     @pytest.mark.asyncio
+    async def test_approve_request_success(self):
+        """Test approving a request successfully."""
+        with patch(
+            "app.siftarr.services.integrations.overseerr_service.get_settings"
+        ) as mock_get_settings:
+            mock_settings = MagicMock()
+            mock_settings.overseerr_url = "http://localhost:5055"
+            mock_settings.overseerr_api_key = "test"
+            mock_get_settings.return_value = mock_settings
+
+            service = OverseerrService()
+            mock_client = AsyncMock()
+            mock_response = MagicMock()
+            mock_response.status_code = 200
+            mock_client.post = AsyncMock(return_value=mock_response)
+
+            with patch(
+                "app.siftarr.services.integrations.overseerr_service.get_shared_client",
+                return_value=mock_client,
+            ):
+                result = await service.approve_request(123)
+
+            assert result is True
+            mock_client.post.assert_called_once_with(
+                "http://localhost:5055/api/v1/request/123/approve",
+                headers={"X-Api-Key": "test"},
+            )
+
+    @pytest.mark.asyncio
+    async def test_approve_request_failure(self):
+        """Test approve returns False on failure."""
+        with patch(
+            "app.siftarr.services.integrations.overseerr_service.get_settings"
+        ) as mock_get_settings:
+            mock_settings = MagicMock()
+            mock_settings.overseerr_url = "http://localhost:5055"
+            mock_settings.overseerr_api_key = "test"
+            mock_get_settings.return_value = mock_settings
+
+            service = OverseerrService()
+            mock_client = AsyncMock()
+            mock_response = MagicMock()
+            mock_response.status_code = 400
+            mock_client.post = AsyncMock(return_value=mock_response)
+
+            with patch(
+                "app.siftarr.services.integrations.overseerr_service.get_shared_client",
+                return_value=mock_client,
+            ):
+                result = await service.approve_request(123)
+
+            assert result is False
+
+    @pytest.mark.asyncio
+    async def test_approve_request_missing_config(self):
+        """Test approve returns False without config."""
+        with patch(
+            "app.siftarr.services.integrations.overseerr_service.get_settings"
+        ) as mock_get_settings:
+            mock_settings = MagicMock()
+            mock_settings.overseerr_url = ""
+            mock_settings.overseerr_api_key = "test"
+            mock_get_settings.return_value = mock_settings
+
+            assert await OverseerrService().approve_request(123) is False
+
+    @pytest.mark.asyncio
+    async def test_approve_request_network_error(self):
+        """Test approve handles request errors."""
+        import httpx
+
+        with patch(
+            "app.siftarr.services.integrations.overseerr_service.get_settings"
+        ) as mock_get_settings:
+            mock_settings = MagicMock()
+            mock_settings.overseerr_url = "http://localhost:5055"
+            mock_settings.overseerr_api_key = "test"
+            mock_get_settings.return_value = mock_settings
+
+            service = OverseerrService()
+            mock_client = AsyncMock()
+            mock_client.post = AsyncMock(side_effect=httpx.RequestError("Network error"))
+
+            with patch(
+                "app.siftarr.services.integrations.overseerr_service.get_shared_client",
+                return_value=mock_client,
+            ):
+                result = await service.approve_request(123)
+
+            assert result is False
+
+    @pytest.mark.asyncio
     async def test_get_media_details_uses_ttl_cache(self):
         """Media details should reuse a cached response within the TTL window."""
         overseerr_service._MEDIA_DETAILS_CACHE.clear()

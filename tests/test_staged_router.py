@@ -165,6 +165,52 @@ class TestStagedRouter:
         )
 
     @pytest.mark.asyncio
+    async def test_approve_overseerr_sync_failure_does_not_block(self, mock_db, monkeypatch):
+        """Overseerr approve sync failures should not prevent local approval."""
+        torrent = MagicMock()
+        torrent.id = 8
+        torrent.request_id = 9
+        torrent.magnet_url = "magnet:?xt=urn:btih:abc"
+        torrent.status = "staged"
+        torrent.selection_source = "rule"
+        torrent.torrent_path = "/tmp/test.torrent"
+        torrent.json_path = "/tmp/test.json"
+
+        request = MagicMock()
+        request.id = 9
+        request.media_type = MediaType.MOVIE
+        request.status = RequestStatus.STAGED
+        request.overseerr_request_id = 99
+
+        torrent_result = MagicMock()
+        torrent_result.scalar_one_or_none.return_value = torrent
+        request_result = MagicMock()
+        request_result.scalar_one_or_none.return_value = request
+        rule_result = MagicMock()
+        rule_result.scalars.return_value.first.return_value = torrent
+        mock_db.execute.side_effect = [torrent_result, request_result, rule_result]
+
+        qbittorrent = AsyncMock()
+        qbittorrent.add_torrent.return_value = "hash789"
+        lifecycle_service = AsyncMock()
+        sync = AsyncMock(return_value=False)
+        monkeypatch.setattr(staged, "get_settings", lambda: MagicMock())
+        monkeypatch.setattr(staged, "QbittorrentService", MagicMock(return_value=qbittorrent))
+        monkeypatch.setattr(staged, "LifecycleService", MagicMock(return_value=lifecycle_service))
+        monkeypatch.setattr(staged, "log_staging_decision", MagicMock())
+        monkeypatch.setattr(staged, "approve_overseerr_request_best_effort", sync)
+        monkeypatch.setattr(staged.os.path, "exists", MagicMock(return_value=False))
+
+        response = await staged.approve_staged_torrent(
+            8, http_request=MagicMock(headers={}), db=mock_db
+        )
+
+        assert response.status_code == 303
+        assert torrent.status == "approved"
+        lifecycle_service.transition.assert_awaited_once_with(request.id, RequestStatus.DOWNLOADING)
+        sync.assert_awaited_once_with(mock_db, request, reason="staged_approval_qbit_sent")
+
+    @pytest.mark.asyncio
     async def test_bulk_staged_action_approves_selected(self, mock_db, monkeypatch):
         """Bulk approve should process multiple staged torrents."""
         torrent_one = MagicMock()
