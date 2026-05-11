@@ -223,6 +223,12 @@ Tests mirror the service subpackage organization under `tests/services/`:
 - `tests/services/utils/` — type utils tests
 - Top-level `tests/test_*.py` — integration tests (season sweep, torrent helpers, API, router-level, config)
 
+## CI/CD Workflows
+
+- `.github/workflows/ci.yml` — quality gates (lint, format, typecheck, tests, Docker build) on push/PR to main/develop
+- `.github/workflows/deploy.yml` — build and push Docker image to GHCR on `v*` tags
+- `.github/workflows/release.yaml` — create GitHub Release with built Python package artifacts and auto-generated release notes on `v*` tags
+
 ## Database and operations
 
 - `alembic.ini` / `db/alembic.ini` — local and container Alembic CLI configuration
