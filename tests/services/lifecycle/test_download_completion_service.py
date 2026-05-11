@@ -182,6 +182,57 @@ class TestDownloadCompletionService:
         ]
 
     @pytest.mark.asyncio
+    async def test_qbit_evidence_overseerr_sync_failure_does_not_block(
+        self, mock_db, mock_qbit, mock_plex_polling, monkeypatch
+    ):
+        """Failed Overseerr approval sync should not block qBit/Plex reconciliation."""
+        from app.siftarr.models.request import MediaType, RequestStatus
+        from app.siftarr.services.admin.plex_polling_service import CheckRequestResult
+        from app.siftarr.services.lifecycle import download_completion_service as module
+
+        torrent = MagicMock()
+        torrent.id = 3
+        torrent.request_id = 41
+        torrent.title = "Test Movie 2024"
+        torrent.magnet_url = "magnet:?xt=urn:btih:da39a3ee5e6b4b0d3255bfef95601890afd80709"
+
+        request = MagicMock()
+        request.id = 41
+        request.title = "Test Movie"
+        request.media_type = MediaType.MOVIE
+        request.status = RequestStatus.DOWNLOADING
+        request.overseerr_request_id = 410
+
+        mock_qbit.get_all_active_torrents = AsyncMock(
+            return_value=[
+                {
+                    "hash": "da39a3ee5e6b4b0d3255bfef95601890afd80709",
+                    "name": torrent.title,
+                    "progress": 0.5,
+                    "state": "downloading",
+                }
+            ]
+        )
+        mock_plex_polling.check_request = AsyncMock(
+            return_value=CheckRequestResult(
+                request_id=41,
+                available=False,
+                status_before=RequestStatus.DOWNLOADING,
+                status_after=RequestStatus.DOWNLOADING,
+            )
+        )
+        mock_db.execute.return_value = _rows_result([(torrent, request)])
+        sync = AsyncMock(return_value=False)
+        monkeypatch.setattr(module, "approve_overseerr_request_best_effort", sync)
+
+        service = DownloadCompletionService(mock_db, mock_qbit, mock_plex_polling)
+        result = await service.check_downloading_requests()
+
+        assert result == 0
+        sync.assert_awaited_once_with(mock_db, request, reason="qbit_present_evidence")
+        mock_plex_polling.check_request.assert_not_called()
+
+    @pytest.mark.asyncio
     async def test_plex_confirms_completion(self, mock_db, mock_qbit, mock_plex_polling):
         """When Plex confirms, request is completed through Plex polling."""
         from app.siftarr.models.request import MediaType, RequestStatus

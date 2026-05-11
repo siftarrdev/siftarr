@@ -153,6 +153,68 @@ async def test_dashboard_marks_only_completed_episode_waiting_for_plex(mock_db, 
 
 
 @pytest.mark.asyncio
+async def test_dashboard_includes_multiple_bulk_approved_movie_torrents(mock_db, monkeypatch):
+    """Downloading tab should show every approved movie from one bulk approval."""
+    torrents = []
+    for torrent_id, request_id, title in [
+        (21, 121, "First Bulk Movie 2026"),
+        (22, 122, "Second Bulk Movie 2026"),
+    ]:
+        torrent = MagicMock()
+        torrent.id = torrent_id
+        torrent.request_id = request_id
+        torrent.title = title
+        torrent.status = "approved"
+        torrent.size = 1024 * 1024 * 1024
+        torrent.indexer = "TestIndexer"
+        torrent.score = 88
+        torrent.created_at = datetime(2026, 4, 1, 12, 0, tzinfo=UTC)
+        torrent.replaced_by_id = None
+        torrents.append(torrent)
+
+    lifecycle_service = AsyncMock()
+    lifecycle_service.get_active_requests.return_value = []
+    lifecycle_service.get_requests_by_status.return_value = []
+    lifecycle_service.get_unreleased_requests.return_value = []
+    monkeypatch.setattr(dashboard, "LifecycleService", lambda db: lifecycle_service)
+    monkeypatch.setattr(
+        dashboard,
+        "get_settings",
+        lambda: MagicMock(
+            overseerr_url="http://overseerr.test",
+            staging_mode_enabled=False,
+            qbittorrent_url="http://qb.test",
+        ),
+    )
+
+    mock_db.execute.side_effect = [
+        MagicMock(scalars=MagicMock(return_value=MagicMock(all=MagicMock(return_value=torrents)))),
+        MagicMock(
+            all=MagicMock(
+                return_value=[
+                    (121, RequestStatus.DOWNLOADING, MediaType.MOVIE, "First Bulk Movie", 2026),
+                    (122, RequestStatus.DOWNLOADING, MediaType.MOVIE, "Second Bulk Movie", 2026),
+                ]
+            )
+        ),
+        MagicMock(all=MagicMock(return_value=[])),
+        MagicMock(scalars=MagicMock(return_value=MagicMock(all=MagicMock(return_value=[])))),
+    ]
+
+    response = await dashboard.dashboard(MagicMock(), db=mock_db)
+
+    rendered = response.body.decode()
+    assert response.context["downloading_torrents"] == torrents
+    assert response.context["downloading_request_statuses"] == {
+        121: RequestStatus.DOWNLOADING.value,
+        122: RequestStatus.DOWNLOADING.value,
+    }
+    assert response.context["stats"]["downloading"] == 2
+    assert 'data-torrent-id="21"' in rendered
+    assert 'data-torrent-id="22"' in rendered
+
+
+@pytest.mark.asyncio
 async def test_dashboard_warns_for_staged_movie_identity_mismatch(mock_db, monkeypatch):
     torrent = MagicMock()
     torrent.id = 5

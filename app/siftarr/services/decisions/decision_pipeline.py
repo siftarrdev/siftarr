@@ -101,11 +101,18 @@ async def add_to_pending_queue(
 def get_best_passing(
     all_evaluated: Sequence[ReleaseEvaluation],
 ) -> ReleaseEvaluation | None:
-    """Return the highest‑scoring passing evaluation, or *None*."""
+    """Return the highest‑scoring passing evaluation, with deterministic tie-breaks."""
     passed = [e for e in all_evaluated if e.passed]
     if not passed:
         return None
-    passed.sort(key=lambda e: e.total_score, reverse=True)
+    passed.sort(
+        key=lambda e: (
+            -e.total_score,
+            -e.release.seeders,
+            e.release.title.casefold(),
+            e.release.indexer.casefold(),
+        )
+    )
     return passed[0]
 
 

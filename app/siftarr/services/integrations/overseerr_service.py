@@ -314,3 +314,18 @@ class OverseerrService:
             return response.status_code == 200
         except httpx.RequestError:
             return False
+
+    async def approve_request(self, request_id: int) -> bool:
+        """Approve a request in Overseerr via API."""
+        if not self.base_url or not self.api_key:
+            return False
+
+        endpoint = f"{self.base_url}/api/v1/request/{request_id}/approve"
+        client = await self._get_client()
+        headers = self._get_headers()
+
+        try:
+            response = await client.post(endpoint, headers=headers)
+            return response.status_code == 200
+        except httpx.RequestError:
+            return False

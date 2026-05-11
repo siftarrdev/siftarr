@@ -71,6 +71,44 @@ class TestRuleEngine:
         assert engine.size_limit_rules[0].max_size_bytes == 10 * 1024 * 1024 * 1024
         assert engine.size_limit_rules[0].tv_target == TVTarget.SEASON_PACK
 
+    def test_from_db_rules_handles_string_types_and_movie_scope(self):
+        """Movie engines should include movie/both DB rules even when values are strings."""
+        movie_scorer = MagicMock(spec=Rule)
+        movie_scorer.is_enabled = True
+        movie_scorer.rule_type = "scorer"
+        movie_scorer.media_scope = "movie"
+        movie_scorer.id = 1
+        movie_scorer.name = "Movie x265"
+        movie_scorer.pattern = "x265"
+        movie_scorer.score = 50
+
+        both_requirement = MagicMock(spec=Rule)
+        both_requirement.is_enabled = True
+        both_requirement.rule_type = "requirement"
+        both_requirement.media_scope = "both"
+        both_requirement.id = 2
+        both_requirement.name = "Require 1080p"
+        both_requirement.pattern = "1080p"
+        both_requirement.score = 0
+
+        tv_exclusion = MagicMock(spec=Rule)
+        tv_exclusion.is_enabled = True
+        tv_exclusion.rule_type = "exclusion"
+        tv_exclusion.media_scope = "tv"
+        tv_exclusion.id = 3
+        tv_exclusion.name = "TV only"
+        tv_exclusion.pattern = "HDTV"
+        tv_exclusion.score = 0
+
+        engine = RuleEngine.from_db_rules(
+            rules=[movie_scorer, both_requirement, tv_exclusion],
+            media_type="movie",
+        )
+
+        assert engine.scorer_patterns == [(1, "Movie x265", "x265", 50)]
+        assert engine.requirement_patterns == [(2, "Require 1080p", "1080p")]
+        assert engine.exclusion_patterns == []
+
     def test_evaluate_no_rules(self):
         """Test evaluating with no rules."""
         engine = RuleEngine()

@@ -20,6 +20,9 @@ from app.siftarr.models.season import Season
 from app.siftarr.services.integrations.plex_service import PlexService, PlexTransientScanError
 from app.siftarr.services.lifecycle.episode_sync_service import persist_episode_availability
 from app.siftarr.services.lifecycle.lifecycle_service import LifecycleService
+from app.siftarr.services.lifecycle.overseerr_sync_service import (
+    approve_overseerr_request_best_effort,
+)
 from app.siftarr.services.utils.async_utils import gather_limited
 
 logger = logging.getLogger(__name__)
@@ -603,9 +606,16 @@ class PlexPollingService:
                 req.seasons,
                 decision.availability,
             )
+            if req.status == RequestStatus.COMPLETED:
+                await approve_overseerr_request_best_effort(
+                    self.db,
+                    req,
+                    reason="plex_available",
+                )
             return
 
         await self.lifecycle.transition(req.id, RequestStatus.COMPLETED, reason=decision.reason)
+        await approve_overseerr_request_best_effort(self.db, req, reason="plex_available")
 
 
 __all__ = [

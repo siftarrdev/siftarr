@@ -173,6 +173,7 @@ Business logic and integrations, organized into thematic subpackages:
 - `episode_derive.py` — canonical derivation functions for TV episode/season/request statuses
 - `episode_sync_service.py` — syncing episode availability from Overseerr and Plex
 - `download_completion_service.py` — completion detection via qBit torrent list matching
+- `overseerr_sync_service.py` — best-effort lifecycle sync back to Overseerr (approval evidence)
 - `unreleased_service.py` — unreleased content handling
 
 **`releases/`** — Release processing and staging

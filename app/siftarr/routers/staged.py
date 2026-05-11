@@ -30,6 +30,9 @@ from app.siftarr.services.integrations.plex_service import PlexService
 from app.siftarr.services.integrations.qbittorrent_service import MediaCategory, QbittorrentService
 from app.siftarr.services.lifecycle.activity_log_service import ActivityLogService
 from app.siftarr.services.lifecycle.lifecycle_service import LifecycleService
+from app.siftarr.services.lifecycle.overseerr_sync_service import (
+    approve_overseerr_request_best_effort,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -188,7 +191,12 @@ async def _finalize_action_response(
     return RedirectResponse(url=redirect_url, status_code=303)
 
 
-async def _approve_torrent(torrent: StagedTorrent, db: AsyncSession) -> bool:
+async def _approve_torrent(
+    torrent: StagedTorrent,
+    db: AsyncSession,
+    *,
+    commit_transition: bool = True,
+) -> bool:
     request = None
     if torrent.request_id:
         result = await db.execute(select(Request).where(Request.id == torrent.request_id))
@@ -234,6 +242,8 @@ async def _approve_torrent(torrent: StagedTorrent, db: AsyncSession) -> bool:
     if torrent_hash is None:
         return False
 
+    await approve_overseerr_request_best_effort(db, request, reason="staged_approval_qbit_sent")
+
     activity_log = ActivityLogService(db)
     await activity_log.log(
         EventType.RELEASE_APPROVED,
@@ -264,7 +274,14 @@ async def _approve_torrent(torrent: StagedTorrent, db: AsyncSession) -> bool:
             RequestStatus.FAILED,
             RequestStatus.DENIED,
         ):
-            await lifecycle_service.transition(request.id, RequestStatus.DOWNLOADING)
+            if commit_transition:
+                await lifecycle_service.transition(request.id, RequestStatus.DOWNLOADING)
+            else:
+                await lifecycle_service.transition(
+                    request.id,
+                    RequestStatus.DOWNLOADING,
+                    commit=False,
+                )
 
     try:
         if os.path.exists(torrent_path):
@@ -441,7 +458,7 @@ async def bulk_staged_action(
     processed = 0
     for torrent in torrents:
         if action == "approve":
-            success = await _approve_torrent(torrent, db)
+            success = await _approve_torrent(torrent, db, commit_transition=False)
         else:
             success = await _discard_torrent(torrent, db)
         if success:
