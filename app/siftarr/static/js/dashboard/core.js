@@ -24,6 +24,8 @@ window.currentTvSeasons = [];
 window.currentActiveStagedTorrent = null;
 window.currentRequestTimeline = [];
 
+const checkboxRangeAnchors = new Map();
+
 // Utility functions
 function escapeHtml(value) {
     return String(value ?? '')
@@ -162,6 +164,49 @@ function closeRequestDetails() {
     document.getElementById('request-details-modal').classList.add('hidden');
 }
 
+function isRangeSelectableCheckboxVisible(checkbox) {
+    const row = checkbox.closest('tr');
+    return !row || row.style.display !== 'none';
+}
+
+function getCheckboxRangeKey(checkbox, selector) {
+    const scope = checkbox.closest('table') || checkbox.closest('form') || document;
+    if (scope.id) return `${selector}:${scope.id}`;
+    return selector;
+}
+
+function getVisibleCheckboxRange(checkbox, selector) {
+    const scope = checkbox.closest('table') || checkbox.closest('form') || document;
+    return Array.from(scope.querySelectorAll(selector)).filter(isRangeSelectableCheckboxVisible);
+}
+
+function bindCheckboxRangeSelection(selector) {
+    document.querySelectorAll(selector).forEach(checkbox => {
+        if (checkbox.dataset.checkboxRangeBound === 'true') return;
+        checkbox.dataset.checkboxRangeBound = 'true';
+        checkbox.addEventListener('click', event => {
+            event.stopPropagation();
+
+            const current = event.currentTarget;
+            const key = getCheckboxRangeKey(current, selector);
+            const visibleCheckboxes = getVisibleCheckboxRange(current, selector);
+            const currentIndex = visibleCheckboxes.indexOf(current);
+            const anchor = checkboxRangeAnchors.get(key);
+            const anchorIndex = anchor ? visibleCheckboxes.indexOf(anchor) : -1;
+
+            if (event.shiftKey && currentIndex >= 0 && anchorIndex >= 0) {
+                const start = Math.min(anchorIndex, currentIndex);
+                const end = Math.max(anchorIndex, currentIndex);
+                visibleCheckboxes.slice(start, end + 1).forEach(rangeCheckbox => {
+                    rangeCheckbox.checked = current.checked;
+                });
+            }
+
+            checkboxRangeAnchors.set(key, current);
+        });
+    });
+}
+
 /**
  * Refresh the currently visible tab's content by fetching fresh HTML from the server.
  * Preserves text filter, media filter, and sort state.
@@ -211,6 +256,9 @@ async function refreshCurrentTabContent() {
             if (selectAll && window.bindSelectAll) {
                 window.bindSelectAll(selectAll, checkboxSelector);
             }
+            if (tabName === 'pending' && window.bindCheckboxRangeSelection) {
+                window.bindCheckboxRangeSelection(checkboxSelector);
+            }
         }
     } catch (err) {
         console.error('Failed to refresh tab content:', err);
@@ -228,3 +276,4 @@ window.getVisibleRequests = getVisibleRequests;
 window.refreshDetailsNavigationContext = refreshDetailsNavigationContext;
 window.updateNavigationButtons = updateNavigationButtons;
 window.refreshCurrentTabContent = refreshCurrentTabContent;
+window.bindCheckboxRangeSelection = bindCheckboxRangeSelection;
