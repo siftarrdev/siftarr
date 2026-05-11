@@ -7,11 +7,22 @@ from typing import Any
 
 from fastapi import HTTPException, Request, status
 
-from app.siftarr.config import get_settings
+from app.siftarr.config import PLACEHOLDER_API_KEY, get_settings
 
 logger = logging.getLogger(__name__)
 
 AUTHORIZATION_SCHEME = "Bearer"
+
+
+def _api_key_matches(provided_key: str | None, configured_key: str) -> bool:
+    """Return true only for a non-placeholder configured API key match."""
+    return bool(
+        provided_key
+        and configured_key
+        and provided_key != PLACEHOLDER_API_KEY
+        and configured_key != PLACEHOLDER_API_KEY
+        and provided_key == configured_key
+    )
 
 
 def _extract_api_key(request: Request) -> str | None:
@@ -52,7 +63,7 @@ async def verify_api_key(request: Request) -> None:
         return
 
     key = _extract_api_key(request)
-    if key is None or key != settings.api_key:
+    if not _api_key_matches(key, settings.api_key):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid or missing API key",
@@ -77,7 +88,7 @@ async def require_auth(request: Request) -> None:
 
     # Fall back to API key (programmatic access)
     key = _extract_api_key(request)
-    if key is not None and key == settings.api_key:
+    if _api_key_matches(key, settings.api_key):
         return
 
     raise HTTPException(

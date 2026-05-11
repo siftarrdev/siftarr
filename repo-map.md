@@ -86,6 +86,7 @@ The old duplicated developer guide and stale product specification under `docs/`
 - `Settings` Pydantic model loaded from environment variables
 - `get_settings()` — cached singleton accessor
 - `reload_settings()` — invalidates the cached singleton (called after runtime setting changes)
+- first-run API key safety helpers (placeholder constant and secure key generation)
 - `get_static_version()` — cache-busting value for static assets
 
 ### `app/siftarr/version.py`
@@ -138,7 +139,7 @@ Business logic and integrations, organized into thematic subpackages:
 - `plex_oauth_service.py` — `PlexOAuthService` wrapping plex.tv API calls (PIN flow, user identity, token validation)
 
 **`admin/`** — Config, scheduling, polling
-- `settings_service.py` — SettingsStore (DB-backed settings persistence), SSE progress, scheduled job helpers, Plex rescan/Overseerr import orchestration
+- `settings_service.py` — SettingsStore (DB-backed settings persistence and startup API key generation), SSE progress, scheduled job helpers, Plex rescan/Overseerr import orchestration
 - `scheduler_service.py` — recurring job scheduling via APScheduler
 - `plex_polling_service/` — Plex polling logic; prioritizes recent/downloading requests with periodic full reconcile every 20th poll cycle
 

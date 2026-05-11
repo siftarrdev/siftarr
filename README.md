@@ -115,8 +115,14 @@ Common variables:
 | `PLEX_RECENT_SCAN_INTERVAL_MINUTES` | `5` | Recent Plex scan polling interval. |
 | `OVERSEERR_SYNC_CONCURRENCY` | `16` | Overseerr sync concurrency. |
 | `PLEX_SYNC_CONCURRENCY` | `16` | Plex sync concurrency. |
+| `SIFTARR_API_KEY` | generated on first run | Optional explicit API key for programmatic access. The development placeholder `dev-key-change-me` is never accepted. |
 | `SIFTARR_DB_PATH` | `/data/db/siftarr.db` | SQLite database path used to build the default database URL. |
 | `DATABASE_URL` | SQLite under `/data/db/` | Full database URL override. |
+
+On startup, Siftarr loads persisted runtime settings and generates a random API key if the
+effective key is missing or still `dev-key-change-me`; the generated key is stored in the
+database and shown masked in **Settings**. Set `SIFTARR_API_KEY` to a non-placeholder value
+to explicitly override the persisted API key for non-interactive deployments.
 
 ## First-run setup
 

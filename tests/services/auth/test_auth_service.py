@@ -158,3 +158,20 @@ class TestRequireAuth:
         with pytest.raises(HTTPException) as exc:
             await require_auth(request)
         assert exc.value.status_code == 401
+
+    @patch("app.siftarr.services.auth_service.get_settings")
+    async def test_placeholder_api_key_is_rejected(self, mock_get_settings):
+        """The development placeholder must never authenticate requests."""
+        mock_get_settings.return_value.auth_enabled = True
+        mock_get_settings.return_value.api_key = "dev-key-change-me"
+        request = Request(
+            scope={
+                "type": "http",
+                "session": {},
+                "headers": [(b"x-api-key", b"dev-key-change-me")],
+            }
+        )
+
+        with pytest.raises(HTTPException) as exc:
+            await require_auth(request)
+        assert exc.value.status_code == 401

@@ -25,6 +25,7 @@ from app.siftarr.routers import (
     webhooks,
 )
 from app.siftarr.services.admin.scheduler_service import SchedulerService
+from app.siftarr.services.admin.settings_service import SettingsStore
 from app.siftarr.services.auth_service import require_auth
 from app.siftarr.services.utils.http_client import close_shared_client
 from app.siftarr.version import __version__
@@ -112,6 +113,10 @@ async def lifespan(app: FastAPI):
 
     # Verify database readiness before starting background work.
     await db_mod.init_db()
+
+    assert db_mod.async_session_maker is not None
+    async with db_mod.async_session_maker() as session, session.begin():
+        await SettingsStore(session).ensure_runtime_api_key()
 
     scheduler_service = SchedulerService(db_mod.async_session_maker, logger=logger)
     scheduler_service.start()

@@ -46,7 +46,7 @@ async def login_page(request: Request) -> Response:
     from app.siftarr.services.auth_service import get_session_user
 
     if get_session_user(request) is not None:
-        return RedirectResponse(url="/dashboard")
+        return RedirectResponse(url="/")
 
     templates = _get_templates()
     return templates.TemplateResponse(request, "login.html")

@@ -1,6 +1,7 @@
 """Application settings loaded from environment variables."""
 
 import os
+import secrets
 import time
 from functools import lru_cache
 
@@ -8,6 +9,13 @@ from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from app.siftarr.version import __version__
+
+PLACEHOLDER_API_KEY = "dev-key-change-me"
+
+
+def generate_api_key() -> str:
+    """Generate a secure random API key for persisted runtime auth."""
+    return secrets.token_urlsafe(32)
 
 
 class Settings(BaseSettings):
@@ -59,7 +67,7 @@ class Settings(BaseSettings):
     )
 
     # Authentication settings
-    api_key: str = Field(default="dev-key-change-me", validation_alias="SIFTARR_API_KEY")
+    api_key: str = Field(default=PLACEHOLDER_API_KEY, validation_alias="SIFTARR_API_KEY")
     auth_enabled: bool = False
 
     # Session secret key (auto-generated if not set)

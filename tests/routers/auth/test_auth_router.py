@@ -1,5 +1,6 @@
 """Tests for the auth router."""
 
+from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -7,6 +8,16 @@ from fastapi import HTTPException
 
 from app.siftarr.routers import auth_router
 from app.siftarr.routers.auth_router import PlexAuthRequest
+
+
+def test_login_template_guards_crypto_random_uuid():
+    """Login JS should not require crypto.randomUUID support."""
+    template = (Path(auth_router.__file__).parent.parent / "templates" / "login.html").read_text()
+
+    assert "crypto.randomUUID()" not in template
+    assert "typeof globalCrypto.randomUUID === 'function'" in template
+    assert "globalCrypto.getRandomValues(bytes)" in template
+    assert "Math.random().toString(36)" in template
 
 
 @pytest.fixture(autouse=True)
@@ -42,7 +53,15 @@ class TestLoginPage:
 
         result = await auth_router.login_page(request)
         assert isinstance(result, RedirectResponse)
-        assert result.headers.get("location") == "/dashboard"
+        assert result.headers.get("location") == "/"
+
+
+def test_login_template_redirects_to_existing_dashboard_route():
+    """Login JS should redirect to the mounted dashboard route."""
+    template = (Path(auth_router.__file__).parent.parent / "templates" / "login.html").read_text()
+
+    assert "window.location.href = '/';" in template
+    assert "window.location.href = '/dashboard';" not in template
 
 
 class TestPlexAuth:
