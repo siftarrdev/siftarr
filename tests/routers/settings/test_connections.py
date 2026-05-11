@@ -97,6 +97,22 @@ async def test_apply_runtime_setting_updates_env_and_clears_cache(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_runtime_settings_apply_db_overrides_before_connection_tests(monkeypatch, mock_db):
+    """Connection tests should use the same persisted/env merge as the settings page."""
+
+    runtime_settings = MagicMock()
+    store = AsyncMock()
+    store.load_into_environ = AsyncMock()
+    monkeypatch.setattr(settings, "SettingsStore", lambda db: store)
+    monkeypatch.setattr(settings, "get_settings", lambda: runtime_settings)
+
+    result = await settings._get_runtime_settings(mock_db)
+
+    store.load_into_environ.assert_awaited_once_with()
+    assert result is runtime_settings
+
+
+@pytest.mark.asyncio
 async def test_toggle_staging_mode_flips_runtime_setting(monkeypatch, mock_db):
     """Staging mode toggle should write the inverted runtime setting value."""
 
@@ -167,7 +183,8 @@ async def test_individual_connection_test_routes_return_service_results(
     """Each connection test route should wrap its service result consistently."""
 
     effective_settings = MagicMock()
-    monkeypatch.setattr(settings, "get_settings", lambda: effective_settings)
+    get_runtime_settings = AsyncMock(return_value=effective_settings)
+    monkeypatch.setattr(settings, "_get_runtime_settings", get_runtime_settings)
     tester = AsyncMock(
         return_value=ConnectionTestResult(True, f"{service_name} ok", details="detail")
     )
@@ -175,6 +192,7 @@ async def test_individual_connection_test_routes_return_service_results(
 
     response = await getattr(settings, route_name)(db=mock_db)
 
+    get_runtime_settings.assert_awaited_once_with(mock_db)
     tester.assert_awaited_once_with(effective_settings)
     assert response.service == service_name
     assert response.success is True
@@ -187,7 +205,8 @@ async def test_test_all_connections_runs_each_tester_in_order(monkeypatch, mock_
     """Bulk connection testing should reuse one settings object and preserve service order."""
 
     effective_settings = MagicMock()
-    monkeypatch.setattr(settings, "get_settings", lambda: effective_settings)
+    get_runtime_settings = AsyncMock(return_value=effective_settings)
+    monkeypatch.setattr(settings, "_get_runtime_settings", get_runtime_settings)
     overseerr = AsyncMock(return_value=ConnectionTestResult(True, "overseerr ok", "ov"))
     prowlarr = AsyncMock(return_value=ConnectionTestResult(False, "prowlarr bad", "pr"))
     qbittorrent = AsyncMock(return_value=ConnectionTestResult(True, "qb ok", "qb"))
@@ -200,6 +219,7 @@ async def test_test_all_connections_runs_each_tester_in_order(monkeypatch, mock_
 
     response = await settings.test_all_connections(db=mock_db)
 
+    get_runtime_settings.assert_awaited_once_with(mock_db)
     overseerr.assert_awaited_once_with(effective_settings)
     prowlarr.assert_awaited_once_with(effective_settings)
     qbittorrent.assert_awaited_once_with(effective_settings)

@@ -210,6 +210,12 @@ async def _clear_runtime_settings(store: SettingsStore, *keys: str) -> None:
     reload_settings()
 
 
+async def _get_runtime_settings(db: AsyncSession):
+    """Return settings after applying DB overrides to the runtime environment."""
+    await SettingsStore(db).load_into_environ()
+    return get_settings()
+
+
 # ── Page routes ────────────────────────────────────────────────────────────
 
 
@@ -312,7 +318,7 @@ async def get_connections_api(db: AsyncSession = Depends(get_db)) -> dict:
 @router.post("/api/test/overseerr", response_model=ConnectionTestResponse)
 async def test_overseerr_connection(db: AsyncSession = Depends(get_db)) -> ConnectionTestResponse:
     """Test connection to Overseerr."""
-    result: ConnectionTestResult = await ConnectionTester.test_overseerr(get_settings())
+    result: ConnectionTestResult = await ConnectionTester.test_overseerr(await _get_runtime_settings(db))
     return ConnectionTestResponse(
         service="overseerr",
         success=result.success,
@@ -324,7 +330,7 @@ async def test_overseerr_connection(db: AsyncSession = Depends(get_db)) -> Conne
 @router.post("/api/test/prowlarr", response_model=ConnectionTestResponse)
 async def test_prowlarr_connection(db: AsyncSession = Depends(get_db)) -> ConnectionTestResponse:
     """Test connection to Prowlarr."""
-    result: ConnectionTestResult = await ConnectionTester.test_prowlarr(get_settings())
+    result: ConnectionTestResult = await ConnectionTester.test_prowlarr(await _get_runtime_settings(db))
     return ConnectionTestResponse(
         service="prowlarr",
         success=result.success,
@@ -336,7 +342,7 @@ async def test_prowlarr_connection(db: AsyncSession = Depends(get_db)) -> Connec
 @router.post("/api/test/qbittorrent", response_model=ConnectionTestResponse)
 async def test_qbittorrent_connection(db: AsyncSession = Depends(get_db)) -> ConnectionTestResponse:
     """Test connection to qBittorrent."""
-    result: ConnectionTestResult = await ConnectionTester.test_qbittorrent(get_settings())
+    result: ConnectionTestResult = await ConnectionTester.test_qbittorrent(await _get_runtime_settings(db))
     return ConnectionTestResponse(
         service="qbittorrent",
         success=result.success,
@@ -348,7 +354,7 @@ async def test_qbittorrent_connection(db: AsyncSession = Depends(get_db)) -> Con
 @router.post("/api/test/plex", response_model=ConnectionTestResponse)
 async def test_plex_connection(db: AsyncSession = Depends(get_db)) -> ConnectionTestResponse:
     """Test connection to Plex."""
-    result: ConnectionTestResult = await ConnectionTester.test_plex(get_settings())
+    result: ConnectionTestResult = await ConnectionTester.test_plex(await _get_runtime_settings(db))
     return ConnectionTestResponse(
         service="plex",
         success=result.success,
@@ -360,7 +366,7 @@ async def test_plex_connection(db: AsyncSession = Depends(get_db)) -> Connection
 @router.post("/api/test/all", response_model=list[ConnectionTestResponse])
 async def test_all_connections(db: AsyncSession = Depends(get_db)) -> list[ConnectionTestResponse]:
     """Test connections to all services."""
-    effective_settings = get_settings()
+    effective_settings = await _get_runtime_settings(db)
     results = []
     for service_name, tester in [
         ("overseerr", ConnectionTester.test_overseerr),
