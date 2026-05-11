@@ -307,56 +307,6 @@ details[open] summary .accordion-chevron { transform: rotate(90deg); }
                         <button type="submit" class="btn-secondary btn-sm">Reset Scheduler Defaults</button>
                     </form>
             </div>
-            <div class="flex flex-wrap items-center gap-2">
-                <form action="/settings/run-recent-plex-scan" method="post">
-                    <button type="submit" class="btn-primary btn-sm shrink-0">Run Recent Plex Scan</button>
-                </form>
-                <form action="/settings/run-plex-poll" method="post">
-                    <button type="submit" class="btn-warning btn-sm shrink-0">Run Plex Poll</button>
-                </form>
-            </div>
-
-            <div class="grid grid-cols-1 xl:grid-cols-2 gap-4">
-                {% for job in plex_jobs or [] %}
-                <div class="rounded-xl border border-gray-700/60 bg-surface-850 p-5 space-y-3">
-                    <div class="flex items-start justify-between gap-4">
-                        <div>
-                            <h3 class="text-sm font-semibold text-white">{{ job.label }}</h3>
-                            <p class="text-xs text-gray-500 mt-0.5">{{ job.description }}</p>
-                        </div>
-                        <span class="text-xs font-semibold px-2.5 py-1 rounded-full {% if job.locked %}bg-amber-900/40 text-amber-300 border border-amber-700/50{% else %}bg-emerald-900/40 text-emerald-300 border border-emerald-700/50{% endif %}">
-                            {{ 'In Progress' if job.locked else 'Idle' }}
-                        </span>
-                    </div>
-                    <dl class="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
-                        <div class="rounded-lg bg-surface-900/70 p-3 sm:col-span-2">
-                            <dt class="text-gray-500">Last Outcome</dt>
-                            <dd class="text-gray-200 mt-1">{{ job.run_summary or 'No completed run recorded' }}</dd>
-                        </div>
-                        <div class="rounded-lg bg-surface-900/70 p-3">
-                            <dt class="text-gray-500">Last Success</dt>
-                            <dd class="text-gray-200 mt-1">{{ job.last_success or 'Never' }}</dd>
-                        </div>
-                        <div class="rounded-lg bg-surface-900/70 p-3">
-                            <dt class="text-gray-500">Last Run</dt>
-                            <dd class="text-gray-200 mt-1">{{ job.last_run or job.last_started or 'Never' }}</dd>
-                        </div>
-                        <div class="rounded-lg bg-surface-900/70 p-3">
-                            <dt class="text-gray-500">Lock</dt>
-                            <dd class="text-gray-200 mt-1">{{ job.lock_owner or 'Unlocked' }}</dd>
-                        </div>
-                        <div class="rounded-lg bg-surface-900/70 p-3 sm:col-span-2">
-                            <dt class="text-gray-500">Last Error</dt>
-                            <dd class="text-gray-200 mt-1">{{ job.last_error or 'None' }}</dd>
-                        </div>
-                        <div class="rounded-lg bg-surface-900/70 p-3 sm:col-span-2">
-                            <dt class="text-gray-500">Metrics Snapshot</dt>
-                            <dd class="text-gray-200 mt-1">{{ job.metrics_snapshot or 'No metrics recorded yet' }}</dd>
-                        </div>
-                    </dl>
-                </div>
-                {% endfor %}
-            </div>
         </div>
     </details>
 
