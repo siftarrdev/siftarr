@@ -323,21 +323,16 @@ async def test_settings_page_includes_plex_job_status_and_manual_job_actions(
 
     assert "Advanced / Scheduler" in body
     assert "Plex Scheduler Status" not in body
-    assert "Recent Plex Scan" in body
-    assert "Plex Poll" in body
-    assert "Run Recent Plex Scan" in body
-    assert "Run Plex Poll" in body
-    assert "Metrics Snapshot" in body
-    assert "Last Outcome" in body
-    assert "Recent scan completed; completed 2, matched 0, scanned 4" in body
-    assert "worker-1" in body
+    assert "Recent Plex Scan" not in body
+    assert "Plex Poll" not in body
+    assert "Run Recent Plex Scan" not in body
+    assert "Run Plex Poll" not in body
+    assert "Metrics Snapshot" not in body
+    assert "Last Outcome" not in body
+    assert "Recent scan completed; completed 2, matched 0, scanned 4" not in body
+    assert "worker-1" not in body
 
     advanced_index = body.index("Advanced / Scheduler")
-    run_recent_index = body.index("Run Recent Plex Scan")
-    run_poll_index = body.index("Run Plex Poll")
-    metrics_index = body.index("Metrics Snapshot")
-    assert advanced_index < run_recent_index < metrics_index
-    assert advanced_index < run_poll_index < metrics_index
 
     advanced_details_start = body.rindex("<details", 0, advanced_index)
     advanced_summary_start = body.rindex("<summary", 0, advanced_index)
