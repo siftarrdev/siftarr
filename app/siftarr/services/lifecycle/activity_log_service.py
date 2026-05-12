@@ -8,6 +8,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.siftarr.models import ActivityLog, EventType
+from app.siftarr.services.stats_metrics_service import record_timing_event
 
 logger = logging.getLogger(__name__)
 
@@ -43,6 +44,22 @@ class ActivityLogService:
                 if inspect.isawaitable(add_result):
                     await add_result
                 await self.db.flush()
+                if event_type in {
+                    EventType.SEARCH_STARTED,
+                    EventType.SEARCH_COMPLETED,
+                    EventType.RULE_EVALUATION,
+                    EventType.RELEASE_STAGED,
+                    EventType.RELEASE_APPROVED,
+                    EventType.DOWNLOAD_STARTED,
+                    EventType.DOWNLOAD_COMPLETED,
+                }:
+                    await record_timing_event(
+                        self.db,
+                        event_name=event_type.value,
+                        request_id=request_id,
+                        activity_log_id=entry.id,
+                        details=details,
+                    )
             logger.debug("Logged %s for request_id=%s", event_type, request_id)
             return entry
         except Exception:

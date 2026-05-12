@@ -1,4 +1,4 @@
-<!-- Phase 1 audit only: no migrations or API/UI implementation. -->
+<!-- Stats persistence contract; API/UI implementation is intentionally deferred. -->
 
 # Stats Metrics Audit and Contract
 
@@ -34,12 +34,14 @@
   - processing times: search duration and request-to-approval duration.
   - rule outcomes: counts by rule and outcome (`matched`, `not_matched`, `passed`, `failed/rejected`, score delta where relevant).
 
-## Persistence proposal requiring approval
+## Phase 2 approved persistence
 
-Before Phase 2 migrations/instrumentation, choose and approve compact persistence for missing durable data:
+Approved long-term approach: dedicated immutable metrics tables. Existing historical rows are not backfilled with fabricated data; stats API work should expose unsupported/partial fields as unavailable when no metric rows exist.
 
-1. Add approved-selection facts to `staged_torrents` or a small approval metrics table: selected resolution bucket/raw resolution, selected indexer, selection source, approved event timestamp, and request ID.
-2. Add per-rule evaluation outcome persistence keyed to request/search run/release/rule, storing rule ID/name/type, matched boolean, passed/rejected outcome, score delta, and rejection reason.
-3. Add durable timing events or spans with correlation IDs for each search/decision run: search started/completed, decision completed, staged, approved; optionally persist computed durations for search and request-to-approval.
+Tables:
 
-Question for approval: should Phase 2 extend existing tables (`staged_torrents`, `activity_logs`) with compact columns/structured details, or introduce dedicated metrics tables optimized for immutable historical stats?
+1. `stats_release_facts`: one immutable row per newly approved selected release, with request/release/staged IDs where available, title, indexer, raw resolution, bucket (`4K`, `1080p`, `other`), selection source, and approval timestamp.
+2. `stats_rule_outcomes`: per-release/per-rule evaluation outcomes for new search/evaluation runs, including matched flag, outcome, score delta, rejection reason, and stored release ID where available.
+3. `stats_timing_events`: durable timing events emitted alongside activity logs for search/rule/stage/approval/download events, plus computed `request_to_approval` duration rows when a selected release is approved.
+
+Instrumentation covers automatic decisions, manual release selections, staged approvals/replacements, direct-send approvals, and activity-log timing events. No Stats router/API/UI is included in Phase 2.

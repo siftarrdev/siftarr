@@ -62,7 +62,7 @@ Primary flow:
 - `README.md` — end-user overview, deployment, first-run setup, integrations, rules, staging, and troubleshooting
 - `CONTRIBUTING.md` — developer prerequisites, local setup, dependency management, migrations, tests, quality gates, and PR workflow
 - `docs/README.md` — documentation index and guidance for where detailed docs should live
-- `docs/stats-metrics.md` — Phase 1 stats metric contract, support audit, and persistence proposal/question
+- `docs/stats-metrics.md` — stats metric contract, support audit, and Phase 2 immutable metrics persistence notes
 - `app/siftarr/README.md` — application package boundaries, runtime flow, extension points, and package-level testing guidance
 - `app/siftarr/routers/README.md` — route-layer responsibilities, extension points, and router testing guidance
 - `app/siftarr/services/README.md` — service/integration responsibilities, extension points, and service testing guidance
@@ -113,6 +113,7 @@ Database entities and enums.
 - `season.py` / `episode.py` — TV coverage and availability tracking
 - `staged_torrent.py` — staged torrent persistence; indexed on `request_id` and `status`
 - `activity_log.py` — activity/audit history; indexed on `event_type`
+- `stats_metrics.py` — immutable stats metric tables for selected release facts, rule outcomes, and timing events
 - `app_setting.py` — key-value store for runtime-configurable settings, generated API key, and Plex SSO claim metadata (persisted across restarts)
 - `_base.py` — declarative base
 
@@ -138,6 +139,7 @@ Business logic and integrations, organized into thematic subpackages:
 - `auth_service.py` — authentication dependencies: `require_auth` (browser Plex SSO redirect with API-key fallback for programmatic requests), claimed-admin session validation/cleanup, request classification, `get_session_user` helper, `verify_api_key`
 - `metadata_service.py` — Overseerr metadata lookup for request details
 - `request_service.py` — request loading / validation
+- `stats_metrics_service.py` — write-only instrumentation helpers for immutable stats metric facts/events (Stats API/UI not implemented yet)
 
 **`auth/`** — Plex SSO authentication
 - `plex_oauth_service.py` — `PlexOAuthService` wrapping plex.tv API calls (PIN flow, user identity, token validation)

@@ -17,6 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.siftarr.config import get_settings
+from app.siftarr.models.activity_log import EventType
 from app.siftarr.models.episode import Episode
 from app.siftarr.models.release import Release
 from app.siftarr.models.request import MediaType, Request, RequestStatus
@@ -24,6 +25,7 @@ from app.siftarr.models.season import Season
 from app.siftarr.models.staged_torrent import StagedTorrent
 from app.siftarr.services.integrations.prowlarr_service import ProwlarrRelease
 from app.siftarr.services.integrations.qbittorrent_service import MediaCategory, QbittorrentService
+from app.siftarr.services.lifecycle.activity_log_service import ActivityLogService
 from app.siftarr.services.lifecycle.episode_derive import (
     derive_request_status_from_episodes,
     derive_season_status,
@@ -37,6 +39,7 @@ from app.siftarr.services.releases.release_serializers import (
     tv_target_scopes_overlap,
 )
 from app.siftarr.services.releases.release_storage import build_prowlarr_release
+from app.siftarr.services.stats_metrics_service import record_release_fact
 from app.siftarr.services.utils.http_client import get_shared_client
 
 STAGING_DIR = Path("/data/staging")
@@ -717,6 +720,27 @@ class StagingService:
                 raise RuntimeError(f"Failed to send '{release.title}' to qBittorrent.")
 
             added_hashes.append(torrent_hash)
+            await record_release_fact(
+                self.db,
+                release,
+                selection_source=selection_source,
+            )
+            activity_log = ActivityLogService(self.db)
+            await activity_log.log(
+                EventType.RELEASE_APPROVED,
+                request_id=request.id,
+                details={
+                    "release_id": release.id,
+                    "title": release.title,
+                    "indexer": release.indexer,
+                    "selection_source": selection_source,
+                },
+            )
+            await activity_log.log(
+                EventType.DOWNLOAD_STARTED,
+                request_id=request.id,
+                details={"release_id": release.id, "title": release.title},
+            )
             logger.info(
                 "Torrent sent to qBittorrent: request_id=%s title=%s hash=%s category=%s",
                 request.id,

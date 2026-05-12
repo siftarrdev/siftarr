@@ -62,6 +62,7 @@ from app.siftarr.services.releases.release_storage import (
     store_search_results,
 )
 from app.siftarr.services.releases.staging_service import StagingService
+from app.siftarr.services.stats_metrics_service import record_rule_outcomes
 
 logger = logging.getLogger(__name__)
 
@@ -709,6 +710,13 @@ class TVDecisionService:
             request.id,
             all_evaluated_releases,
         )
+        await record_rule_outcomes(
+            self.db,
+            request_id=request.id,
+            evaluations=all_evaluated_releases,
+            stored_releases_by_key=stored_releases_by_key,
+        )
+        await self.db.commit()
 
         if all_selected_releases:
             stored_releases: list[Release] = []

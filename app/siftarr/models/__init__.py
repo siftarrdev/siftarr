@@ -9,6 +9,11 @@ from app.siftarr.models.request import MediaType, Request, RequestStatus
 from app.siftarr.models.rule import Rule, RuleType
 from app.siftarr.models.season import Season
 from app.siftarr.models.staged_torrent import StagedTorrent
+from app.siftarr.models.stats_metrics import (
+    StatsReleaseFact,
+    StatsRuleOutcome,
+    StatsTimingEvent,
+)
 
 __all__ = [
     "ActivityLog",
@@ -24,4 +29,7 @@ __all__ = [
     "RuleType",
     "Season",
     "StagedTorrent",
+    "StatsReleaseFact",
+    "StatsRuleOutcome",
+    "StatsTimingEvent",
 ]
