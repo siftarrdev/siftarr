@@ -23,10 +23,20 @@ function formatMs(value) {
     return `${Math.round(value)}ms`;
 }
 
-function renderBars(container, rows, valueKey = 'value') {
+function renderBars(container, rows, valueKey = 'value', availability = 'stats') {
     container.innerHTML = '';
+    if (availability === 'unavailable') {
+        const message = document.createElement('p');
+        message.className = 'text-sm text-gray-500';
+        message.textContent = 'Unavailable for historical data.';
+        container.appendChild(message);
+        return;
+    }
     if (!rows || rows.length === 0) {
-        container.innerHTML = '<p class="text-sm text-gray-500">No data for this range.</p>';
+        const message = document.createElement('p');
+        message.className = 'text-sm text-gray-500';
+        message.textContent = 'No data for this range.';
+        container.appendChild(message);
         return;
     }
     const max = Math.max(...rows.map((row) => row[valueKey] || 0), 1);
@@ -34,33 +44,41 @@ function renderBars(container, rows, valueKey = 'value') {
         const value = row[valueKey] || 0;
         const width = Math.max((value / max) * 100, value > 0 ? 4 : 0);
         const item = document.createElement('div');
-        item.innerHTML = `
-            <div class="mb-1 flex items-center justify-between gap-3 text-sm">
-                <span class="truncate text-gray-300">${row.label}</span>
-                <span class="font-mono text-gray-400">${valueKey === 'avg_ms' ? formatMs(value) : formatNumber(value)}</span>
-            </div>
-            <div class="h-2 overflow-hidden rounded-full bg-surface-850">
-                <div class="h-full rounded-full bg-brand-500" style="width: ${width}%"></div>
-            </div>`;
+        const header = document.createElement('div');
+        header.className = 'mb-1 flex items-center justify-between gap-3 text-sm';
+        const label = document.createElement('span');
+        label.className = 'truncate text-gray-300';
+        label.textContent = row.label;
+        const amount = document.createElement('span');
+        amount.className = 'font-mono text-gray-400';
+        amount.textContent = valueKey === 'avg_ms' ? formatMs(value) : formatNumber(value);
+        header.append(label, amount);
+        const track = document.createElement('div');
+        track.className = 'h-2 overflow-hidden rounded-full bg-surface-850';
+        const bar = document.createElement('div');
+        bar.className = 'h-full rounded-full bg-brand-500';
+        bar.style.width = `${width}%`;
+        track.appendChild(bar);
+        item.append(header, track);
         container.appendChild(item);
     });
 }
 
-function updateCards(cards) {
+function updateCards(cards, availability = {}) {
     document.querySelector('[data-card="total_requests"]').textContent = formatNumber(cards.total_requests);
-    document.querySelector('[data-card="downloads_processed"]').textContent = formatNumber(cards.downloads_processed);
+    document.querySelector('[data-card="downloads_processed"]').textContent = availability.downloads_processed === 'unavailable' ? '--' : formatNumber(cards.downloads_processed);
     document.querySelector('[data-card="approval_rate"]').textContent = cards.approval_rate === null ? '--' : `${cards.approval_rate}%`;
-    document.querySelector('[data-card="evaluated_requests"]').textContent = `${formatNumber(cards.evaluated_requests)} evaluated`;
+    document.querySelector('[data-card="evaluated_requests"]').textContent = availability.evaluated_requests === 'unavailable' ? 'Unavailable' : `${formatNumber(cards.evaluated_requests)} evaluated`;
     document.querySelector('[data-card="rules"]').textContent = `${formatNumber(cards.enabled_rules)} / ${formatNumber(cards.total_rules)}`;
 }
 
 function renderStats(data) {
     rangeLabel.textContent = data.range.label;
-    updateCards(data.cards);
-    renderBars(document.querySelector('[data-chart="resolution_split"]'), data.charts.resolution_split);
-    renderBars(document.querySelector('[data-chart="source_split"]'), data.charts.source_split);
-    renderBars(document.querySelector('[data-chart="rule_outcomes"]'), data.charts.rule_outcomes);
-    renderBars(document.querySelector('[data-chart="processing_times"]'), data.charts.processing_times, 'avg_ms');
+    updateCards(data.cards, data.availability);
+    renderBars(document.querySelector('[data-chart="resolution_split"]'), data.charts.resolution_split, 'value', data.availability?.resolution_split);
+    renderBars(document.querySelector('[data-chart="source_split"]'), data.charts.source_split, 'value', data.availability?.source_split);
+    renderBars(document.querySelector('[data-chart="rule_outcomes"]'), data.charts.rule_outcomes, 'value', data.availability?.rule_outcomes);
+    renderBars(document.querySelector('[data-chart="processing_times"]'), data.charts.processing_times, 'avg_ms', data.availability?.processing_times);
     setHidden(emptyBox, !data.empty);
     setHidden(content, false);
 }

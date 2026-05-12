@@ -2,6 +2,7 @@
 
 import logging
 from copy import copy
+from time import perf_counter
 from typing import Any
 
 from sqlalchemy import select
@@ -128,6 +129,7 @@ class SearchService:
         qbittorrent_service = QbittorrentService(settings=runtime_settings)
         queue_service = PendingQueueService(self.db)
 
+        started = perf_counter()
         if request.media_type.value == "movie":
             decision_service = MovieDecisionService(self.db, prowlarr_service, qbittorrent_service)
             result = await decision_service.process_request(request.id)
@@ -142,6 +144,7 @@ class SearchService:
         await activity_log.log(
             EventType.SEARCH_COMPLETED,
             request_id=request.id,
+            duration_ms=(perf_counter() - started) * 1000,
             details={
                 "status": result.get("status"),
                 "message": result.get("message"),

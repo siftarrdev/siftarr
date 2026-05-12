@@ -4,13 +4,17 @@ import pytest
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from app.siftarr.models import (
+    ActivityLog,
     Base,
+    Release,
     Request,
     Rule,
+    StagedTorrent,
     StatsReleaseFact,
     StatsRuleOutcome,
     StatsTimingEvent,
 )
+from app.siftarr.models.activity_log import EventType
 from app.siftarr.models.request import MediaType, RequestStatus
 from app.siftarr.models.rule import RuleType
 from app.siftarr.services.stats_service import StatsRangeError, StatsService, build_stats_range
@@ -141,3 +145,59 @@ async def test_custom_range_filters_event_dates(session_maker):
         )
 
     assert payload["cards"]["total_requests"] == 1
+
+
+@pytest.mark.asyncio
+async def test_historical_stats_derive_supported_metrics_and_mark_unavailable(session_maker):
+    created = datetime(2026, 5, 1, 12, 0)
+    async with session_maker() as session:
+        request = Request(
+            external_id="hist-1",
+            media_type=MediaType.MOVIE,
+            title="Historical",
+            status=RequestStatus.COMPLETED,
+            created_at=created,
+        )
+        session.add(request)
+        await session.flush()
+        session.add_all(
+            [
+                Release(
+                    request_id=request.id,
+                    title="Historical.1080p",
+                    size=1,
+                    download_url="https://example.test/torrent",
+                    indexer="IndexerOld",
+                    resolution="1080p",
+                ),
+                StagedTorrent(
+                    request_id=request.id,
+                    torrent_path="/tmp/a.torrent",
+                    json_path="/tmp/a.json",
+                    original_filename="a.torrent",
+                    title="Historical.1080p",
+                    size=1,
+                    indexer="IndexerOld",
+                    status="approved",
+                    updated_at=created,
+                ),
+                ActivityLog(
+                    request_id=request.id,
+                    event_type=EventType.RULE_EVALUATION.value,
+                    created_at=created,
+                ),
+            ]
+        )
+        await session.commit()
+
+        payload = await StatsService(session).get_stats(build_stats_range("all"))
+
+    assert payload["cards"]["downloads_processed"] == 1
+    assert payload["cards"]["evaluated_requests"] == 1
+    assert payload["cards"]["approval_rate"] == 100.0
+    assert payload["charts"]["source_split"] == [{"label": "IndexerOld", "value": 1}]
+    assert payload["charts"]["resolution_split"] == [{"label": "1080p", "value": 1}]
+    assert payload["charts"]["rule_outcomes"] == []
+    assert payload["availability"]["downloads_processed"] == "historical"
+    assert payload["availability"]["rule_outcomes"] == "unavailable"
+    assert payload["availability"]["processing_times"] == "unavailable"

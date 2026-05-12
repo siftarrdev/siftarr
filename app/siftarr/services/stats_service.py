@@ -8,8 +8,12 @@ from sqlalchemy import distinct, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.siftarr.models import (
+    ActivityLog,
+    EventType,
+    Release,
     Request,
     Rule,
+    StagedTorrent,
     StatsReleaseFact,
     StatsRuleOutcome,
     StatsTimingEvent,
@@ -109,6 +113,11 @@ class StatsService:
                 stats_range,
             )
         )
+        release_fact_count = downloads_processed
+        downloads_source = "stats"
+        if release_fact_count == 0:
+            downloads_processed = await self._historical_downloads_processed(stats_range)
+            downloads_source = "historical" if downloads_processed else "unavailable"
         evaluated_requests = await self._scalar_count(
             _apply_range(
                 select(func.count(distinct(StatsRuleOutcome.request_id))),
@@ -116,11 +125,13 @@ class StatsService:
                 stats_range,
             )
         )
-        approval_rate = (
-            round((downloads_processed / evaluated_requests) * 100, 1)
-            if evaluated_requests
-            else None
-        )
+        rule_outcomes_source = "stats"
+        if evaluated_requests == 0:
+            evaluated_requests = await self._historical_evaluated_requests(stats_range)
+            rule_outcomes_source = "historical" if evaluated_requests else "unavailable"
+        approval_rate = None
+        if evaluated_requests and downloads_source != "unavailable":
+            approval_rate = round((downloads_processed / evaluated_requests) * 100, 1)
 
         resolution_split = await self._group_counts(
             _apply_range(
@@ -131,6 +142,10 @@ class StatsService:
                 stats_range,
             )
         )
+        resolution_source = "stats"
+        if release_fact_count == 0:
+            resolution_split = await self._historical_resolution_split(stats_range)
+            resolution_source = "historical" if resolution_split else "unavailable"
         source_split = await self._group_counts(
             _apply_range(
                 select(StatsReleaseFact.indexer, func.count(StatsReleaseFact.id)).group_by(
@@ -140,6 +155,10 @@ class StatsService:
                 stats_range,
             )
         )
+        source_source = "stats"
+        if release_fact_count == 0:
+            source_split = await self._historical_source_split(stats_range)
+            source_source = "historical" if source_split else "unavailable"
         rule_outcomes = await self._group_counts(
             _apply_range(
                 select(StatsRuleOutcome.outcome, func.count(StatsRuleOutcome.id)).group_by(
@@ -149,6 +168,8 @@ class StatsService:
                 stats_range,
             )
         )
+        if rule_outcomes_source != "stats":
+            rule_outcomes = []
         processing_times = await self._processing_times(stats_range)
 
         has_activity = any(
@@ -187,6 +208,15 @@ class StatsService:
                 "rule_outcomes": rule_outcomes,
                 "processing_times": processing_times,
             },
+            "availability": {
+                "downloads_processed": downloads_source,
+                "approval_rate": "available" if approval_rate is not None else "unavailable",
+                "evaluated_requests": rule_outcomes_source,
+                "resolution_split": resolution_source,
+                "source_split": source_source,
+                "rule_outcomes": "stats" if rule_outcomes_source == "stats" else "unavailable",
+                "processing_times": "stats" if processing_times else "unavailable",
+            },
             "empty": not has_activity,
         }
 
@@ -220,6 +250,55 @@ class StatsService:
             }
             for key, avg, count in result.all()
         ]
+
+    async def _historical_downloads_processed(self, stats_range: StatsRange) -> int:
+        return await self._scalar_count(
+            _apply_range(
+                select(func.count(distinct(StagedTorrent.request_id))).where(
+                    StagedTorrent.status == "approved",
+                    StagedTorrent.request_id.is_not(None),
+                ),
+                StagedTorrent.updated_at,
+                stats_range,
+            )
+        )
+
+    async def _historical_evaluated_requests(self, stats_range: StatsRange) -> int:
+        return await self._scalar_count(
+            _apply_range(
+                select(func.count(distinct(ActivityLog.request_id))).where(
+                    ActivityLog.event_type == EventType.RULE_EVALUATION.value,
+                    ActivityLog.request_id.is_not(None),
+                ),
+                ActivityLog.created_at,
+                stats_range,
+            )
+        )
+
+    async def _historical_source_split(self, stats_range: StatsRange) -> list[dict[str, Any]]:
+        return await self._group_counts(
+            _apply_range(
+                select(StagedTorrent.indexer, func.count(StagedTorrent.id))
+                .where(StagedTorrent.status == "approved")
+                .group_by(StagedTorrent.indexer),
+                StagedTorrent.updated_at,
+                stats_range,
+            )
+        )
+
+    async def _historical_resolution_split(self, stats_range: StatsRange) -> list[dict[str, Any]]:
+        stmt = (
+            select(Release.resolution, func.count(distinct(StagedTorrent.id)))
+            .join(
+                Release,
+                (Release.request_id == StagedTorrent.request_id)
+                & (Release.title == StagedTorrent.title),
+            )
+            .where(StagedTorrent.status == "approved")
+            .group_by(Release.resolution)
+        )
+        rows = await self._group_counts(_apply_range(stmt, StagedTorrent.updated_at, stats_range))
+        return [row for row in rows if row["label"] != "Unknown"]
 
     @staticmethod
     def _timing_average(processing_times: list[dict[str, Any]], key: str) -> float | None:

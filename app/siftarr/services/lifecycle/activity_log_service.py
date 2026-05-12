@@ -29,6 +29,7 @@ class ActivityLogService:
         event_type: EventType,
         request_id: int | None = None,
         details: dict | None = None,
+        duration_ms: float | None = None,
     ) -> ActivityLog | None:
         """Create an activity log entry within a savepoint.
 
@@ -63,6 +64,7 @@ class ActivityLogService:
                         event_name=event_type.value,
                         request_id=request_id,
                         activity_log_id=entry.id,
+                        duration_ms=duration_ms,
                         details=details,
                     )
             logger.debug("Logged %s for request_id=%s", event_type, request_id)
