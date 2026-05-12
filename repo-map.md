@@ -62,6 +62,7 @@ Primary flow:
 - `README.md` — end-user overview, deployment, first-run setup, integrations, rules, staging, and troubleshooting
 - `CONTRIBUTING.md` — developer prerequisites, local setup, dependency management, migrations, tests, quality gates, and PR workflow
 - `docs/README.md` — documentation index and guidance for where detailed docs should live
+- `docs/stats-metrics.md` — Phase 1 stats metric contract, support audit, and persistence proposal/question
 - `app/siftarr/README.md` — application package boundaries, runtime flow, extension points, and package-level testing guidance
 - `app/siftarr/routers/README.md` — route-layer responsibilities, extension points, and router testing guidance
 - `app/siftarr/services/README.md` — service/integration responsibilities, extension points, and service testing guidance
