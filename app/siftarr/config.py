@@ -173,7 +173,7 @@ class Settings(BaseSettings):
     prowlarr_tv_strategy_tvdb_enabled: bool = False
 
     @model_validator(mode="after")
-    def _validate_tv_sweep_strategies(self) -> "Settings":
+    def _validate_tv_sweep_strategies(self) -> Settings:
         if not any(
             [
                 self.prowlarr_tv_strategy_title_sxx_enabled,
@@ -198,7 +198,7 @@ class Settings(BaseSettings):
             hour_str, minute_str = (value or "03:00").strip().split(":", maxsplit=1)
             hour = int(hour_str)
             minute = int(minute_str)
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             return "03:00"
         if 0 <= hour <= 23 and 0 <= minute <= 59:
             return f"{hour:02d}:{minute:02d}"

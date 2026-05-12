@@ -46,7 +46,7 @@ def _parse_full_sync_time(value: str) -> tuple[int, int]:
         hour_str, minute_str = value.split(":", maxsplit=1)
         hour = int(hour_str)
         minute = int(minute_str)
-    except (ValueError, AttributeError):
+    except ValueError, AttributeError:
         return 3, 0
     if 0 <= hour <= 23 and 0 <= minute <= 59:
         return hour, minute

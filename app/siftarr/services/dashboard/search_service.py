@@ -324,7 +324,7 @@ class SearchService:
             stored_by_key = await store_search_results(
                 self.db, request_id, evaluations, scope=scope, source="adhoc"
             )
-        except (StopAsyncIteration, StopIteration):
+        except StopAsyncIteration, StopIteration:
             return [
                 self._transient_release_from_evaluation(request_id, evaluation)
                 for evaluation in evaluations
@@ -517,7 +517,7 @@ class SearchService:
             stored_by_key = await store_search_results(
                 self.db, request_id, evaluations, scope=scope, source="adhoc"
             )
-        except (StopAsyncIteration, StopIteration):
+        except StopAsyncIteration, StopIteration:
             releases = [
                 serialize_evaluated_release(
                     evaluation.release,

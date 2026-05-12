@@ -73,7 +73,7 @@ async def download_torrent(url: str, save_path: Path) -> bool:
         with open(save_path, "wb") as f:
             f.write(content)
         return True
-    except (httpx.RequestError, httpx.HTTPStatusError):
+    except httpx.RequestError, httpx.HTTPStatusError:
         return False
 
 
@@ -178,7 +178,7 @@ def _staged_selection_outcome(
 
 async def _delete_superseded_staged_torrents(
     db: AsyncSession,
-    staging_service: "StagingService",
+    staging_service: StagingService,
     torrents: list[StagedTorrent],
 ) -> bool:
     """Delete superseded staged rows and any local staging files."""

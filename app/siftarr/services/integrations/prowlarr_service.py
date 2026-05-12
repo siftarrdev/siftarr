@@ -19,7 +19,7 @@ logger = logging.getLogger(__name__)
 # ── Search result cache ──────────────────────────────────────────────
 # LRU cache keyed by params hash, with TTL.  Only caches non-manual
 # (automatic decision pipeline) searches.
-_search_cache: OrderedDict[str, tuple[float, "ProwlarrSearchResult"]] = OrderedDict()
+_search_cache: OrderedDict[str, tuple[float, ProwlarrSearchResult]] = OrderedDict()
 _SEARCH_CACHE_MAX_SIZE = 50
 _SEARCH_CACHE_TTL = 45  # seconds
 
@@ -30,7 +30,7 @@ def _search_cache_key(params: dict) -> str:
     return hashlib.md5(raw.encode()).hexdigest()
 
 
-def _cache_get(key: str) -> "ProwlarrSearchResult | None":
+def _cache_get(key: str) -> ProwlarrSearchResult | None:
     if key not in _search_cache:
         return None
     timestamp, result = _search_cache[key]
@@ -42,7 +42,7 @@ def _cache_get(key: str) -> "ProwlarrSearchResult | None":
     return result
 
 
-def _cache_set(key: str, result: "ProwlarrSearchResult") -> None:
+def _cache_set(key: str, result: ProwlarrSearchResult) -> None:
     if len(_search_cache) >= _SEARCH_CACHE_MAX_SIZE:
         _search_cache.popitem(last=False)  # evict LRU
     _search_cache[key] = (time_module.monotonic(), result)
@@ -384,7 +384,7 @@ class ProwlarrService:
             return None
         try:
             return datetime.fromisoformat(date_str.replace("Z", "+00:00"))
-        except (ValueError, AttributeError):
+        except ValueError, AttributeError:
             return None
 
     async def search_by_tmdbid(

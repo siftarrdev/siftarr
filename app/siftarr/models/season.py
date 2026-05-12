@@ -30,8 +30,8 @@ class Season(Base):
     )
     synced_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
-    request: Mapped["Request"] = relationship("Request", back_populates="seasons")
-    episodes: Mapped[list["Episode"]] = relationship(
+    request: Mapped[Request] = relationship("Request", back_populates="seasons")
+    episodes: Mapped[list[Episode]] = relationship(
         "Episode", back_populates="season", cascade="all, delete-orphan"
     )
 

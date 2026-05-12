@@ -44,7 +44,7 @@ def _staged_download_url(torrent: StagedTorrent) -> str | None:
     try:
         with open(torrent.json_path) as f:
             metadata = json.load(f)
-    except (OSError, json.JSONDecodeError, TypeError):
+    except OSError, json.JSONDecodeError, TypeError:
         return None
     release = metadata.get("release") if isinstance(metadata, dict) else None
     download_url = release.get("download_url") if isinstance(release, dict) else None
@@ -165,7 +165,7 @@ def _download_completed_torrent_ids(details: str | None) -> set[int]:
         return set()
     try:
         payload = json.loads(details)
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return set()
     if not isinstance(payload, dict):
         return set()

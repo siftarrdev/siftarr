@@ -4,8 +4,12 @@ from __future__ import annotations
 
 import os
 import subprocess
+from contextlib import suppress
 from importlib.metadata import PackageNotFoundError
 from importlib.metadata import version as package_version
+
+with suppress(ImportError):
+    from app.siftarr._version import __version__  # noqa: F401
 
 
 def get_version() -> str:
@@ -19,7 +23,7 @@ def get_version() -> str:
                 stderr=subprocess.DEVNULL,
                 text=True,
             ).strip()
-        except (FileNotFoundError, subprocess.CalledProcessError):
+        except FileNotFoundError, subprocess.CalledProcessError:
             pass
 
         env_version = os.getenv("SIFTARR_VERSION")
@@ -28,4 +32,5 @@ def get_version() -> str:
         return "0.0.0"
 
 
-__version__ = get_version()
+if "__version__" not in globals():
+    __version__ = get_version()

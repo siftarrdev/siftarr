@@ -77,7 +77,7 @@ class PlexService:
         }
 
     @asynccontextmanager
-    async def scan_cycle(self) -> AsyncIterator["PlexService"]:
+    async def scan_cycle(self) -> AsyncIterator[PlexService]:
         async with self._cache.scan_cycle():
             yield self
 

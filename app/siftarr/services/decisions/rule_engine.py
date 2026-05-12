@@ -15,7 +15,7 @@ _rule_version: int = 0
 
 # Centralised rule engine cache shared by all services.
 # Key is media_type ("movie" | "tv"), value is (engine, version_at_cache_time).
-_engine_cache: dict[str, tuple["RuleEngine", int]] = {}
+_engine_cache: dict[str, tuple[RuleEngine, int]] = {}
 
 
 def get_rule_version() -> int:
@@ -33,7 +33,7 @@ def increment_rule_version() -> None:
     _rule_version += 1
 
 
-def get_cached_engine(media_type: str) -> "RuleEngine | None":
+def get_cached_engine(media_type: str) -> RuleEngine | None:
     """Return a cached :class:`RuleEngine` for *media_type* if still fresh, or *None*."""
     entry = _engine_cache.get(media_type)
     if entry is not None and entry[1] == _rule_version:
@@ -41,7 +41,7 @@ def get_cached_engine(media_type: str) -> "RuleEngine | None":
     return None
 
 
-def set_cached_engine(media_type: str, engine: "RuleEngine") -> None:
+def set_cached_engine(media_type: str, engine: RuleEngine) -> None:
     """Store a :class:`RuleEngine` for *media_type* at the current rule version."""
     _engine_cache[media_type] = (engine, _rule_version)
 
@@ -206,7 +206,7 @@ class RuleEngine:
         cls,
         rules: list | None = None,
         media_type: str | None = None,
-    ) -> "RuleEngine":
+    ) -> RuleEngine:
         """Create RuleEngine from database rules."""
         size_limit_rules: list[SizeLimitRule] = []
         exclusions = []

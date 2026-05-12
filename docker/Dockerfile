@@ -9,7 +9,7 @@ RUN --mount=type=cache,target=/root/.npm \
     npx tailwindcss -i ./app/siftarr/static/css/tailwind-input.css -o ./app/siftarr/static/css/tailwind.css --minify
 
 # Stage 2: Python application
-FROM python:3.12-slim
+FROM python:3.14-slim
 
 ARG SIFTARR_VERSION=0.0.0
 LABEL org.opencontainers.image.title="siftarr"

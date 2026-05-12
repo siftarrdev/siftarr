@@ -286,7 +286,7 @@ def _coerce_setting_type(current: Any, raw: str) -> Any:
     if isinstance(current, int):
         try:
             return int(raw)
-        except (ValueError, TypeError):
+        except ValueError, TypeError:
             return current
     return raw
 
