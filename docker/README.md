@@ -51,7 +51,9 @@ Inside the container:
 - `/data/config/rules.json` is a recommended read-only mount location for an
   optional default rules seed file.
 
-The entrypoint adjusts `/data` ownership for the runtime user before starting the app.
+The entrypoint adjusts writable data directories such as `/data/db` and
+`/data/staging` for the runtime user before starting the app. Read-only config
+mounts under `/data/config`, such as `rules.json`, are left untouched.
 
 ## Environment variables
 
