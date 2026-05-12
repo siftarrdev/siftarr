@@ -132,7 +132,7 @@ def test_dashboard_details_search_sets_progress_and_restores_button():
     assert "window.startSearchProgress(" in js
     assert "/requests/' + window.currentRequestId + '/search/results" not in js
     assert (
-        "window.openRequestDetails(window.currentRequestId, window.currentDetailsIndex, { skipAutoSearch: true })"
+        "window.openRequestDetails(window.currentRequestId, window.currentDetailsIndex, { preserveUiState: true, skipAutoSearch: true })"
         in js
     )
     assert "btn.innerHTML = originalText || 'Refresh Search';" in js

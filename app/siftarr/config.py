@@ -156,6 +156,13 @@ class Settings(BaseSettings):
     # Search result caching (Prowlarr)
     siftarr_disable_search_cache: bool = False
 
+    # Optional first-run rules import file (for Docker/Compose bind mounts).
+    # When unset, bundled defaults are seeded. When set, the file must exist
+    # and match the /rules/export JSON schema.
+    default_rules_path: str | None = Field(
+        default=None, validation_alias="SIFTARR_DEFAULT_RULES_PATH"
+    )
+
     # Prowlarr TV season-sweep settings
     prowlarr_tv_page_size: int = Field(default=100, ge=1, le=500)
     prowlarr_tv_max_pages_per_query: int = Field(default=6, ge=1, le=50)

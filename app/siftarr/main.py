@@ -33,6 +33,7 @@ from app.siftarr.services.auth_service import (
     build_login_redirect_url,
     require_auth,
 )
+from app.siftarr.services.decisions.rule_service import RuleService
 from app.siftarr.services.utils.http_client import close_shared_client
 from app.siftarr.version import __version__
 
@@ -132,6 +133,9 @@ async def lifespan(app: FastAPI):
     assert db_mod.async_session_maker is not None
     async with db_mod.async_session_maker() as session, session.begin():
         await SettingsStore(session).ensure_runtime_api_key()
+
+    async with db_mod.async_session_maker() as session:
+        await RuleService(session).ensure_default_rules()
 
     scheduler_service = SchedulerService(db_mod.async_session_maker, logger=logger)
     scheduler_service.start()

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+from dataclasses import dataclass
 from typing import Any
 
 from fastapi import BackgroundTasks
@@ -38,6 +39,77 @@ from app.siftarr.services.releases.release_storage import build_prowlarr_release
 
 logger = logging.getLogger(__name__)
 
+DETAIL_SORT_KEYS = {"score", "size", "seeders", "published", "title", "indexer"}
+DETAIL_SORT_DIRECTIONS = {"asc", "desc"}
+RESOLUTION_ALIASES = {
+    "4k": "2160p",
+    "uhd": "2160p",
+    "2160": "2160p",
+    "2160p": "2160p",
+    "1080": "1080p",
+    "1080p": "1080p",
+    "fullhd": "1080p",
+    "720": "720p",
+    "720p": "720p",
+    "480": "480p",
+    "480p": "480p",
+}
+
+
+@dataclass(frozen=True, slots=True)
+class DetailReleaseControls:
+    title: str = ""
+    resolution: str = "all"
+    sort: str = "score"
+    direction: str = "desc"
+
+    @classmethod
+    def normalize(
+        cls,
+        *,
+        title: str | None = None,
+        resolution: str | None = None,
+        sort: str | None = None,
+        direction: str | None = None,
+    ) -> DetailReleaseControls:
+        normalized_title = (title or "").strip()[:200]
+        normalized_resolution = RESOLUTION_ALIASES.get(
+            (resolution or "all").strip().casefold(), "all"
+        )
+        normalized_sort = (sort or "score").strip().casefold()
+        if normalized_sort not in DETAIL_SORT_KEYS:
+            normalized_sort = "score"
+        normalized_direction = (direction or "desc").strip().casefold()
+        if normalized_direction not in DETAIL_SORT_DIRECTIONS:
+            normalized_direction = "desc"
+        return cls(
+            title=normalized_title,
+            resolution=normalized_resolution,
+            sort=normalized_sort,
+            direction=normalized_direction,
+        )
+
+    def as_payload(self, *, offset: int, limit: int) -> dict[str, object]:
+        return {
+            "title": self.title,
+            "resolution": self.resolution,
+            "sort": self.sort,
+            "direction": self.direction,
+            "offset": offset,
+            "limit": limit,
+        }
+
+
+class _ReverseSort:
+    """Small wrapper for descending sort inside a tuple key."""
+
+    def __init__(self, value: Any) -> None:
+        self.value = value
+
+    def __lt__(self, other: object) -> bool:
+        other_value: Any = other.value if isinstance(other, _ReverseSort) else other
+        return bool(other_value < self.value)
+
 
 class DetailService:
     """Load dashboard request-detail data while keeping routers thin."""
@@ -54,10 +126,25 @@ class DetailService:
         background_tasks: BackgroundTasks,
         offset: int = 0,
         limit: int = 100,
+        title: str | None = None,
+        resolution: str | None = None,
+        sort: str | None = None,
+        direction: str | None = None,
     ) -> RequestDetailsData:
         """Load full request detail payload including releases, TV info, and timeline."""
-        releases, total_releases = await self._load_serialized_stored_releases(
-            request_id, media_type=request.media_type, offset=offset, limit=limit
+        controls = DetailReleaseControls.normalize(
+            title=title, resolution=resolution, sort=sort, direction=direction
+        )
+        (
+            releases,
+            total_releases,
+            filtered_total_releases,
+        ) = await self._load_serialized_stored_releases(
+            request_id,
+            media_type=request.media_type,
+            offset=offset,
+            limit=limit,
+            controls=controls,
         )
         active_staged_torrents = await self._load_active_staged_payloads(
             request_id,
@@ -71,12 +158,13 @@ class DetailService:
         tv_info = None
         if request.media_type == MediaType.TV:
             tv_releases = releases
-            if total_releases > len(releases):
-                tv_releases, _ = await self._load_serialized_stored_releases(
+            if filtered_total_releases > len(releases):
+                tv_releases, _, _ = await self._load_serialized_stored_releases(
                     request_id,
                     media_type=request.media_type,
                     offset=0,
-                    limit=total_releases,
+                    limit=filtered_total_releases,
+                    controls=controls,
                 )
                 apply_active_selection_metadata(
                     tv_releases, active_staged_torrents, media_type=request.media_type
@@ -101,6 +189,8 @@ class DetailService:
             ),
             releases=releases,
             total_releases=total_releases,
+            filtered_total_releases=filtered_total_releases,
+            release_controls=controls.as_payload(offset=offset, limit=limit),
             active_staged_torrent=active_staged_torrents[0] if active_staged_torrents else None,
             active_staged_torrents=active_staged_torrents,
             overseerr=overseerr_details,
@@ -112,7 +202,7 @@ class DetailService:
         self, request: Any, *, request_id: int
     ) -> RequestSearchData:
         """Load stored releases for a movie request after a search."""
-        releases, _total = await self._load_serialized_stored_releases(
+        releases, _total, _filtered_total = await self._load_serialized_stored_releases(
             request_id, media_type=request.media_type
         )
         return RequestSearchData(
@@ -132,12 +222,15 @@ class DetailService:
         media_type: MediaType,
         offset: int = 0,
         limit: int = 100,
-    ) -> tuple[list[dict[str, object]], int]:
+        controls: DetailReleaseControls | None = None,
+    ) -> tuple[list[dict[str, object]], int, int]:
         """Load and serialize persisted releases with rule evaluation.
 
         Returns (serialized_releases, total_count) for pagination UI.
         """
         from app.siftarr.models.release import Release
+
+        controls = controls or DetailReleaseControls.normalize()
 
         # Get total count for pagination
         count_result = await self.db.execute(
@@ -145,41 +238,94 @@ class DetailService:
         )
         total_count = count_result.scalar() or 0
 
+        filters = [Release.request_id == request_id]
+        if controls.title:
+            filters.append(Release.title.ilike(f"%{controls.title}%"))
+        if controls.resolution != "all":
+            filters.append(func.lower(Release.resolution) == controls.resolution.casefold())
+
+        filtered_total = total_count
+        if len(filters) > 1:
+            filtered_count_result = await self.db.execute(
+                select(func.count()).select_from(Release).where(*filters)
+            )
+            filtered_total = filtered_count_result.scalar() or 0
+
+        sort_columns = {
+            "score": Release.score,
+            "size": Release.size,
+            "seeders": Release.seeders,
+            "published": Release.publish_date,
+            "title": Release.title,
+            "indexer": Release.indexer,
+        }
+        primary = sort_columns[controls.sort]
+        primary_order = primary.asc() if controls.direction == "asc" else primary.desc()
+
         release_result = await self.db.execute(
             select(Release)
-            .where(Release.request_id == request_id)
+            .where(*filters)
             .order_by(
+                primary_order,
                 Release.score.desc(),
                 Release.size.asc(),
                 Release.seeders.desc(),
-                Release.created_at.desc(),
+                Release.publish_date.desc(),
+                Release.title.asc(),
             )
             .offset(offset)
             .limit(limit)
         )
         releases = list(release_result.scalars().all())
         logger.info(
-            "Stored releases loaded from DB: request_id=%s media_type=%s offset=%s limit=%s count=%s total=%s source=db",
+            "Stored releases loaded from DB: request_id=%s media_type=%s offset=%s limit=%s count=%s total=%s filtered_total=%s source=db",
             request_id,
             media_type.value,
             offset,
             limit,
             len(releases),
             total_count,
+            filtered_total,
         )
         engine = await self._build_rule_engine(media_type=media_type.value)
+        serialized = [
+            serialize_stored_evaluated_release(
+                release,
+                engine.evaluate(build_prowlarr_release(release)),
+                media_type=media_type,
+            )
+            for release in releases
+        ]
         return (
             finalize_releases(
-                [
-                    serialize_stored_evaluated_release(
-                        release,
-                        engine.evaluate(build_prowlarr_release(release)),
-                        media_type=media_type,
-                    )
-                    for release in releases
-                ]
+                serialized,
+                sort_key=self._serialized_sort_key(controls),
             ),
             total_count,
+            filtered_total,
+        )
+
+    def _serialized_sort_key(self, controls: DetailReleaseControls):
+        if controls.sort == "score" and controls.direction == "desc":
+            return None
+
+        def sort_value(release: dict[str, object]) -> object:
+            if controls.sort == "published":
+                return release.get("publish_date") or ""
+            if controls.sort == "size":
+                return release.get("_size_bytes") or 0
+            if controls.sort == "seeders":
+                return release.get("seeders") or 0
+            if controls.sort == "title":
+                return str(release.get("title") or "").casefold()
+            if controls.sort == "indexer":
+                return str(release.get("indexer") or "").casefold()
+            return release.get("score") or 0
+
+        reverse = controls.direction == "desc"
+        return lambda release: (
+            sort_value(release) if not reverse else _ReverseSort(sort_value(release)),
+            str(release.get("title") or "").casefold(),
         )
 
     async def _load_active_staged_payloads(

@@ -1,11 +1,14 @@
 import json
+import logging
 import re
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, TypedDict, cast
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.siftarr.config import get_settings
 from app.siftarr.models.rule import Rule, RuleType, TVTarget
 from app.siftarr.services.decisions.rule_engine import increment_rule_version
 from app.siftarr.services.integrations.prowlarr_service import clear_search_cache
@@ -197,6 +200,7 @@ DEFAULT_RULES: list[RuleData] = [
 
 
 SIZE_LIMIT_RULE_NAME = "Size Limits"
+logger = logging.getLogger(__name__)
 
 
 class RuleService:
@@ -331,11 +335,13 @@ class RuleService:
         if existing:
             return existing
 
-        rules = []
-        for rule_data in DEFAULT_RULES:
-            rule = await self.create_rule(**rule_data)
-            rules.append(rule)
-        return rules
+        configured_path = get_settings().default_rules_path
+        if configured_path:
+            preview = self._load_default_rules_file(Path(configured_path))
+            return await self.create_rules_from_preview(preview)
+
+        logger.info("No default rules file configured; seeding bundled default rules")
+        return await self.create_rules_from_preview(self._preview_bundled_default_rules())
 
     async def ensure_default_rules(self) -> list[Rule]:
         rules = await self.get_all_rules()
@@ -630,12 +636,39 @@ class RuleService:
 
         return RuleImportPreview(version=1, rules=preview_rules, replace_count=len(preview_rules))
 
-    async def replace_rules_from_preview(self, preview: RuleImportPreview) -> list[Rule]:
-        existing = await self.get_all_rules()
-        for rule in existing:
-            await self.db.delete(rule)
-        await self.db.flush()
+    def _preview_bundled_default_rules(self) -> RuleImportPreview:
+        payload = json.dumps(
+            {
+                "version": 1,
+                "rules": [self._serialize_rule_data(rule_data) for rule_data in DEFAULT_RULES],
+            }
+        )
+        return self.preview_import_rules(payload)
 
+    def _load_default_rules_file(self, path: Path) -> RuleImportPreview:
+        try:
+            payload = path.read_text(encoding="utf-8")
+        except OSError as exc:
+            logger.exception("Configured default rules file is unreadable: %s", path)
+            raise RuntimeError(f"Configured default rules file is unreadable: {path}") from exc
+
+        try:
+            preview = self.preview_import_rules(payload)
+        except ValueError as exc:
+            logger.exception("Configured default rules file is invalid: %s", path)
+            raise RuntimeError(f"Configured default rules file is invalid: {path}: {exc}") from exc
+
+        logger.info("Seeding default rules from configured file: %s", path)
+        return preview
+
+    @staticmethod
+    def _serialize_rule_data(rule_data: RuleData) -> dict[str, Any]:
+        return {
+            key: value.value if isinstance(value, RuleType | TVTarget) else value
+            for key, value in rule_data.items()
+        }
+
+    async def create_rules_from_preview(self, preview: RuleImportPreview) -> list[Rule]:
         created: list[Rule] = []
         for rule_data in preview.rules:
             rule = Rule(**rule_data)
@@ -648,3 +681,11 @@ class RuleService:
         clear_search_cache()
         increment_rule_version()
         return created
+
+    async def replace_rules_from_preview(self, preview: RuleImportPreview) -> list[Rule]:
+        existing = await self.get_all_rules()
+        for rule in existing:
+            await self.db.delete(rule)
+        await self.db.flush()
+
+        return await self.create_rules_from_preview(preview)

@@ -247,7 +247,12 @@ async def test_request_details_orders_stored_releases_by_score_then_size(
     )
 
     response = await dashboard_api.request_details(
-        request_id=21, background_tasks=background_tasks, db=mock_db
+        request_id=21,
+        background_tasks=background_tasks,
+        db=mock_db,
+        resolution="bogus",
+        sort="bogus",
+        direction="sideways",
     )
 
     body = json.loads(cast(bytes, response.body))
@@ -350,3 +355,6 @@ async def test_request_details_includes_release_status_reason_and_publish_date(
     assert body["releases"][0]["status_label"] == "Rejected"
     assert body["releases"][0]["rejection_reason"] == "Blocked by quality profile"
     assert body["releases"][0]["publish_date"] == published_at.isoformat()
+    assert body["release_controls"]["resolution"] == "all"
+    assert body["release_controls"]["sort"] == "score"
+    assert body["release_controls"]["direction"] == "desc"

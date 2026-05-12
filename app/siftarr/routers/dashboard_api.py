@@ -37,6 +37,10 @@ async def request_details(
     db: AsyncSession = Depends(get_db),
     offset: int = 0,
     limit: int = 100,
+    title: str | None = None,
+    resolution: str | None = None,
+    sort: str | None = None,
+    direction: str | None = None,
 ) -> JSONResponse:
     request = await load_request_or_404(db, request_id)
     detail_service = DetailService(db, settings=get_settings())
@@ -46,6 +50,10 @@ async def request_details(
         background_tasks=background_tasks,
         offset=offset,
         limit=limit,
+        title=title,
+        resolution=resolution,
+        sort=sort,
+        direction=direction,
     )
     return JSONResponse(serialize_request_details_response(details), background=background_tasks)
 

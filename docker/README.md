@@ -33,6 +33,9 @@ docker compose -f docker/docker-compose.yml down
 ```
 
 The service publishes `8000:8000` and includes a healthcheck against `/health`.
+The Compose file also includes a commented example for mounting a host
+`rules.json` into `/data/config/rules.json` and setting
+`SIFTARR_DEFAULT_RULES_PATH` for first-run rule seeding.
 
 ## Volumes
 
@@ -45,6 +48,8 @@ Inside the container:
 - `/data/db/session_secret` stores the generated browser session signing secret when
   `SECRET_KEY` is unset.
 - `/data/staging` is the default staging area for staged download data.
+- `/data/config/rules.json` is a recommended read-only mount location for an
+  optional default rules seed file.
 
 The entrypoint adjusts `/data` ownership for the runtime user before starting the app.
 
@@ -63,11 +68,37 @@ Common variables passed by Compose:
 - `SIFTARR_SECRET_KEY_FILE` to override where that generated secret file is stored.
 - `SIFTARR_API_KEY` for programmatic/webhook access; generated and persisted on
   first startup when unset.
+- `SIFTARR_DEFAULT_RULES_PATH` to point at an optional mounted rules export JSON
+  used only when the database has no rules.
 
 Additional app settings can be supplied through the container environment, including
 `SIFTARR_DB_PATH`, `DATABASE_URL`, `STAGING_MODE_ENABLED`, retry settings,
 `MAX_EPISODE_DISCOVERY`, Plex polling intervals, and sync concurrency settings. The
 entrypoint also honors `PUID` and `PGID` for runtime file ownership.
+
+## Default rules JSON seed
+
+To customize the rules created for a fresh database, export rules from an
+existing Siftarr instance (**Rules → Export** or `/rules/export`) and save the
+JSON on the host, for example `docker/rules.json`. Then enable the commented
+Compose example:
+
+```yaml
+services:
+  siftarr:
+    volumes:
+      - ./data:/data
+      - ./rules.json:/data/config/rules.json:ro
+    environment:
+      - SIFTARR_DEFAULT_RULES_PATH=/data/config/rules.json
+```
+
+The JSON must match the version-1 import/export schema. Siftarr reads it during
+startup or rule-page initialization only when the rules table is empty. Existing
+rules are preserved and are not replaced by later file changes; use the Rules
+import UI/API when you intentionally want to replace rules. If the path is set
+but the file is missing, unreadable, or invalid, startup reports the error
+instead of silently falling back to bundled defaults.
 
 ## Plex SSO claim
 

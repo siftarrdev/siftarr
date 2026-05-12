@@ -1,6 +1,109 @@
 // Dashboard Details Module - Request details modal and timeline
 // =============================================================
 
+window.detailsControlState = window.detailsControlState || {};
+window.detailsControlHandlersReady = false;
+window.detailsControlDebounce = null;
+
+function defaultDetailsControls() {
+    return { title: '', resolution: 'all', sort: 'score', direction: 'desc' };
+}
+
+function getDetailsControls(requestId) {
+    if (!window.detailsControlState[requestId]) {
+        window.detailsControlState[requestId] = defaultDetailsControls();
+    }
+    return window.detailsControlState[requestId];
+}
+
+function resetDetailsControls(requestId, options = {}) {
+    window.detailsControlState[requestId] = defaultDetailsControls();
+    if (options.updateInputs) window.applyDetailsControls(window.detailsControlState[requestId]);
+}
+
+function buildDetailsUrl(requestId) {
+    const controls = getDetailsControls(requestId);
+    const params = new URLSearchParams();
+    if (controls.title) params.set('title', controls.title);
+    if (controls.resolution && controls.resolution !== 'all') params.set('resolution', controls.resolution);
+    if (controls.sort && controls.sort !== 'score') params.set('sort', controls.sort);
+    if (controls.direction && controls.direction !== 'desc') params.set('direction', controls.direction);
+    const suffix = params.toString();
+    return `/requests/${requestId}/details${suffix ? '?' + suffix : ''}`;
+}
+
+function applyDetailsControls(controls) {
+    const filterInput = document.getElementById('release-filter-input');
+    const resolutionSelect = document.getElementById('release-resolution-filter');
+    const sortSelect = document.getElementById('release-sort-key');
+    const directionBtn = document.getElementById('release-sort-direction');
+    if (filterInput) filterInput.value = controls.title || '';
+    if (resolutionSelect) resolutionSelect.value = controls.resolution === '2160p' ? '4k' : (controls.resolution || 'all');
+    if (sortSelect) sortSelect.value = controls.sort || 'score';
+    if (directionBtn) {
+        const direction = controls.direction || 'desc';
+        directionBtn.dataset.direction = direction;
+        directionBtn.textContent = direction === 'asc' ? 'Asc' : 'Desc';
+    }
+}
+
+function updateReleaseCountText(data) {
+    const countEl = document.getElementById('release-results-count');
+    if (!countEl) return;
+    const filtered = data.filtered_total_releases ?? (data.releases || []).length;
+    const total = data.total_releases ?? filtered;
+    countEl.textContent = filtered === total ? `${filtered} results` : `${filtered} of ${total} results`;
+}
+
+function reloadDetailsWithControls(debounceMs = 0) {
+    if (!window.currentRequestId) return;
+    const run = () => window.openRequestDetails(window.currentRequestId, window.currentDetailsIndex, {
+        preserveUiState: true,
+        skipAutoSearch: true,
+    });
+    clearTimeout(window.detailsControlDebounce);
+    if (debounceMs > 0) {
+        window.detailsControlDebounce = setTimeout(run, debounceMs);
+    } else {
+        run();
+    }
+}
+
+function ensureDetailsControlHandlers() {
+    if (window.detailsControlHandlersReady) return;
+    window.detailsControlHandlersReady = true;
+    const filterInput = document.getElementById('release-filter-input');
+    const resolutionSelect = document.getElementById('release-resolution-filter');
+    const sortSelect = document.getElementById('release-sort-key');
+    const directionBtn = document.getElementById('release-sort-direction');
+    const resetBtn = document.getElementById('release-controls-reset');
+    if (filterInput) filterInput.addEventListener('input', () => {
+        const controls = getDetailsControls(window.currentRequestId);
+        controls.title = filterInput.value.trim();
+        reloadDetailsWithControls(300);
+    });
+    if (resolutionSelect) resolutionSelect.addEventListener('change', () => {
+        const controls = getDetailsControls(window.currentRequestId);
+        controls.resolution = resolutionSelect.value;
+        reloadDetailsWithControls();
+    });
+    if (sortSelect) sortSelect.addEventListener('change', () => {
+        const controls = getDetailsControls(window.currentRequestId);
+        controls.sort = sortSelect.value;
+        reloadDetailsWithControls();
+    });
+    if (directionBtn) directionBtn.addEventListener('click', () => {
+        const controls = getDetailsControls(window.currentRequestId);
+        controls.direction = (controls.direction || 'desc') === 'desc' ? 'asc' : 'desc';
+        applyDetailsControls(controls);
+        reloadDetailsWithControls();
+    });
+    if (resetBtn) resetBtn.addEventListener('click', () => {
+        resetDetailsControls(window.currentRequestId, { updateInputs: true });
+        reloadDetailsWithControls();
+    });
+}
+
 async function openRequestDetails(requestId, explicitIndex = null, options = {}) {
     const preserveUiState = !!options.preserveUiState;
     const skipAutoSearch = !!options.skipAutoSearch;
@@ -14,6 +117,7 @@ async function openRequestDetails(requestId, explicitIndex = null, options = {})
     const searchBtn = document.getElementById('request-details-search-btn');
     const tvSearchBtn = document.getElementById('request-details-tv-search-btn');
     const filterInput = document.getElementById('release-filter-input');
+    window.ensureDetailsControlHandlers();
 
     // Build navigation context from currently visible rows
     if (explicitIndex !== null) {
@@ -53,17 +157,17 @@ async function openRequestDetails(requestId, explicitIndex = null, options = {})
     window.updateActiveStageBanner({ active_staged_torrent: null });
     window.setPoster(null, 'Loading poster');
     document.getElementById('release-results-header').classList.remove('hidden');
-    document.getElementById('release-filter-input').classList.remove('hidden');
+    document.getElementById('release-controls').classList.remove('hidden');
     if (!preserveUiState) {
         releases.innerHTML = '<div class="text-gray-500 text-sm">Loading search results...</div>';
     }
     const cacheIndicatorInit = document.getElementById('release-cache-indicator');
     if (cacheIndicatorInit) cacheIndicatorInit.classList.add('hidden');
-    if (filterInput && !preserveUiState) filterInput.value = '';
+    if (!preserveUiState) window.resetDetailsControls(requestId, { updateInputs: true });
     modal.classList.remove('hidden');
 
     try {
-        const response = await fetch(`/requests/${requestId}/details`);
+        const response = await fetch(window.buildDetailsUrl(requestId));
         if (!response.ok) {
             throw new Error(`Server error: ${response.status}`);
         }
@@ -118,8 +222,8 @@ async function openRequestDetails(requestId, explicitIndex = null, options = {})
 
         if (data.request.media_type === 'tv' && data.tv_info) {
             window.currentTvSeasons = data.tv_info.seasons || [];
-            document.getElementById('release-results-header').classList.add('hidden');
-            document.getElementById('release-filter-input').classList.add('hidden');
+            document.getElementById('release-results-header').classList.remove('hidden');
+            document.getElementById('release-controls').classList.remove('hidden');
             if (cacheIndicator) cacheIndicator.classList.add('hidden');
             releases.innerHTML = window.renderSeasonAccordion(data);
             if (preservedDetailsState && window.restoreDetailsAccordionState) {
@@ -127,7 +231,7 @@ async function openRequestDetails(requestId, explicitIndex = null, options = {})
             }
         } else {
             document.getElementById('release-results-header').classList.remove('hidden');
-            document.getElementById('release-filter-input').classList.remove('hidden');
+            document.getElementById('release-controls').classList.remove('hidden');
             if (window.currentReleases.length > 0) {
                 releases.innerHTML = window.currentReleases.map(release => window.renderReleaseCard(release, window.currentRequestId)).join('');
                 if (cacheIndicator && cacheIndicatorText) {
@@ -141,6 +245,8 @@ async function openRequestDetails(requestId, explicitIndex = null, options = {})
                 }
             }
         }
+        window.applyDetailsControls(data.release_controls || {});
+        window.updateReleaseCountText(data);
 
         window.currentRequestTimeline = data.timeline || [];
         renderTimeline(window.currentRequestTimeline);
@@ -220,7 +326,7 @@ async function searchRequestFromDetails() {
     window.startSearchProgress(window.currentRequestId, detailsTitle, async function() {
         // Reload full details from the existing details API. skipAutoSearch avoids
         // re-triggering the auto-search loop when the completed search found none.
-        await window.openRequestDetails(window.currentRequestId, window.currentDetailsIndex, { skipAutoSearch: true });
+        await window.openRequestDetails(window.currentRequestId, window.currentDetailsIndex, { preserveUiState: true, skipAutoSearch: true });
         if (btn) {
             btn.disabled = false;
             btn.innerHTML = originalText || 'Refresh Search';
@@ -309,6 +415,11 @@ function renderTimeline(timelineData) {
 
 // Export functions to window for HTML onclick handlers
 window.openRequestDetails = openRequestDetails;
+window.ensureDetailsControlHandlers = ensureDetailsControlHandlers;
+window.resetDetailsControls = resetDetailsControls;
+window.buildDetailsUrl = buildDetailsUrl;
+window.applyDetailsControls = applyDetailsControls;
+window.updateReleaseCountText = updateReleaseCountText;
 window.refreshPlexAndReload = refreshPlexAndReload;
 window.searchRequestFromDetails = searchRequestFromDetails;
 window.searchTvRequestAll = searchTvRequestAll;

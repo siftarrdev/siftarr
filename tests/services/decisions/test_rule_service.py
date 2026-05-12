@@ -5,6 +5,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from app.siftarr.config import reload_settings
 from app.siftarr.models.rule import Rule, RuleType, TVTarget
 from app.siftarr.services.decisions.rule_service import (
     DEFAULT_RULES,
@@ -243,6 +244,118 @@ class TestRuleService:
             result = await service.seed_default_rules()
 
             assert len(result) == len(DEFAULT_RULES)
+
+    @pytest.mark.asyncio
+    async def test_seed_default_rules_from_configured_file(
+        self, mock_db, service, monkeypatch, tmp_path
+    ):
+        """Configured rules.json should seed through import preview schema."""
+        rules_path = tmp_path / "rules.json"
+        rules_path.write_text(
+            json.dumps(
+                {
+                    "version": 1,
+                    "rules": [
+                        {
+                            "name": "Imported scorer",
+                            "rule_type": "scorer",
+                            "media_scope": "movie",
+                            "tv_target": None,
+                            "pattern": "1080p",
+                            "score": 25,
+                            "min_size_gb": None,
+                            "max_size_gb": None,
+                            "priority": 1,
+                            "is_enabled": True,
+                            "description": None,
+                        }
+                    ],
+                }
+            ),
+            encoding="utf-8",
+        )
+        monkeypatch.setenv("SIFTARR_DEFAULT_RULES_PATH", str(rules_path))
+        reload_settings()
+
+        try:
+            with patch.object(service, "get_all_rules", return_value=[]):
+                result = await service.seed_default_rules()
+        finally:
+            monkeypatch.delenv("SIFTARR_DEFAULT_RULES_PATH", raising=False)
+            reload_settings()
+
+        assert len(result) == 1
+        assert result[0].name == "Imported scorer"
+        mock_db.add.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_seed_default_rules_falls_back_to_bundled_defaults(
+        self, mock_db, service, monkeypatch
+    ):
+        monkeypatch.delenv("SIFTARR_DEFAULT_RULES_PATH", raising=False)
+        reload_settings()
+
+        with patch.object(service, "get_all_rules", return_value=[]):
+            result = await service.seed_default_rules()
+
+        assert len(result) == len(DEFAULT_RULES)
+        assert mock_db.add.call_count == len(DEFAULT_RULES)
+
+    @pytest.mark.asyncio
+    async def test_seed_default_rules_does_not_replace_existing_rules(
+        self, mock_db, service, monkeypatch, tmp_path
+    ):
+        rules_path = tmp_path / "missing.json"
+        monkeypatch.setenv("SIFTARR_DEFAULT_RULES_PATH", str(rules_path))
+        reload_settings()
+        existing_rules = [MagicMock(spec=Rule)]
+
+        try:
+            with patch.object(service, "get_all_rules", return_value=existing_rules):
+                result = await service.seed_default_rules()
+        finally:
+            monkeypatch.delenv("SIFTARR_DEFAULT_RULES_PATH", raising=False)
+            reload_settings()
+
+        assert result == existing_rules
+        mock_db.add.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_seed_default_rules_fails_for_invalid_configured_file(
+        self, service, monkeypatch, tmp_path
+    ):
+        rules_path = tmp_path / "rules.json"
+        rules_path.write_text('{"version": 1, "rules": []}', encoding="utf-8")
+        monkeypatch.setenv("SIFTARR_DEFAULT_RULES_PATH", str(rules_path))
+        reload_settings()
+
+        try:
+            with (
+                patch.object(service, "get_all_rules", return_value=[]),
+                pytest.raises(RuntimeError, match="Configured default rules file is invalid"),
+            ):
+                await service.seed_default_rules()
+        finally:
+            monkeypatch.delenv("SIFTARR_DEFAULT_RULES_PATH", raising=False)
+            reload_settings()
+
+    @pytest.mark.asyncio
+    async def test_seed_default_rules_fails_for_missing_configured_file(
+        self, service, monkeypatch, tmp_path
+    ):
+        rules_path = tmp_path / "missing.json"
+        monkeypatch.setenv("SIFTARR_DEFAULT_RULES_PATH", str(rules_path))
+        reload_settings()
+
+        try:
+            with (
+                patch.object(service, "get_all_rules", return_value=[]),
+                pytest.raises(RuntimeError, match="Configured default rules file is unreadable"),
+            ):
+                await service.seed_default_rules()
+        finally:
+            monkeypatch.delenv("SIFTARR_DEFAULT_RULES_PATH", raising=False)
+            reload_settings()
 
     @pytest.mark.asyncio
     async def test_seed_default_rules_already_exists(self, mock_db, service):

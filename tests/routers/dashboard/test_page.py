@@ -10,6 +10,16 @@ from app.siftarr.models.request import MediaType, RequestStatus
 from app.siftarr.routers import dashboard
 
 
+def test_dashboard_details_modal_includes_release_controls(dashboard_template_path):
+    body = dashboard_template_path.read_text()
+
+    assert 'id="release-controls"' in body
+    assert 'id="release-resolution-filter"' in body
+    assert 'id="release-sort-key"' in body
+    assert 'id="release-sort-direction"' in body
+    assert 'id="release-results-count"' in body
+
+
 @pytest.mark.asyncio
 async def test_pending_requests_include_searching_requests(mock_db, monkeypatch):
     """Pending tab should keep in-flight searches visible."""

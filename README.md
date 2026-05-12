@@ -32,7 +32,7 @@ Use Siftarr when you want more control than a simple first-match download flow: 
 - **Season-first TV searches**: Siftarr looks for season packs before falling back to individual episodes.
 - **Staging mode**: save selected torrents for review before sending them to qBittorrent.
 - **Pending retries**: items with no acceptable release stay pending and are retried on a schedule.
-- **Web dashboard**: view active, pending, staged, rejected, completed, and manual-search items.
+- **Web dashboard**: view active, pending, staged, rejected, completed, and manual-search items, with searchable/sortable release details.
 - **Connection testing and maintenance actions**: validate integrations, sync Overseerr requests, reseed default rules, and trigger retries from the UI.
 - **Plex polling support**: use Plex to help track media availability and recent scans.
 
@@ -61,6 +61,11 @@ services:
       - "8000:8000"
     volumes:
       - ./data:/data
+      # Optional: seed rules on first run from a Rules export JSON.
+      # - ./rules.json:/data/config/rules.json:ro
+    environment:
+      # Optional: only used when the rules table is empty.
+      # - SIFTARR_DEFAULT_RULES_PATH=/data/config/rules.json
 ```
 
 Start it with:
@@ -95,6 +100,7 @@ environment:
   - PLEX_URL=http://plex:32400
   - SECRET_KEY=optional_explicit_session_secret
   - SIFTARR_API_KEY=optional_integration_key
+  - SIFTARR_DEFAULT_RULES_PATH=/data/config/rules.json  # optional
 ```
 
 Common variables:
@@ -119,6 +125,7 @@ Common variables:
 | `OVERSEERR_SYNC_CONCURRENCY` | `16` | Overseerr sync concurrency. |
 | `PLEX_SYNC_CONCURRENCY` | `16` | Plex sync concurrency. |
 | `SIFTARR_API_KEY` | generated on first run | Optional explicit API key for programmatic access. The development placeholder `dev-key-change-me` is never accepted. |
+| `SIFTARR_DEFAULT_RULES_PATH` | unset | Optional path to a mounted rules export JSON used to seed an empty rules table. |
 | `SIFTARR_DB_PATH` | `/data/db/siftarr.db` | SQLite database path used to build the default database URL. |
 | `DATABASE_URL` | SQLite under `/data/db/` | Full database URL override. |
 
@@ -132,6 +139,20 @@ If `SECRET_KEY` is not set, Siftarr generates a session signing secret once and 
 in the data volume, next to the SQLite database by default. This keeps Plex SSO browser
 sessions valid across app or container restarts. Use `SECRET_KEY` when you want to provide
 and rotate the session secret yourself.
+
+### Optional Docker default rules file
+
+For container deployments, you can mount a host `rules.json` and set
+`SIFTARR_DEFAULT_RULES_PATH` to its in-container path, for example
+`./rules.json:/data/config/rules.json:ro` plus
+`SIFTARR_DEFAULT_RULES_PATH=/data/config/rules.json`. The file must use the same
+versioned JSON format produced by **Rules → Export** (or `GET /rules/export`).
+
+The configured file is a first-run/default seed only: Siftarr reads it when the
+rules table is empty, such as on a new database. It does not replace or merge
+with user-edited rules after rules already exist. If no file is configured,
+Siftarr seeds its bundled defaults; if a configured file is missing, unreadable,
+or invalid, startup fails loudly so the mount/configuration can be fixed.
 
 ### Browser auth and instance claim
 
@@ -169,8 +190,8 @@ Siftarr can also sync requests from Overseerr from the **Settings** page if a we
 
 ## Using the web UI
 
-- **Dashboard**: monitor active requests, pending searches, staged torrents, rejected releases, completion state, and manual release searches.
-- **Rules**: create, edit, enable/disable, delete, and test release rules.
+- **Dashboard**: monitor active requests, pending searches, staged torrents, rejected releases, completion state, and manual release searches. Request details include release-result controls for title search, resolution filters (All, 4K, 1080p, 720p), sort key (score, size, seeders, published date, title, indexer), direction, reset, and filtered counts.
+- **Rules**: create, edit, enable/disable, delete, import/export, and test release rules.
 - **Settings**: manage integrations, staging mode, database stats, default rules, sync jobs, retries, and Plex scheduler status.
 
 Typical request lifecycle:

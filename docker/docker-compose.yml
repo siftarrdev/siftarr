@@ -12,6 +12,9 @@ services:
       - "8000:8000"
     volumes:
       - ./data:/data
+      # Optional first-run rule seed file. Create docker/rules.json from
+      # Rules → Export, then uncomment this mount and the env var below.
+      # - ./rules.json:/data/config/rules.json:ro
     environment:
       - TZ=${TZ:-UTC}
       - OVERSEERR_URL=${OVERSEERR_URL}
@@ -22,6 +25,7 @@ services:
       - QBITTORRENT_API_KEY=${QBITTORRENT_API_KEY}
       - PLEX_URL=${PLEX_URL}
       - PLEX_TOKEN=${PLEX_TOKEN:-}
+      # - SIFTARR_DEFAULT_RULES_PATH=/data/config/rules.json
     healthcheck:
       test: ["CMD", "/app/.venv/bin/python", "-c", "import httpx; httpx.get('http://localhost:8000/health')"]
       interval: 30s
