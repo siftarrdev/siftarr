@@ -1,6 +1,28 @@
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+@import "tailwindcss";
+
+@theme {
+    --color-brand-50: #eef6ff;
+    --color-brand-100: #d9eaff;
+    --color-brand-200: #bbd8ff;
+    --color-brand-300: #8cbeff;
+    --color-brand-400: #5599ff;
+    --color-brand-500: #2e73fc;
+    --color-brand-600: #1854f1;
+    --color-brand-700: #103fde;
+    --color-brand-800: #1434b4;
+    --color-brand-900: #16308e;
+    --color-brand-950: #111f56;
+    --color-surface: #0f1117;
+    --color-surface-50: #f6f7f9;
+    --color-surface-100: #eceef2;
+    --color-surface-200: #d5d8e2;
+    --color-surface-800: #1a1d27;
+    --color-surface-850: #151720;
+    --color-surface-900: #0f1117;
+    --color-surface-950: #0a0b0f;
+    --font-family-sans: Inter, system-ui, -apple-system, sans-serif;
+    --font-family-mono: JetBrains Mono, Fira Code, monospace;
+}
 
 @layer base {
     body {
@@ -10,7 +32,7 @@
 
 @layer components {
     .card {
-        @apply bg-surface-800 rounded-xl border border-gray-700/60 shadow-sm;
+        @apply bg-surface-800 rounded-xl border border-gray-700/60 shadow-xs;
     }
     .card-header {
         @apply px-5 py-4 border-b border-gray-700/60;
@@ -22,19 +44,19 @@
         @apply inline-flex items-center justify-center gap-2 rounded-lg px-4 py-2 text-sm font-medium transition-all duration-150 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-surface-900 disabled:opacity-50 disabled:cursor-not-allowed;
     }
     .btn-primary {
-        @apply btn bg-brand-600 text-white hover:bg-brand-500 focus:ring-brand-500;
+        @apply inline-flex items-center justify-center gap-2 rounded-lg px-4 py-2 text-sm font-medium transition-all duration-150 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-surface-900 disabled:opacity-50 disabled:cursor-not-allowed bg-brand-600 text-white hover:bg-brand-500 focus:ring-brand-500;
     }
     .btn-success {
-        @apply btn bg-emerald-600 text-white hover:bg-emerald-500 focus:ring-emerald-500;
+        @apply inline-flex items-center justify-center gap-2 rounded-lg px-4 py-2 text-sm font-medium transition-all duration-150 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-surface-900 disabled:opacity-50 disabled:cursor-not-allowed bg-emerald-600 text-white hover:bg-emerald-500 focus:ring-emerald-500;
     }
     .btn-danger {
-        @apply btn bg-red-600 text-white hover:bg-red-500 focus:ring-red-500;
+        @apply inline-flex items-center justify-center gap-2 rounded-lg px-4 py-2 text-sm font-medium transition-all duration-150 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-surface-900 disabled:opacity-50 disabled:cursor-not-allowed bg-red-600 text-white hover:bg-red-500 focus:ring-red-500;
     }
     .btn-warning {
-        @apply btn bg-amber-600 text-white hover:bg-amber-500 focus:ring-amber-500;
+        @apply inline-flex items-center justify-center gap-2 rounded-lg px-4 py-2 text-sm font-medium transition-all duration-150 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-surface-900 disabled:opacity-50 disabled:cursor-not-allowed bg-amber-600 text-white hover:bg-amber-500 focus:ring-amber-500;
     }
     .btn-ghost {
-        @apply btn bg-gray-700/50 text-gray-300 hover:bg-gray-700 hover:text-white focus:ring-gray-500;
+        @apply inline-flex items-center justify-center gap-2 rounded-lg px-4 py-2 text-sm font-medium transition-all duration-150 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-surface-900 disabled:opacity-50 disabled:cursor-not-allowed bg-gray-700/50 text-gray-300 hover:bg-gray-700 hover:text-white focus:ring-gray-500;
     }
     .btn-sm {
         @apply px-3 py-1.5 text-xs;
@@ -43,7 +65,7 @@
         @apply w-full rounded-lg border border-gray-600/80 bg-surface-850 px-3.5 py-2 text-sm text-white placeholder-gray-500 transition-colors focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500;
     }
     .form-select {
-        @apply form-input appearance-none;
+        @apply w-full rounded-lg border border-gray-600/80 bg-surface-850 px-3.5 py-2 text-sm text-white placeholder-gray-500 transition-colors focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500 appearance-none;
     }
     .form-label {
         @apply block text-xs font-medium uppercase tracking-wider text-gray-400 mb-1.5;

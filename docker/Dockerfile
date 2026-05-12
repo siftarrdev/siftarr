@@ -1,12 +1,12 @@
 # Stage 1: Build Tailwind CSS
 FROM node:20-slim AS tailwind-builder
 WORKDIR /build
-COPY package.json tailwind.config.js ./
+COPY package.json ./
 COPY app/siftarr/static/css/tailwind-input.css ./app/siftarr/static/css/tailwind-input.css
 COPY app/siftarr/templates/ ./app/siftarr/templates/
 RUN --mount=type=cache,target=/root/.npm \
     npm install && \
-    npx tailwindcss -i ./app/siftarr/static/css/tailwind-input.css -o ./app/siftarr/static/css/tailwind.css --minify
+    npx @tailwindcss/cli -i ./app/siftarr/static/css/tailwind-input.css -o ./app/siftarr/static/css/tailwind.css --minify
 
 # Stage 2: Python application
 FROM python:3.14-slim
