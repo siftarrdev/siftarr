@@ -118,7 +118,6 @@ function reloadDetailsWithControls(debounceMs = 0) {
     if (!window.currentRequestId) return;
     const run = () => window.openRequestDetails(window.currentRequestId, window.currentDetailsIndex, {
         preserveUiState: true,
-        skipAutoSearch: true,
     });
     clearTimeout(window.detailsControlDebounce);
     if (debounceMs > 0) {
@@ -165,7 +164,6 @@ function ensureDetailsControlHandlers() {
 
 async function openRequestDetails(requestId, explicitIndex = null, options = {}) {
     const preserveUiState = !!options.preserveUiState;
-    const skipAutoSearch = !!options.skipAutoSearch;
     const modal = document.getElementById('request-details-modal');
     const title = document.getElementById('request-details-title');
     const meta = document.getElementById('request-details-meta');
@@ -300,9 +298,7 @@ async function openRequestDetails(requestId, explicitIndex = null, options = {})
                 }
             } else {
                 if (cacheIndicator) cacheIndicator.classList.add('hidden');
-                if (!skipAutoSearch) {
-                    searchRequestFromDetails();
-                }
+                releases.innerHTML = '<div class="text-gray-500 text-sm">No cached search results yet. Use Refresh Search to search indexers.</div>';
             }
         }
         window.applyDetailsControls(data.release_controls || {});
@@ -384,9 +380,7 @@ async function searchRequestFromDetails() {
         cacheInd.classList.add('hidden');
     }
     window.startSearchProgress(window.currentRequestId, detailsTitle, async function() {
-        // Reload full details from the existing details API. skipAutoSearch avoids
-        // re-triggering the auto-search loop when the completed search found none.
-        await window.openRequestDetails(window.currentRequestId, window.currentDetailsIndex, { preserveUiState: true, skipAutoSearch: true });
+        await window.openRequestDetails(window.currentRequestId, window.currentDetailsIndex, { preserveUiState: true });
         if (btn) {
             btn.disabled = false;
             btn.innerHTML = originalText || 'Refresh Search';
