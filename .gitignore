@@ -46,6 +46,7 @@ htmlcov/
 
 # Project specific
 data/
+app/siftarr/_version.py
 docker/*rules.json
 .plans/
 *.log

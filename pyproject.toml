@@ -34,7 +34,7 @@ source = "vcs"
 version-file = "app/siftarr/_version.py"
 
 [tool.hatch.build.targets.wheel]
-packages = ["app/siftarr"]
+only-include = ["app"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

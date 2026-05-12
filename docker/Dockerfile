@@ -25,15 +25,23 @@ WORKDIR /app
 # Create non-root user
 RUN groupadd -g 1000 appgroup && useradd -u 1000 -g appgroup -m -s /bin/bash appuser
 
-# Copy project files
+# Copy dependency metadata first for dependency-layer caching.
 COPY pyproject.toml uv.lock* ./
 
 # Install dependencies
 RUN --mount=type=cache,target=/root/.cache/uv \
-    SETUPTOOLS_SCM_PRETEND_VERSION_FOR_SIFTARR="${SIFTARR_VERSION#v}" uv sync --frozen
+    uv sync --frozen --no-install-project
 
 # Copy application code
 COPY app/ ./app/
+
+# Install the project after source is present. Set both hatch-vcs/setuptools-scm
+# version override forms so builds without .git metadata (Docker context) work.
+RUN --mount=type=cache,target=/root/.cache/uv \
+    SETUPTOOLS_SCM_PRETEND_VERSION="${SIFTARR_VERSION#v}" \
+    SETUPTOOLS_SCM_PRETEND_VERSION_FOR_SIFTARR="${SIFTARR_VERSION#v}" \
+    uv sync --frozen
+
 # Copy pre-built Tailwind CSS from build stage
 COPY --from=tailwind-builder /build/app/siftarr/static/css/tailwind.css ./app/siftarr/static/css/tailwind.css
 COPY db/alembic/ ./alembic/
