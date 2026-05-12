@@ -55,6 +55,65 @@ function updateReleaseCountText(data) {
     countEl.textContent = filtered === total ? `${filtered} results` : `${filtered} of ${total} results`;
 }
 
+function normalizeReleaseSortValue(value) {
+    if (typeof value === 'string') return value.toLocaleLowerCase();
+    if (typeof value === 'number') return value;
+    return value || '';
+}
+
+function releaseSortValue(release, sortKey) {
+    if (sortKey === 'published') return release.publish_date || '';
+    if (sortKey === 'size') return release.size_bytes || 0;
+    if (sortKey === 'seeders') return release.seeders || 0;
+    if (sortKey === 'title') return release.title || '';
+    if (sortKey === 'indexer') return release.indexer || '';
+    return release.score || 0;
+}
+
+function compareReleasesForDetails(a, b, controls) {
+    const direction = controls.direction === 'asc' ? 1 : -1;
+    const primaryA = normalizeReleaseSortValue(releaseSortValue(a, controls.sort || 'score'));
+    const primaryB = normalizeReleaseSortValue(releaseSortValue(b, controls.sort || 'score'));
+    if (primaryA < primaryB) return -1 * direction;
+    if (primaryA > primaryB) return 1 * direction;
+    return String(a.title || '').localeCompare(String(b.title || ''), undefined, { sensitivity: 'base' });
+}
+
+function applyLocalReleaseSort() {
+    if (!window.currentRequestId) return false;
+    const releasesEl = document.getElementById('request-details-releases');
+    if (!releasesEl) return false;
+    const controls = getDetailsControls(window.currentRequestId);
+    const sortReleases = (releases) => (releases || []).slice().sort((a, b) => compareReleasesForDetails(a, b, controls));
+    if (window.currentRequestMediaType === 'tv' && window.currentDetailsData?.tv_info) {
+        const data = JSON.parse(JSON.stringify(window.currentDetailsData));
+        data.tv_info.releases_by_season = data.tv_info.releases_by_season || {};
+        data.tv_info.releases_by_episode = data.tv_info.releases_by_episode || {};
+        Object.keys(data.tv_info.releases_by_season).forEach((key) => {
+            data.tv_info.releases_by_season[key] = sortReleases(data.tv_info.releases_by_season[key]);
+        });
+        Object.keys(data.tv_info.releases_by_episode).forEach((key) => {
+            data.tv_info.releases_by_episode[key] = sortReleases(data.tv_info.releases_by_episode[key]);
+        });
+        data.releases = sortReleases(data.releases);
+        const preservedDetailsState = window.captureDetailsAccordionState ? window.captureDetailsAccordionState() : null;
+        releasesEl.innerHTML = window.renderSeasonAccordion(data);
+        if (preservedDetailsState && window.restoreDetailsAccordionState) {
+            window.restoreDetailsAccordionState(preservedDetailsState);
+        }
+        window.currentDetailsData = data;
+        window.currentReleases = data.releases || [];
+        return true;
+    }
+    if (Array.isArray(window.currentReleases)) {
+        window.currentReleases = sortReleases(window.currentReleases);
+        releasesEl.innerHTML = window.currentReleases.map(release => window.renderReleaseCard(release, window.currentRequestId)).join('');
+        if (window.currentDetailsData) window.currentDetailsData.releases = window.currentReleases;
+        return true;
+    }
+    return false;
+}
+
 function reloadDetailsWithControls(debounceMs = 0) {
     if (!window.currentRequestId) return;
     const run = () => window.openRequestDetails(window.currentRequestId, window.currentDetailsIndex, {
@@ -90,13 +149,13 @@ function ensureDetailsControlHandlers() {
     if (sortSelect) sortSelect.addEventListener('change', () => {
         const controls = getDetailsControls(window.currentRequestId);
         controls.sort = sortSelect.value;
-        reloadDetailsWithControls();
+        applyLocalReleaseSort();
     });
     if (directionBtn) directionBtn.addEventListener('click', () => {
         const controls = getDetailsControls(window.currentRequestId);
         controls.direction = (controls.direction || 'desc') === 'desc' ? 'asc' : 'desc';
         applyDetailsControls(controls);
-        reloadDetailsWithControls();
+        applyLocalReleaseSort();
     });
     if (resetBtn) resetBtn.addEventListener('click', () => {
         resetDetailsControls(window.currentRequestId, { updateInputs: true });
@@ -213,6 +272,7 @@ async function openRequestDetails(requestId, explicitIndex = null, options = {})
         }
 
         window.currentReleases = data.releases || [];
+        window.currentDetailsData = data;
         window.currentRequestId = data.request.id;
         window.currentRequestMediaType = data.request.media_type || 'movie';
         window.updateActiveStageBanner(data);
@@ -420,6 +480,7 @@ window.resetDetailsControls = resetDetailsControls;
 window.buildDetailsUrl = buildDetailsUrl;
 window.applyDetailsControls = applyDetailsControls;
 window.updateReleaseCountText = updateReleaseCountText;
+window.applyLocalReleaseSort = applyLocalReleaseSort;
 window.refreshPlexAndReload = refreshPlexAndReload;
 window.searchRequestFromDetails = searchRequestFromDetails;
 window.searchTvRequestAll = searchTvRequestAll;

@@ -142,6 +142,17 @@ def test_dashboard_details_search_sets_progress_and_restores_button():
     )
 
 
+def test_dashboard_details_sort_controls_reorder_locally_without_reload():
+    """Sort-only details controls should avoid refetching the whole modal."""
+    js = _read_dashboard_js()
+
+    assert "function applyLocalReleaseSort()" in js
+    assert "controls.sort = sortSelect.value;\n        applyLocalReleaseSort();" in js
+    assert "applyDetailsControls(controls);\n        applyLocalReleaseSort();" in js
+    assert "controls.sort = sortSelect.value;\n        reloadDetailsWithControls();" not in js
+    assert "applyDetailsControls(controls);\n        reloadDetailsWithControls();" not in js
+
+
 def test_dashboard_template_search_actions_use_progress_helpers(dashboard_template_path):
     """Search actions should opt into progress helpers without changing deny actions."""
     with open(dashboard_template_path, encoding="utf-8") as handle:
