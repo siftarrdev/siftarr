@@ -63,9 +63,33 @@ services:
       - ./data:/data
       # Optional: seed rules on first run from a Rules export JSON.
       # - ./rules.json:/data/config/rules.json:ro
-    environment:
-      # Optional: only used when the rules table is empty.
-      # - SIFTARR_DEFAULT_RULES_PATH=/data/config/rules.json
+    env_file:
+      - .env
+```
+
+Create a `.env` file next to your Compose file for runtime configuration. This
+is the recommended way to pass URLs, API keys, and optional feature settings
+without hard-coding them in Compose:
+
+```dotenv
+TZ=UTC
+
+OVERSEERR_URL=http://overseerr:5055
+OVERSEERR_API_KEY=your_overseerr_key
+
+PROWLARR_URL=http://prowlarr:9696
+PROWLARR_API_KEY=your_prowlarr_key
+
+QBITTORRENT_URL=http://qbittorrent:8080
+QBITTORRENT_API_KEY=your_qbittorrent_api_key
+
+PLEX_URL=http://plex:32400
+
+# Optional: explicit integration/API key. If unset, Siftarr generates one.
+SIFTARR_API_KEY=optional_integration_key
+
+# Optional: only used when the rules table is empty and rules.json is mounted.
+# SIFTARR_DEFAULT_RULES_PATH=/data/config/rules.json
 ```
 
 Start it with:
@@ -86,7 +110,7 @@ docker compose -f docker/docker-compose.yml up -d --build
 
 ### Optional environment configuration
 
-Most settings can be entered in the web UI after first launch. Environment variables are useful for pre-seeding values or running non-interactively. Values saved in **Settings** are used at runtime.
+Most settings can be entered in the web UI after first launch. Environment variables are useful for pre-seeding values or running non-interactively. For Docker Compose, prefer an `env_file` such as `.env` next to your Compose file instead of inline secrets. Values saved in **Settings** are used at runtime.
 
 ```yaml
 environment:
