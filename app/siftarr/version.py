@@ -5,11 +5,12 @@ from __future__ import annotations
 import os
 import subprocess
 from contextlib import suppress
+from importlib import import_module
 from importlib.metadata import PackageNotFoundError
 from importlib.metadata import version as package_version
 
 with suppress(ImportError):
-    from app.siftarr._version import __version__  # noqa: F401
+    __version__ = import_module("app.siftarr._version").__version__
 
 
 def get_version() -> str:
