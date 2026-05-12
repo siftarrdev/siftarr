@@ -7,11 +7,7 @@ import pytest
 
 from app.siftarr.config import reload_settings
 from app.siftarr.models.rule import Rule, RuleType, TVTarget
-from app.siftarr.services.decisions.rule_service import (
-    DEFAULT_RULES,
-    RuleImportPreview,
-    RuleService,
-)
+from app.siftarr.services.decisions.rule_service import RuleImportPreview, RuleService
 
 
 class TestRuleService:
@@ -231,7 +227,7 @@ class TestRuleService:
 
     @pytest.mark.asyncio
     async def test_seed_default_rules(self, mock_db, service):
-        """Test seeding default rules."""
+        """Without a configured file, default seeding leaves rules empty."""
         mock_result_empty = MagicMock()
         mock_result_empty.scalars.return_value.all.return_value = []
         mock_db.execute.return_value = mock_result_empty
@@ -243,7 +239,8 @@ class TestRuleService:
         with patch.object(service, "get_all_rules", return_value=[]):
             result = await service.seed_default_rules()
 
-            assert len(result) == len(DEFAULT_RULES)
+            assert result == []
+            mock_db.add.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_seed_default_rules_from_configured_file(
@@ -289,7 +286,7 @@ class TestRuleService:
         mock_db.add.assert_called_once()
 
     @pytest.mark.asyncio
-    async def test_seed_default_rules_falls_back_to_bundled_defaults(
+    async def test_seed_default_rules_without_configured_file_leaves_rules_empty(
         self, mock_db, service, monkeypatch
     ):
         monkeypatch.delenv("SIFTARR_DEFAULT_RULES_PATH", raising=False)
@@ -298,8 +295,8 @@ class TestRuleService:
         with patch.object(service, "get_all_rules", return_value=[]):
             result = await service.seed_default_rules()
 
-        assert len(result) == len(DEFAULT_RULES)
-        assert mock_db.add.call_count == len(DEFAULT_RULES)
+        assert result == []
+        mock_db.add.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_seed_default_rules_does_not_replace_existing_rules(
@@ -398,64 +395,6 @@ class TestRuleService:
         result = await service.toggle_rule(999)
 
         assert result is None
-
-    def test_default_rules_content(self):
-        """Test that DEFAULT_RULES has expected content."""
-        assert len(DEFAULT_RULES) == 12
-
-        exclusion_rules = [r for r in DEFAULT_RULES if r["rule_type"] == RuleType.EXCLUSION]
-        assert len(exclusion_rules) == 1
-
-        requirement_rules = [r for r in DEFAULT_RULES if r["rule_type"] == RuleType.REQUIREMENT]
-        assert len(requirement_rules) == 1
-
-        scorer_rules = [r for r in DEFAULT_RULES if r["rule_type"] == RuleType.SCORER]
-        assert len(scorer_rules) == 7
-
-        size_rules = [r for r in DEFAULT_RULES if r["rule_type"] == RuleType.SIZE_LIMIT]
-        assert len(size_rules) == 3
-
-    def test_default_rules_have_required_fields(self):
-        """Test that each default rule has all required fields."""
-        required_fields = {
-            "name",
-            "rule_type",
-            "pattern",
-            "score",
-            "priority",
-            "description",
-            "media_scope",
-            "is_enabled",
-            "min_size_gb",
-            "max_size_gb",
-            "tv_target",
-        }
-
-        for rule in DEFAULT_RULES:
-            assert required_fields.issubset(rule.keys())
-            assert isinstance(rule["name"], str)
-            assert isinstance(rule["pattern"], str)
-            assert isinstance(rule["score"], int)
-            assert isinstance(rule["priority"], int)
-
-    def test_default_rules_match_live_snapshot_expectations(self):
-        """Bundled defaults should match the approved 12-rule live snapshot."""
-        assert [rule["name"] for rule in DEFAULT_RULES] == [
-            "Reject Camera/TS/Screener",
-            "Require HD Resolution",
-            "Prefer x265/HEVC",
-            "Prefer MeGusta",
-            "Prefer LAMA/SPiCYLAMA",
-            "Movies Size Limit",
-            "Tv Episode Size",
-            "TV Seasons Size",
-            "1080p TV",
-            "720p TV",
-            "1080p Movie",
-            "4k Movie",
-        ]
-        assert DEFAULT_RULES[6]["tv_target"] == TVTarget.EPISODE
-        assert DEFAULT_RULES[7]["tv_target"] == TVTarget.SEASON_PACK
 
     @pytest.mark.asyncio
     async def test_export_rules_json_includes_versioned_tv_targeting(self, service):

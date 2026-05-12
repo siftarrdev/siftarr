@@ -98,7 +98,8 @@ startup or rule-page initialization only when the rules table is empty. Existing
 rules are preserved and are not replaced by later file changes; use the Rules
 import UI/API when you intentionally want to replace rules. If the path is set
 but the file is missing, unreadable, or invalid, startup reports the error
-instead of silently falling back to bundled defaults.
+instead of silently continuing without seeded rules. If no path is configured,
+Siftarr starts with no rules.
 
 ## Plex SSO claim
 

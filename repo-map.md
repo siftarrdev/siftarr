@@ -155,7 +155,7 @@ Business logic and integrations, organized into thematic subpackages:
 
 **`decisions/`** — Rule engine and decision pipeline
 - `rule_engine.py` — release filtering and scoring evaluation; module-level rule version cache (`_rule_version`)
-- `rule_service.py` — CRUD/order logic for rules, import/export validation, and empty-database default-rule seeding from either bundled defaults or configured `rules.json`
+- `rule_service.py` — CRUD/order logic for rules, import/export validation, and empty-database default-rule seeding from configured `rules.json`
 - `decision_pipeline.py` — shared decision pipeline helpers (rule loading, activity logging, pending queue, best-release selection)
 - `tv_decision_service.py` — TV-specific decision logic (season sweeps, episode fallback)
 - `movie_decision_service.py` — movie-specific decision logic

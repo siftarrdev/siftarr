@@ -3,7 +3,7 @@ import logging
 import re
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, TypedDict, cast
+from typing import Any, cast
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -14,22 +14,6 @@ from app.siftarr.services.decisions.rule_engine import increment_rule_version
 from app.siftarr.services.integrations.prowlarr_service import clear_search_cache
 
 
-class RuleData(TypedDict):
-    """Type definition for rule data dictionary."""
-
-    name: str
-    rule_type: RuleType
-    media_scope: str
-    pattern: str
-    score: int
-    priority: int
-    description: str | None
-    is_enabled: bool
-    min_size_gb: float | None
-    max_size_gb: float | None
-    tv_target: TVTarget | None
-
-
 @dataclass
 class RuleImportPreview:
     """Preview returned for a validated JSON rule import."""
@@ -37,166 +21,6 @@ class RuleImportPreview:
     version: int
     rules: list[dict[str, Any]]
     replace_count: int
-
-
-DEFAULT_RULES: list[RuleData] = [
-    {
-        "name": "Reject Camera/TS/Screener",
-        "rule_type": RuleType.EXCLUSION,
-        "media_scope": "both",
-        "pattern": r"\b(?:CAM|TS|HDCAM|SCR|TELESYNC)\b",
-        "score": 0,
-        "priority": 1,
-        "description": "Reject low-quality camera recordings and screeners",
-        "is_enabled": True,
-        "min_size_gb": None,
-        "max_size_gb": None,
-        "tv_target": None,
-    },
-    {
-        "name": "Require HD Resolution",
-        "rule_type": RuleType.REQUIREMENT,
-        "media_scope": "both",
-        "pattern": r"1080p|2160p|720p|4k",
-        "score": 0,
-        "priority": 2,
-        "description": "Require HD resolution (720p or higher)",
-        "is_enabled": True,
-        "min_size_gb": None,
-        "max_size_gb": None,
-        "tv_target": None,
-    },
-    {
-        "name": "Prefer x265/HEVC",
-        "rule_type": RuleType.SCORER,
-        "media_scope": "both",
-        "pattern": r"x265|HEVC|H\.265",
-        "score": 100,
-        "priority": 3,
-        "description": "Prefer HEVC codec for better compression",
-        "is_enabled": True,
-        "min_size_gb": None,
-        "max_size_gb": None,
-        "tv_target": None,
-    },
-    {
-        "name": "Prefer MeGusta",
-        "rule_type": RuleType.SCORER,
-        "media_scope": "tv",
-        "pattern": r"MeGusta",
-        "score": 100,
-        "priority": 4,
-        "description": "Preferred release group",
-        "is_enabled": True,
-        "min_size_gb": None,
-        "max_size_gb": None,
-        "tv_target": None,
-    },
-    {
-        "name": "Prefer LAMA/SPiCYLAMA",
-        "rule_type": RuleType.SCORER,
-        "media_scope": "movie",
-        "pattern": r"SPiCYLAMA|LAMA",
-        "score": 100,
-        "priority": 5,
-        "description": "Preferred release groups",
-        "is_enabled": True,
-        "min_size_gb": None,
-        "max_size_gb": None,
-        "tv_target": None,
-    },
-    {
-        "name": "Movies Size Limit",
-        "rule_type": RuleType.SIZE_LIMIT,
-        "media_scope": "movie",
-        "pattern": "size_limit",
-        "score": 0,
-        "priority": 6,
-        "description": None,
-        "is_enabled": True,
-        "min_size_gb": 1.0,
-        "max_size_gb": 10.0,
-        "tv_target": None,
-    },
-    {
-        "name": "Tv Episode Size",
-        "rule_type": RuleType.SIZE_LIMIT,
-        "media_scope": "tv",
-        "pattern": "size_limit",
-        "score": 0,
-        "priority": 7,
-        "description": None,
-        "is_enabled": True,
-        "min_size_gb": 0.1,
-        "max_size_gb": 1.5,
-        "tv_target": TVTarget.EPISODE,
-    },
-    {
-        "name": "TV Seasons Size",
-        "rule_type": RuleType.SIZE_LIMIT,
-        "media_scope": "tv",
-        "pattern": "size_limit",
-        "score": 0,
-        "priority": 8,
-        "description": None,
-        "is_enabled": True,
-        "min_size_gb": 2.0,
-        "max_size_gb": 15.0,
-        "tv_target": TVTarget.SEASON_PACK,
-    },
-    {
-        "name": "1080p TV",
-        "rule_type": RuleType.SCORER,
-        "media_scope": "tv",
-        "pattern": r"1080P",
-        "score": 100,
-        "priority": 9,
-        "description": None,
-        "is_enabled": True,
-        "min_size_gb": None,
-        "max_size_gb": None,
-        "tv_target": None,
-    },
-    {
-        "name": "720p TV",
-        "rule_type": RuleType.SCORER,
-        "media_scope": "tv",
-        "pattern": r"720p",
-        "score": 30,
-        "priority": 10,
-        "description": None,
-        "is_enabled": True,
-        "min_size_gb": None,
-        "max_size_gb": None,
-        "tv_target": None,
-    },
-    {
-        "name": "1080p Movie",
-        "rule_type": RuleType.SCORER,
-        "media_scope": "both",
-        "pattern": r"1080p",
-        "score": 30,
-        "priority": 11,
-        "description": None,
-        "is_enabled": True,
-        "min_size_gb": None,
-        "max_size_gb": None,
-        "tv_target": None,
-    },
-    {
-        "name": "4k Movie",
-        "rule_type": RuleType.SCORER,
-        "media_scope": "movie",
-        "pattern": r"2160p|4k",
-        "score": 0,
-        "priority": 12,
-        "description": None,
-        "is_enabled": True,
-        "min_size_gb": None,
-        "max_size_gb": None,
-        "tv_target": None,
-    },
-]
 
 
 SIZE_LIMIT_RULE_NAME = "Size Limits"
@@ -340,8 +164,8 @@ class RuleService:
             preview = self._load_default_rules_file(Path(configured_path))
             return await self.create_rules_from_preview(preview)
 
-        logger.info("No default rules file configured; seeding bundled default rules")
-        return await self.create_rules_from_preview(self._preview_bundled_default_rules())
+        logger.info("No default rules file configured; leaving rules empty")
+        return []
 
     async def ensure_default_rules(self) -> list[Rule]:
         rules = await self.get_all_rules()
@@ -636,15 +460,6 @@ class RuleService:
 
         return RuleImportPreview(version=1, rules=preview_rules, replace_count=len(preview_rules))
 
-    def _preview_bundled_default_rules(self) -> RuleImportPreview:
-        payload = json.dumps(
-            {
-                "version": 1,
-                "rules": [self._serialize_rule_data(rule_data) for rule_data in DEFAULT_RULES],
-            }
-        )
-        return self.preview_import_rules(payload)
-
     def _load_default_rules_file(self, path: Path) -> RuleImportPreview:
         try:
             payload = path.read_text(encoding="utf-8")
@@ -660,13 +475,6 @@ class RuleService:
 
         logger.info("Seeding default rules from configured file: %s", path)
         return preview
-
-    @staticmethod
-    def _serialize_rule_data(rule_data: RuleData) -> dict[str, Any]:
-        return {
-            key: value.value if isinstance(value, RuleType | TVTarget) else value
-            for key, value in rule_data.items()
-        }
 
     async def create_rules_from_preview(self, preview: RuleImportPreview) -> list[Rule]:
         created: list[Rule] = []

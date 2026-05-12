@@ -151,8 +151,8 @@ versioned JSON format produced by **Rules → Export** (or `GET /rules/export`).
 The configured file is a first-run/default seed only: Siftarr reads it when the
 rules table is empty, such as on a new database. It does not replace or merge
 with user-edited rules after rules already exist. If no file is configured,
-Siftarr seeds its bundled defaults; if a configured file is missing, unreadable,
-or invalid, startup fails loudly so the mount/configuration can be fixed.
+Siftarr leaves the rules table empty; if a configured file is missing,
+unreadable, or invalid, startup fails loudly so the mount/configuration can be fixed.
 
 ### Browser auth and instance claim
 

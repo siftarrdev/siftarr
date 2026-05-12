@@ -157,8 +157,8 @@ class Settings(BaseSettings):
     siftarr_disable_search_cache: bool = False
 
     # Optional first-run rules import file (for Docker/Compose bind mounts).
-    # When unset, bundled defaults are seeded. When set, the file must exist
-    # and match the /rules/export JSON schema.
+    # When unset, no rules are seeded. When set, the file must exist and match
+    # the /rules/export JSON schema.
     default_rules_path: str | None = Field(
         default=None, validation_alias="SIFTARR_DEFAULT_RULES_PATH"
     )
