@@ -313,7 +313,7 @@ def _load_staged_release_identity(staged_torrent: Any) -> dict[str, object]:
     try:
         with open(json_path) as f:
             metadata = json.load(f)
-    except (OSError, json.JSONDecodeError, TypeError):
+    except OSError, json.JSONDecodeError, TypeError:
         return {}
     release = metadata.get("release")
     return release if isinstance(release, dict) else {}

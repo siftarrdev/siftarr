@@ -42,7 +42,7 @@ def _download_completed_torrent_ids(details: str | None) -> set[int]:
         return set()
     try:
         payload = json.loads(details)
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return set()
     if not isinstance(payload, dict):
         return set()

@@ -82,10 +82,10 @@ class Request(Base):
     plex_rating_key: Mapped[str | None] = mapped_column(String(100), nullable=True)
 
     # Relationships
-    releases: Mapped[list["Release"]] = relationship(
+    releases: Mapped[list[Release]] = relationship(
         "Release", back_populates="request", cascade="all, delete-orphan"
     )
-    seasons: Mapped[list["Season"]] = relationship(
+    seasons: Mapped[list[Season]] = relationship(
         "Season", back_populates="request", cascade="all, delete-orphan"
     )
 

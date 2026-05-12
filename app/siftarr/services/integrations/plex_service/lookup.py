@@ -135,7 +135,7 @@ class PlexServiceLookup:
                 "PlexService: search_show(%r) returned status %d", title, response.status_code
             )
             return []
-        except (httpx.RequestError, ValueError):
+        except httpx.RequestError, ValueError:
             logger.exception("PlexService: search_show(%r) failed", title)
             return []
 
@@ -169,7 +169,7 @@ class PlexServiceLookup:
                         return normalized
                 return None
             return None
-        except (httpx.RequestError, ValueError):
+        except httpx.RequestError, ValueError:
             return None
 
     async def get_movie_by_tmdb(self, tmdb_id: int) -> dict[str, Any] | None:

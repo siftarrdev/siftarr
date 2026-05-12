@@ -29,7 +29,7 @@ class Episode(Base):
     status: Mapped[RequestStatus] = mapped_column(
         SQLEnum(RequestStatus), default=RequestStatus.PENDING
     )
-    season: Mapped["Season"] = relationship("Season", back_populates="episodes")
+    season: Mapped[Season] = relationship("Season", back_populates="episodes")
 
     def __repr__(self) -> str:
         return f"<Episode(id={self.id}, season_id={self.season_id}, episode_number={self.episode_number}, status={self.status})>"

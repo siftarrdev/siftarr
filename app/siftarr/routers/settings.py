@@ -682,7 +682,7 @@ async def rescan_plex_stream(
     """
     partial = shallow or mode == "partial"
 
-    async def _inner() -> AsyncGenerator[str, None]:
+    async def _inner() -> AsyncGenerator[str]:
         async for event in rescan_plex_generator_svc(
             shallow=partial,
             async_session_maker=db_mod.async_session_maker,
@@ -708,7 +708,7 @@ async def rescan_plex_stream(
 async def sync_overseerr_stream() -> StreamingResponse:
     """Stream Overseerr sync progress via SSE."""
 
-    async def _inner() -> AsyncGenerator[str, None]:
+    async def _inner() -> AsyncGenerator[str]:
         async for event in sync_overseerr_generator_svc(
             async_session_maker=db_mod.async_session_maker,
             build_effective_settings_func=build_effective_settings,

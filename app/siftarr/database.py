@@ -109,7 +109,7 @@ def init_engine() -> None:
     _engine_initialized = True
 
 
-async def get_db() -> AsyncGenerator[AsyncSession, None]:
+async def get_db() -> AsyncGenerator[AsyncSession]:
     """Dependency that provides a database session."""
     if async_session_maker is None:
         init_engine()

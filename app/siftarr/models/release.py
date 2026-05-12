@@ -59,7 +59,7 @@ class Release(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now)
 
     # Relationships
-    request: Mapped["Request"] = relationship("Request", back_populates="releases")
+    request: Mapped[Request] = relationship("Request", back_populates="releases")
 
     def __repr__(self) -> str:
         return f"<Release(id={self.id}, title='{self.title[:50]}...', score={self.score})>"

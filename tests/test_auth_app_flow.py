@@ -89,7 +89,7 @@ class NoopScheduler:
         return None
 
 
-async def _fake_db() -> AsyncGenerator[MagicMock, None]:
+async def _fake_db() -> AsyncGenerator[MagicMock]:
     yield MagicMock()
 
 
