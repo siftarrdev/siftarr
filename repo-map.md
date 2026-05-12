@@ -51,10 +51,10 @@ Primary flow:
 - `CONTRIBUTING.md` — developer setup, workflow, quality gates, and PR expectations
 - `AGENTS.md` — repository-specific agent/development rules
 - `alembic.ini` — local Alembic CLI configuration pointing at `db/alembic/`
-- `pyproject.toml` — Python project metadata, dependencies, pytest, and Ruff config
-- `ty.toml` — static type checker configuration
+- `pyproject.toml` — Python project metadata, dependencies, hatchling/hatch-vcs build backend, pytest, and Ruff config
+- `ty.toml` — static type checker configuration (Python version target)
 - `uv.lock` — locked dependency graph for `uv`
-- `package.json` / `tailwind.config.js` — Tailwind CSS build config (npm dev dependency)
+- `package.json` — Tailwind CSS build script and npm dev dependency (`@tailwindcss/cli`)
 - `node_modules/` — JavaScript dependencies (gitignored)
 
 ## Documentation map
@@ -207,7 +207,7 @@ Static assets.
 
 - `css/dashboard.css` — supplemental UI styling
 - `css/tailwind.css` — built Tailwind CSS output (generated, committed)
-- `css/tailwind-input.css` — Tailwind CSS input with `@tailwind` directives and custom component classes
+- `css/tailwind-input.css` — Tailwind CSS v4 input with CSS-based theme configuration and custom component classes
 - `js/dashboard*.js` and `js/dashboard/` — dashboard client-side behavior, filters, details-modal release controls, staged actions, single-action TV Search All/read-only bucket UI, movie release search UX, and SSE progress panel
 - favicon assets
 
@@ -248,7 +248,12 @@ Tests mirror the service subpackage organization under `tests/services/`:
 
 ## Tailwind CSS Build
 
-After changing custom styles or Tailwind classes in templates, rebuild the CSS:
+Tailwind CSS v4 is built with `@tailwindcss/cli`. Configuration lives in
+`app/siftarr/static/css/tailwind-input.css` using CSS-based `@theme` settings;
+there is no `tailwind.config.js`.
+
+After changing custom styles, Tailwind theme values, or Tailwind classes in
+templates, rebuild the CSS:
 
 ```bash
 npm run build:css
