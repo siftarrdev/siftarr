@@ -131,8 +131,12 @@ def test_dashboard_details_search_sets_progress_and_restores_button():
     assert "btn.textContent = 'Searching...';" in js
     assert "window.startSearchProgress(" in js
     assert "/requests/' + window.currentRequestId + '/search/results" not in js
+    assert "No cached search results yet. Use Refresh Search to search indexers." in js
+    assert "skipAutoSearch" not in js
+    assert "if (!skipAutoSearch)" not in js
+    assert "searchRequestFromDetails();" not in js
     assert (
-        "window.openRequestDetails(window.currentRequestId, window.currentDetailsIndex, { skipAutoSearch: true })"
+        "window.openRequestDetails(window.currentRequestId, window.currentDetailsIndex, { preserveUiState: true })"
         in js
     )
     assert "btn.innerHTML = originalText || 'Refresh Search';" in js
@@ -140,6 +144,17 @@ def test_dashboard_details_search_sets_progress_and_restores_button():
     assert (
         "window.startSearchProgress(window.currentRequestId, detailsTitle, async function()" in js
     )
+
+
+def test_dashboard_details_sort_controls_reorder_locally_without_reload():
+    """Sort-only details controls should avoid refetching the whole modal."""
+    js = _read_dashboard_js()
+
+    assert "function applyLocalReleaseSort()" in js
+    assert "controls.sort = sortSelect.value;\n        applyLocalReleaseSort();" in js
+    assert "applyDetailsControls(controls);\n        applyLocalReleaseSort();" in js
+    assert "controls.sort = sortSelect.value;\n        reloadDetailsWithControls();" not in js
+    assert "applyDetailsControls(controls);\n        reloadDetailsWithControls();" not in js
 
 
 def test_dashboard_template_search_actions_use_progress_helpers(dashboard_template_path):

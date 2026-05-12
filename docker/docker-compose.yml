@@ -8,20 +8,15 @@ services:
         SIFTARR_VERSION: ${SIFTARR_VERSION:-0.0.0}
     container_name: siftarr
     restart: unless-stopped
+    env_file:
+      - .env
     ports:
       - "8000:8000"
     volumes:
       - ./data:/data
-    environment:
-      - TZ=${TZ:-UTC}
-      - OVERSEERR_URL=${OVERSEERR_URL}
-      - OVERSEERR_API_KEY=${OVERSEERR_API_KEY}
-      - PROWLARR_URL=${PROWLARR_URL}
-      - PROWLARR_API_KEY=${PROWLARR_API_KEY}
-      - QBITTORRENT_URL=${QBITTORRENT_URL}
-      - QBITTORRENT_API_KEY=${QBITTORRENT_API_KEY}
-      - PLEX_URL=${PLEX_URL}
-      - PLEX_TOKEN=${PLEX_TOKEN:-}
+      # Optional first-run rule seed file. Create docker/rules.json from
+      # Rules → Export, then uncomment this mount and the env var below.
+      - ./siftarr-rules.json:/data/config/rules.json:ro
     healthcheck:
       test: ["CMD", "/app/.venv/bin/python", "-c", "import httpx; httpx.get('http://localhost:8000/health')"]
       interval: 30s

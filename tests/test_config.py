@@ -78,6 +78,15 @@ def test_default_api_key_is_placeholder_constant(monkeypatch):
     assert Settings().api_key == PLACEHOLDER_API_KEY
 
 
+def test_default_rules_path_is_optional_and_env_configurable(monkeypatch, tmp_path):
+    monkeypatch.delenv("SIFTARR_DEFAULT_RULES_PATH", raising=False)
+    assert Settings().default_rules_path is None
+
+    rules_path = tmp_path / "rules.json"
+    monkeypatch.setenv("SIFTARR_DEFAULT_RULES_PATH", str(rules_path))
+    assert Settings().default_rules_path == str(rules_path)
+
+
 def test_auth_enabled_defaults_to_api_auth_disabled_only():
     """Browser Plex SSO gating is enforced separately from API auth_enabled."""
     assert Settings().auth_enabled is False

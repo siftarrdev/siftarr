@@ -1,9 +1,169 @@
 // Dashboard Details Module - Request details modal and timeline
 // =============================================================
 
+window.detailsControlState = window.detailsControlState || {};
+window.detailsControlHandlersReady = false;
+window.detailsControlDebounce = null;
+
+function defaultDetailsControls() {
+    return { title: '', resolution: 'all', sort: 'score', direction: 'desc' };
+}
+
+function getDetailsControls(requestId) {
+    if (!window.detailsControlState[requestId]) {
+        window.detailsControlState[requestId] = defaultDetailsControls();
+    }
+    return window.detailsControlState[requestId];
+}
+
+function resetDetailsControls(requestId, options = {}) {
+    window.detailsControlState[requestId] = defaultDetailsControls();
+    if (options.updateInputs) window.applyDetailsControls(window.detailsControlState[requestId]);
+}
+
+function buildDetailsUrl(requestId) {
+    const controls = getDetailsControls(requestId);
+    const params = new URLSearchParams();
+    if (controls.title) params.set('title', controls.title);
+    if (controls.resolution && controls.resolution !== 'all') params.set('resolution', controls.resolution);
+    if (controls.sort && controls.sort !== 'score') params.set('sort', controls.sort);
+    if (controls.direction && controls.direction !== 'desc') params.set('direction', controls.direction);
+    const suffix = params.toString();
+    return `/requests/${requestId}/details${suffix ? '?' + suffix : ''}`;
+}
+
+function applyDetailsControls(controls) {
+    const filterInput = document.getElementById('release-filter-input');
+    const resolutionSelect = document.getElementById('release-resolution-filter');
+    const sortSelect = document.getElementById('release-sort-key');
+    const directionBtn = document.getElementById('release-sort-direction');
+    if (filterInput) filterInput.value = controls.title || '';
+    if (resolutionSelect) resolutionSelect.value = controls.resolution === '2160p' ? '4k' : (controls.resolution || 'all');
+    if (sortSelect) sortSelect.value = controls.sort || 'score';
+    if (directionBtn) {
+        const direction = controls.direction || 'desc';
+        directionBtn.dataset.direction = direction;
+        directionBtn.textContent = direction === 'asc' ? 'Asc' : 'Desc';
+    }
+}
+
+function updateReleaseCountText(data) {
+    const countEl = document.getElementById('release-results-count');
+    if (!countEl) return;
+    const filtered = data.filtered_total_releases ?? (data.releases || []).length;
+    const total = data.total_releases ?? filtered;
+    countEl.textContent = filtered === total ? `${filtered} results` : `${filtered} of ${total} results`;
+}
+
+function normalizeReleaseSortValue(value) {
+    if (typeof value === 'string') return value.toLocaleLowerCase();
+    if (typeof value === 'number') return value;
+    return value || '';
+}
+
+function releaseSortValue(release, sortKey) {
+    if (sortKey === 'published') return release.publish_date || '';
+    if (sortKey === 'size') return release.size_bytes || 0;
+    if (sortKey === 'seeders') return release.seeders || 0;
+    if (sortKey === 'title') return release.title || '';
+    if (sortKey === 'indexer') return release.indexer || '';
+    return release.score || 0;
+}
+
+function compareReleasesForDetails(a, b, controls) {
+    const direction = controls.direction === 'asc' ? 1 : -1;
+    const primaryA = normalizeReleaseSortValue(releaseSortValue(a, controls.sort || 'score'));
+    const primaryB = normalizeReleaseSortValue(releaseSortValue(b, controls.sort || 'score'));
+    if (primaryA < primaryB) return -1 * direction;
+    if (primaryA > primaryB) return 1 * direction;
+    return String(a.title || '').localeCompare(String(b.title || ''), undefined, { sensitivity: 'base' });
+}
+
+function applyLocalReleaseSort() {
+    if (!window.currentRequestId) return false;
+    const releasesEl = document.getElementById('request-details-releases');
+    if (!releasesEl) return false;
+    const controls = getDetailsControls(window.currentRequestId);
+    const sortReleases = (releases) => (releases || []).slice().sort((a, b) => compareReleasesForDetails(a, b, controls));
+    if (window.currentRequestMediaType === 'tv' && window.currentDetailsData?.tv_info) {
+        const data = JSON.parse(JSON.stringify(window.currentDetailsData));
+        data.tv_info.releases_by_season = data.tv_info.releases_by_season || {};
+        data.tv_info.releases_by_episode = data.tv_info.releases_by_episode || {};
+        Object.keys(data.tv_info.releases_by_season).forEach((key) => {
+            data.tv_info.releases_by_season[key] = sortReleases(data.tv_info.releases_by_season[key]);
+        });
+        Object.keys(data.tv_info.releases_by_episode).forEach((key) => {
+            data.tv_info.releases_by_episode[key] = sortReleases(data.tv_info.releases_by_episode[key]);
+        });
+        data.releases = sortReleases(data.releases);
+        const preservedDetailsState = window.captureDetailsAccordionState ? window.captureDetailsAccordionState() : null;
+        releasesEl.innerHTML = window.renderSeasonAccordion(data);
+        if (preservedDetailsState && window.restoreDetailsAccordionState) {
+            window.restoreDetailsAccordionState(preservedDetailsState);
+        }
+        window.currentDetailsData = data;
+        window.currentReleases = data.releases || [];
+        return true;
+    }
+    if (Array.isArray(window.currentReleases)) {
+        window.currentReleases = sortReleases(window.currentReleases);
+        releasesEl.innerHTML = window.currentReleases.map(release => window.renderReleaseCard(release, window.currentRequestId)).join('');
+        if (window.currentDetailsData) window.currentDetailsData.releases = window.currentReleases;
+        return true;
+    }
+    return false;
+}
+
+function reloadDetailsWithControls(debounceMs = 0) {
+    if (!window.currentRequestId) return;
+    const run = () => window.openRequestDetails(window.currentRequestId, window.currentDetailsIndex, {
+        preserveUiState: true,
+    });
+    clearTimeout(window.detailsControlDebounce);
+    if (debounceMs > 0) {
+        window.detailsControlDebounce = setTimeout(run, debounceMs);
+    } else {
+        run();
+    }
+}
+
+function ensureDetailsControlHandlers() {
+    if (window.detailsControlHandlersReady) return;
+    window.detailsControlHandlersReady = true;
+    const filterInput = document.getElementById('release-filter-input');
+    const resolutionSelect = document.getElementById('release-resolution-filter');
+    const sortSelect = document.getElementById('release-sort-key');
+    const directionBtn = document.getElementById('release-sort-direction');
+    const resetBtn = document.getElementById('release-controls-reset');
+    if (filterInput) filterInput.addEventListener('input', () => {
+        const controls = getDetailsControls(window.currentRequestId);
+        controls.title = filterInput.value.trim();
+        reloadDetailsWithControls(300);
+    });
+    if (resolutionSelect) resolutionSelect.addEventListener('change', () => {
+        const controls = getDetailsControls(window.currentRequestId);
+        controls.resolution = resolutionSelect.value;
+        reloadDetailsWithControls();
+    });
+    if (sortSelect) sortSelect.addEventListener('change', () => {
+        const controls = getDetailsControls(window.currentRequestId);
+        controls.sort = sortSelect.value;
+        applyLocalReleaseSort();
+    });
+    if (directionBtn) directionBtn.addEventListener('click', () => {
+        const controls = getDetailsControls(window.currentRequestId);
+        controls.direction = (controls.direction || 'desc') === 'desc' ? 'asc' : 'desc';
+        applyDetailsControls(controls);
+        applyLocalReleaseSort();
+    });
+    if (resetBtn) resetBtn.addEventListener('click', () => {
+        resetDetailsControls(window.currentRequestId, { updateInputs: true });
+        reloadDetailsWithControls();
+    });
+}
+
 async function openRequestDetails(requestId, explicitIndex = null, options = {}) {
     const preserveUiState = !!options.preserveUiState;
-    const skipAutoSearch = !!options.skipAutoSearch;
     const modal = document.getElementById('request-details-modal');
     const title = document.getElementById('request-details-title');
     const meta = document.getElementById('request-details-meta');
@@ -14,6 +174,7 @@ async function openRequestDetails(requestId, explicitIndex = null, options = {})
     const searchBtn = document.getElementById('request-details-search-btn');
     const tvSearchBtn = document.getElementById('request-details-tv-search-btn');
     const filterInput = document.getElementById('release-filter-input');
+    window.ensureDetailsControlHandlers();
 
     // Build navigation context from currently visible rows
     if (explicitIndex !== null) {
@@ -53,17 +214,17 @@ async function openRequestDetails(requestId, explicitIndex = null, options = {})
     window.updateActiveStageBanner({ active_staged_torrent: null });
     window.setPoster(null, 'Loading poster');
     document.getElementById('release-results-header').classList.remove('hidden');
-    document.getElementById('release-filter-input').classList.remove('hidden');
+    document.getElementById('release-controls').classList.remove('hidden');
     if (!preserveUiState) {
         releases.innerHTML = '<div class="text-gray-500 text-sm">Loading search results...</div>';
     }
     const cacheIndicatorInit = document.getElementById('release-cache-indicator');
     if (cacheIndicatorInit) cacheIndicatorInit.classList.add('hidden');
-    if (filterInput && !preserveUiState) filterInput.value = '';
+    if (!preserveUiState) window.resetDetailsControls(requestId, { updateInputs: true });
     modal.classList.remove('hidden');
 
     try {
-        const response = await fetch(`/requests/${requestId}/details`);
+        const response = await fetch(window.buildDetailsUrl(requestId));
         if (!response.ok) {
             throw new Error(`Server error: ${response.status}`);
         }
@@ -109,6 +270,7 @@ async function openRequestDetails(requestId, explicitIndex = null, options = {})
         }
 
         window.currentReleases = data.releases || [];
+        window.currentDetailsData = data;
         window.currentRequestId = data.request.id;
         window.currentRequestMediaType = data.request.media_type || 'movie';
         window.updateActiveStageBanner(data);
@@ -118,8 +280,8 @@ async function openRequestDetails(requestId, explicitIndex = null, options = {})
 
         if (data.request.media_type === 'tv' && data.tv_info) {
             window.currentTvSeasons = data.tv_info.seasons || [];
-            document.getElementById('release-results-header').classList.add('hidden');
-            document.getElementById('release-filter-input').classList.add('hidden');
+            document.getElementById('release-results-header').classList.remove('hidden');
+            document.getElementById('release-controls').classList.remove('hidden');
             if (cacheIndicator) cacheIndicator.classList.add('hidden');
             releases.innerHTML = window.renderSeasonAccordion(data);
             if (preservedDetailsState && window.restoreDetailsAccordionState) {
@@ -127,7 +289,7 @@ async function openRequestDetails(requestId, explicitIndex = null, options = {})
             }
         } else {
             document.getElementById('release-results-header').classList.remove('hidden');
-            document.getElementById('release-filter-input').classList.remove('hidden');
+            document.getElementById('release-controls').classList.remove('hidden');
             if (window.currentReleases.length > 0) {
                 releases.innerHTML = window.currentReleases.map(release => window.renderReleaseCard(release, window.currentRequestId)).join('');
                 if (cacheIndicator && cacheIndicatorText) {
@@ -136,11 +298,11 @@ async function openRequestDetails(requestId, explicitIndex = null, options = {})
                 }
             } else {
                 if (cacheIndicator) cacheIndicator.classList.add('hidden');
-                if (!skipAutoSearch) {
-                    searchRequestFromDetails();
-                }
+                releases.innerHTML = '<div class="text-gray-500 text-sm">No cached search results yet. Use Refresh Search to search indexers.</div>';
             }
         }
+        window.applyDetailsControls(data.release_controls || {});
+        window.updateReleaseCountText(data);
 
         window.currentRequestTimeline = data.timeline || [];
         renderTimeline(window.currentRequestTimeline);
@@ -218,9 +380,7 @@ async function searchRequestFromDetails() {
         cacheInd.classList.add('hidden');
     }
     window.startSearchProgress(window.currentRequestId, detailsTitle, async function() {
-        // Reload full details from the existing details API. skipAutoSearch avoids
-        // re-triggering the auto-search loop when the completed search found none.
-        await window.openRequestDetails(window.currentRequestId, window.currentDetailsIndex, { skipAutoSearch: true });
+        await window.openRequestDetails(window.currentRequestId, window.currentDetailsIndex, { preserveUiState: true });
         if (btn) {
             btn.disabled = false;
             btn.innerHTML = originalText || 'Refresh Search';
@@ -309,6 +469,12 @@ function renderTimeline(timelineData) {
 
 // Export functions to window for HTML onclick handlers
 window.openRequestDetails = openRequestDetails;
+window.ensureDetailsControlHandlers = ensureDetailsControlHandlers;
+window.resetDetailsControls = resetDetailsControls;
+window.buildDetailsUrl = buildDetailsUrl;
+window.applyDetailsControls = applyDetailsControls;
+window.updateReleaseCountText = updateReleaseCountText;
+window.applyLocalReleaseSort = applyLocalReleaseSort;
 window.refreshPlexAndReload = refreshPlexAndReload;
 window.searchRequestFromDetails = searchRequestFromDetails;
 window.searchTvRequestAll = searchTvRequestAll;

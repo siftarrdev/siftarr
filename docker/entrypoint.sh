@@ -17,10 +17,6 @@ fi
 mkdir -p "$DB_DIR" /data/staging
 chown -R appuser:appgroup "$DB_DIR" /data/staging
 
-if [ -d /data ]; then
-    chown -R appuser:appgroup /data
-fi
-
 export SIFTARR_DB_PATH="$DB_PATH"
 
 printf '[entrypoint] preparing sqlite database at %s\n' "$SIFTARR_DB_PATH"

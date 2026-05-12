@@ -525,7 +525,35 @@
                         <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
                         <span id="release-cache-indicator-text">Showing cached results</span>
                     </div>
-                    <input type="text" id="release-filter-input" placeholder="Filter results by title..." class="form-input mt-2 mb-2 w-full lg:w-64">
+                    <div id="release-controls" class="mt-3 flex flex-wrap items-end gap-2">
+                        <label class="block w-full sm:w-64">
+                            <span class="form-label">Title filter</span>
+                            <input type="text" id="release-filter-input" placeholder="Filter results by title..." class="form-input mt-1 w-full">
+                        </label>
+                        <label class="block w-36">
+                            <span class="form-label">Resolution</span>
+                            <select id="release-resolution-filter" class="form-input mt-1 w-full">
+                                <option value="all">All</option>
+                                <option value="4k">4K</option>
+                                <option value="1080p">1080p</option>
+                                <option value="720p">720p</option>
+                            </select>
+                        </label>
+                        <label class="block w-36">
+                            <span class="form-label">Sort</span>
+                            <select id="release-sort-key" class="form-input mt-1 w-full">
+                                <option value="score">Score</option>
+                                <option value="size">Size</option>
+                                <option value="seeders">Seeders</option>
+                                <option value="published">Published</option>
+                                <option value="title">Title</option>
+                                <option value="indexer">Indexer</option>
+                            </select>
+                        </label>
+                        <button type="button" id="release-sort-direction" class="btn-ghost btn-sm" data-direction="desc">Desc</button>
+                        <button type="button" id="release-controls-reset" class="btn-ghost btn-sm">Clear</button>
+                        <span id="release-results-count" class="text-xs text-gray-500"></span>
+                    </div>
                     <div id="request-details-releases" class="mt-1 space-y-1"></div>
                 </div>
                 <div id="request-details-timeline" class="hidden">

@@ -46,6 +46,7 @@ htmlcov/
 
 # Project specific
 data/
+docker/*rules.json
 .plans/
 *.log
 *.sqlite3

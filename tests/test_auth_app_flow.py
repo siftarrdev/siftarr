@@ -2,11 +2,13 @@
 
 import os
 from collections.abc import AsyncGenerator, Iterator
+from typing import Any, cast
 from unittest.mock import MagicMock
 
 import pytest
 from fastapi.testclient import TestClient
 
+from app.siftarr import main as main_module
 from app.siftarr.config import reload_settings
 from app.siftarr.main import create_app
 from app.siftarr.routers import auth_router
@@ -47,6 +49,44 @@ class MemorySettingsStore:
             "plex_thumb": self.values.get("plex_thumb"),
             "plex_token_present": bool(self.values.get("plex_token")),
         }
+
+    async def ensure_runtime_api_key(self) -> None:
+        return None
+
+
+class AsyncContext:
+    def __init__(self, value=None) -> None:
+        self.value = value or MagicMock()
+
+    async def __aenter__(self):
+        return self.value
+
+    async def __aexit__(self, exc_type, exc, tb):
+        return False
+
+
+class StartupSession:
+    def begin(self):
+        return AsyncContext(self)
+
+
+class StartupSessionMaker:
+    def __call__(self):
+        return AsyncContext(StartupSession())
+
+
+class NoopScheduler:
+    def __init__(self, *args, **kwargs) -> None:
+        pass
+
+    def start(self) -> None:
+        return None
+
+    def stop(self) -> None:
+        return None
+
+    def run_startup_catchup_syncs(self):
+        return None
 
 
 async def _fake_db() -> AsyncGenerator[MagicMock, None]:
@@ -178,3 +218,40 @@ def test_session_cookie_survives_restart_like_app_reload(monkeypatch, tmp_path):
         for key in ("PLEX_CLAIMED_ID", "PLEX_USERNAME", "PLEX_THUMB", "PLEX_TOKEN"):
             os.environ.pop(key, None)
         reload_settings()
+
+
+def test_startup_ensures_default_rules_after_runtime_api_key(monkeypatch):
+    calls: list[str] = []
+
+    class StartupSettingsStore(MemorySettingsStore):
+        async def ensure_runtime_api_key(self) -> None:
+            calls.append("api_key")
+
+    class StartupRuleService:
+        def __init__(self, db) -> None:
+            del db
+
+        async def ensure_default_rules(self) -> None:
+            calls.append("rules")
+
+    async def init_db() -> None:
+        calls.append("init_db")
+        cast(Any, main_module.db_mod).async_session_maker = StartupSessionMaker()
+
+    async def close_client() -> None:
+        return None
+
+    monkeypatch.setenv("SECRET_KEY", "test-secret")
+    monkeypatch.setenv("SIFTARR_DB_PATH", ":memory:")
+    reload_settings()
+    monkeypatch.setattr(main_module, "_ensure_db_directory", lambda: None)
+    monkeypatch.setattr(main_module.db_mod, "init_db", init_db)
+    monkeypatch.setattr(main_module, "SettingsStore", StartupSettingsStore)
+    monkeypatch.setattr(main_module, "RuleService", StartupRuleService)
+    monkeypatch.setattr(main_module, "SchedulerService", NoopScheduler)
+    monkeypatch.setattr(main_module, "close_shared_client", close_client)
+
+    with TestClient(create_app(), raise_server_exceptions=True):
+        pass
+
+    assert calls[:3] == ["init_db", "api_key", "rules"]

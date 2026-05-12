@@ -52,6 +52,8 @@ class RequestDetailsData:
     request: DashboardRequestSummary
     releases: list[dict[str, object]]
     total_releases: int = 0
+    filtered_total_releases: int = 0
+    release_controls: dict[str, object] | None = None
     active_staged_torrent: dict[str, object] | None = None
     active_staged_torrents: list[dict[str, object]] | None = None
     overseerr: DashboardOverseerrDetails | None = None
@@ -84,6 +86,8 @@ def serialize_request_details_response(data: RequestDetailsData) -> dict[str, ob
         },
         "releases": data.releases,
         "total_releases": data.total_releases,
+        "filtered_total_releases": data.filtered_total_releases,
+        "release_controls": data.release_controls or {},
         "active_staged_torrent": data.active_staged_torrent,
         "active_staged_torrents": data.active_staged_torrents,
         "timeline": [

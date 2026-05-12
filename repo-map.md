@@ -36,7 +36,7 @@ Primary flow:
 3. Search and decision services query Prowlarr and evaluate releases (TV dashboard search uses one Search All stream that runs bounded paginated season sweeps and classifies stored coverage)
 4. Winning releases are staged or sent to qBittorrent
 5. Background services track retries, lifecycle state, Plex polling, and completion
-6. Dashboard and settings UI expose control and visibility
+6. Dashboard and settings UI expose control and visibility; request details can filter/sort stored release results
 
 ## Top-level repository layout
 
@@ -78,7 +78,7 @@ The old duplicated developer guide and stale product specification under `docs/`
 - FastAPI entrypoint
 - logging setup
 - app lifespan startup/shutdown
-- startup verifies DB readiness before scheduler/background jobs start, then launches stale Overseerr/Plex catch-up syncs in the background
+- startup verifies DB readiness, initializes default rules for empty databases, then starts scheduler/background jobs and stale Overseerr/Plex catch-up syncs
 - router registration
 - health and root endpoints
 
@@ -88,6 +88,7 @@ The old duplicated developer guide and stale product specification under `docs/`
 - `get_settings()` — cached singleton accessor
 - `reload_settings()` — invalidates the cached singleton (called after runtime setting changes)
 - first-run API key safety helpers (placeholder constant and secure key generation)
+- `SIFTARR_DEFAULT_RULES_PATH` can point at a mounted Rules export JSON used only to seed an empty rules table
 - `SECRET_KEY` controls browser session signing when explicitly set; otherwise Siftarr auto-generates and persists a session secret beside the SQLite DB (override path with `SIFTARR_SECRET_KEY_FILE`) so Plex SSO browser sessions survive restarts
 - `get_static_version()` — cache-busting value for static assets
 
@@ -120,7 +121,7 @@ HTTP route layer.
 
 - `auth_router.py` — Plex SSO auth endpoints (login page, first-login admin claim, same-admin token refresh, guarded full Plex sync kick-off after successful admin sign-in, non-admin denial UX, logout, session info); included without global auth dependency
 - `dashboard.py` — main dashboard page routes
-- `dashboard_api.py` — dashboard JSON endpoints for details/search data
+- `dashboard_api.py` — dashboard JSON endpoints for details/search data, including validated detail-release filter/sort query controls
 - `dashboard_actions.py` — dashboard-triggered actions and mutations
 - `search_sse.py` — SSE streaming endpoints for live search progress; `/requests/{id}/search/stream` is the primary TV Search All path, while TV scope-specific streams remain compatibility/debug inspect paths
 - `rules.py` — rule management UI/API, including unified rule listing, multi-title testing, modal import/export, and create/edit actions
@@ -147,14 +148,14 @@ Business logic and integrations, organized into thematic subpackages:
 
 **`dashboard/`** — Dashboard, search, detail views
 - `dashboard_service.py` — dashboard DTOs and response serializers only (load/assembly logic in sub-services)
-- `detail_service.py` — request detail loading (releases, timeline, TV enrichment integration)
+- `detail_service.py` — request detail loading (releases, timeline, TV enrichment integration) plus stored-release title/resolution filtering, sorting, pagination counts, and applied-control metadata
 - `tv_details_service.py` — TV details and sync metadata helpers
 - `tv_enrichment_service.py` — TV season/episode enrichment (season data, coverage-based release grouping)
 - `search_service.py` — ad hoc release evaluation/selection, request search orchestration
 
 **`decisions/`** — Rule engine and decision pipeline
 - `rule_engine.py` — release filtering and scoring evaluation; module-level rule version cache (`_rule_version`)
-- `rule_service.py` — CRUD/order logic for rules
+- `rule_service.py` — CRUD/order logic for rules, import/export validation, and empty-database default-rule seeding from configured `rules.json`
 - `decision_pipeline.py` — shared decision pipeline helpers (rule loading, activity logging, pending queue, best-release selection)
 - `tv_decision_service.py` — TV-specific decision logic (season sweeps, episode fallback)
 - `movie_decision_service.py` — movie-specific decision logic
@@ -194,7 +195,7 @@ Business logic and integrations, organized into thematic subpackages:
 Server-rendered HTML templates.
 
 - `base.html` — shared layout (nav bar shows user avatar/name + logout when logged in)
-- `dashboard.html` — main dashboard UI
+- `dashboard.html` — main dashboard UI, including details-modal release result filters/sorting/count controls
 - `login.html` — Plex SSO login page with JS-driven OAuth PIN flow, denied-admin message, and safe next redirect handling
 - `rules.html` — single-pane rules UI with unified rule table, multi-title tester, modal create/edit wizard, and modal import/export
 - `rule_form.html` — fallback full-page create/edit rule form
@@ -207,7 +208,7 @@ Static assets.
 - `css/dashboard.css` — supplemental UI styling
 - `css/tailwind.css` — built Tailwind CSS output (generated, committed)
 - `css/tailwind-input.css` — Tailwind CSS input with `@tailwind` directives and custom component classes
-- `js/dashboard*.js` and `js/dashboard/` — dashboard client-side behavior, filters, details, staged actions, single-action TV Search All/read-only bucket UI, movie release search UX, and SSE progress panel
+- `js/dashboard*.js` and `js/dashboard/` — dashboard client-side behavior, filters, details-modal release controls, staged actions, single-action TV Search All/read-only bucket UI, movie release search UX, and SSE progress panel
 - favicon assets
 
 ## Tests map
@@ -215,11 +216,11 @@ Static assets.
 Tests mirror the service subpackage organization under `tests/services/`:
 
 - `tests/routers/auth/` — auth router coverage (login, plex auth, logout, session info)
-- `tests/routers/dashboard/` — dashboard page/API/action coverage, including SSE search streams
+- `tests/routers/dashboard/` — dashboard page/API/action coverage, including details controls and SSE search streams
 - `tests/routers/settings/` — settings page, connections, maintenance, and jobs coverage
 - `tests/services/auth/` — PlexOAuthService unit tests and auth_service (require_auth, get_session_user) tests
 - `tests/services/admin/` — settings, scheduler, and Plex polling service tests
-- `tests/services/decisions/` — rule engine, rule service, TV/movie decision service tests
+- `tests/services/decisions/` — rule engine, rule service (including import/export-backed default seeding), TV/movie decision service tests
 - `tests/services/integrations/` — Prowlarr, qBittorrent, Overseerr, Plex service tests
 - `tests/services/lifecycle/` — lifecycle, activity log, episode sync, download completion tests
 - `tests/services/releases/` — release parser, serializers, staging, and release selection tests
@@ -237,9 +238,9 @@ Tests mirror the service subpackage organization under `tests/services/`:
 - `alembic.ini` / `db/alembic.ini` — local and container Alembic CLI configuration
 - `db/alembic/env.py` — Alembic environment wiring
 - `db/alembic/versions/` — compact schema migrations; reset/stamp existing local databases when schema history is collapsed
-- container startup runs Alembic/SQLite repair before the FastAPI app launches
+- container startup runs Alembic/SQLite repair before the FastAPI app launches; FastAPI startup then seeds default rules for empty databases
 - `docker/Dockerfile` — multi-stage production image build (Node stage builds Tailwind CSS, Python stage runs the app)
-- `docker/docker-compose.yml` — local container orchestration
+- `docker/docker-compose.yml` — local container orchestration with documented optional `rules.json` first-run seed mount/env workflow
 - `docker/rebuild-run-logs.sh` — rebuild, run, and log-tail helper (use when deps change)
 - `docker/dev-up.sh` — fast dev loop with volume mounts and uvicorn --reload (daily use, no rebuild)
 - `docker/docker-compose.override.yml` — dev overrides: source code volume mounts and `--reload` command
