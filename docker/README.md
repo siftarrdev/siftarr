@@ -59,6 +59,9 @@ mounts under `/data/config`, such as `rules.json`, are left untouched.
 
 Common variables passed by Compose:
 
+The bundled Compose file loads `docker/.env` with `env_file: .env`, so values in
+that file are passed into the Siftarr container as runtime environment variables.
+
 - `TZ` for timezone, defaulting to `UTC`.
 - `OVERSEERR_URL` and `OVERSEERR_API_KEY`.
 - `PROWLARR_URL` and `PROWLARR_API_KEY`.

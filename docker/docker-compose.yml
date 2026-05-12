@@ -8,6 +8,8 @@ services:
         SIFTARR_VERSION: ${SIFTARR_VERSION:-0.0.0}
     container_name: siftarr
     restart: unless-stopped
+    env_file:
+      - .env
     ports:
       - "8000:8000"
     volumes:
