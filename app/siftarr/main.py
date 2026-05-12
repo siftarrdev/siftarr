@@ -23,8 +23,8 @@ from app.siftarr.routers import (
     rules,
     search_sse,
     settings,
-    stats,
     staged,
+    stats,
     webhooks,
 )
 from app.siftarr.services.admin.scheduler_service import SchedulerService

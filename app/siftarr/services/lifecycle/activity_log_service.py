@@ -13,6 +13,11 @@ from app.siftarr.services.stats_metrics_service import record_timing_event
 logger = logging.getLogger(__name__)
 
 
+def _json_dumps_safe(value: dict) -> str:
+    """Serialize log details without failing on test doubles."""
+    return json.dumps(value, default=str)
+
+
 class ActivityLogService:
     """Service for structured activity logging."""
 
@@ -38,7 +43,7 @@ class ActivityLogService:
                 entry = ActivityLog(
                     event_type=event_type.value,
                     request_id=request_id,
-                    details=json.dumps(details) if details is not None else None,
+                    details=_json_dumps_safe(details) if details is not None else None,
                 )
                 add_result = self.db.add(entry)
                 if inspect.isawaitable(add_result):

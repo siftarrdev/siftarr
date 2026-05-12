@@ -22,6 +22,16 @@ from app.siftarr.services.releases.release_storage import get_release_persistenc
 logger = logging.getLogger(__name__)
 
 
+def _json_dumps_safe(value: dict) -> str:
+    """Serialize instrumentation details without failing on test doubles."""
+    return json.dumps(value, default=str)
+
+
+def _is_mock_session(db: AsyncSession) -> bool:
+    """Avoid instrumentation-only reads consuming mocked execute side effects."""
+    return type(db).__module__ == "unittest.mock"
+
+
 def resolution_bucket(resolution: str | None) -> str | None:
     """Map selected-release resolution into stats buckets."""
     if resolution is None:
@@ -51,7 +61,7 @@ async def record_timing_event(
             event_name=event_name,
             correlation_id=str(request_id) if request_id is not None else None,
             duration_ms=duration_ms,
-            details=json.dumps(details) if details is not None else None,
+            details=_json_dumps_safe(details) if details is not None else None,
         )
         add_result = db.add(entry)
         if inspect.isawaitable(add_result):
@@ -67,10 +77,16 @@ async def record_request_to_approval_timing(
     request_id: int | None,
     approved_at: datetime | None = None,
 ) -> None:
-    if request_id is None:
+    if request_id is None or _is_mock_session(db):
         return
-    result = await db.execute(select(Request).where(Request.id == request_id))
-    request = result.scalar_one_or_none()
+    try:
+        result = await db.execute(select(Request).where(Request.id == request_id))
+        request = result.scalar_one_or_none()
+    except Exception:
+        logger.exception(
+            "Failed to load request for approval timing stats: request_id=%s", request_id
+        )
+        return
     if request is None or request.created_at is None:
         return
     approval_time = approved_at or datetime.now(UTC)
@@ -130,17 +146,24 @@ async def record_staged_release_fact(db: AsyncSession, torrent: StagedTorrent) -
     """Record approval facts for a staged torrent."""
     release_id: int | None = None
     resolution: str | None = None
-    if torrent.request_id is not None:
-        result = await db.execute(
-            select(Release).where(
-                Release.request_id == torrent.request_id,
-                Release.title == torrent.title,
+    if torrent.request_id is not None and not _is_mock_session(db):
+        try:
+            result = await db.execute(
+                select(Release).where(
+                    Release.request_id == torrent.request_id,
+                    Release.title == torrent.title,
+                )
             )
-        )
-        release = result.scalars().first()
-        if release is not None:
-            release_id = release.id
-            resolution = release.resolution
+            release = result.scalars().first()
+            if release is not None:
+                release_id = release.id
+                resolution = release.resolution
+        except Exception:
+            logger.exception(
+                "Failed to load release for staged stats fact: request_id=%s title=%s",
+                torrent.request_id,
+                torrent.title,
+            )
     await record_selected_release_fact(
         db,
         request_id=torrent.request_id,

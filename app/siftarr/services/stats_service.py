@@ -86,8 +86,8 @@ def _apply_range(stmt: Any, column: Any, stats_range: StatsRange) -> Any:
     return stmt
 
 
-def _series(rows: list[tuple[str | None, int]]) -> list[dict[str, Any]]:
-    return [{"label": label or "Unknown", "value": int(value or 0)} for label, value in rows]
+def _series(rows: list[Any]) -> list[dict[str, Any]]:
+    return [{"label": row[0] or "Unknown", "value": int(row[1] or 0)} for row in rows]
 
 
 class StatsService:
@@ -99,7 +99,9 @@ class StatsService:
             _apply_range(select(func.count(Request.id)), Request.created_at, stats_range)
         )
         total_rules = await self._scalar_count(select(func.count(Rule.id)))
-        enabled_rules = await self._scalar_count(select(func.count(Rule.id)).where(Rule.is_enabled.is_(True)))
+        enabled_rules = await self._scalar_count(
+            select(func.count(Rule.id)).where(Rule.is_enabled.is_(True))
+        )
         downloads_processed = await self._scalar_count(
             _apply_range(
                 select(func.count(distinct(StatsReleaseFact.request_id))),
@@ -115,14 +117,16 @@ class StatsService:
             )
         )
         approval_rate = (
-            round((downloads_processed / evaluated_requests) * 100, 1) if evaluated_requests else None
+            round((downloads_processed / evaluated_requests) * 100, 1)
+            if evaluated_requests
+            else None
         )
 
         resolution_split = await self._group_counts(
             _apply_range(
-                select(StatsReleaseFact.resolution_bucket, func.count(StatsReleaseFact.id)).group_by(
-                    StatsReleaseFact.resolution_bucket
-                ),
+                select(
+                    StatsReleaseFact.resolution_bucket, func.count(StatsReleaseFact.id)
+                ).group_by(StatsReleaseFact.resolution_bucket),
                 StatsReleaseFact.approved_at,
                 stats_range,
             )
@@ -148,7 +152,13 @@ class StatsService:
         processing_times = await self._processing_times(stats_range)
 
         has_activity = any(
-            [total_requests, downloads_processed, evaluated_requests, resolution_split, source_split]
+            [
+                total_requests,
+                downloads_processed,
+                evaluated_requests,
+                resolution_split,
+                source_split,
+            ]
         )
         return {
             "range": {

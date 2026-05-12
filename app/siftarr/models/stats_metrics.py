@@ -68,7 +68,9 @@ class StatsTimingEvent(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     request_id: Mapped[int | None] = mapped_column(ForeignKey("requests.id"), nullable=True)
-    activity_log_id: Mapped[int | None] = mapped_column(ForeignKey("activity_logs.id"), nullable=True)
+    activity_log_id: Mapped[int | None] = mapped_column(
+        ForeignKey("activity_logs.id"), nullable=True
+    )
     event_name: Mapped[str] = mapped_column(String(50), nullable=False)
     correlation_id: Mapped[str | None] = mapped_column(String(100), nullable=True)
     duration_ms: Mapped[float | None] = mapped_column(Float, nullable=True)

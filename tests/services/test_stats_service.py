@@ -30,6 +30,8 @@ async def session_maker():
 def test_range_validation_all_and_custom():
     assert build_stats_range("all").start is None
     custom = build_stats_range("custom", start="2026-05-01", end="2026-05-02")
+    assert custom.start is not None
+    assert custom.end is not None
     assert custom.start.date().isoformat() == "2026-05-01"
     assert custom.end.date().isoformat() == "2026-05-03"
     with pytest.raises(StatsRangeError):
