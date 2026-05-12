@@ -23,6 +23,7 @@ from app.siftarr.routers import (
     rules,
     search_sse,
     settings,
+    stats,
     staged,
     webhooks,
 )
@@ -183,6 +184,7 @@ def create_app() -> FastAPI:
     app.include_router(rules.router, dependencies=auth)
     app.include_router(search_sse.router, dependencies=auth)
     app.include_router(settings.router, dependencies=auth)
+    app.include_router(stats.router, dependencies=auth)
     app.include_router(staged.router, dependencies=auth)
 
     @app.get("/", dependencies=auth)

@@ -1,0 +1,219 @@
+"""Stats aggregation service for the Stats API/UI."""
+
+from dataclasses import dataclass
+from datetime import UTC, date, datetime, time, timedelta
+from typing import Any
+
+from sqlalchemy import distinct, func, select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.siftarr.models import (
+    Request,
+    Rule,
+    StatsReleaseFact,
+    StatsRuleOutcome,
+    StatsTimingEvent,
+)
+
+PRESET_DAYS = {"7d": 7, "30d": 30, "90d": 90}
+TIMING_LABELS = {
+    "search_completed": "Search duration",
+    "request_to_approval": "Request to approval",
+}
+
+
+@dataclass(frozen=True)
+class StatsRange:
+    key: str
+    label: str
+    start: datetime | None
+    end: datetime | None
+
+
+class StatsRangeError(ValueError):
+    """Raised for invalid stats range input."""
+
+
+def _parse_date(value: str | None, field: str) -> date:
+    if not value:
+        raise StatsRangeError(f"{field} is required for custom ranges")
+    try:
+        return date.fromisoformat(value)
+    except ValueError as exc:
+        raise StatsRangeError(f"{field} must be YYYY-MM-DD") from exc
+
+
+def build_stats_range(
+    range_key: str = "30d",
+    *,
+    start: str | None = None,
+    end: str | None = None,
+    now: datetime | None = None,
+) -> StatsRange:
+    """Validate and normalize all-time, preset, and custom date ranges."""
+    current = now or datetime.now(UTC)
+    current_date = current.date()
+    if range_key == "all":
+        return StatsRange("all", "All time", None, None)
+    if range_key in PRESET_DAYS:
+        days = PRESET_DAYS[range_key]
+        start_date = current_date - timedelta(days=days - 1)
+        return StatsRange(
+            range_key,
+            f"Last {days} days",
+            datetime.combine(start_date, time.min),
+            datetime.combine(current_date + timedelta(days=1), time.min),
+        )
+    if range_key == "custom":
+        start_date = _parse_date(start, "start")
+        end_date = _parse_date(end, "end")
+        if start_date > end_date:
+            raise StatsRangeError("start must be before or equal to end")
+        return StatsRange(
+            "custom",
+            f"{start_date.isoformat()} to {end_date.isoformat()}",
+            datetime.combine(start_date, time.min),
+            datetime.combine(end_date + timedelta(days=1), time.min),
+        )
+    raise StatsRangeError("range must be one of all, 7d, 30d, 90d, custom")
+
+
+def _apply_range(stmt: Any, column: Any, stats_range: StatsRange) -> Any:
+    if stats_range.start is not None:
+        stmt = stmt.where(column >= stats_range.start)
+    if stats_range.end is not None:
+        stmt = stmt.where(column < stats_range.end)
+    return stmt
+
+
+def _series(rows: list[tuple[str | None, int]]) -> list[dict[str, Any]]:
+    return [{"label": label or "Unknown", "value": int(value or 0)} for label, value in rows]
+
+
+class StatsService:
+    def __init__(self, db: AsyncSession) -> None:
+        self.db = db
+
+    async def get_stats(self, stats_range: StatsRange) -> dict[str, Any]:
+        total_requests = await self._scalar_count(
+            _apply_range(select(func.count(Request.id)), Request.created_at, stats_range)
+        )
+        total_rules = await self._scalar_count(select(func.count(Rule.id)))
+        enabled_rules = await self._scalar_count(select(func.count(Rule.id)).where(Rule.is_enabled.is_(True)))
+        downloads_processed = await self._scalar_count(
+            _apply_range(
+                select(func.count(distinct(StatsReleaseFact.request_id))),
+                StatsReleaseFact.approved_at,
+                stats_range,
+            )
+        )
+        evaluated_requests = await self._scalar_count(
+            _apply_range(
+                select(func.count(distinct(StatsRuleOutcome.request_id))),
+                StatsRuleOutcome.created_at,
+                stats_range,
+            )
+        )
+        approval_rate = (
+            round((downloads_processed / evaluated_requests) * 100, 1) if evaluated_requests else None
+        )
+
+        resolution_split = await self._group_counts(
+            _apply_range(
+                select(StatsReleaseFact.resolution_bucket, func.count(StatsReleaseFact.id)).group_by(
+                    StatsReleaseFact.resolution_bucket
+                ),
+                StatsReleaseFact.approved_at,
+                stats_range,
+            )
+        )
+        source_split = await self._group_counts(
+            _apply_range(
+                select(StatsReleaseFact.indexer, func.count(StatsReleaseFact.id)).group_by(
+                    StatsReleaseFact.indexer
+                ),
+                StatsReleaseFact.approved_at,
+                stats_range,
+            )
+        )
+        rule_outcomes = await self._group_counts(
+            _apply_range(
+                select(StatsRuleOutcome.outcome, func.count(StatsRuleOutcome.id)).group_by(
+                    StatsRuleOutcome.outcome
+                ),
+                StatsRuleOutcome.created_at,
+                stats_range,
+            )
+        )
+        processing_times = await self._processing_times(stats_range)
+
+        has_activity = any(
+            [total_requests, downloads_processed, evaluated_requests, resolution_split, source_split]
+        )
+        return {
+            "range": {
+                "key": stats_range.key,
+                "label": stats_range.label,
+                "start": stats_range.start.date().isoformat() if stats_range.start else None,
+                "end": (stats_range.end.date() - timedelta(days=1)).isoformat()
+                if stats_range.end
+                else None,
+            },
+            "cards": {
+                "total_requests": total_requests,
+                "downloads_processed": downloads_processed,
+                "approval_rate": approval_rate,
+                "evaluated_requests": evaluated_requests,
+                "total_rules": total_rules,
+                "enabled_rules": enabled_rules,
+                "avg_search_ms": self._timing_average(processing_times, "search_completed"),
+                "avg_request_to_approval_ms": self._timing_average(
+                    processing_times, "request_to_approval"
+                ),
+            },
+            "charts": {
+                "resolution_split": resolution_split,
+                "source_split": source_split,
+                "rule_outcomes": rule_outcomes,
+                "processing_times": processing_times,
+            },
+            "empty": not has_activity,
+        }
+
+    async def _scalar_count(self, stmt: Any) -> int:
+        result = await self.db.execute(stmt)
+        return int(result.scalar_one() or 0)
+
+    async def _group_counts(self, stmt: Any) -> list[dict[str, Any]]:
+        result = await self.db.execute(stmt)
+        return _series(list(result.all()))
+
+    async def _processing_times(self, stats_range: StatsRange) -> list[dict[str, Any]]:
+        stmt = (
+            select(
+                StatsTimingEvent.event_name,
+                func.avg(StatsTimingEvent.duration_ms),
+                func.count(StatsTimingEvent.id),
+            )
+            .where(StatsTimingEvent.duration_ms.is_not(None))
+            .where(StatsTimingEvent.event_name.in_(TIMING_LABELS))
+            .group_by(StatsTimingEvent.event_name)
+        )
+        stmt = _apply_range(stmt, StatsTimingEvent.created_at, stats_range)
+        result = await self.db.execute(stmt)
+        return [
+            {
+                "key": key,
+                "label": TIMING_LABELS.get(key, key),
+                "avg_ms": round(float(avg or 0), 1),
+                "count": int(count or 0),
+            }
+            for key, avg, count in result.all()
+        ]
+
+    @staticmethod
+    def _timing_average(processing_times: list[dict[str, Any]], key: str) -> float | None:
+        for row in processing_times:
+            if row["key"] == key:
+                return row["avg_ms"]
+        return None

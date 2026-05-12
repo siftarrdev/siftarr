@@ -1,0 +1,62 @@
+{% extends "base.html" %}
+
+{% block title %}Stats - Siftarr{% endblock %}
+
+{% block content %}
+<div class="space-y-6" data-stats-root>
+    <div class="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
+        <div>
+            <h1 class="page-title">Stats</h1>
+            <p class="section-subtitle">Request, download, rule, and processing metrics.</p>
+        </div>
+        <form id="stats-range-form" class="card p-3 flex flex-col gap-3 sm:flex-row sm:items-end">
+            <div>
+                <label for="stats-range" class="form-label">Range</label>
+                <select id="stats-range" name="range" class="form-select min-w-36">
+                    <option value="7d">Last 7 days</option>
+                    <option value="30d" selected>Last 30 days</option>
+                    <option value="90d">Last 90 days</option>
+                    <option value="all">All time</option>
+                    <option value="custom">Custom</option>
+                </select>
+            </div>
+            <div class="stats-custom-range hidden grid-cols-2 gap-2">
+                <div>
+                    <label for="stats-start" class="form-label">Start</label>
+                    <input id="stats-start" name="start" type="date" class="form-input">
+                </div>
+                <div>
+                    <label for="stats-end" class="form-label">End</label>
+                    <input id="stats-end" name="end" type="date" class="form-input">
+                </div>
+            </div>
+            <button type="submit" class="btn-primary">Apply</button>
+        </form>
+    </div>
+
+    <div id="stats-loading" class="card card-body text-sm text-gray-400">Loading stats...</div>
+    <div id="stats-error" class="hidden rounded-xl border border-red-700/50 bg-red-900/40 p-4 text-sm text-red-200"></div>
+    <div id="stats-empty" class="hidden rounded-xl border border-gray-700/60 bg-surface-800 p-4 text-sm text-gray-400">
+        No stats activity exists for this range yet.
+    </div>
+
+    <div id="stats-content" class="hidden space-y-6">
+        <div id="stats-range-label" class="text-sm text-gray-400"></div>
+        <div class="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+            <div class="card card-body"><div class="text-xs uppercase tracking-wider text-gray-500">Requests</div><div class="mt-2 text-3xl font-bold text-white tabular-nums" data-card="total_requests">0</div></div>
+            <div class="card card-body"><div class="text-xs uppercase tracking-wider text-gray-500">Downloads processed</div><div class="mt-2 text-3xl font-bold text-emerald-400 tabular-nums" data-card="downloads_processed">0</div></div>
+            <div class="card card-body"><div class="text-xs uppercase tracking-wider text-gray-500">Approval rate</div><div class="mt-2 text-3xl font-bold text-brand-400 tabular-nums" data-card="approval_rate">--</div><div class="mt-1 text-xs text-gray-500" data-card="evaluated_requests">0 evaluated</div></div>
+            <div class="card card-body"><div class="text-xs uppercase tracking-wider text-gray-500">Rules enabled</div><div class="mt-2 text-3xl font-bold text-amber-400 tabular-nums" data-card="rules">0 / 0</div></div>
+        </div>
+
+        <div class="grid gap-6 lg:grid-cols-2">
+            <section class="card card-body"><h2 class="section-title">Resolution split</h2><div class="mt-4 space-y-3" data-chart="resolution_split"></div></section>
+            <section class="card card-body"><h2 class="section-title">Indexer split</h2><div class="mt-4 space-y-3" data-chart="source_split"></div></section>
+            <section class="card card-body"><h2 class="section-title">Processing times</h2><div class="mt-4 space-y-3" data-chart="processing_times"></div></section>
+            <section class="card card-body"><h2 class="section-title">Rule outcomes</h2><div class="mt-4 space-y-3" data-chart="rule_outcomes"></div></section>
+        </div>
+    </div>
+</div>
+
+<script type="module" src="{{ url_for('static', path='/js/stats.js') }}?v={{ static_version }}"></script>
+{% endblock %}
