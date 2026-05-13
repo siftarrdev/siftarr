@@ -53,6 +53,8 @@ class RequestDetailsData:
     releases: list[dict[str, object]]
     total_releases: int = 0
     filtered_total_releases: int = 0
+    has_cached_releases: bool = False
+    auto_search_eligible: bool = False
     release_controls: dict[str, object] | None = None
     active_staged_torrent: dict[str, object] | None = None
     active_staged_torrents: list[dict[str, object]] | None = None
@@ -87,6 +89,8 @@ def serialize_request_details_response(data: RequestDetailsData) -> dict[str, ob
         "releases": data.releases,
         "total_releases": data.total_releases,
         "filtered_total_releases": data.filtered_total_releases,
+        "has_cached_releases": data.has_cached_releases,
+        "auto_search_eligible": data.auto_search_eligible,
         "release_controls": data.release_controls or {},
         "active_staged_torrent": data.active_staged_torrent,
         "active_staged_torrents": data.active_staged_torrents,

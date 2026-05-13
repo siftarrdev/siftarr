@@ -78,9 +78,9 @@ def test_default_api_key_is_placeholder_constant(monkeypatch):
     assert Settings().api_key == PLACEHOLDER_API_KEY
 
 
-def test_default_rules_path_is_optional_and_env_configurable(monkeypatch, tmp_path):
+def test_default_rules_path_uses_docker_mount_and_is_env_configurable(monkeypatch, tmp_path):
     monkeypatch.delenv("SIFTARR_DEFAULT_RULES_PATH", raising=False)
-    assert Settings().default_rules_path is None
+    assert Settings().default_rules_path == "/data/config/rules.json"
 
     rules_path = tmp_path / "rules.json"
     monkeypatch.setenv("SIFTARR_DEFAULT_RULES_PATH", str(rules_path))

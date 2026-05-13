@@ -1,5 +1,6 @@
 """Tests for TVDecisionService."""
 
+from datetime import date, timedelta
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -1046,3 +1047,58 @@ class TestProcessRequest:
 
         assert result["status"] == "pending"
         assert "Timeout" in result.get("search_errors", [])
+
+    def test_actionable_targets_exclude_completed_staged_downloading_and_future(self, service):
+        request = _make_request(seasons=[1, 2, 3], episodes={1: [1, 2], 2: [1], 3: [1, 2]})
+        today = date.today()
+        statuses = {
+            (1, 1): RequestStatus.COMPLETED,
+            (1, 2): RequestStatus.STAGED,
+            (2, 1): RequestStatus.DOWNLOADING,
+            (3, 1): RequestStatus.PENDING,
+            (3, 2): RequestStatus.PENDING,
+        }
+        air_dates = {
+            (3, 1): today - timedelta(days=1),
+            (3, 2): today + timedelta(days=7),
+        }
+        for season in request.seasons:
+            for episode in season.episodes:
+                key = (season.season_number, episode.episode_number)
+                episode.status = statuses[key]
+                episode.air_date = air_dates.get(key, today - timedelta(days=1))
+
+        seasons, episodes = service._get_actionable_targets(request)
+
+        assert seasons == [3]
+        assert episodes == {3: [1]}
+
+    def test_actionable_pack_coverage_rejects_completed_requested_seasons(self, service):
+        complete_series = _passing_eval(_make_release("Show.Complete.Series.1080p"))
+        broad_requested_pack = _passing_eval(_make_release("Show.S01-S03.1080p"))
+        season_three_pack = _passing_eval(_make_release("Show.S03.1080p"))
+
+        all_requested = {1, 2, 3}
+        actionable = {3}
+
+        assert (
+            service._get_actionable_pack_coverage(
+                complete_series,
+                actionable,
+                all_requested,
+            )
+            == set()
+        )
+        assert (
+            service._get_actionable_pack_coverage(
+                broad_requested_pack,
+                actionable,
+                all_requested,
+            )
+            == set()
+        )
+        assert service._get_actionable_pack_coverage(
+            season_three_pack,
+            actionable,
+            all_requested,
+        ) == {3}

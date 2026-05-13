@@ -57,7 +57,7 @@ class SizeLimitRule:
     rule_name: str
     min_size_bytes: int | None
     max_size_bytes: int | None
-    tv_target: TVTarget | None = None
+    tv_target: TVTarget | str | None = None
     media_scope: str = "both"
 
 
@@ -145,18 +145,38 @@ class RuleEngine:
     @staticmethod
     def _matches_any_field(compiled: re.Pattern, release: ProwlarrRelease) -> bool:
         """Check if compiled pattern matches any of the release's relevant fields."""
-        return bool(
-            compiled.search(release.title)
-            or (release.release_group and compiled.search(release.release_group))
-            or (release.uploaded_by and compiled.search(release.uploaded_by))
+        fields = [release.title]
+        if release.release_group:
+            fields.append(release.release_group)
+        if release.uploaded_by:
+            fields.append(release.uploaded_by)
+        return any(
+            compiled.search(field)
+            or compiled.search(RuleEngine._normalize_match_text(field))
+            or RuleEngine._matches_all_phrase_terms(compiled, field)
+            for field in fields
         )
 
     @staticmethod
+    def _normalize_match_text(value: str) -> str:
+        """Normalize common release separators so literal phrase rules still match."""
+        return re.sub(r"[.\-_()[\]{}]+", " ", value)
+
+    @staticmethod
+    def _matches_all_phrase_terms(compiled: re.Pattern, value: str) -> bool:
+        pattern = compiled.pattern.strip()
+        if not re.search(r"\s", pattern):
+            return False
+        normalized = RuleEngine._normalize_match_text(value)
+        terms = [term for term in re.split(r"\s+", pattern) if term]
+        return bool(terms) and all(re.search(term, normalized, compiled.flags) for term in terms)
+
+    @staticmethod
     def _scope_matches(rule_scope: str, media_type: str | None) -> bool:
-        rule_scope = RuleEngine._enum_or_string_value(rule_scope).lower()
+        rule_scope = RuleEngine._normalized_identifier(rule_scope, "both")
         if not rule_scope or rule_scope == "both" or media_type is None:
             return True
-        return rule_scope == media_type.lower()
+        return rule_scope == RuleEngine._normalized_identifier(media_type)
 
     @staticmethod
     def _enum_or_string_value(value: object, default: str = "") -> str:
@@ -170,6 +190,22 @@ class RuleEngine:
         return default
 
     @staticmethod
+    def _normalized_identifier(value: object, default: str = "") -> str:
+        raw = RuleEngine._enum_or_string_value(value, default).strip().lower()
+        if "." in raw:
+            raw = raw.rsplit(".", 1)[-1]
+        return raw.replace("-", "_")
+
+    @staticmethod
+    def _normalize_tv_target(value: object) -> TVTarget | None:
+        target = RuleEngine._normalized_identifier(value)
+        if target == TVTarget.EPISODE.value:
+            return TVTarget.EPISODE
+        if target in {TVTarget.SEASON_PACK.value, "seasonpack"}:
+            return TVTarget.SEASON_PACK
+        return None
+
+    @staticmethod
     def _size_rule_applies_to_release(rule: SizeLimitRule, release: ProwlarrRelease) -> bool:
         coverage = cached_parse_release_coverage(release.title)
         is_tv_release = bool(
@@ -177,11 +213,13 @@ class RuleEngine:
             or coverage.is_complete_series
             or coverage.episode_number is not None
         )
-        if (rule.media_scope == "movie" and is_tv_release) or (
-            rule.media_scope == "tv" and not is_tv_release
+        media_scope = RuleEngine._normalized_identifier(rule.media_scope, "both")
+        if (media_scope == "movie" and is_tv_release) or (
+            media_scope == "tv" and not is_tv_release
         ):
             return False
-        if not is_tv_release or rule.tv_target is None:
+        tv_target = RuleEngine._normalize_tv_target(rule.tv_target)
+        if not is_tv_release or tv_target is None:
             return True
 
         is_single_episode = (
@@ -193,9 +231,9 @@ class RuleEngine:
                 coverage.episode_number,
             )
         )
-        if rule.tv_target == TVTarget.EPISODE:
+        if tv_target == TVTarget.EPISODE:
             return is_single_episode
-        if rule.tv_target == TVTarget.SEASON_PACK:
+        if tv_target == TVTarget.SEASON_PACK:
             return not is_single_episode and bool(
                 coverage.season_numbers or coverage.is_complete_series
             )
@@ -221,10 +259,11 @@ class RuleEngine:
                     getattr(rule, "media_scope", "both"),
                     "both",
                 )
+                media_scope = cls._normalized_identifier(media_scope, "both")
                 if not cls._scope_matches(media_scope, media_type):
                     continue
                 pattern = rule.pattern
-                rule_type = cls._enum_or_string_value(getattr(rule, "rule_type", None)).lower()
+                rule_type = cls._normalized_identifier(getattr(rule, "rule_type", None))
                 if rule_type == "size_limit":
                     min_bytes = (
                         int(rule.min_size_gb * 1024 * 1024 * 1024)
@@ -242,7 +281,7 @@ class RuleEngine:
                             rule_name=rule.name,
                             min_size_bytes=min_bytes,
                             max_size_bytes=max_bytes,
-                            tv_target=getattr(rule, "tv_target", None),
+                            tv_target=cls._normalize_tv_target(getattr(rule, "tv_target", None)),
                             media_scope=media_scope,
                         )
                     )

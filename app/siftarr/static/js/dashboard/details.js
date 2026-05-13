@@ -4,6 +4,7 @@
 window.detailsControlState = window.detailsControlState || {};
 window.detailsControlHandlersReady = false;
 window.detailsControlDebounce = null;
+window.detailsAutoSearchStarted = window.detailsAutoSearchStarted || {};
 
 function defaultDetailsControls() {
     return { title: '', resolution: 'all', sort: 'score', direction: 'desc' };
@@ -220,7 +221,10 @@ async function openRequestDetails(requestId, explicitIndex = null, options = {})
     }
     const cacheIndicatorInit = document.getElementById('release-cache-indicator');
     if (cacheIndicatorInit) cacheIndicatorInit.classList.add('hidden');
-    if (!preserveUiState) window.resetDetailsControls(requestId, { updateInputs: true });
+    if (!preserveUiState) {
+        window.resetDetailsControls(requestId, { updateInputs: true });
+        delete window.detailsAutoSearchStarted[requestId];
+    }
     modal.classList.remove('hidden');
 
     try {
@@ -306,6 +310,17 @@ async function openRequestDetails(requestId, explicitIndex = null, options = {})
 
         window.currentRequestTimeline = data.timeline || [];
         renderTimeline(window.currentRequestTimeline);
+
+        if (data.auto_search_eligible && !window.detailsAutoSearchStarted[requestId]) {
+            window.detailsAutoSearchStarted[requestId] = true;
+            if (data.request.media_type === 'tv') {
+                releases.innerHTML = '<div class="text-gray-500 text-sm">Searching indexers for TV results...</div>';
+                window.searchTvRequestAll({ auto: true });
+            } else {
+                releases.innerHTML = window.renderMovieSearchLoadingState();
+                window.searchRequestFromDetails({ auto: true });
+            }
+        }
     } catch (err) {
         title.textContent = 'Error loading details';
         meta.textContent = err.message || 'Unknown error';
@@ -326,8 +341,10 @@ async function searchTvRequestAll() {
     }
     const detailsTitle = document.getElementById('request-details-title')?.textContent?.trim() || 'TV Search All';
     const streamUrl = '/requests/' + window.currentRequestId + '/search/stream';
-    window.startTvSearchProgress(streamUrl, 'TV Search All: ' + detailsTitle, async function() {
-        await window.openRequestDetails(window.currentRequestId, window.currentDetailsIndex, { preserveUiState: true });
+    window.startTvSearchProgress(streamUrl, 'TV Search All: ' + detailsTitle, async function(data) {
+        if (!data || data.reload_details !== false) {
+            await window.openRequestDetails(window.currentRequestId, window.currentDetailsIndex, { preserveUiState: true });
+        }
         if (btn) {
             btn.disabled = false;
             btn.innerHTML = originalText || 'Refresh Search';

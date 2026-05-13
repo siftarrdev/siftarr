@@ -109,6 +109,151 @@ class TestRuleEngine:
         assert engine.requirement_patterns == [(2, "Require 1080p", "1080p")]
         assert engine.exclusion_patterns == []
 
+    def test_from_db_rules_tv_scorers_score_season_pack_with_enum_and_raw_scope(self):
+        tv_scorer = MagicMock(spec=Rule)
+        tv_scorer.is_enabled = True
+        tv_scorer.rule_type = RuleType.SCORER
+        tv_scorer.media_scope = "TV"
+        tv_scorer.id = 1
+        tv_scorer.name = "Prefer x265"
+        tv_scorer.pattern = "x265"
+        tv_scorer.score = 50
+
+        both_scorer = MagicMock(spec=Rule)
+        both_scorer.is_enabled = True
+        both_scorer.rule_type = "SCORER"
+        both_scorer.media_scope = "BoTh"
+        both_scorer.id = 2
+        both_scorer.name = "Prefer MeGusta"
+        both_scorer.pattern = "MeGusta"
+        both_scorer.score = 100
+
+        engine = RuleEngine.from_db_rules(
+            rules=[tv_scorer, both_scorer],
+            media_type="tv",
+        )
+        result = engine.evaluate(
+            ProwlarrRelease(
+                title="Show.S01.1080p.x265-MeGusta",
+                size=10 * 1024 * 1024 * 1024,
+                seeders=10,
+                leechers=2,
+                download_url="http://example.com",
+                indexer="test",
+            )
+        )
+
+        assert result.passed is True
+        assert result.total_score == 150
+
+    def test_from_db_rules_tv_scorers_score_episode_with_string_variants(self):
+        tv_scorer = MagicMock(spec=Rule)
+        tv_scorer.is_enabled = True
+        tv_scorer.rule_type = "scorer"
+        tv_scorer.media_scope = "Tv"
+        tv_scorer.id = 1
+        tv_scorer.name = "Prefer 1080p"
+        tv_scorer.pattern = "1080p"
+        tv_scorer.score = 25
+
+        both_scorer = MagicMock(spec=Rule)
+        both_scorer.is_enabled = True
+        both_scorer.rule_type = RuleType.SCORER
+        both_scorer.media_scope = "both"
+        both_scorer.id = 2
+        both_scorer.name = "Prefer x265"
+        both_scorer.pattern = "x265"
+        both_scorer.score = 50
+
+        engine = RuleEngine.from_db_rules(
+            rules=[tv_scorer, both_scorer],
+            media_type="TV",
+        )
+        result = engine.evaluate(
+            ProwlarrRelease(
+                title="Show.S01E01.1080p.x265",
+                size=2 * 1024 * 1024 * 1024,
+                seeders=10,
+                leechers=2,
+                download_url="http://example.com",
+                indexer="test",
+            )
+        )
+
+        assert result.passed is True
+        assert result.total_score == 75
+
+    def test_tv_scorer_phrase_matches_dotted_release_title(self):
+        engine = RuleEngine(scorer_patterns=[(1, "Prefer 1080p x265", "1080p x265", 40)])
+
+        result = engine.evaluate(
+            ProwlarrRelease(
+                title="Elsbeth.S03E01.1080p.WEB-DL.x265-GROUP",
+                size=2 * 1024 * 1024 * 1024,
+                seeders=10,
+                leechers=2,
+                download_url="http://example.com",
+                indexer="test",
+            )
+        )
+
+        assert result.passed is True
+        assert result.total_score == 40
+
+    def test_from_db_rules_normalizes_raw_tv_target_strings_for_size_rules(self):
+        pack_rule = MagicMock(spec=Rule)
+        pack_rule.is_enabled = True
+        pack_rule.rule_type = "SIZE_LIMIT"
+        pack_rule.media_scope = "TV"
+        pack_rule.id = 1
+        pack_rule.name = "TV Pack Size"
+        pack_rule.pattern = "size_limit"
+        pack_rule.min_size_gb = 5
+        pack_rule.max_size_gb = None
+        pack_rule.tv_target = "SEASON_PACK"
+
+        episode_rule = MagicMock(spec=Rule)
+        episode_rule.is_enabled = True
+        episode_rule.rule_type = RuleType.SIZE_LIMIT
+        episode_rule.media_scope = "tv"
+        episode_rule.id = 2
+        episode_rule.name = "TV Episode Size"
+        episode_rule.pattern = "size_limit"
+        episode_rule.min_size_gb = 2
+        episode_rule.max_size_gb = None
+        episode_rule.tv_target = "Episode"
+
+        engine = RuleEngine.from_db_rules(
+            rules=[pack_rule, episode_rule],
+            media_type="tv",
+        )
+
+        pack_result = engine.evaluate(
+            ProwlarrRelease(
+                title="Show.S01.1080p",
+                size=4 * 1024 * 1024 * 1024,
+                seeders=10,
+                leechers=2,
+                download_url="http://example.com/pack",
+                indexer="test",
+            )
+        )
+        episode_result = engine.evaluate(
+            ProwlarrRelease(
+                title="Show.S01E01.1080p",
+                size=1 * 1024 * 1024 * 1024,
+                seeders=10,
+                leechers=2,
+                download_url="http://example.com/episode",
+                indexer="test",
+            )
+        )
+
+        assert pack_result.passed is False
+        assert pack_result.rejection_reason == "Size 4.00 GB below minimum 5.00 GB"
+        assert episode_result.passed is False
+        assert episode_result.rejection_reason == "Size 1.00 GB below minimum 2.00 GB"
+
     def test_evaluate_no_rules(self):
         """Test evaluating with no rules."""
         engine = RuleEngine()

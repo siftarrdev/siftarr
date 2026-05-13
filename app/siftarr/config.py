@@ -165,10 +165,10 @@ class Settings(BaseSettings):
     siftarr_disable_search_cache: bool = False
 
     # Optional first-run rules import file (for Docker/Compose bind mounts).
-    # When unset, no rules are seeded. When set, the file must exist and match
-    # the /rules/export JSON schema.
+    # By default, Docker users can mount a Rules export JSON at this path and
+    # empty rules tables will be seeded automatically on startup.
     default_rules_path: str | None = Field(
-        default=None, validation_alias="SIFTARR_DEFAULT_RULES_PATH"
+        default="/data/config/rules.json", validation_alias="SIFTARR_DEFAULT_RULES_PATH"
     )
 
     # Prowlarr TV season-sweep settings

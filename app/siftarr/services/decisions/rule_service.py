@@ -161,7 +161,11 @@ class RuleService:
 
         configured_path = get_settings().default_rules_path
         if configured_path:
-            preview = self._load_default_rules_file(Path(configured_path))
+            path = Path(configured_path)
+            if not path.exists() and configured_path == "/data/config/rules.json":
+                logger.info("Default rules file not mounted at %s; leaving rules empty", path)
+                return []
+            preview = self._load_default_rules_file(path)
             return await self.create_rules_from_preview(preview)
 
         logger.info("No default rules file configured; leaving rules empty")

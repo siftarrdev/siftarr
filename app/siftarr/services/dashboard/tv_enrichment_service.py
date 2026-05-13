@@ -47,7 +47,7 @@ class TVEnrichmentService:
         self,
         *,
         request_id: int,
-        background_tasks: BackgroundTasks,
+        background_tasks: BackgroundTasks | None,
         releases: list[dict[str, object]],
         active_staged_torrents: list[dict[str, object]] | None = None,
     ) -> DashboardTVDetails:

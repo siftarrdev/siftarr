@@ -89,7 +89,7 @@ The old duplicated developer guide and stale product specification under `docs/`
 - `get_settings()` — cached singleton accessor
 - `reload_settings()` — invalidates the cached singleton (called after runtime setting changes)
 - first-run API key safety helpers (placeholder constant and secure key generation)
-- `SIFTARR_DEFAULT_RULES_PATH` can point at a mounted Rules export JSON used only to seed an empty rules table
+- Siftarr auto-detects `/data/config/rules.json` as a mounted Rules export JSON used only to seed an empty rules table; `SIFTARR_DEFAULT_RULES_PATH` can override this path
 - `SECRET_KEY` controls browser session signing when explicitly set; otherwise Siftarr auto-generates and persists a session secret beside the SQLite DB (override path with `SIFTARR_SECRET_KEY_FILE`) so Plex SSO browser sessions survive restarts
 - `get_static_version()` — cache-busting value for static assets
 
@@ -251,7 +251,7 @@ Tests mirror the service subpackage organization under `tests/services/`:
 - `db/alembic/versions/` — compact schema migrations; reset/stamp existing local databases when schema history is collapsed
 - container startup runs Alembic/SQLite repair before the FastAPI app launches; FastAPI startup then seeds default rules for empty databases
 - `docker/Dockerfile` — multi-stage production image build (Node stage builds Tailwind CSS, Python stage runs the app)
-- `docker/docker-compose.yml` — local container orchestration with documented optional `rules.json` first-run seed mount/env workflow
+- `docker/docker-compose.yml` — local container orchestration with `docker/siftarr-rules.json` mounted for empty-database rule seeding
 - `docker/rebuild-run-logs.sh` — rebuild, run, and log-tail helper (use when deps change)
 - `docker/dev-up.sh` — fast dev loop with volume mounts and uvicorn --reload (daily use, no rebuild)
 - `docker/docker-compose.override.yml` — dev overrides: source code volume mounts and `--reload` command
