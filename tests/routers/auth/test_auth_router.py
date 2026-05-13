@@ -181,11 +181,12 @@ class TestPlexAuth:
 
         request = MagicMock()
         request.session = {}
-        body = PlexAuthRequest(authToken="valid-token")
+        body = PlexAuthRequest(authToken="valid-token", next="/settings")
 
         result = await auth_router.plex_auth(request, body, db=MagicMock())
 
         assert result["username"] == "testuser"
+        assert result["redirect_url"] == "/settings"
         # Should refresh metadata/token for existing admin
         mock_store.set.assert_any_call("plex_username", "testuser")
         mock_store.set.assert_any_call("plex_thumb", "")
@@ -193,6 +194,25 @@ class TestPlexAuth:
         mock_store.load_into_environ.assert_called_once()
         launch_sync.assert_called_once()
         assert "initial_plex_sync_required" not in request.session
+        assert "initial_plex_sync_next" not in request.session
+
+    @pytest.mark.asyncio
+    async def test_initial_sync_error_retry_keeps_gate(self, _mock_get_templates):
+        """Retrying after a failed stream should keep rendering while the gate remains set."""
+        request = MagicMock()
+        request.session = {
+            "plex_user_id": "123",
+            "initial_plex_sync_required": True,
+            "initial_plex_sync_next": "/settings",
+        }
+        request.query_params = {"next": "/settings"}
+
+        result = await auth_router.initial_plex_sync_page(request)
+
+        assert result is not None
+        assert request.session["initial_plex_sync_required"] is True
+        assert request.session["initial_plex_sync_next"] == "/settings"
+        _mock_get_templates.TemplateResponse.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_initial_sync_page_requires_gate(self):

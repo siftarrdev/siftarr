@@ -26,8 +26,10 @@ def test_initial_plex_sync_template_uses_full_stream_and_retry_gate():
     assert "new EventSource('/settings/api/rescan-plex/stream?mode=full')" in template
     assert "if (running) return;" in template
     assert "payload.phase === 'complete'" in template
+    assert "await completeGate();" in template
     assert "'/auth/initial-plex-sync/complete'" in template
     assert "payload.phase === 'error'" in template
+    assert "failSync(payload.message);" in template
 
 
 def _parse_sse_events(chunks: list[str]) -> list[dict[str, Any]]:
@@ -440,6 +442,7 @@ async def test_rescan_plex_full_reports_weighted_overall_progress(monkeypatch, m
     polling.get_active_requests = AsyncMock(return_value=[movie, tv])
 
     async def poll(on_progress=None):
+        assert on_progress is not None
         await on_progress(
             {
                 "phase": "poll",
@@ -480,8 +483,11 @@ async def test_rescan_plex_full_reports_weighted_overall_progress(monkeypatch, m
     ) == (1, 0, 1)
 
     weighted = [event for event in events if "overall_percent" in event]
+    percents = [event["overall_percent"] for event in weighted]
     assert [event["phase"] for event in weighted][:3] == ["fetching", "processing", "processing"]
-    assert all(event["overall_percent"] < 100 for event in weighted)
+    assert all(percent < 100 for percent in percents)
+    assert percents == sorted(percents)
+    assert all(percent < 90 for percent in percents[:-1])
     assert weighted[-2]["detail"] == "tv_episode_availability"
     assert weighted[-2]["overall_percent"] > weighted[-3]["overall_percent"]
     assert weighted[-1]["overall_percent"] == pytest.approx(99.8)

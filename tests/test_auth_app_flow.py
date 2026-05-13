@@ -144,8 +144,16 @@ def test_plex_claim_relogin_denial_logout_and_next_flow(client, monkeypatch):
 
     first = client.post("/auth/plex", json={"authToken": "admin-token", "next": "/settings"})
     assert first.status_code == 200
-    assert first.json()["redirect_url"] == "/settings"
+    assert first.json()["redirect_url"] == "/auth/initial-plex-sync?next=%2Fsettings"
     assert MemorySettingsStore.values["plex_claimed_id"] == "admin-id"
+
+    gated = client.get("/settings", headers={"accept": "text/html"}, follow_redirects=False)
+    assert gated.status_code == 303
+    assert gated.headers["location"] == "/auth/initial-plex-sync?next=%2Fsettings"
+
+    completed = client.post("/auth/initial-plex-sync/complete")
+    assert completed.status_code == 200
+    assert completed.json()["redirect_url"] == "/settings"
 
     relogin = client.post("/auth/plex", json={"authToken": "admin-token", "next": "https://evil"})
     assert relogin.status_code == 200
