@@ -89,7 +89,7 @@ The old duplicated developer guide and stale product specification under `docs/`
 - `get_settings()` — cached singleton accessor
 - `reload_settings()` — invalidates the cached singleton (called after runtime setting changes)
 - first-run API key safety helpers (placeholder constant and secure key generation)
-- `SIFTARR_DEFAULT_RULES_PATH` can point at a mounted Rules export JSON used only to seed an empty rules table
+- Siftarr auto-detects `/data/config/rules.json` as a mounted Rules export JSON used only to seed an empty rules table; `SIFTARR_DEFAULT_RULES_PATH` can override this path
 - `SECRET_KEY` controls browser session signing when explicitly set; otherwise Siftarr auto-generates and persists a session secret beside the SQLite DB (override path with `SIFTARR_SECRET_KEY_FILE`) so Plex SSO browser sessions survive restarts
 - `get_static_version()` — cache-busting value for static assets
 
