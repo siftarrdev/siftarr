@@ -53,6 +53,37 @@ async def test_reset_scheduler_settings_clears_runtime_keys(monkeypatch, mock_db
 
 
 @pytest.mark.asyncio
+async def test_save_qbit_move_settings_persists_without_scheduler_restart(monkeypatch, mock_db):
+    store = MagicMock()
+    store.set = AsyncMock()
+    monkeypatch.setattr(settings, "SettingsStore", lambda db: store)
+    restart = MagicMock()
+    monkeypatch.setattr(settings, "_restart_scheduler_if_running", restart)
+
+    response = await settings.save_qbit_move_settings(
+        MagicMock(),
+        db=mock_db,
+        qbittorrent_move_enabled="on",
+        qbittorrent_move_completed_dir="/done",
+        qbittorrent_move_movie_root="/movies",
+        qbittorrent_move_tv_root="/tv",
+        qbittorrent_move_unmanaged_fallback_enabled=None,
+        qbittorrent_move_retention_weeks="0",
+    )
+
+    assert response.status_code == 303
+    assert response.headers["location"] == "/settings?qbit_move_saved=true"
+    store.set.assert_any_await("qbittorrent_move_enabled", "true")
+    store.set.assert_any_await("qbittorrent_move_completed_dir", "/done")
+    store.set.assert_any_await("qbittorrent_move_movie_root", "/movies")
+    store.set.assert_any_await("qbittorrent_move_tv_root", "/tv")
+    store.set.assert_any_await("qbittorrent_move_unmanaged_fallback_enabled", "false")
+    store.set.assert_any_await("qbittorrent_move_retention_weeks", "1")
+    mock_db.commit.assert_awaited_once()
+    restart.assert_not_called()
+
+
+@pytest.mark.asyncio
 async def test_run_recent_plex_scan_reports_success(monkeypatch, mock_db, base_context):
     """Manual recent Plex scan should report scheduler success."""
 
@@ -197,6 +228,32 @@ async def test_run_plex_poll_reports_lock_contention(monkeypatch, mock_db, base_
     assert context["message_type"] == "error"
     assert context["message"] == "Plex poll is already in progress."
     scheduler.trigger_plex_poll_now.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_run_qbit_move_reports_counts(monkeypatch, mock_db, base_context):
+    monkeypatch.setattr(
+        settings,
+        "_build_settings_page_context",
+        AsyncMock(return_value=base_context()),
+    )
+    scheduler = MagicMock()
+    scheduler.trigger_download_completion_now = AsyncMock(
+        return_value=MagicMock(status="completed", moved=2, removed=1, errors=0, error=None)
+    )
+
+    import app.siftarr.main as main_module
+
+    monkeypatch.setattr(main_module, "scheduler_service", scheduler)
+
+    response = await settings.run_qbit_move(MagicMock(), db=mock_db)
+    context = cast(dict, getattr(response, "context", None))
+
+    assert context["message_type"] == "success"
+    assert context["message"] == (
+        "qBittorrent move/retention completed. Moved 2, removed 1, errors 0."
+    )
+    scheduler.trigger_download_completion_now.assert_awaited_once()
 
 
 @pytest.mark.asyncio

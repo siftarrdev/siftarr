@@ -36,6 +36,10 @@ class StagedTorrent(Base):
     status: Mapped[str] = mapped_column(
         String(50), default="staged"
     )  # staged, approved, discarded, replaced
+    move_status: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    moved_path: Mapped[str | None] = mapped_column(String(1000), nullable=True)
+    move_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    moved_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now, onupdate=utc_now)
 

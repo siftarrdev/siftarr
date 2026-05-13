@@ -46,6 +46,9 @@ async def test_settings_page_layout_defaults_and_connections(monkeypatch, mock_d
     assert "Database Statistics" not in body
     assert "Total Requests" not in body
     assert "Staging Mode" in body
+    assert "qBittorrent Move / Retention" in body
+    assert 'name="qbittorrent_move_completed_dir" value="/downloads"' in body
+    assert 'name="qbittorrent_move_retention_weeks" value="6"' in body
     assert "Scheduler Settings" in body
     assert 'name="overseerr_poll_interval_minutes" value="60"' in body
     assert 'name="qbittorrent_completion_poll_interval_seconds" value="30"' in body
@@ -174,7 +177,7 @@ async def test_settings_page_includes_plex_sync_action(monkeypatch, mock_db):
     assert "Deep Re-scan" not in body
     assert "Shallow Re-scan" not in body
 
-    plex_row = body[body.index("Plex Sync") : body.index("Reseed Default Rules")]
+    plex_row = body[body.index("Plex Sync") : body.index("qBittorrent Move / Retention")]
     assert plex_row.count("<button") == 2
     assert plex_row.count("btn-primary") == 2
     assert "Partial Sync" in plex_row

@@ -39,6 +39,12 @@ def _clean_api_key_env(monkeypatch):
     monkeypatch.delenv("PLEX_FAST_SYNC_INTERVAL_MINUTES", raising=False)
     monkeypatch.delenv("PLEX_FULL_SYNC_FREQUENCY", raising=False)
     monkeypatch.delenv("PLEX_FULL_SYNC_TIME", raising=False)
+    monkeypatch.delenv("QBITTORRENT_MOVE_ENABLED", raising=False)
+    monkeypatch.delenv("QBITTORRENT_MOVE_COMPLETED_DIR", raising=False)
+    monkeypatch.delenv("QBITTORRENT_MOVE_MOVIE_ROOT", raising=False)
+    monkeypatch.delenv("QBITTORRENT_MOVE_TV_ROOT", raising=False)
+    monkeypatch.delenv("QBITTORRENT_MOVE_UNMANAGED_FALLBACK_ENABLED", raising=False)
+    monkeypatch.delenv("QBITTORRENT_MOVE_RETENTION_WEEKS", raising=False)
     reload_settings()
     yield
     for key in (
@@ -52,6 +58,12 @@ def _clean_api_key_env(monkeypatch):
         "PLEX_FAST_SYNC_INTERVAL_MINUTES",
         "PLEX_FULL_SYNC_FREQUENCY",
         "PLEX_FULL_SYNC_TIME",
+        "QBITTORRENT_MOVE_ENABLED",
+        "QBITTORRENT_MOVE_COMPLETED_DIR",
+        "QBITTORRENT_MOVE_MOVIE_ROOT",
+        "QBITTORRENT_MOVE_TV_ROOT",
+        "QBITTORRENT_MOVE_UNMANAGED_FALLBACK_ENABLED",
+        "QBITTORRENT_MOVE_RETENTION_WEEKS",
     ):
         os.environ.pop(key, None)
     reload_settings()
@@ -77,6 +89,31 @@ async def test_scheduler_settings_load_into_environ_and_effective_dict(session_m
     assert get_settings().plex_full_sync_time == "04:30"
     assert effective["overseerr_poll_interval_minutes"] == 15
     assert effective["qbittorrent_completion_poll_interval_seconds"] == 45
+
+
+@pytest.mark.asyncio
+async def test_qbittorrent_move_settings_load_into_environ_and_effective_dict(session_maker):
+    async with session_maker() as session, session.begin():
+        store = SettingsStore(session)
+        await store.set("qbittorrent_move_enabled", "true")
+        await store.set("qbittorrent_move_completed_dir", "/downloads/complete")
+        await store.set("qbittorrent_move_movie_root", "/media/Movies")
+        await store.set("qbittorrent_move_tv_root", "/media/TV")
+        await store.set("qbittorrent_move_unmanaged_fallback_enabled", "true")
+        await store.set("qbittorrent_move_retention_weeks", "8")
+        await store.load_into_environ()
+        effective = await store.get_effective_dict()
+
+    assert os.environ["QBITTORRENT_MOVE_ENABLED"] == "true"
+    assert get_settings().qbittorrent_move_enabled is True
+    assert get_settings().qbittorrent_move_completed_dir == "/downloads/complete"
+    assert get_settings().qbittorrent_move_retention_weeks == 8
+    assert effective["qbittorrent_move_enabled"] is True
+    assert effective["qbittorrent_move_completed_dir"] == "/downloads/complete"
+    assert effective["qbittorrent_move_movie_root"] == "/media/Movies"
+    assert effective["qbittorrent_move_tv_root"] == "/media/TV"
+    assert effective["qbittorrent_move_unmanaged_fallback_enabled"] is True
+    assert effective["qbittorrent_move_retention_weeks"] == 8
 
 
 @pytest.mark.asyncio

@@ -154,6 +154,8 @@ class TestQbittorrentServiceUnit:
             mock_torrent.added_on = 1234567890
             mock_torrent.completed_on = 1234567900
             mock_torrent.download_location = "/downloads"
+            mock_torrent.save_path = "/downloads"
+            mock_torrent.seeding_time = 3600
 
             mock_client = MagicMock()
             mock_client.torrents_info = MagicMock(return_value=[mock_torrent])
@@ -165,6 +167,69 @@ class TestQbittorrentServiceUnit:
                 assert result is not None
                 assert result["hash"] == "abc123"
                 assert result["name"] == "Test.Torrent"
+                assert result["save_path"] == "/downloads"
+                assert result["seeding_time"] == 3600
+
+    @pytest.mark.asyncio
+    async def test_get_completed_torrents_uses_completed_filter(self):
+        with patch("app.siftarr.config.get_settings") as mock_get_settings:
+            mock_get_settings.return_value = MagicMock()
+            service = QbittorrentService()
+            mock_client = MagicMock()
+            service._client = mock_client
+            mock_torrent = MagicMock()
+            mock_torrent.hash = "abc"
+            mock_torrent.name = "Done"
+            mock_torrent.progress = 1.0
+            mock_torrent.save_path = "/downloads"
+            mock_torrent.seeding_time = 60
+
+            with patch("asyncio.to_thread", AsyncMock(return_value=[mock_torrent])) as to_thread:
+                result = await service.get_completed_torrents()
+
+            assert result[0]["hash"] == "abc"
+            assert result[0]["save_path"] == "/downloads"
+            to_thread.assert_awaited_once_with(
+                mock_client.torrents_info,
+                status_filter="completed",
+            )
+
+    @pytest.mark.asyncio
+    async def test_set_torrent_location_moves_by_default(self):
+        with patch("app.siftarr.config.get_settings") as mock_get_settings:
+            mock_get_settings.return_value = MagicMock()
+            service = QbittorrentService()
+            mock_client = MagicMock()
+            service._client = mock_client
+
+            with patch("asyncio.to_thread", AsyncMock()) as to_thread:
+                result = await service.set_torrent_location("abc123", "/media/movies")
+
+            assert result is True
+            to_thread.assert_awaited_once_with(
+                mock_client.torrents_set_location,
+                torrent_hashes="abc123",
+                location="/media/movies",
+                move=True,
+            )
+
+    @pytest.mark.asyncio
+    async def test_delete_torrents_keeps_files_by_default(self):
+        with patch("app.siftarr.config.get_settings") as mock_get_settings:
+            mock_get_settings.return_value = MagicMock()
+            service = QbittorrentService()
+            mock_client = MagicMock()
+            service._client = mock_client
+
+            with patch("asyncio.to_thread", AsyncMock()) as to_thread:
+                result = await service.delete_torrents(["abc123", "def456"])
+
+            assert result is True
+            to_thread.assert_awaited_once_with(
+                mock_client.torrents_delete,
+                torrent_hashes=["abc123", "def456"],
+                delete_files=False,
+            )
 
     @pytest.mark.asyncio
     async def test_get_torrent_info_not_found(self):

@@ -111,7 +111,7 @@ Database entities and enums.
 - `release.py` — searched/candidate releases
 - `rule.py` — rule definitions for filtering/scoring
 - `season.py` / `episode.py` — TV coverage and availability tracking
-- `staged_torrent.py` — staged torrent persistence; indexed on `request_id` and `status`
+- `staged_torrent.py` — staged torrent persistence; indexed on `request_id` and `status`; includes move tracking columns (`move_status`, `moved_path`, `move_error`, `moved_at`)
 - `activity_log.py` — activity/audit history; indexed on `event_type`
 - `stats_metrics.py` — immutable stats metric tables for selected release facts, rule outcomes, and timing events
 - `app_setting.py` — key-value store for runtime-configurable settings, generated API key, and Plex SSO claim metadata (persisted across restarts)
@@ -127,9 +127,9 @@ HTTP route layer.
 - `dashboard_actions.py` — dashboard-triggered actions and mutations
 - `search_sse.py` — SSE streaming endpoints for live search progress; `/requests/{id}/search/stream` is the primary TV Search All path, while TV scope-specific streams remain compatibility/debug inspect paths
 - `rules.py` — rule management UI/API, including unified rule listing, multi-title testing, modal import/export, and create/edit actions
-- `settings.py` — settings UI (connection test/save/reset, scheduler interval save/reset, staging toggle, Plex rescan, Overseerr sync, cache/reseed actions, SSE progress streams, API key management, Plex SSO status), uses SettingsStore for DB-backed persistence and keeps the SSO-managed Plex token out of connection saves/resets
+- `settings.py` — settings UI (connection test/save/reset, scheduler interval save/reset, staging toggle, Plex rescan, Overseerr sync, cache/reseed actions, SSE progress streams, API key management, Plex SSO status, qBit mover enable/paths/retention settings and manual trigger), uses SettingsStore for DB-backed persistence and keeps the SSO-managed Plex token out of connection saves/resets
 - `stats.py` — protected Stats page and JSON data endpoint for all-time, preset, and custom date ranges
-- `staged.py` — staged torrent review/approval endpoints
+- `staged.py` — staged torrent review/approval endpoints; download-status endpoint now returns move tracking fields (status, path, error) for dashboard visibility
 - `webhooks.py` — inbound webhook handling
 
 ### `app/siftarr/services/`
@@ -148,7 +148,7 @@ Business logic and integrations, organized into thematic subpackages:
 
 **`admin/`** — Config, scheduling, polling
 - `settings_service.py` — SettingsStore (DB-backed settings persistence, startup API key generation, runtime env loading, sync success timestamps, Plex SSO claim/token status without exposing token), SSE progress, scheduled job helpers, Plex rescan/Overseerr import orchestration
-- `scheduler_service.py` — recurring job scheduling via APScheduler using runtime-configurable sync/completion intervals, plus startup catch-up orchestration for stale Overseerr/Plex syncs and the guarded Plex sign-in full-sync trigger used after later admin sign-ins
+- `scheduler_service.py` — recurring job scheduling via APScheduler using runtime-configurable sync/completion intervals, plus startup catch-up orchestration for stale Overseerr/Plex syncs and the guarded Plex sign-in full-sync trigger used after later admin sign-ins; `_check_download_completion()` now also runs the qBit move/retention service; `trigger_download_completion_now()` allows manual invocation from settings with structured result reporting
 - `plex_polling_service/` — Plex polling logic; prioritizes recent/downloading requests with periodic full reconcile every 20th poll cycle
 
 **`dashboard/`** — Dashboard, search, detail views
@@ -167,7 +167,7 @@ Business logic and integrations, organized into thematic subpackages:
 
 **`integrations/`** — External service adapters
 - `prowlarr_service.py` — Prowlarr indexer integration; LRU search cache (45s TTL, 50 entries), bounded paginated TV sweeps
-- `qbittorrent_service.py` — qBittorrent download client integration
+- `qbittorrent_service.py` — qBittorrent download client integration; includes serialized `save_path`/`seeding_time` access, listing completed torrents, `set_torrent_location()` with `move=True`, and batch delete with `delete_files=False`
 - `overseerr_service.py` — Overseerr request management integration
 - `connection_tester.py` — external connectivity test helpers
 - `plex_service/` — Plex media server integration (lookup, scan, episode availability)
@@ -179,6 +179,7 @@ Business logic and integrations, organized into thematic subpackages:
 - `episode_derive.py` — canonical derivation functions for TV episode/season/request statuses
 - `episode_sync_service.py` — syncing episode availability from Overseerr and Plex
 - `download_completion_service.py` — completion detection via qBit torrent list matching
+- `qbit_move_service.py` — qBit move and retention service: selects eligible completed torrents (managed first, optional unmanaged fallback), computes safe destinations using Siftarr metadata then regex fallback, moves via qBittorrent `set_location(move=True)`, updates move tracking fields on managed torrents, performs retention cleanup (remove old completed torrents by seeding_time, keep files); called from scheduler's download-completion loop
 - `overseerr_sync_service.py` — best-effort lifecycle sync back to Overseerr (approval evidence)
 - `unreleased_service.py` — unreleased content handling
 
@@ -200,12 +201,12 @@ Business logic and integrations, organized into thematic subpackages:
 Server-rendered HTML templates.
 
 - `base.html` — shared layout (nav bar shows user avatar/name + logout when logged in)
-- `dashboard.html` — main dashboard UI, including details-modal release result filters/sorting/count controls
+- `dashboard.html` — main dashboard UI, including details-modal release result filters/sorting/count controls; move status badges and moved path shown in downloads table
 - `login.html` — Plex SSO login page with JS-driven OAuth PIN flow, denied-admin message, and safe next redirect handling
 - `initial_plex_sync.html` — first-claim setup gate that opens the full Plex sync SSE stream, shows progress/retry/logout, and unlocks protected navigation only after successful completion
 - `rules.html` — single-pane rules UI with unified rule table, multi-title tester, modal create/edit wizard, and modal import/export
 - `rule_form.html` — fallback full-page create/edit rule form
-- `settings.html` — settings UI (manual actions, connection settings with Plex SSO status and API key reveal/copy/regenerate, scheduler interval controls/status, staging toggle)
+- `settings.html` — settings UI (manual actions, connection settings with Plex SSO status and API key reveal/copy/regenerate, scheduler interval controls/status, staging toggle, qBit mover settings with enable/path/retention toggles and manual trigger)
 - `stats.html` — Stats UI tab with cards, range selector, empty/error/loading states, and lightweight chart containers
 
 ### `app/siftarr/static/`
@@ -215,7 +216,7 @@ Static assets.
 - `css/dashboard.css` — supplemental UI styling
 - `css/tailwind.css` — built Tailwind CSS output (generated, committed)
 - `css/tailwind-input.css` — Tailwind CSS v4 input with CSS-based theme configuration and custom component classes
-- `js/dashboard*.js` and `js/dashboard/` — dashboard client-side behavior, filters, details-modal release controls, staged actions, single-action TV Search All/read-only bucket UI, movie release search UX, and SSE progress panel
+- `js/dashboard*.js` and `js/dashboard/` — dashboard client-side behavior, filters, details-modal release controls, staged actions, single-action TV Search All/read-only bucket UI, movie release search UX, and SSE progress panel; polls move status fields in download-status endpoint and shows badges/paths
 - `js/stats.js` — Stats API fetch/range handling and lightweight bar chart rendering
 - favicon assets
 
@@ -231,7 +232,7 @@ Tests mirror the service subpackage organization under `tests/services/`:
 - `tests/services/admin/` — settings, scheduler, and Plex polling service tests
 - `tests/services/decisions/` — rule engine, rule service (including import/export-backed default seeding), TV/movie decision service tests
 - `tests/services/integrations/` — Prowlarr, qBittorrent, Overseerr, Plex service tests
-- `tests/services/lifecycle/` — lifecycle, activity log, episode sync, download completion tests
+- `tests/services/lifecycle/` — lifecycle, activity log, episode sync, download completion, qbit move service tests
 - `tests/services/test_stats_service.py` — Stats aggregation/range unit tests
 - `tests/services/releases/` — release parser, serializers, staging, and release selection tests
 - `tests/services/utils/` — type utils tests

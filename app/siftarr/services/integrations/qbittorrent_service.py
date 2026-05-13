@@ -164,7 +164,9 @@ class QbittorrentService:
             "ratio": getattr(torrent, "ratio", None),
             "added_on": getattr(torrent, "added_on", None),
             "completed_on": getattr(torrent, "completed_on", None),
+            "save_path": getattr(torrent, "save_path", None),
             "download_location": getattr(torrent, "download_location", None),
+            "seeding_time": getattr(torrent, "seeding_time", None),
             "eta": getattr(torrent, "eta", None),
             "dlspeed": getattr(torrent, "dlspeed", None),
         }
@@ -338,6 +340,53 @@ class QbittorrentService:
         except Exception:
             return []
 
+    async def get_completed_torrents(self) -> list[dict]:
+        """Get completed torrents from qBittorrent."""
+        try:
+            torrents = await asyncio.to_thread(
+                self.client.torrents_info,
+                status_filter="completed",
+            )
+            return [self._serialize_torrent(t) for t in torrents]
+        except Exception:
+            return []
+
+    async def set_torrent_location(
+        self,
+        torrent_hashes: str | list[str],
+        location: str,
+        *,
+        move: bool = True,
+    ) -> bool:
+        """Set torrent content location, moving files by default."""
+        try:
+            await asyncio.to_thread(
+                self.client.torrents_set_location,
+                torrent_hashes=torrent_hashes,
+                location=location,
+                move=move,
+            )
+            return True
+        except Exception:
+            return False
+
+    async def delete_torrents(
+        self,
+        torrent_hashes: str | list[str],
+        *,
+        delete_files: bool = False,
+    ) -> bool:
+        """Delete torrents from qBittorrent without deleting files by default."""
+        try:
+            await asyncio.to_thread(
+                self.client.torrents_delete,
+                torrent_hashes=torrent_hashes,
+                delete_files=delete_files,
+            )
+            return True
+        except Exception:
+            return False
+
     async def get_torrent_progress_by_name(self, name_fragment: str) -> float | None:
         """Get progress of a torrent matching a name fragment.
 
@@ -380,12 +429,4 @@ class QbittorrentService:
         Returns:
             True if deletion successful, False otherwise.
         """
-        try:
-            await asyncio.to_thread(
-                self.client.torrents_delete,
-                torrent_hashes=torrent_hash,
-                delete_files=delete_files,
-            )
-            return True
-        except Exception:
-            return False
+        return await self.delete_torrents(torrent_hash, delete_files=delete_files)
