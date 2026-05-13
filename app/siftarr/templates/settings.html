@@ -10,7 +10,12 @@ details[open] summary .accordion-chevron { transform: rotate(90deg); }
 .accordion-chevron { transition: transform 0.15s ease; }
 </style>
 <div class="space-y-8">
-    <h1 class="page-title">Settings</h1>
+    <div class="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+        <h1 class="page-title">Settings</h1>
+        <div class="text-xs font-medium uppercase tracking-wide text-gray-500">
+            Version <span class="text-gray-300">{{ app_version }}</span>
+        </div>
+    </div>
 
     {% if message %}
     <div class="flex items-start gap-3 rounded-xl p-4 text-sm {% if message_type == 'error' %}bg-red-900/40 border border-red-700/50 text-red-200{% else %}bg-emerald-900/40 border border-emerald-700/50 text-emerald-200{% endif %}">
