@@ -145,11 +145,31 @@ class RuleEngine:
     @staticmethod
     def _matches_any_field(compiled: re.Pattern, release: ProwlarrRelease) -> bool:
         """Check if compiled pattern matches any of the release's relevant fields."""
-        return bool(
-            compiled.search(release.title)
-            or (release.release_group and compiled.search(release.release_group))
-            or (release.uploaded_by and compiled.search(release.uploaded_by))
+        fields = [release.title]
+        if release.release_group:
+            fields.append(release.release_group)
+        if release.uploaded_by:
+            fields.append(release.uploaded_by)
+        return any(
+            compiled.search(field)
+            or compiled.search(RuleEngine._normalize_match_text(field))
+            or RuleEngine._matches_all_phrase_terms(compiled, field)
+            for field in fields
         )
+
+    @staticmethod
+    def _normalize_match_text(value: str) -> str:
+        """Normalize common release separators so literal phrase rules still match."""
+        return re.sub(r"[.\-_()[\]{}]+", " ", value)
+
+    @staticmethod
+    def _matches_all_phrase_terms(compiled: re.Pattern, value: str) -> bool:
+        pattern = compiled.pattern.strip()
+        if not re.search(r"\s", pattern):
+            return False
+        normalized = RuleEngine._normalize_match_text(value)
+        terms = [term for term in re.split(r"\s+", pattern) if term]
+        return bool(terms) and all(re.search(term, normalized, compiled.flags) for term in terms)
 
     @staticmethod
     def _scope_matches(rule_scope: str, media_type: str | None) -> bool:

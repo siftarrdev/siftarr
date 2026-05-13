@@ -183,6 +183,23 @@ class TestRuleEngine:
         assert result.passed is True
         assert result.total_score == 75
 
+    def test_tv_scorer_phrase_matches_dotted_release_title(self):
+        engine = RuleEngine(scorer_patterns=[(1, "Prefer 1080p x265", "1080p x265", 40)])
+
+        result = engine.evaluate(
+            ProwlarrRelease(
+                title="Elsbeth.S03E01.1080p.WEB-DL.x265-GROUP",
+                size=2 * 1024 * 1024 * 1024,
+                seeders=10,
+                leechers=2,
+                download_url="http://example.com",
+                indexer="test",
+            )
+        )
+
+        assert result.passed is True
+        assert result.total_score == 40
+
     def test_from_db_rules_normalizes_raw_tv_target_strings_for_size_rules(self):
         pack_rule = MagicMock(spec=Rule)
         pack_rule.is_enabled = True

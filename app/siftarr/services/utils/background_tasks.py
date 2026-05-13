@@ -14,7 +14,7 @@ logger = logging.getLogger(__name__)
 
 # Module-level mutable state for tracking active refresh tasks
 DETAILS_SYNC_TASKS: set[int] = set()
-SQLITE_LOCK_RETRY_DELAYS = (0.5, 1.0, 2.0)
+SQLITE_LOCK_RETRY_DELAYS = (1.0, 2.0, 5.0)
 
 
 def _is_sqlite_locked_error(exc: OperationalError) -> bool:
@@ -43,11 +43,16 @@ async def run_background_episode_refresh(request_id: int) -> None:
                         await episode_sync.sync_request(request_id)
                         break
                     except OperationalError as exc:
-                        if not _is_sqlite_locked_error(exc) or attempt == len(
-                            SQLITE_LOCK_RETRY_DELAYS
-                        ):
+                        if not _is_sqlite_locked_error(exc):
                             raise
                         await db.rollback()
+                        if attempt == len(SQLITE_LOCK_RETRY_DELAYS):
+                            logger.warning(
+                                "Background episode sync skipped after SQLite lock retries: request_id=%s attempts=%s",
+                                request_id,
+                                attempt + 1,
+                            )
+                            break
                         delay = SQLITE_LOCK_RETRY_DELAYS[attempt]
                         logger.info(
                             "Background episode sync hit SQLite lock; retrying: request_id=%s attempt=%s delay=%.1fs",
