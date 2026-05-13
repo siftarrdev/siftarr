@@ -7,7 +7,7 @@ from collections.abc import AsyncGenerator
 from typing import Any
 
 from fastapi import APIRouter, Depends, Form, Query, Request
-from fastapi.responses import HTMLResponse, RedirectResponse, StreamingResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, StreamingResponse
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -148,6 +148,22 @@ def _coerce_positive_int(value: str | None, default: int, *, minimum: int = 1) -
     except ValueError:
         parsed = default
     return str(max(parsed, minimum))
+
+
+def _coerce_bool_form(value: str | None) -> str:
+    return "true" if str(value or "").lower() in {"1", "true", "on", "yes"} else "false"
+
+
+def _qbit_move_message(result) -> tuple[str, str]:
+    if result.status == "locked":
+        return "qBittorrent move/retention is already running.", "error"
+    if result.status == "error":
+        return f"qBittorrent move/retention failed: {result.error}", "error"
+    return (
+        "qBittorrent move/retention completed. "
+        f"Moved {result.moved}, removed {result.removed}, errors {result.errors}.",
+        "success" if result.errors == 0 else "error",
+    )
 
 
 def _coerce_full_sync_frequency(value: str | None) -> str:
@@ -392,6 +408,56 @@ async def reset_scheduler_settings(
     return RedirectResponse(url="/settings?scheduler_reset=true", status_code=303)
 
 
+@router.post("/qbit-move")
+async def save_qbit_move_settings(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    qbittorrent_move_enabled: str | None = Form(None),
+    qbittorrent_move_completed_dir: str | None = Form(None),
+    qbittorrent_move_movie_root: str | None = Form(None),
+    qbittorrent_move_tv_root: str | None = Form(None),
+    qbittorrent_move_unmanaged_fallback_enabled: str | None = Form(None),
+    qbittorrent_move_retention_weeks: str | None = Form(None),
+) -> RedirectResponse:
+    """Save qBittorrent move/retention settings without restarting scheduler jobs."""
+    del request
+    current = get_settings()
+    store = SettingsStore(db)
+    await _apply_runtime_setting(
+        store, "qbittorrent_move_enabled", _coerce_bool_form(qbittorrent_move_enabled)
+    )
+    await _apply_runtime_setting(
+        store,
+        "qbittorrent_move_completed_dir",
+        (qbittorrent_move_completed_dir or current.qbittorrent_move_completed_dir).strip(),
+    )
+    await _apply_runtime_setting(
+        store,
+        "qbittorrent_move_movie_root",
+        (qbittorrent_move_movie_root or current.qbittorrent_move_movie_root).strip(),
+    )
+    await _apply_runtime_setting(
+        store,
+        "qbittorrent_move_tv_root",
+        (qbittorrent_move_tv_root or current.qbittorrent_move_tv_root).strip(),
+    )
+    await _apply_runtime_setting(
+        store,
+        "qbittorrent_move_unmanaged_fallback_enabled",
+        _coerce_bool_form(qbittorrent_move_unmanaged_fallback_enabled),
+    )
+    await _apply_runtime_setting(
+        store,
+        "qbittorrent_move_retention_weeks",
+        _coerce_positive_int(
+            qbittorrent_move_retention_weeks,
+            current.qbittorrent_move_retention_weeks,
+        ),
+    )
+    await db.commit()
+    return RedirectResponse(url="/settings?qbit_move_saved=true", status_code=303)
+
+
 # ── Connection testing API routes ─────────────────────────────────────────
 
 
@@ -628,6 +694,46 @@ async def run_plex_poll(
     )
     context["plex_jobs"] = await _build_plex_job_statuses(db)
     return templates.TemplateResponse(request, "settings.html", context)
+
+
+@router.post("/run-qbit-move")
+async def run_qbit_move(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+) -> HTMLResponse:
+    """Manually trigger guarded qBittorrent completion/move/retention workflow."""
+    scheduler_service = _get_scheduler_service()
+    context = await _build_settings_page_context(request, db)
+    if scheduler_service is None:
+        context["message"] = "Scheduler not available"
+        context["message_type"] = "error"
+        return templates.TemplateResponse(request, "settings.html", context)
+
+    result = await scheduler_service.trigger_download_completion_now()
+    context["message"], context["message_type"] = _qbit_move_message(result)
+    return templates.TemplateResponse(request, "settings.html", context)
+
+
+@router.post("/api/run-qbit-move")
+async def run_qbit_move_api() -> JSONResponse:
+    """API endpoint for manually triggering guarded qBittorrent move workflow."""
+    scheduler_service = _get_scheduler_service()
+    if scheduler_service is None:
+        return JSONResponse(
+            {"status": "error", "error": "Scheduler not available"}, status_code=503
+        )
+    result = await scheduler_service.trigger_download_completion_now()
+    status_code = 409 if result.status == "locked" else 500 if result.status == "error" else 200
+    return JSONResponse(
+        {
+            "status": result.status,
+            "moved": result.moved,
+            "removed": result.removed,
+            "errors": result.errors,
+            "error": result.error,
+        },
+        status_code=status_code,
+    )
 
 
 # ── Maintenance routes ─────────────────────────────────────────────────────

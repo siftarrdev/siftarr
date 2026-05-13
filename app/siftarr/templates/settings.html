@@ -52,6 +52,14 @@ details[open] summary .accordion-chevron { transform: rotate(90deg); }
                 </div>
             </div>
 
+            <form action="/settings/run-qbit-move" method="post" class="flex items-center justify-between gap-4 py-3 first:pt-0 last:pb-0">
+                <div class="min-w-0">
+                    <div class="text-sm font-semibold text-white">qBittorrent Move / Retention</div>
+                    <div class="text-xs text-gray-500">Run download completion, move, and retention cleanup now</div>
+                </div>
+                <button type="submit" class="btn-primary btn-sm shrink-0">Run Now</button>
+            </form>
+
             <form action="/settings/reseed-rules" method="post" class="flex items-center justify-between gap-4 py-3 first:pt-0 last:pb-0">
                 <div class="min-w-0">
                     <div class="text-sm font-semibold text-white">Reseed Default Rules</div>
@@ -66,6 +74,56 @@ details[open] summary .accordion-chevron { transform: rotate(90deg); }
                     <div class="text-xs text-gray-500">Clears stored releases and Siftarr's app-side Overseerr status cache. Requests stay intact.</div>
                 </div>
                 <button type="submit" class="btn-danger btn-sm shrink-0">Clear Cache</button>
+            </form>
+        </div>
+    </details>
+
+    {# ── qBittorrent Move / Retention ── #}
+    <details class="card">
+        <summary class="card-header flex items-center gap-3 cursor-pointer select-none">
+            <svg class="accordion-chevron w-4 h-4 text-gray-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
+            <div>
+                <h2 class="section-title">qBittorrent Move / Retention</h2>
+                <p class="section-subtitle">Move completed downloads into media roots and prune old qBittorrent entries</p>
+            </div>
+        </summary>
+        <div class="card-body">
+            <form action="/settings/qbit-move" method="post" class="space-y-5">
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <label class="flex items-start gap-3 rounded-xl border border-gray-700/60 bg-surface-850 p-4">
+                        <input type="checkbox" name="qbittorrent_move_enabled" class="mt-1 rounded-sm border-gray-600 bg-surface-900 text-brand-500 focus:ring-brand-500" {% if env.qbittorrent_move_enabled %}checked{% endif %}>
+                        <span>
+                            <span class="block text-sm font-semibold text-white">Enable mover</span>
+                            <span class="block text-xs text-gray-500 mt-1">Scheduled and manual runs will move completed torrents.</span>
+                        </span>
+                    </label>
+                    <label class="flex items-start gap-3 rounded-xl border border-gray-700/60 bg-surface-850 p-4">
+                        <input type="checkbox" name="qbittorrent_move_unmanaged_fallback_enabled" class="mt-1 rounded-sm border-gray-600 bg-surface-900 text-brand-500 focus:ring-brand-500" {% if env.qbittorrent_move_unmanaged_fallback_enabled %}checked{% endif %}>
+                        <span>
+                            <span class="block text-sm font-semibold text-white">Unmanaged fallback</span>
+                            <span class="block text-xs text-gray-500 mt-1">Also move completed torrents under the completed dir that Siftarr did not send.</span>
+                        </span>
+                    </label>
+                </div>
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div>
+                        <label for="qbittorrent_move_completed_dir" class="form-label">Completed downloads dir</label>
+                        <input type="text" id="qbittorrent_move_completed_dir" name="qbittorrent_move_completed_dir" value="{{ env.qbittorrent_move_completed_dir }}" class="form-input" placeholder="/downloads">
+                    </div>
+                    <div>
+                        <label for="qbittorrent_move_movie_root" class="form-label">Movie root</label>
+                        <input type="text" id="qbittorrent_move_movie_root" name="qbittorrent_move_movie_root" value="{{ env.qbittorrent_move_movie_root }}" class="form-input" placeholder="/media/movies">
+                    </div>
+                    <div>
+                        <label for="qbittorrent_move_tv_root" class="form-label">TV root</label>
+                        <input type="text" id="qbittorrent_move_tv_root" name="qbittorrent_move_tv_root" value="{{ env.qbittorrent_move_tv_root }}" class="form-input" placeholder="/media/tv">
+                    </div>
+                    <div>
+                        <label for="qbittorrent_move_retention_weeks" class="form-label">Retention (weeks)</label>
+                        <input type="number" min="1" id="qbittorrent_move_retention_weeks" name="qbittorrent_move_retention_weeks" value="{{ env.qbittorrent_move_retention_weeks }}" class="form-input">
+                    </div>
+                </div>
+                <button type="submit" class="btn-success btn-sm">Save Move Settings</button>
             </form>
         </div>
     </details>

@@ -122,6 +122,14 @@ class Settings(BaseSettings):
     qbittorrent_url: str | None = None
     qbittorrent_api_key: str | None = None
 
+    # qBittorrent move/retention settings
+    qbittorrent_move_enabled: bool = False
+    qbittorrent_move_completed_dir: str = "/downloads"
+    qbittorrent_move_movie_root: str = "/media/movies"
+    qbittorrent_move_tv_root: str = "/media/tv"
+    qbittorrent_move_unmanaged_fallback_enabled: bool = False
+    qbittorrent_move_retention_weeks: int = Field(default=6, ge=1)
+
     # Application settings (with defaults)
     staging_mode_enabled: bool = True
     retry_interval_hours: int = 24

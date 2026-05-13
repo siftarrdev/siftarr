@@ -295,6 +295,7 @@
                         <col data-col-key="eta" style="width: 120px;">
                         <col data-col-key="state" style="width: 150px;">
                         <col data-col-key="requeststate" style="width: 130px;">
+                        <col data-col-key="movestatus" style="width: 150px;">
                         <col data-col-key="size" style="width: 100px;">
                         <col data-col-key="indexer" style="width: 120px;">
                         <col data-col-key="score" style="width: 70px;">
@@ -307,6 +308,7 @@
                             <th class="px-5 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 cursor-pointer hover:text-gray-300" data-table="downloading" data-sort="eta" data-col-key="eta" style="position: relative;"><span class="sort-title">ETA <span class="sort-indicator"></span></span><div class="resize-handle"></div></th>
                             <th class="px-5 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 cursor-pointer hover:text-gray-300" data-table="downloading" data-sort="state" data-col-key="state" style="position: relative;"><span class="sort-title">qBittorrent State <span class="sort-indicator"></span></span><div class="resize-handle"></div></th>
                             <th class="px-5 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 cursor-pointer hover:text-gray-300" data-table="downloading" data-sort="requeststate" data-col-key="requeststate" style="position: relative;"><span class="sort-title">Request State <span class="sort-indicator"></span></span><div class="resize-handle"></div></th>
+                            <th class="px-5 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 cursor-pointer hover:text-gray-300" data-table="downloading" data-sort="movestatus" data-col-key="movestatus" style="position: relative;"><span class="sort-title">Move <span class="sort-indicator"></span></span><div class="resize-handle"></div></th>
                             <th class="px-5 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 cursor-pointer hover:text-gray-300" data-table="downloading" data-sort="size" data-col-key="size" style="position: relative;"><span class="sort-title">Size <span class="sort-indicator"></span></span><div class="resize-handle"></div></th>
                             <th class="px-5 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 cursor-pointer hover:text-gray-300" data-table="downloading" data-sort="indexer" data-col-key="indexer" style="position: relative;"><span class="sort-title">Indexer <span class="sort-indicator"></span></span><div class="resize-handle"></div></th>
                             <th class="px-5 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 cursor-pointer hover:text-gray-300" data-table="downloading" data-sort="score" data-col-key="score" style="position: relative;"><span class="sort-title">Score <span class="sort-indicator"></span></span><div class="resize-handle"></div></th>
@@ -319,7 +321,9 @@
                         {% set request_state = downloading_request_statuses.get(torrent.request_id, 'unknown') %}
                         {% set waiting_for_plex = torrent.id in downloading_waiting_plex_torrent_ids or torrent.request_id in downloading_waiting_plex_request_ids %}
                         {% set identity_warning = movie_identity_mismatch_warnings.get(torrent.id) %}
-                        <tr class="hover:bg-surface-850/80 cursor-pointer transition-colors" onclick="{% if torrent.request_id %}openRequestDetails({{ torrent.request_id }}){% endif %}" data-torrent-id="{{ torrent.id }}" data-request-id="{{ torrent.request_id }}" data-title="{{ torrent.title|lower }}" data-state="{{ 'qbit_finished_waiting_plex' if waiting_for_plex else torrent.status|lower }}" data-requeststate="{{ request_state|lower }}" data-progress="-1" data-eta="999999999" data-size="{{ torrent.size }}" data-indexer="{{ torrent.indexer|lower }}" data-score="{{ torrent.score }}" data-qbit-finished-waiting-plex="{{ 'true' if waiting_for_plex else 'false' }}">
+                        {% set move_status = torrent.move_status if torrent.move_status in ['pending', 'moved', 'error'] else 'pending' %}
+                        {% set moved_path = torrent.moved_path if torrent.moved_path is string else none %}
+                        <tr class="hover:bg-surface-850/80 cursor-pointer transition-colors" onclick="{% if torrent.request_id %}openRequestDetails({{ torrent.request_id }}){% endif %}" data-torrent-id="{{ torrent.id }}" data-request-id="{{ torrent.request_id }}" data-title="{{ torrent.title|lower }}" data-state="{{ 'qbit_finished_waiting_plex' if waiting_for_plex else torrent.status|lower }}" data-requeststate="{{ request_state|lower }}" data-movestatus="{{ move_status }}" data-progress="-1" data-eta="999999999" data-size="{{ torrent.size }}" data-indexer="{{ torrent.indexer|lower }}" data-score="{{ torrent.score }}" data-qbit-finished-waiting-plex="{{ 'true' if waiting_for_plex else 'false' }}">
                             <td class="px-5 py-3.5 text-sm font-medium text-white">
                                 <div>{{ torrent.title }}</div>
                                 {% if identity_warning %}
@@ -332,7 +336,11 @@
                             <td class="px-5 py-3.5  text-sm text-gray-400 tabular-nums" data-download-progress>—</td>
                             <td class="px-5 py-3.5  text-sm text-gray-400 tabular-nums" data-download-eta>—</td>
                             <td class="px-5 py-3.5  text-sm"><span class="badge {{ 'badge-yellow' if waiting_for_plex else 'badge-blue' }}" data-download-state>{{ 'qBittorrent finished; waiting for Plex' if waiting_for_plex else 'sent to qBittorrent' }}</span></td>
-                            <td class="px-5 py-3.5  text-sm"><span class="badge {% if request_state == 'downloading' %}badge-blue{% elif request_state == 'staged' %}badge-yellow{% else %}badge-gray{% endif %}">{{ request_state }}</span></td>
+                            <td class="px-5 py-3.5  text-sm" data-request-state-cell><span class="badge {% if request_state == 'downloading' %}badge-blue{% elif request_state == 'staged' %}badge-yellow{% else %}badge-gray{% endif %}">{{ request_state }}</span></td>
+                            <td class="px-5 py-3.5 text-sm" data-move-cell>
+                                <span class="badge {% if move_status == 'moved' %}badge-green{% elif move_status == 'error' %}badge-red{% else %}badge-gray{% endif %}" data-move-status>{{ move_status }}</span>
+                                {% if moved_path %}<div class="mt-1 max-w-xs truncate text-xs text-gray-500" title="{{ moved_path }}" data-moved-path>{{ moved_path }}</div>{% else %}<div class="mt-1 max-w-xs truncate text-xs text-gray-500 hidden" data-moved-path></div>{% endif %}
+                            </td>
                             <td class="px-5 py-3.5  text-sm text-gray-400 tabular-nums">{{ (torrent.size / 1024 / 1024 / 1024)|round(2) }} GB</td>
                             <td class="px-5 py-3.5  text-sm text-gray-400">{{ torrent.indexer }}</td>
                             <td class="px-5 py-3.5  text-sm text-emerald-400 font-medium tabular-nums">{{ torrent.score }}</td>

@@ -386,6 +386,69 @@ async def test_download_completion_check_closes_plex_service_on_error(monkeypatc
 
 
 @pytest.mark.asyncio
+async def test_download_completion_runs_qbit_move_when_enabled(monkeypatch):
+    db = AsyncMock()
+    runtime_settings = SimpleNamespace(qbittorrent_move_enabled=True)
+    monkeypatch.setattr(scheduler_service, "get_settings", lambda: runtime_settings)
+
+    download_completion_service = AsyncMock()
+    download_completion_service.check_downloading_requests.return_value = 0
+    move_service = AsyncMock()
+    move_service.run.return_value = SimpleNamespace(moved=1, removed=2, errors=0)
+
+    monkeypatch.setattr(scheduler_service, "PlexService", lambda settings: AsyncMock())
+    monkeypatch.setattr(scheduler_service, "QbittorrentService", lambda settings: AsyncMock())
+    monkeypatch.setattr(
+        scheduler_service, "PlexPollingService", lambda db_session, plex: AsyncMock()
+    )
+    monkeypatch.setattr(
+        scheduler_service,
+        "DownloadCompletionService",
+        lambda db_session, qbittorrent, plex_polling: download_completion_service,
+    )
+    monkeypatch.setattr(
+        scheduler_service,
+        "QbitMoveService",
+        lambda db_session, qbittorrent, settings, log: move_service,
+    )
+
+    service = SchedulerService(lambda: _FakeSessionContext(db), logger=MagicMock())
+    await service._check_download_completion()
+
+    download_completion_service.check_downloading_requests.assert_awaited_once()
+    move_service.run.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_download_completion_skips_qbit_move_when_disabled(monkeypatch):
+    db = AsyncMock()
+    runtime_settings = SimpleNamespace(qbittorrent_move_enabled=False)
+    monkeypatch.setattr(scheduler_service, "get_settings", lambda: runtime_settings)
+
+    download_completion_service = AsyncMock()
+    download_completion_service.check_downloading_requests.return_value = 0
+    move_service_cls = MagicMock()
+
+    monkeypatch.setattr(scheduler_service, "PlexService", lambda settings: AsyncMock())
+    monkeypatch.setattr(scheduler_service, "QbittorrentService", lambda settings: AsyncMock())
+    monkeypatch.setattr(
+        scheduler_service, "PlexPollingService", lambda db_session, plex: AsyncMock()
+    )
+    monkeypatch.setattr(
+        scheduler_service,
+        "DownloadCompletionService",
+        lambda db_session, qbittorrent, plex_polling: download_completion_service,
+    )
+    monkeypatch.setattr(scheduler_service, "QbitMoveService", move_service_cls)
+
+    service = SchedulerService(lambda: _FakeSessionContext(db), logger=MagicMock())
+    await service._check_download_completion()
+
+    download_completion_service.check_downloading_requests.assert_awaited_once()
+    move_service_cls.assert_not_called()
+
+
+@pytest.mark.asyncio
 async def test_recheck_unreleased_revisits_finished_and_available_tv_requests(monkeypatch):
     """Scheduler recheck should revisit ongoing TV rows beyond current unreleased ones."""
     db = AsyncMock()

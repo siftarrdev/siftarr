@@ -112,6 +112,55 @@ async def test_dashboard_marks_qbit_finished_waiting_for_plex(mock_db, monkeypat
 
 
 @pytest.mark.asyncio
+async def test_dashboard_downloads_show_move_status_and_path(mock_db, monkeypatch):
+    torrent = MagicMock()
+    torrent.id = 7
+    torrent.request_id = 41
+    torrent.title = "Moved Movie 2026"
+    torrent.status = "approved"
+    torrent.size = 1024 * 1024 * 1024
+    torrent.indexer = "TestIndexer"
+    torrent.score = 95
+    torrent.created_at = datetime(2026, 4, 1, 12, 0, tzinfo=UTC)
+    torrent.replaced_by_id = None
+    torrent.move_status = "moved"
+    torrent.moved_path = "/media/movies"
+
+    lifecycle_service = AsyncMock()
+    lifecycle_service.get_active_requests.return_value = []
+    lifecycle_service.get_requests_by_status.return_value = []
+    lifecycle_service.get_unreleased_requests.return_value = []
+    monkeypatch.setattr(dashboard, "LifecycleService", lambda db: lifecycle_service)
+    monkeypatch.setattr(
+        dashboard,
+        "get_settings",
+        lambda: MagicMock(
+            overseerr_url="http://overseerr.test",
+            staging_mode_enabled=False,
+            qbittorrent_url="http://qb.test",
+        ),
+    )
+
+    mock_db.execute.side_effect = [
+        MagicMock(scalars=MagicMock(return_value=MagicMock(all=MagicMock(return_value=[torrent])))),
+        MagicMock(
+            all=MagicMock(
+                return_value=[(41, RequestStatus.DOWNLOADING, MediaType.MOVIE, "Moved Movie", 2026)]
+            )
+        ),
+        MagicMock(all=MagicMock(return_value=[])),
+        MagicMock(scalars=MagicMock(return_value=MagicMock(all=MagicMock(return_value=[])))),
+    ]
+
+    response = await dashboard.dashboard(MagicMock(), db=mock_db)
+    rendered = response.body.decode()
+
+    assert 'data-movestatus="moved"' in rendered
+    assert "data-move-status>moved</span>" in rendered
+    assert "/media/movies" in rendered
+
+
+@pytest.mark.asyncio
 async def test_dashboard_marks_only_completed_episode_waiting_for_plex(mock_db, monkeypatch):
     """Per-torrent completion evidence should not fan out to sibling TV episode rows."""
     torrents = []

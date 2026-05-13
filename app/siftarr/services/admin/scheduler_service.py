@@ -31,6 +31,7 @@ from app.siftarr.services.integrations.qbittorrent_service import QbittorrentSer
 from app.siftarr.services.lifecycle.download_completion_service import DownloadCompletionService
 from app.siftarr.services.lifecycle.lifecycle_service import LifecycleService
 from app.siftarr.services.lifecycle.pending_queue_service import PendingQueueService
+from app.siftarr.services.lifecycle.qbit_move_service import QbitMoveResult, QbitMoveService
 from app.siftarr.services.lifecycle.unreleased_service import (
     UnreleasedEvaluator,
     evaluate_imported_request,
@@ -76,6 +77,17 @@ class PlexJobState:
     lock_owner: str | None = None
     last_error: str | None = None
     metrics_payload: dict[str, Any] | None = field(default=None)
+
+
+@dataclass(frozen=True)
+class DownloadCompletionRunResult:
+    """Outcome of a manually or automatically triggered download completion run."""
+
+    status: str
+    moved: int = 0
+    removed: int = 0
+    errors: int = 0
+    error: str | None = None
 
 
 class SchedulerService:
@@ -406,14 +418,15 @@ class SchedulerService:
         except Exception:
             logger.exception("Error during unreleased recheck")
 
-    async def _check_download_completion(self) -> None:
+    async def _check_download_completion(self) -> DownloadCompletionRunResult:
         """Poll qBittorrent for completed downloads and transition requests to COMPLETED."""
         logger = self._logger
         if self._download_completion_lock.locked():
             logger.debug("DownloadCompletionService: previous run still in progress, skipping")
-            return
+            return DownloadCompletionRunResult(status="locked")
         async with self._download_completion_lock:
             try:
+                move_result = QbitMoveResult()
                 async with self.db_session_factory() as db:
                     runtime_settings = get_settings()
                     plex = PlexService(settings=runtime_settings)
@@ -426,8 +439,39 @@ class SchedulerService:
                             "DownloadCompletionService: completed %d request(s) this cycle",
                             completed,
                         )
-            except Exception:
+                    if getattr(runtime_settings, "qbittorrent_move_enabled", False):
+                        move_result = await QbitMoveService(
+                            db,
+                            qbittorrent,
+                            runtime_settings,
+                            log=logger,
+                        ).run()
+                        if move_result.moved or move_result.removed or move_result.errors:
+                            logger.info(
+                                "QbitMoveService: moved=%d removed=%d errors=%d",
+                                move_result.moved,
+                                move_result.removed,
+                                move_result.errors,
+                            )
+                    else:
+                        logger.debug("QbitMoveService: disabled, skipping")
+                return DownloadCompletionRunResult(
+                    status="completed",
+                    moved=move_result.moved,
+                    removed=move_result.removed,
+                    errors=move_result.errors,
+                )
+            except Exception as exc:
                 logger.exception("Error during download completion check")
+                return DownloadCompletionRunResult(
+                    status="error",
+                    errors=1,
+                    error=str(exc) or exc.__class__.__name__,
+                )
+
+    async def trigger_download_completion_now(self) -> DownloadCompletionRunResult:
+        """Manually run the guarded download completion and qBit move workflow."""
+        return await self._check_download_completion()
 
     async def _poll_overseerr(self) -> bool:
         """

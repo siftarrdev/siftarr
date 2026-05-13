@@ -715,6 +715,11 @@ async def get_download_status(
                 "qbit_complete": qbit_complete,
                 "waiting_for_plex": waiting_for_plex,
                 "plex_available": plex_available,
+                "move_status": torrent.move_status
+                if isinstance(torrent.move_status, str)
+                else None,
+                "moved_path": torrent.moved_path if isinstance(torrent.moved_path, str) else None,
+                "move_error": torrent.move_error if isinstance(torrent.move_error, str) else None,
                 "refresh_staged_tab": _should_refresh_staged_tab(
                     qbit_complete=qbit_complete,
                     plex_available=plex_available,

@@ -65,7 +65,7 @@ async function _patchStagedDownloadStatus() {
                 row.dataset.qbitFinishedWaitingPlex = waitingForPlex ? 'true' : 'false';
             }
 
-            const reqStateTd = row.querySelector('td:nth-child(5)');
+            const reqStateTd = row.querySelector('[data-request-state-cell]');
             if (reqStateTd && torrent.request_status) {
                 const span = reqStateTd.querySelector('.badge');
                 if (span) {
@@ -75,6 +75,24 @@ async function _patchStagedDownloadStatus() {
                     span.textContent = rs;
                     row.dataset.requeststate = rs;
                 }
+            }
+
+            const moveCell = row.querySelector('[data-move-cell]');
+            if (moveCell) {
+                const status = torrent.move_status || 'pending';
+                const badge = moveCell.querySelector('[data-move-status]');
+                if (badge) {
+                    const cls = status === 'moved' ? 'badge-green' : status === 'error' ? 'badge-red' : 'badge-gray';
+                    badge.className = `badge ${cls}`;
+                    badge.textContent = status;
+                }
+                const movedPath = moveCell.querySelector('[data-moved-path]');
+                if (movedPath) {
+                    movedPath.textContent = torrent.moved_path || '';
+                    movedPath.title = torrent.moved_path || '';
+                    movedPath.classList.toggle('hidden', !torrent.moved_path);
+                }
+                row.dataset.movestatus = status;
             }
         }
     } catch (_err) {
