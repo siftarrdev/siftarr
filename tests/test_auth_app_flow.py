@@ -151,6 +151,10 @@ def test_plex_claim_relogin_denial_logout_and_next_flow(client, monkeypatch):
     assert gated.status_code == 303
     assert gated.headers["location"] == "/auth/initial-plex-sync?next=%2Fsettings"
 
+    direct_completed = client.post("/auth/initial-plex-sync/complete")
+    assert direct_completed.status_code == 409
+
+    monkeypatch.setattr(auth_router, "pop_initial_plex_sync_completion", lambda *_args: True)
     completed = client.post("/auth/initial-plex-sync/complete")
     assert completed.status_code == 200
     assert completed.json()["redirect_url"] == "/settings"

@@ -28,6 +28,27 @@ OVERSEERR_LAST_SYNC_SUCCESS_KEY = "overseerr_last_sync_success_at"
 PLEX_LAST_SYNC_SUCCESS_KEY = "plex_last_sync_success_at"
 SYNC_STALE_AFTER = 24 * 60 * 60
 
+_FULL_PLEX_SYNC_LOCK = asyncio.Lock()
+_INITIAL_PLEX_SYNC_COMPLETIONS: set[tuple[str, str]] = set()
+
+
+def record_initial_plex_sync_completion(gate_id: str | None, user_id: str | None) -> None:
+    """Record server-side proof that a gated initial full sync completed."""
+    if gate_id and user_id:
+        _INITIAL_PLEX_SYNC_COMPLETIONS.add((gate_id, user_id))
+
+
+def pop_initial_plex_sync_completion(gate_id: str | None, user_id: str | None) -> bool:
+    """Consume server-side proof for a gated initial full sync completion."""
+    if not gate_id or not user_id:
+        return False
+    key = (gate_id, user_id)
+    if key not in _INITIAL_PLEX_SYNC_COMPLETIONS:
+        return False
+    _INITIAL_PLEX_SYNC_COMPLETIONS.discard(key)
+    return True
+
+
 # ── Runtime-to-environment key mapping ────────────────────────────────────
 
 ENV_KEY_MAP: dict[str, str] = {
@@ -823,7 +844,7 @@ async def rescan_plex_requests(
             )
         )
 
-    completed = await polling_service.poll(on_progress=emit_polling_progress)
+    completed = await polling_service.poll(on_progress=emit_polling_progress, priority_only=False)
     return tv_resynced, tv_failed, completed
 
 
@@ -835,11 +856,27 @@ async def rescan_plex_generator(
     rescan_plex_requests_func,
     build_sse_progress_func,
     logger,
+    on_full_sync_complete=None,
 ):
     """Yield SSE events for Plex re-scan progress."""
     mode = "partial" if shallow else "full"
+    lock_acquired = False
     try:
         yield serialize_sse({"phase": "connecting", "mode": mode})
+
+        if not shallow:
+            if _FULL_PLEX_SYNC_LOCK.locked():
+                yield serialize_sse(
+                    build_sse_progress_func(
+                        "locked",
+                        mode=mode,
+                        active=[],
+                        message="A full Plex sync is already running. Please wait and retry.",
+                    )
+                )
+                return
+            await _FULL_PLEX_SYNC_LOCK.acquire()
+            lock_acquired = True
 
         async with async_session_maker() as db:
             runtime_settings = get_settings()
@@ -897,6 +934,8 @@ async def rescan_plex_generator(
                     f"{errors} failed, "
                     f"{completed} transitioned to completed."
                 )
+            if not shallow and on_full_sync_complete is not None:
+                on_full_sync_complete()
             yield serialize_sse(
                 build_sse_progress_func(
                     "complete",
@@ -912,6 +951,9 @@ async def rescan_plex_generator(
     except Exception as exc:
         logger.exception("Plex SSE re-scan failed")
         yield serialize_sse({"phase": "error", "message": f"Plex re-scan error: {exc}"})
+    finally:
+        if lock_acquired:
+            _FULL_PLEX_SYNC_LOCK.release()
 
 
 @dataclass(slots=True)

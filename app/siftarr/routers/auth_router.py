@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import inspect
 import logging
+import secrets
 from pathlib import Path
 from typing import Any
 from urllib.parse import quote, urlparse
@@ -16,7 +17,10 @@ from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.siftarr.database import get_db
-from app.siftarr.services.admin.settings_service import SettingsStore
+from app.siftarr.services.admin.settings_service import (
+    SettingsStore,
+    pop_initial_plex_sync_completion,
+)
 from app.siftarr.services.auth.plex_oauth_service import PlexOAuthService
 
 logger = logging.getLogger(__name__)
@@ -188,10 +192,12 @@ async def plex_auth(
     if is_first_claim:
         request.session["initial_plex_sync_required"] = True
         request.session["initial_plex_sync_next"] = safe_next
+        request.session["initial_plex_sync_gate_id"] = secrets.token_urlsafe(24)
         redirect_url = _initial_sync_url(safe_next)
     else:
         request.session.pop("initial_plex_sync_required", None)
         request.session.pop("initial_plex_sync_next", None)
+        request.session.pop("initial_plex_sync_gate_id", None)
         redirect_url = safe_next
 
     logger.info("Plex user %s logged in (id=%s)", username, user_id)
@@ -209,6 +215,7 @@ async def initial_plex_sync_page(request: Request) -> Response:
         return RedirectResponse(url=f"/auth/login?next={quote(next_url, safe='')}")
     if not request.session.get("initial_plex_sync_required"):
         return RedirectResponse(url=next_url)
+    request.session.setdefault("initial_plex_sync_gate_id", secrets.token_urlsafe(24))
 
     stored_next = _safe_next_url(request.session.get("initial_plex_sync_next"))
     templates = _get_templates()
@@ -226,9 +233,17 @@ async def complete_initial_plex_sync(request: Request) -> JSONResponse:
 
     if get_session_user(request) is None:
         raise HTTPException(status_code=401, detail="Not authenticated")
+    if not request.session.get("initial_plex_sync_required"):
+        raise HTTPException(status_code=409, detail="Initial Plex sync is not required")
+    if not pop_initial_plex_sync_completion(
+        request.session.get("initial_plex_sync_gate_id"),
+        request.session.get("plex_user_id"),
+    ):
+        raise HTTPException(status_code=409, detail="Initial Plex sync has not completed")
     redirect_url = _safe_next_url(request.session.get("initial_plex_sync_next"))
     request.session.pop("initial_plex_sync_required", None)
     request.session.pop("initial_plex_sync_next", None)
+    request.session.pop("initial_plex_sync_gate_id", None)
     return JSONResponse({"redirect_url": redirect_url})
 
 

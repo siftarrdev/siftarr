@@ -253,6 +253,33 @@ async def test_rescan_plex_sse_streams_partial_and_full_progress(monkeypatch, sh
 
 
 @pytest.mark.asyncio
+async def test_full_rescan_sse_rejects_overlapping_full_sync():
+    """A second full-sync SSE stream should not start overlapping full-sync work."""
+
+    async def unused_rescan(*_args, **_kwargs):
+        raise AssertionError("overlapping full sync started")
+
+    await settings_service._FULL_PLEX_SYNC_LOCK.acquire()
+    try:
+        chunks = [
+            chunk
+            async for chunk in settings_service.rescan_plex_generator(
+                shallow=False,
+                async_session_maker=lambda: AsyncMock(),
+                plex_service_cls=lambda settings: AsyncMock(),
+                rescan_plex_requests_func=unused_rescan,
+                build_sse_progress_func=settings_service.build_sse_progress,
+                logger=settings.logger,
+            )
+        ]
+    finally:
+        settings_service._FULL_PLEX_SYNC_LOCK.release()
+
+    events = _parse_sse_events(chunks)
+    assert [event["phase"] for event in events] == ["connecting", "locked"]
+
+
+@pytest.mark.asyncio
 async def test_rescan_plex_sse_reports_movies_and_tv_in_active_items(monkeypatch, mock_db):
     """Plex SSE progress should include both movie and TV requests in active items."""
 
@@ -425,6 +452,9 @@ async def test_rescan_plex_full_resyncs_all_active_non_completed_tv_and_polls(mo
     assert polling_event["mode"] == "full"
     assert "metadata refresh and availability poll" in polling_event["message"]
     polling.poll.assert_awaited_once()
+    await_args = polling.poll.await_args
+    assert await_args is not None
+    assert await_args.kwargs["priority_only"] is False
 
 
 @pytest.mark.asyncio
@@ -441,7 +471,8 @@ async def test_rescan_plex_full_reports_weighted_overall_progress(monkeypatch, m
     polling = AsyncMock()
     polling.get_active_requests = AsyncMock(return_value=[movie, tv])
 
-    async def poll(on_progress=None):
+    async def poll(on_progress=None, priority_only=True):
+        assert priority_only is False
         assert on_progress is not None
         await on_progress(
             {
@@ -600,9 +631,10 @@ async def test_rescan_plex_uses_bounded_parallel_workers_and_reports_counts(
         async def get_active_requests(self):
             return tv_requests
 
-        async def poll(self, on_progress=None):
+        async def poll(self, on_progress=None, priority_only=True):
             nonlocal poll_called
             poll_called = True
+            assert priority_only is False
             assert finished == len(tv_requests)
             return 4
 

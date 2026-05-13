@@ -28,6 +28,7 @@ from app.siftarr.services.admin.settings_service import (
     build_sse_progress,
     mask_secret,
     prepare_overseerr_import,
+    record_initial_plex_sync_completion,
 )
 from app.siftarr.services.admin.settings_service import (
     build_plex_job_statuses as build_plex_job_statuses_svc,
@@ -673,6 +674,7 @@ async def reseed_rules(
 
 @router.get("/api/rescan-plex/stream")
 async def rescan_plex_stream(
+    request: Request,
     shallow: bool = False,
     mode: str | None = Query(default=None, pattern="^(partial|full)$"),
 ) -> StreamingResponse:
@@ -681,6 +683,11 @@ async def rescan_plex_stream(
     The legacy shallow=true query remains compatible and maps to partial sync.
     """
     partial = shallow or mode == "partial"
+    gate_id = request.session.get("initial_plex_sync_gate_id")
+    user_id = request.session.get("plex_user_id")
+
+    def mark_initial_gate_complete() -> None:
+        record_initial_plex_sync_completion(gate_id, user_id)
 
     async def _inner() -> AsyncGenerator[str]:
         async for event in rescan_plex_generator_svc(
@@ -690,6 +697,7 @@ async def rescan_plex_stream(
             rescan_plex_requests_func=_rescan_plex_requests,
             build_sse_progress_func=build_sse_progress,
             logger=logger,
+            on_full_sync_complete=mark_initial_gate_complete,
         ):
             yield event
 

@@ -236,13 +236,36 @@ class TestPlexAuth:
             "plex_user_id": "123",
             "initial_plex_sync_required": True,
             "initial_plex_sync_next": "/settings",
+            "initial_plex_sync_gate_id": "gate-1",
         }
+        auth_router.pop_initial_plex_sync_completion("gate-1", "123")
+        from app.siftarr.services.admin.settings_service import record_initial_plex_sync_completion
+
+        record_initial_plex_sync_completion("gate-1", "123")
 
         result = await auth_router.complete_initial_plex_sync(request)
 
         assert result.status_code == 200
         assert "initial_plex_sync_required" not in request.session
         assert "initial_plex_sync_next" not in request.session
+        assert "initial_plex_sync_gate_id" not in request.session
+
+    @pytest.mark.asyncio
+    async def test_initial_sync_complete_requires_server_side_completion(self):
+        """Direct POST must not clear the gate without a completed full-sync record."""
+        request = MagicMock()
+        request.session = {
+            "plex_user_id": "123",
+            "initial_plex_sync_required": True,
+            "initial_plex_sync_next": "/settings",
+            "initial_plex_sync_gate_id": "missing-proof",
+        }
+
+        with pytest.raises(HTTPException) as exc_info:
+            await auth_router.complete_initial_plex_sync(request)
+
+        assert exc_info.value.status_code == 409
+        assert request.session["initial_plex_sync_required"] is True
 
     @pytest.mark.asyncio
     async def test_successful_sign_in_launches_scheduler_sync_non_blocking(self, monkeypatch):
