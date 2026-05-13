@@ -8,6 +8,7 @@ Media search and download decision middleware (FastAPI app).
 uv sync --extra dev       # Install dependencies
 uv run alembic upgrade head # Run database migrations
 uv run uvicorn app.siftarr.main:app --reload  # Dev server
+npm run build:css         # Rebuild Tailwind CSS after template/style changes
 ```
 
 ## Project Structure
@@ -21,11 +22,14 @@ uv run uvicorn app.siftarr.main:app --reload  # Dev server
   - `services/` - Business logic
 - `db/alembic/` - Alembic migrations
 - `data/db/` - SQLite database (create before running locally)
-- `docker/Dockerfile` - Container build
+- `docker/` - Container build, Compose, and helper scripts
+- `docs/` - Documentation index and cross-cutting docs
+- `tests/` - Pytest suite, grouped by routers/services/features
 
 ## Docker
 
-- Base image: `python:3.12-slim`
+- Base image: `python:3.14-slim`
+- Node stage builds Tailwind CSS from `app/siftarr/static/css/tailwind-input.css`
 - Installs `uv` at build time from ghcr.io/astral-sh/uv
 - Runs as non-root user `appuser:appgroup` (uid/gid 1000)
 - Port: 8000
@@ -35,6 +39,7 @@ uv run uvicorn app.siftarr.main:app --reload  # Dev server
 
 ```bash
 docker/rebuild-run-logs.sh
+docker/dev-up.sh
 ```
 
 ## Setup (Local)

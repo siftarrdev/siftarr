@@ -4,221 +4,133 @@
 
 # Siftarr
 
-**Media release filtering and scoring middleware**
+**Choose the right release before it reaches your download client.**
 
-Siftarr sits between your request, indexer, and download tools so you can decide which releases are accepted, rejected, staged for review, or sent to qBittorrent.
+Siftarr is a FastAPI web app that sits between Overseerr, Prowlarr, Plex, and qBittorrent. It searches, filters, scores, stages, and sends media releases according to rules you control.
+
+[Getting started](#getting-started-docker-compose) · [Features](#features) · [First run](#first-run) · [Troubleshooting](#troubleshooting)
 
 </div>
 
 ---
 
-## What Siftarr does
+## Why Siftarr?
 
-Siftarr receives approved media requests, searches indexers through Prowlarr, evaluates every candidate against your rules, then either stages the best torrent for review or sends it directly to qBittorrent.
+Use Siftarr when you want more control than “grab the first result”. Keep bad releases out, prefer the qualities and groups you like, review staged decisions, and retry requests that have no acceptable match yet.
 
 ```text
-Overseerr webhook ──► Siftarr ──► qBittorrent
-                         │
-                         ├──► Prowlarr search
-                         └──► Plex availability checks
+Overseerr webhook/manual sync ──► Siftarr ──► staged review or qBittorrent
+                                  │
+                                  ├──► Prowlarr release search
+                                  └──► Plex availability/completion checks
 ```
-
-Use Siftarr when you want more control than a simple first-match download flow: block unwanted releases, require quality terms, prefer trusted groups/codecs, limit sizes, and keep a manual approval step before anything reaches your download client.
 
 ## Features
 
-- **Release rules**: regex exclusions, regex requirements, weighted scoring, and size limits.
-- **Movie and TV awareness**: rules can apply to movies, TV, or both; TV size limits can target episodes or season packs.
-- **Season-first TV searches**: Siftarr looks for season packs before falling back to individual episodes.
-- **Staging mode**: save selected torrents for review before sending them to qBittorrent.
-- **Pending retries**: items with no acceptable release stay pending and are retried on a schedule.
-- **Web dashboard**: view active, pending, staged, rejected, completed, and manual-search items, with searchable/sortable release details.
-- **Connection testing and maintenance actions**: validate integrations, sync Overseerr requests, reseed default rules, and trigger retries from the UI.
-- **Plex polling support**: use Plex to help track media availability and recent scans.
+- **Rule-based release decisions**: exclusions, requirements, weighted scoring, and size limits.
+- **Movie + TV aware**: TV searches prefer season packs when useful and fall back to missing episodes.
+- **Safe staging mode**: review selected torrents before sending them to qBittorrent.
+- **Pending retries**: retry requests that do not have an acceptable release yet.
+- **Plex SSO browser access**: first Plex login claims the instance as the admin account.
+- **Dashboard controls**: inspect requests, releases, staged items, activity, stats, and settings.
+- **Operational tools**: connection tests, Overseerr sync, Plex sync, default-rule seeding, qBit move/retention settings, and manual maintenance actions.
 
-## Supported integrations
+## Integrations
 
-| Integration | Purpose | Required? |
-|-------------|---------|-----------|
-| **Overseerr** | Sends request webhooks and provides request metadata. | Yes, for automated request intake |
-| **Prowlarr** | Searches configured indexers by TMDB/TVDB IDs. | Yes |
-| **qBittorrent** | Receives approved torrents or magnets. | Yes, unless only reviewing staged decisions |
-| **Plex** | Checks library availability and recent scan state. | Optional but recommended |
+| Integration | What Siftarr uses it for |
+| --- | --- |
+| **Overseerr** | Request webhooks, request metadata, and manual request sync. |
+| **Prowlarr** | Indexer searches by stable media IDs and title strategies. |
+| **qBittorrent** | Sending approved torrents/magnets and completion/move tracking. |
+| **Plex** | Browser SSO, availability checks, and library sync/polling. |
 
-## Install and deploy
+## Getting started: Docker Compose
 
-### Option 1: Docker Compose image
+Docker Compose is the recommended way to run Siftarr.
 
-Create a Compose file such as:
+1. Create a directory for Siftarr and add this `docker-compose.yml`:
 
-```yaml
-services:
-  siftarr:
-    image: ghcr.io/siftarrdev/siftarr:latest
-    container_name: siftarr
-    restart: unless-stopped
-    ports:
-      - "8000:8000"
-    volumes:
-      - ./data:/data
-      # Optional: seed rules on first run from a Rules export JSON.
-      # - ./rules.json:/data/config/rules.json:ro
-    env_file:
-      - .env
+   ```yaml
+   services:
+     siftarr:
+       image: ghcr.io/siftarrdev/siftarr:latest
+       container_name: siftarr
+       restart: unless-stopped
+       env_file:
+         - .env
+       ports:
+         - "8000:8000"
+       volumes:
+         - ./data:/data
+         # Optional first-run rule seed exported from Siftarr's Rules page:
+         # - ./rules.json:/data/config/rules.json:ro
+   ```
+
+2. Create `.env` next to the Compose file:
+
+   ```dotenv
+   TZ=UTC
+
+   OVERSEERR_URL=http://overseerr:5055
+   OVERSEERR_API_KEY=your_overseerr_key
+
+   PROWLARR_URL=http://prowlarr:9696
+   PROWLARR_API_KEY=your_prowlarr_key
+
+   QBITTORRENT_URL=http://qbittorrent:8080
+   QBITTORRENT_API_KEY=your_qbittorrent_web_api_key
+
+   PLEX_URL=http://plex:32400
+
+   # Optional: provide a fixed programmatic/API key instead of the generated one.
+   # SIFTARR_API_KEY=change_me_to_a_long_random_value
+   ```
+
+3. Start Siftarr:
+
+   ```bash
+   docker compose up -d
+   ```
+
+4. Open <http://localhost:8000>.
+
+> Running from a cloned checkout? Use the local build Compose file instead:
+>
+> ```bash
+> docker compose -f docker/docker-compose.yml up -d --build
+> ```
+>
+> See [docker/README.md](docker/README.md) for image, volume, helper-script, and dev-container details.
+
+## First run
+
+1. Open Siftarr and sign in with the Plex account that should administer this instance.
+2. Wait for the initial Plex sync gate to complete.
+3. Go to **Settings** and confirm Overseerr, Prowlarr, qBittorrent, and Plex URLs/credentials.
+4. Use **Test** or **Test All** to verify connectivity, then save.
+5. Leave staging mode enabled while you review the first few decisions.
+6. Go to **Rules** and create, import, or tune your release rules.
+7. Add the Overseerr webhook below if you want automatic request intake.
+
+### Overseerr webhook
+
+In Overseerr, open **Settings → Notifications → Webhooks** and add:
+
+```text
+http://your-siftarr-host:8000/webhook/overseerr
 ```
 
-Create a `.env` file next to your Compose file for runtime configuration. This
-is the recommended way to pass URLs, API keys, and optional feature settings
-without hard-coding them in Compose:
+Enable request events such as **Media Requested** and **Media Approved**. If a webhook is missed, run an Overseerr sync from Siftarr **Settings**.
 
-```dotenv
-TZ=UTC
+## Day-to-day use
 
-OVERSEERR_URL=http://overseerr:5055
-OVERSEERR_API_KEY=your_overseerr_key
+- **Dashboard**: monitor active, pending, staged, rejected, downloading, and completed requests; inspect release results and activity.
+- **Rules**: add exclusions, requirements, scoring boosts, and size limits; import/export rules for backup or reuse.
+- **Staged**: approve or discard selected releases when staging mode is enabled.
+- **Stats**: review historical decisions and rule outcomes.
+- **Settings**: manage integrations, scheduler intervals, API key, Plex sync, qBit mover/retention, and maintenance jobs.
 
-PROWLARR_URL=http://prowlarr:9696
-PROWLARR_API_KEY=your_prowlarr_key
-
-QBITTORRENT_URL=http://qbittorrent:8080
-QBITTORRENT_API_KEY=your_qbittorrent_api_key
-
-PLEX_URL=http://plex:32400
-
-# Optional: explicit integration/API key. If unset, Siftarr generates one.
-SIFTARR_API_KEY=optional_integration_key
-
-# Optional: only used when the rules table is empty and rules.json is mounted.
-# SIFTARR_DEFAULT_RULES_PATH=/data/config/rules.json
-```
-
-Start it with:
-
-```bash
-docker compose up -d
-```
-
-Then open `http://localhost:8000`.
-
-### Option 2: Local Docker build
-
-If you are running from a cloned checkout and want to build the image locally, use the Compose file in `docker/`:
-
-```bash
-docker compose -f docker/docker-compose.yml up -d --build
-```
-
-### Optional environment configuration
-
-Most settings can be entered in the web UI after first launch. Environment variables are useful for pre-seeding values or running non-interactively. For Docker Compose, prefer an `env_file` such as `.env` next to your Compose file instead of inline secrets. Values saved in **Settings** are used at runtime.
-
-```yaml
-environment:
-  - TZ=UTC
-  - OVERSEERR_URL=http://overseerr:5055
-  - OVERSEERR_API_KEY=your_key
-  - PROWLARR_URL=http://prowlarr:9696
-  - PROWLARR_API_KEY=your_key
-  - QBITTORRENT_URL=http://qbittorrent:8080
-  - QBITTORRENT_API_KEY=your_api_key
-  - PLEX_URL=http://plex:32400
-  - SECRET_KEY=optional_explicit_session_secret
-  - SIFTARR_API_KEY=optional_integration_key
-  - SIFTARR_DEFAULT_RULES_PATH=/data/config/rules.json  # optional
-```
-
-Common variables:
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `TZ` | `UTC` | Timezone used by the app. |
-| `PUID` / `PGID` | `1000` | Container file ownership IDs. |
-| `OVERSEERR_URL` / `OVERSEERR_API_KEY` | unset | Overseerr connection. |
-| `PROWLARR_URL` / `PROWLARR_API_KEY` | unset | Prowlarr connection. |
-| `QBITTORRENT_URL` | unset | qBittorrent Web UI URL. |
-| `QBITTORRENT_API_KEY` | unset | qBittorrent Web API key (qBittorrent ≥ 5.2). |
-| `PLEX_URL` / `PLEX_TOKEN` | unset | Plex connection. |
-| `SECRET_KEY` | generated and persisted under `/data/db/` | Session signing key for Plex SSO browser sessions. Set explicitly to override the persisted generated secret. |
-| `SIFTARR_SECRET_KEY_FILE` | beside `SIFTARR_DB_PATH` | Optional path override for the generated session secret file when `SECRET_KEY` is unset. |
-| `STAGING_MODE_ENABLED` | `true` | Stage selected torrents instead of sending directly. |
-| `RETRY_INTERVAL_HOURS` | `24` | How often pending requests are retried. |
-| `MAX_RETRY_DURATION_DAYS` | `7` | How long pending requests remain retryable. |
-| `PLEX_POLL_INTERVAL_MINUTES` | `360` | Plex polling interval. |
-| `MAX_EPISODE_DISCOVERY` | `30` | Maximum episodes discovered per TV sync pass. |
-| `PLEX_RECENT_SCAN_INTERVAL_MINUTES` | `5` | Recent Plex scan polling interval. |
-| `OVERSEERR_SYNC_CONCURRENCY` | `16` | Overseerr sync concurrency. |
-| `PLEX_SYNC_CONCURRENCY` | `16` | Plex sync concurrency. |
-| `SIFTARR_API_KEY` | generated on first run | Optional explicit API key for programmatic access. The development placeholder `dev-key-change-me` is never accepted. |
-| `SIFTARR_DEFAULT_RULES_PATH` | unset | Optional path to a mounted rules export JSON used to seed an empty rules table. |
-| `SIFTARR_DB_PATH` | `/data/db/siftarr.db` | SQLite database path used to build the default database URL. |
-| `DATABASE_URL` | SQLite under `/data/db/` | Full database URL override. |
-
-On startup, Siftarr loads persisted runtime settings and generates a random API key if the
-effective key is missing or still `dev-key-change-me`; the generated key is stored in the
-database and shown masked in **Settings**. Set `SIFTARR_API_KEY` to a non-placeholder value
-to explicitly override the persisted API key for non-interactive deployments. Browser access
-uses Plex SSO; API keys remain available for webhooks and other programmatic integrations.
-
-If `SECRET_KEY` is not set, Siftarr generates a session signing secret once and persists it
-in the data volume, next to the SQLite database by default. This keeps Plex SSO browser
-sessions valid across app or container restarts. Use `SECRET_KEY` when you want to provide
-and rotate the session secret yourself.
-
-### Optional Docker default rules file
-
-For container deployments, you can mount a host `rules.json` and set
-`SIFTARR_DEFAULT_RULES_PATH` to its in-container path, for example
-`./rules.json:/data/config/rules.json:ro` plus
-`SIFTARR_DEFAULT_RULES_PATH=/data/config/rules.json`. The file must use the same
-versioned JSON format produced by **Rules → Export** (or `GET /rules/export`).
-
-The configured file is a first-run/default seed only: Siftarr reads it when the
-rules table is empty, such as on a new database. It does not replace or merge
-with user-edited rules after rules already exist. If no file is configured,
-Siftarr leaves the rules table empty; if a configured file is missing,
-unreadable, or invalid, startup fails loudly so the mount/configuration can be fixed.
-
-### Browser auth and instance claim
-
-The first successful Plex login claims the Siftarr instance. That Plex account becomes the
-only browser admin/user. Later Plex logins from any other account are rejected with
-“please login with the admin plex account”. Plex SSO stores claim metadata and the Plex token
-in `app_settings`; the settings form can edit the Plex URL but does not expose or overwrite
-the SSO-managed token.
-
-To recover from a mistaken claim, stop Siftarr, back up `/data/db/siftarr.db`, then edit or
-remove the `app_settings` rows for `plex_claimed_id`, `plex_username`, `plex_thumb`, and
-`plex_token` using SQLite tooling. Restart Siftarr and log in with the intended Plex admin.
-
-## First-run setup
-
-1. Open Siftarr at `http://localhost:8000`.
-2. Log in with the Plex account that should own/administer this Siftarr instance.
-3. Go to **Settings**.
-4. Enter URLs and credentials for Overseerr, Prowlarr, qBittorrent, and optionally Plex URL.
-5. Use **Test** beside each service, or **Test All**, to confirm connectivity.
-6. Save settings.
-7. Keep staging mode enabled for the first few requests so you can verify release decisions before downloads start.
-8. Go to **Rules** and review or create your filtering and scoring rules.
-
-## Overseerr webhook setup
-
-In Overseerr:
-
-1. Open **Settings → Notifications → Webhooks**.
-2. Add a webhook pointing to `http://your-siftarr-host:8000/webhook/overseerr`.
-3. Enable request events such as **Media Requested** and **Media Approved**.
-4. Save the webhook and send a test notification if available.
-
-Siftarr can also sync requests from Overseerr from the **Settings** page if a webhook was missed or Siftarr was offline.
-
-## Using the web UI
-
-- **Dashboard**: monitor active requests, pending searches, staged torrents, rejected releases, completion state, and manual release searches. Request details include release-result controls for title search, resolution filters (All, 4K, 1080p, 720p), sort key (score, size, seeders, published date, title, indexer), direction, reset, and filtered counts.
-- **Rules**: create, edit, enable/disable, delete, import/export, and test release rules.
-- **Settings**: manage integrations, staging mode, database stats, default rules, sync jobs, retries, and Plex scheduler status.
-
-Typical request lifecycle:
+Typical lifecycle:
 
 ```text
 received ──► searching ──► pending retry
@@ -230,59 +142,58 @@ received ──► searching ──► pending retry
           └──► discarded
 ```
 
-When staging mode is disabled, accepted releases skip the staged step and are sent directly to qBittorrent.
+When staging mode is disabled, accepted releases skip review and go directly to qBittorrent.
 
-## Rules overview
+## Rules at a glance
 
-Rules decide which release wins:
+| Rule type | Effect | Common use |
+| --- | --- | --- |
+| **Exclusion** | Rejects matching releases. | Block CAM/TS, unwanted tags, bad groups. |
+| **Requirement** | Requires at least one pattern. | Require WEB-DL, 1080p/2160p, language, codec. |
+| **Scoring** | Adds points to matching releases. | Prefer groups, codecs, HDR, remuxes. |
+| **Size limit** | Rejects releases outside a range. | Cap huge files or reject tiny fakes. |
 
-| Rule type | Effect | Example use |
-|-----------|--------|-------------|
-| **Exclusion** | Rejects any matching release. | Block `CAM`, `TS`, `HDCAM`, unwanted languages, or bad groups. |
-| **Requirement** | Requires at least one matching pattern. | Require `1080p`, `2160p`, `WEB-DL`, or a preferred codec. |
-| **Scoring** | Adds points to matching releases. | Prefer `x265`, HDR, specific release groups, or remuxes. |
-| **Size limit** | Rejects releases outside a configured size range. | Cap huge files or reject files that are too small. |
+A release must pass exclusions, requirements, and size limits before score decides the winner.
 
-Rules can be scoped to movies, TV, or both. A release must pass exclusions, requirements, and size limits before its score matters. The highest-scoring passing release is selected.
+## Data and configuration
 
-## Staging behavior
+Mount `/data` persistently. It contains the SQLite database, generated API/session secrets, settings, and staged torrent artifacts.
 
-Staging mode is enabled by default for safer operation.
-
-When enabled:
-
-1. Siftarr saves the selected `.torrent` under `/data/staging/`.
-2. The staged item appears in the dashboard.
-3. You can **Approve** it to send it to qBittorrent or **Discard** it to remove it.
-
-When disabled:
-
-1. Siftarr sends the selected torrent or magnet directly to qBittorrent.
-2. qBittorrent categories are chosen from the media type so downstream tools can process downloads.
-
-## Data volumes
-
-Mount `/data` somewhere persistent. Do not store it only inside the container filesystem.
-
-| Container path | Contents |
-|----------------|----------|
-| `/data/db/` | SQLite database, persisted app settings, and generated session secret. |
+| Path | Purpose |
+| --- | --- |
+| `/data/db/` | SQLite database, app settings, generated API key, generated session secret. |
 | `/data/staging/` | Staged torrent files and staging artifacts. |
+| `/data/config/rules.json` | Optional read-only first-run rules seed file. |
 
-Back up `/data/db/` before upgrades or major rule changes if you need rollback safety.
+Most settings can be edited in the UI. Useful environment variables include:
+
+| Variable | Default | Notes |
+| --- | --- | --- |
+| `OVERSEERR_URL`, `OVERSEERR_API_KEY` | unset | Overseerr connection. |
+| `PROWLARR_URL`, `PROWLARR_API_KEY` | unset | Prowlarr connection. |
+| `QBITTORRENT_URL`, `QBITTORRENT_API_KEY` | unset | qBittorrent Web UI/API connection. |
+| `PLEX_URL` | unset | Plex server URL; Plex token is normally managed by SSO. |
+| `SIFTARR_API_KEY` | generated | Programmatic/webhook API key. |
+| `SECRET_KEY` | generated under `/data/db/` | Optional explicit browser session signing key. |
+| `SIFTARR_DB_PATH` | `/data/db/siftarr.db` | SQLite path used when `DATABASE_URL` is not set. |
+| `DATABASE_URL` | SQLite under `/data/db/` | Full database URL override. |
+| `STAGING_MODE_ENABLED` | `true` | Stage selected releases before qBittorrent. |
+| `RETRY_INTERVAL_HOURS` | `24` | Pending retry cadence. |
+| `MAX_RETRY_DURATION_DAYS` | `7` | Pending retry window. |
 
 ## Troubleshooting
 
-- **Webhook is not arriving**: verify the Overseerr webhook URL is reachable from the Overseerr container/host and points to `/webhook/overseerr`.
-- **No releases found**: confirm Prowlarr has working indexers and that the requested media has TMDB/TVDB metadata.
-- **Everything is rejected**: use the Rules page test tool and check exclusion, requirement, and size-limit rules first.
-- **qBittorrent send fails**: confirm the Web UI URL, credentials, and network path from Siftarr to qBittorrent.
-- **Plex status is empty or stale**: verify the Plex URL/token and check the Plex scheduler status on the Settings page.
-- **Staged files are missing after restart**: ensure `/data` is mounted to persistent storage.
-- **Browser sessions reset after restart**: ensure `/data` is persistent, or set an explicit stable `SECRET_KEY`.
-- **Database or permission errors**: check ownership and write access for the host directory mounted to `/data`.
+- **Cannot log in**: the first Plex account to sign in claims the instance; use that account for future browser access.
+- **Webhook not arriving**: confirm Overseerr can reach `/webhook/overseerr` on the Siftarr host and port.
+- **No releases found**: verify Prowlarr indexers work and the request has TMDB/TVDB metadata.
+- **Everything is rejected**: test rules from the **Rules** page and check exclusions/requirements first.
+- **qBittorrent send fails**: verify URL, API key, Web UI settings, and container networking.
+- **Sessions reset after restart**: make sure `/data` is persistent or set a stable `SECRET_KEY`.
+- **Database/permission errors**: check host ownership/write permissions for the mounted data directory.
 
-For development setup and contribution workflow, see [CONTRIBUTING.md](CONTRIBUTING.md). For the documentation index and component guides, see [docs/README.md](docs/README.md).
+## Developers
+
+Development setup and contribution workflow live in [CONTRIBUTING.md](CONTRIBUTING.md). Repository orientation lives in [repo-map.md](repo-map.md), and additional documentation starts at [docs/README.md](docs/README.md).
 
 ## License
 

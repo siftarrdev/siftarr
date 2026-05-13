@@ -4,10 +4,10 @@ Thanks for helping improve Siftarr. This guide is for developers working on the 
 
 ## Prerequisites
 
-- Python 3.12+
+- Python 3.14+
 - [uv](https://docs.astral.sh/uv/) for dependency and virtual environment management
 - Git
-- Docker, if you need to test the container workflow
+- Docker, if you need to test the container/Compose workflow
 
 ## Local setup
 
@@ -21,6 +21,12 @@ uv run uvicorn app.siftarr.main:app --reload
 ```
 
 The development server runs at <http://localhost:8000>. Local runtime data under `data/` is gitignored.
+
+For a containerized local run, use the Compose workflow documented in [docker/README.md](docker/README.md):
+
+```bash
+docker compose -f docker/docker-compose.yml up -d --build
+```
 
 ## Dependency management
 
@@ -57,7 +63,9 @@ The schema is still in flux; keep migrations focused and compact. If migration h
 - App entry point: `app.siftarr.main:app`
 - Dev server: `uv run uvicorn app.siftarr.main:app --reload`
 - Production-style local run: `uv run uvicorn app.siftarr.main:app`
-- Docker helper: `./docker/rebuild-run-logs.sh` (see [docker/README.md](docker/README.md))
+- Docker Compose: `docker compose -f docker/docker-compose.yml up -d --build`
+- Fast Docker dev loop: `./docker/dev-up.sh`
+- Rebuild/log helper: `./docker/rebuild-run-logs.sh --logs` (see [docker/README.md](docker/README.md))
 
 Keep changes in the layer that owns the behavior:
 
@@ -77,7 +85,7 @@ Useful commands:
 
 ```bash
 uv run pytest
-uv run pytest tests/test_rule_engine.py
+uv run pytest tests/services/decisions/test_rule_engine.py
 uv run pytest tests/routers/settings/
 ```
 

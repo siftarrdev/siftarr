@@ -10,6 +10,7 @@ quick start or directly beside application code.
   quality-gate guide.
 - [repo-map.md](../repo-map.md) is the living high-level map of code ownership, runtime paths, and
   operational files.
+- [stats-metrics.md](stats-metrics.md) documents Stats metric semantics and immutable persistence.
 - `docs/` is reserved for remaining cross-cutting project notes.
 
 ## Component docs live with code
