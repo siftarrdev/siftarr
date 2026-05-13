@@ -1,5 +1,3 @@
-<!-- Stats persistence contract; API/UI implementation is intentionally deferred. -->
-
 # Stats Metrics Audit and Contract
 
 ## Scope and date semantics
@@ -34,9 +32,9 @@
   - processing times: search duration and request-to-approval duration.
   - rule outcomes: counts by rule and outcome (`matched`, `not_matched`, `passed`, `failed/rejected`, score delta where relevant).
 
-## Phase 2 approved persistence
+## Approved persistence
 
-Approved long-term approach: dedicated immutable metrics tables. Existing historical rows are not backfilled with fabricated data; stats API work should expose unsupported/partial fields as unavailable when no metric rows exist.
+Siftarr uses dedicated immutable metrics tables for durable stats. Existing historical rows are not backfilled with fabricated data; stats API/UI code should expose unsupported or partial fields as unavailable when no metric rows exist.
 
 Tables:
 
@@ -44,4 +42,4 @@ Tables:
 2. `stats_rule_outcomes`: per-release/per-rule evaluation outcomes for new search/evaluation runs, including matched flag, outcome, score delta, rejection reason, and stored release ID where available.
 3. `stats_timing_events`: durable timing events emitted alongside activity logs for search/rule/stage/approval/download events, plus computed `request_to_approval` duration rows when a selected release is approved.
 
-Instrumentation covers automatic decisions, manual release selections, staged approvals/replacements, direct-send approvals, and activity-log timing events. No Stats router/API/UI is included in Phase 2.
+Instrumentation covers automatic decisions, manual release selections, staged approvals/replacements, direct-send approvals, and activity-log timing events. The Stats router/API/UI reads these immutable rows for supported all-time, preset, and custom date ranges.

@@ -47,11 +47,11 @@ Primary flow:
 - `docs/` — cross-cutting documentation index; detailed component docs live beside code
 - `data/` — locally created runtime data directory for SQLite and staging artifacts; gitignored and not committed
 - `icons/` — branding assets used by docs/UI
-- `README.md` — product overview and quick start
+- `README.md` — user-facing overview and Docker Compose quick start
 - `CONTRIBUTING.md` — developer setup, workflow, quality gates, and PR expectations
 - `AGENTS.md` — repository-specific agent/development rules
 - `alembic.ini` — local Alembic CLI configuration pointing at `db/alembic/`
-- `pyproject.toml` — Python project metadata, dependencies, hatchling/hatch-vcs build backend, pytest, and Ruff config
+- `pyproject.toml` — Python 3.14 project metadata, dependencies, hatchling/hatch-vcs build backend, pytest, and Ruff config
 - `ty.toml` — static type checker configuration (Python version target)
 - `uv.lock` — locked dependency graph for `uv`
 - `package.json` — Tailwind CSS build script and npm dev dependencies (`@tailwindcss/cli`, `tailwindcss`)
@@ -59,10 +59,10 @@ Primary flow:
 
 ## Documentation map
 
-- `README.md` — end-user overview, deployment, first-run setup, integrations, rules, staging, and troubleshooting
+- `README.md` — user-facing overview, Docker Compose quick start, first-run setup, rules, data/configuration, and troubleshooting
 - `CONTRIBUTING.md` — developer prerequisites, local setup, dependency management, migrations, tests, quality gates, and PR workflow
 - `docs/README.md` — documentation index and guidance for where detailed docs should live
-- `docs/stats-metrics.md` — stats metric contract, support audit, and Phase 2 immutable metrics persistence notes
+- `docs/stats-metrics.md` — stats metric contract, support audit, and immutable metrics persistence notes
 - `app/siftarr/README.md` — application package boundaries, runtime flow, extension points, and package-level testing guidance
 - `app/siftarr/routers/README.md` — route-layer responsibilities, extension points, and router testing guidance
 - `app/siftarr/services/README.md` — service/integration responsibilities, extension points, and service testing guidance

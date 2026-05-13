@@ -11,9 +11,10 @@ Build from the repository root with the Dockerfile in this directory:
 docker build -f docker/Dockerfile -t siftarr:latest .
 ```
 
-The image uses `python:3.12-slim`, installs `uv`, syncs locked dependencies, copies
-the app and Alembic files, and runs through `docker/entrypoint.sh`. The default
-command starts Uvicorn on port `8000`.
+The image uses a Node 20 stage to build Tailwind CSS, then a `python:3.14-slim`
+runtime stage that installs `uv`, syncs locked dependencies, copies the app and
+Alembic files, and runs through `docker/entrypoint.sh`. The default command
+starts Uvicorn on port `8000`.
 
 You can pass a version label at build time:
 
@@ -32,10 +33,11 @@ docker compose -f docker/docker-compose.yml logs -f siftarr
 docker compose -f docker/docker-compose.yml down
 ```
 
-The service publishes `8000:8000` and includes a healthcheck against `/health`.
-The Compose file also includes a commented example for mounting a host
-`rules.json` into `/data/config/rules.json` and setting
-`SIFTARR_DEFAULT_RULES_PATH` for first-run rule seeding.
+The service publishes `8000:8000`, loads `docker/.env`, persists data under
+`docker/data/`, includes a healthcheck against `/health`, and mounts
+`docker/siftarr-rules.json` at `/data/config/rules.json` for optional first-run
+rule seeding. Siftarr auto-detects that default rules path; no environment
+variable is required unless you mount a different path.
 
 ## Volumes
 
@@ -85,17 +87,20 @@ entrypoint also honors `PUID` and `PGID` for runtime file ownership.
 
 To customize the rules created for a fresh database, export rules from an
 existing Siftarr instance (**Rules → Export** or `/rules/export`) and save the
-JSON on the host, for example `docker/rules.json`. Then enable the commented
-Compose example:
+JSON on the host, for example `docker/siftarr-rules.json`. The bundled Compose
+file already mounts that path to `/data/config/rules.json`.
+
+If you prefer another host path or in-container path, mount it explicitly and set
+`SIFTARR_DEFAULT_RULES_PATH`:
 
 ```yaml
 services:
   siftarr:
     volumes:
       - ./data:/data
-      - ./rules.json:/data/config/rules.json:ro
+      - ./my-rules.json:/data/config/my-rules.json:ro
     environment:
-      - SIFTARR_DEFAULT_RULES_PATH=/data/config/rules.json
+      - SIFTARR_DEFAULT_RULES_PATH=/data/config/my-rules.json
 ```
 
 The JSON must match the version-1 import/export schema. Siftarr reads it during
@@ -129,5 +134,17 @@ docker/rebuild-run-logs.sh --logs
 The script derives `SIFTARR_VERSION` from Git tags/commits, runs Compose `down`,
 builds the `siftarr` service, starts it detached, and tails logs when `--logs` is
 provided.
+
+## Fast dev container loop
+
+For day-to-day app development, use:
+
+```bash
+docker/dev-up.sh
+```
+
+It starts the Compose stack with source/Alembic volume mounts and Uvicorn
+`--reload`, so Python and template changes restart quickly. Rebuild the image
+when dependencies, Docker files, or Tailwind output need to change.
 
 Related docs: [user deployment guide](../README.md), [contributing guide](../CONTRIBUTING.md), and [repository map](../repo-map.md).
