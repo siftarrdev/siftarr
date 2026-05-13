@@ -10,12 +10,14 @@ services:
     restart: unless-stopped
     env_file:
       - .env
+    environment:
+      SIFTARR_DEFAULT_RULES_PATH: /data/config/rules.json
     ports:
       - "8000:8000"
     volumes:
       - ./data:/data
-      # Optional first-run rule seed file. Create docker/rules.json from
-      # Rules → Export, then uncomment this mount and the env var below.
+      # Optional first-run rule seed file. Create docker/siftarr-rules.json
+      # from Rules → Export. Seed path is configured above.
       - ./siftarr-rules.json:/data/config/rules.json:ro
     healthcheck:
       test: ["CMD", "/app/.venv/bin/python", "-c", "import httpx; httpx.get('http://localhost:8000/health')"]

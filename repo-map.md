@@ -251,7 +251,7 @@ Tests mirror the service subpackage organization under `tests/services/`:
 - `db/alembic/versions/` — compact schema migrations; reset/stamp existing local databases when schema history is collapsed
 - container startup runs Alembic/SQLite repair before the FastAPI app launches; FastAPI startup then seeds default rules for empty databases
 - `docker/Dockerfile` — multi-stage production image build (Node stage builds Tailwind CSS, Python stage runs the app)
-- `docker/docker-compose.yml` — local container orchestration with documented optional `rules.json` first-run seed mount/env workflow
+- `docker/docker-compose.yml` — local container orchestration with `docker/siftarr-rules.json` mounted for empty-database rule seeding
 - `docker/rebuild-run-logs.sh` — rebuild, run, and log-tail helper (use when deps change)
 - `docker/dev-up.sh` — fast dev loop with volume mounts and uvicorn --reload (daily use, no rebuild)
 - `docker/docker-compose.override.yml` — dev overrides: source code volume mounts and `--reload` command
