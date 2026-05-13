@@ -330,6 +330,44 @@ async def test_poll_caps_probe_concurrency(service, mock_db, mock_plex):
 
 
 @pytest.mark.asyncio
+async def test_poll_progress_includes_tv_detail_and_concurrency(service, mock_db, mock_plex):
+    movie = make_request(id=1, title="Movie", tmdb_id=111)
+    tv = make_request(
+        id=2,
+        title="Show",
+        media_type=MediaType.TV,
+        tmdb_id=222,
+        seasons=[make_season(1, [make_episode(1)])],
+    )
+    mock_result = MagicMock()
+    mock_result.scalars.return_value.all.return_value = [movie, tv]
+    mock_db.execute.return_value = mock_result
+    mock_plex.settings.plex_sync_concurrency = 1
+    mock_plex.check_movie_available.return_value = False
+    mock_plex.get_show_by_tmdb.return_value = {"rating_key": "rk"}
+    mock_plex.get_episode_availability.return_value = {(1, 1): False}
+
+    events = []
+
+    async def collect(payload):
+        events.append(payload)
+
+    completed = await service.poll(on_progress=collect)
+
+    assert completed == 0
+    details = [event for event in events if event.get("detail")]
+    assert [event["detail"] for event in details] == [
+        "movie_lookup",
+        "tv_show_lookup",
+        "tv_episode_availability",
+    ]
+    assert all(event["concurrency_limit"] == 1 for event in events)
+    assert any(
+        event.get("media_type") == "tv" and event.get("title") == "Show" for event in details
+    )
+
+
+@pytest.mark.asyncio
 async def test_check_request_tv_partial_availability(service, mock_db, mock_plex):
     req = make_request(
         id=78,

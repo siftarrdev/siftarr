@@ -432,15 +432,16 @@ async function testAllConnections() {
 let syncEventSource = null;
 
 function progressNumbers(data) {
-    const current = Number(data.current ?? data.completed);
-    const total = Number(data.total);
+    const serverPercent = Number(data.overall_percent ?? data.progress_percent);
+    const current = Number(data.overall_current ?? data.current ?? data.completed);
+    const total = Number(data.overall_total ?? data.total);
 
     if (!Number.isFinite(total) || total <= 0) {
-        return { percent: null, label: 'Working…' };
+        return { percent: Number.isFinite(serverPercent) ? serverPercent : null, label: 'Working…' };
     }
 
     const safeCurrent = Number.isFinite(current) ? Math.max(0, Math.min(current, total)) : 0;
-    const percent = Math.round((safeCurrent / total) * 100);
+    const percent = Number.isFinite(serverPercent) ? serverPercent : Math.round((safeCurrent / total) * 100);
     return { percent: percent, label: `${safeCurrent}/${total}` };
 }
 
@@ -656,7 +657,7 @@ function startPlexRescan(shallow = false) {
                 break;
             case 'polling':
                 status.textContent = data.message;
-                applyProgress(bar, progressText, data, { fallbackPercent: 90, minimumPercent: 90 });
+                applyProgress(bar, progressText, data, { fallbackPercent: 35, minimumPercent: 0 });
                 renderActiveItems(activeList, activeWrap, data.active || []);
                 break;
             case 'complete':

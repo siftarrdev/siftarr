@@ -426,6 +426,68 @@ async def test_rescan_plex_full_resyncs_all_active_non_completed_tv_and_polls(mo
 
 
 @pytest.mark.asyncio
+async def test_rescan_plex_full_reports_weighted_overall_progress(monkeypatch, mock_db):
+    """Full Plex sync should expose bounded weighted progress across all phases."""
+
+    runtime_settings = MagicMock(plex_sync_concurrency=1)
+    plex_service = AsyncMock()
+    movie = MagicMock(id=1, title="Movie", media_type=MediaType.MOVIE)
+    movie.status = RequestStatus.PENDING
+    tv = MagicMock(id=2, title="Show", media_type=MediaType.TV)
+    tv.status = RequestStatus.PENDING
+
+    polling = AsyncMock()
+    polling.get_active_requests = AsyncMock(return_value=[movie, tv])
+
+    async def poll(on_progress=None):
+        await on_progress(
+            {
+                "phase": "poll",
+                "current": 0,
+                "total": 2,
+                "completed": 0,
+                "title": "Show",
+                "active": ["Show"],
+                "detail": "tv_episode_availability",
+                "item_progress": 0.6,
+            }
+        )
+        await on_progress(
+            {
+                "phase": "poll",
+                "current": 2,
+                "total": 2,
+                "completed": 2,
+                "active": [],
+            }
+        )
+        return 1
+
+    polling.poll = AsyncMock(side_effect=poll)
+    monkeypatch.setattr(settings, "PlexPollingService", lambda db, plex: polling)
+
+    import app.siftarr.routers.settings as settings_router
+
+    monkeypatch.setattr(settings_router, "_rescan_plex_tv_request", AsyncMock(return_value=True))
+
+    events: list[dict[str, Any]] = []
+
+    async def collect(payload):
+        events.append(payload)
+
+    assert await settings_router._rescan_plex_requests(
+        mock_db, runtime_settings, plex_service, on_event=collect, shallow=False
+    ) == (1, 0, 1)
+
+    weighted = [event for event in events if "overall_percent" in event]
+    assert [event["phase"] for event in weighted][:3] == ["fetching", "processing", "processing"]
+    assert all(event["overall_percent"] < 100 for event in weighted)
+    assert weighted[-2]["detail"] == "tv_episode_availability"
+    assert weighted[-2]["overall_percent"] > weighted[-3]["overall_percent"]
+    assert weighted[-1]["overall_percent"] == pytest.approx(99.8)
+
+
+@pytest.mark.asyncio
 async def test_rescan_plex_uses_bounded_parallel_workers_and_reports_counts(
     monkeypatch, mock_db, base_context
 ):

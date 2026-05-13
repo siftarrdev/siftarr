@@ -56,6 +56,17 @@
       percent.textContent = `${Math.round(clamped)}%`;
     }
 
+    function payloadProgress(payload) {
+      const serverPercent = Number(payload.overall_percent ?? payload.progress_percent);
+      if (Number.isFinite(serverPercent)) return serverPercent;
+      const current = Number(payload.overall_current ?? payload.current ?? payload.completed);
+      const total = Number(payload.overall_total ?? payload.total);
+      if (Number.isFinite(current) && Number.isFinite(total) && total > 0) {
+        return (current / total) * 100;
+      }
+      return null;
+    }
+
     function updateActive(items) {
       active.innerHTML = '';
       (Array.isArray(items) ? items : []).slice(0, 5).forEach((item) => {
@@ -91,8 +102,9 @@
         phase.textContent = payload.phase || 'Syncing';
         message.textContent = payload.message || message.textContent;
         updateActive(payload.active);
-        if (payload.total && Number.isInteger(payload.current)) {
-          setProgress((payload.current / payload.total) * 100);
+        const progressValue = payloadProgress(payload);
+        if (progressValue !== null) {
+          setProgress(progressValue);
         }
         if (payload.phase === 'complete') {
           setProgress(100);
