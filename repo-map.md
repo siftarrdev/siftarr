@@ -32,7 +32,7 @@ Siftarr is a FastAPI application that sits between Overseerr, Prowlarr, Plex, an
 Primary flow:
 
 1. Overseerr webhook or manual action creates/syncs a request
-2. Browser access is gated by Plex SSO; the first Plex login claims the instance as the sole admin, while API-key auth remains for webhooks/integrations
+2. Browser access is gated by Plex SSO; the first Plex login claims the instance as the sole admin and must finish an initial full Plex sync before reaching protected pages, while API-key auth remains for webhooks/integrations
 3. Search and decision services query Prowlarr and evaluate releases (TV dashboard search uses one Search All stream that runs bounded paginated season sweeps and classifies stored coverage)
 4. Winning releases are staged or sent to qBittorrent
 5. Background services track retries, lifecycle state, Plex polling, and completion
@@ -121,7 +121,7 @@ Database entities and enums.
 
 HTTP route layer.
 
-- `auth_router.py` — Plex SSO auth endpoints (login page, first-login admin claim, same-admin token refresh, guarded full Plex sync kick-off after successful admin sign-in, non-admin denial UX, logout, session info); included without global auth dependency
+- `auth_router.py` — Plex SSO auth endpoints (login page, first-login admin claim, initial Plex sync gate page/completion, same-admin token refresh, guarded full Plex sync kick-off after later successful admin sign-in, non-admin denial UX, logout, session info); included without global auth dependency
 - `dashboard.py` — main dashboard page routes
 - `dashboard_api.py` — dashboard JSON endpoints for details/search data, including validated detail-release filter/sort query controls
 - `dashboard_actions.py` — dashboard-triggered actions and mutations
@@ -137,7 +137,7 @@ HTTP route layer.
 Business logic and integrations, organized into thematic subpackages:
 
 **Flat (cross-cutting):**
-- `auth_service.py` — authentication dependencies: `require_auth` (browser Plex SSO redirect with API-key fallback for programmatic requests), claimed-admin session validation/cleanup, request classification, `get_session_user` helper, `verify_api_key`
+- `auth_service.py` — authentication dependencies: `require_auth` (browser Plex SSO redirect with API-key fallback for programmatic requests), first-claim initial Plex sync session gate redirects, claimed-admin session validation/cleanup, request classification, `get_session_user` helper, `verify_api_key`
 - `metadata_service.py` — Overseerr metadata lookup for request details
 - `request_service.py` — request loading / validation
 - `stats_service.py` — read-side Stats aggregation and date-range validation for cards, splits, rule outcomes, and timing charts
@@ -148,7 +148,7 @@ Business logic and integrations, organized into thematic subpackages:
 
 **`admin/`** — Config, scheduling, polling
 - `settings_service.py` — SettingsStore (DB-backed settings persistence, startup API key generation, runtime env loading, sync success timestamps, Plex SSO claim/token status without exposing token), SSE progress, scheduled job helpers, Plex rescan/Overseerr import orchestration
-- `scheduler_service.py` — recurring job scheduling via APScheduler using runtime-configurable sync/completion intervals, plus startup catch-up orchestration for stale Overseerr/Plex syncs and the guarded Plex sign-in full-sync trigger
+- `scheduler_service.py` — recurring job scheduling via APScheduler using runtime-configurable sync/completion intervals, plus startup catch-up orchestration for stale Overseerr/Plex syncs and the guarded Plex sign-in full-sync trigger used after later admin sign-ins
 - `plex_polling_service/` — Plex polling logic; prioritizes recent/downloading requests with periodic full reconcile every 20th poll cycle
 
 **`dashboard/`** — Dashboard, search, detail views
@@ -202,6 +202,7 @@ Server-rendered HTML templates.
 - `base.html` — shared layout (nav bar shows user avatar/name + logout when logged in)
 - `dashboard.html` — main dashboard UI, including details-modal release result filters/sorting/count controls
 - `login.html` — Plex SSO login page with JS-driven OAuth PIN flow, denied-admin message, and safe next redirect handling
+- `initial_plex_sync.html` — first-claim setup gate that opens the full Plex sync SSE stream, shows progress/retry/logout, and unlocks protected navigation only after successful completion
 - `rules.html` — single-pane rules UI with unified rule table, multi-title tester, modal create/edit wizard, and modal import/export
 - `rule_form.html` — fallback full-page create/edit rule form
 - `settings.html` — settings UI (manual actions, connection settings with Plex SSO status and API key reveal/copy/regenerate, scheduler interval controls/status, staging toggle)

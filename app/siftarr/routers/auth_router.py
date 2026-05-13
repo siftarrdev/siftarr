@@ -7,10 +7,10 @@ import inspect
 import logging
 from pathlib import Path
 from typing import Any
-from urllib.parse import urlparse
+from urllib.parse import quote, urlparse
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
-from fastapi.responses import RedirectResponse
+from fastapi.responses import JSONResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -52,6 +52,10 @@ def _safe_next_url(value: str | None) -> str:
     if parsed.scheme or parsed.netloc or not value.startswith("/") or value.startswith("//"):
         return "/"
     return value
+
+
+def _initial_sync_url(next_url: str) -> str:
+    return f"/auth/initial-plex-sync?next={quote(next_url, safe='')}"
 
 
 async def _maybe_await(value: Any) -> None:
@@ -102,6 +106,9 @@ async def login_page(request: Request) -> Response:
 
     next_url = _safe_next_url(request.query_params.get("next"))
     if get_session_user(request) is not None:
+        if request.session.get("initial_plex_sync_required"):
+            request.session.setdefault("initial_plex_sync_next", next_url)
+            return RedirectResponse(url=_initial_sync_url(next_url))
         return RedirectResponse(url=next_url)
 
     templates = _get_templates()
@@ -142,7 +149,9 @@ async def plex_auth(
     # Check if this instance is already claimed
     claimed_id = await settings_store.get("plex_claimed_id")
 
-    if claimed_id is None:
+    is_first_claim = claimed_id is None
+
+    if is_first_claim:
         # First-time claim — persist user info and token
         try:
             await settings_store.set("plex_claimed_id", user_id)
@@ -160,7 +169,6 @@ async def plex_auth(
             await settings_store.set("plex_token", body.authToken)
         # Push token and claim into runtime environment so auth/Plex services see it
         await settings_store.load_into_environ()
-        _launch_plex_sign_in_sync()
         logger.info("Instance claimed by Plex user %s (id=%s)", username, user_id)
     elif claimed_id != user_id:
         # Instance already claimed by a different user — reject
@@ -176,10 +184,52 @@ async def plex_auth(
     request.session["plex_user_id"] = user_id
     request.session["plex_username"] = username
     request.session["plex_thumb"] = thumb
+    safe_next = _safe_next_url(body.next)
+    if is_first_claim:
+        request.session["initial_plex_sync_required"] = True
+        request.session["initial_plex_sync_next"] = safe_next
+        redirect_url = _initial_sync_url(safe_next)
+    else:
+        request.session.pop("initial_plex_sync_required", None)
+        request.session.pop("initial_plex_sync_next", None)
+        redirect_url = safe_next
 
     logger.info("Plex user %s logged in (id=%s)", username, user_id)
 
-    return {"username": username, "thumb": thumb, "redirect_url": _safe_next_url(body.next)}
+    return {"username": username, "thumb": thumb, "redirect_url": redirect_url}
+
+
+@router.get("/initial-plex-sync")
+async def initial_plex_sync_page(request: Request) -> Response:
+    """Render the blocking first-claim Plex sync page."""
+    from app.siftarr.services.auth_service import get_session_user
+
+    next_url = _safe_next_url(request.query_params.get("next"))
+    if get_session_user(request) is None:
+        return RedirectResponse(url=f"/auth/login?next={quote(next_url, safe='')}")
+    if not request.session.get("initial_plex_sync_required"):
+        return RedirectResponse(url=next_url)
+
+    stored_next = _safe_next_url(request.session.get("initial_plex_sync_next"))
+    templates = _get_templates()
+    return templates.TemplateResponse(
+        request,
+        "initial_plex_sync.html",
+        {"next_url": stored_next},
+    )
+
+
+@router.post("/initial-plex-sync/complete")
+async def complete_initial_plex_sync(request: Request) -> JSONResponse:
+    """Clear the first-claim sync gate after the full Plex sync completes."""
+    from app.siftarr.services.auth_service import get_session_user
+
+    if get_session_user(request) is None:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    redirect_url = _safe_next_url(request.session.get("initial_plex_sync_next"))
+    request.session.pop("initial_plex_sync_required", None)
+    request.session.pop("initial_plex_sync_next", None)
+    return JSONResponse({"redirect_url": redirect_url})
 
 
 @router.post("/logout")

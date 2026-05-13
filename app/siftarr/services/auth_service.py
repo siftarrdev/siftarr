@@ -20,12 +20,34 @@ class BrowserAuthRequired(Exception):
     """Raised when a browser request should be redirected to Plex login."""
 
 
+class InitialPlexSyncRequired(Exception):
+    """Raised when the first admin session must finish the initial Plex sync."""
+
+
 def build_login_redirect_url(request: Request) -> str:
     """Return the login URL with a safe local next path for this request."""
     path = request.url.path or "/"
     query = request.url.query
     next_path = f"{path}?{query}" if query else path
     return f"/auth/login?next={quote(next_path, safe='')}"
+
+
+def build_initial_plex_sync_redirect_url(request: Request) -> str:
+    """Return the initial Plex sync URL with a safe local next path."""
+    path = request.url.path or "/"
+    query = request.url.query
+    next_path = f"{path}?{query}" if query else path
+    return f"/auth/initial-plex-sync?next={quote(next_path, safe='')}"
+
+
+def _allows_initial_plex_sync_gate(request: Request) -> bool:
+    path = request.scope.get("path", "/")
+    return path in {
+        "/auth/initial-plex-sync",
+        "/auth/initial-plex-sync/complete",
+        "/auth/logout",
+        "/settings/api/rescan-plex/stream",
+    }
 
 
 def _api_key_matches(provided_key: str | None, configured_key: str) -> bool:
@@ -124,6 +146,10 @@ async def require_auth(request: Request) -> None:
     """
     # Check session first (browser users)
     if get_session_user(request) is not None:
+        if request.session.get("initial_plex_sync_required") and not _allows_initial_plex_sync_gate(
+            request
+        ):
+            raise InitialPlexSyncRequired()
         return
 
     # Fall back to API key (programmatic access)

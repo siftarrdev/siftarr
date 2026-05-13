@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Initial Plex Sync - Siftarr</title>
+  <link rel="stylesheet" href="/static/css/tailwind.css">
+</head>
+<body class="min-h-screen bg-slate-950 text-slate-100">
+  <main class="mx-auto flex min-h-screen max-w-2xl flex-col justify-center px-6 py-12">
+    <section class="rounded-2xl border border-slate-800 bg-slate-900/80 p-8 shadow-xl">
+      <p class="text-sm font-semibold uppercase tracking-wide text-blue-300">First-time setup</p>
+      <h1 class="mt-2 text-3xl font-bold">Syncing Plex before opening Siftarr</h1>
+      <p class="mt-4 text-slate-300">
+        Siftarr is running a full Plex sync for the claimed admin account. The dashboard will unlock after this sync completes successfully.
+      </p>
+
+      <div class="mt-8">
+        <div class="mb-2 flex justify-between text-sm text-slate-300">
+          <span id="sync-phase">Connecting...</span>
+          <span id="sync-percent">0%</span>
+        </div>
+        <div class="h-3 overflow-hidden rounded-full bg-slate-800">
+          <div id="sync-bar" class="h-full w-0 rounded-full bg-blue-500 transition-all"></div>
+        </div>
+        <p id="sync-message" class="mt-4 text-sm text-slate-300">Starting full Plex sync...</p>
+        <ul id="sync-active" class="mt-3 list-disc space-y-1 pl-5 text-sm text-slate-400"></ul>
+      </div>
+
+      <div id="sync-error" class="mt-6 hidden rounded-lg border border-red-800 bg-red-950/60 p-4 text-sm text-red-100"></div>
+
+      <div class="mt-8 flex gap-3">
+        <button id="retry-button" type="button" class="hidden rounded-lg bg-blue-600 px-4 py-2 font-semibold text-white hover:bg-blue-500">
+          Retry sync
+        </button>
+        <a href="/auth/logout" class="rounded-lg border border-slate-700 px-4 py-2 font-semibold text-slate-200 hover:bg-slate-800">Logout</a>
+      </div>
+    </section>
+  </main>
+
+  <script>
+    const nextUrl = {{ next_url | tojson }};
+    const bar = document.getElementById('sync-bar');
+    const percent = document.getElementById('sync-percent');
+    const phase = document.getElementById('sync-phase');
+    const message = document.getElementById('sync-message');
+    const active = document.getElementById('sync-active');
+    const errorBox = document.getElementById('sync-error');
+    const retryButton = document.getElementById('retry-button');
+    let source = null;
+    let running = false;
+
+    function setProgress(value) {
+      const clamped = Math.max(0, Math.min(100, Number(value) || 0));
+      bar.style.width = `${clamped}%`;
+      percent.textContent = `${Math.round(clamped)}%`;
+    }
+
+    function updateActive(items) {
+      active.innerHTML = '';
+      (Array.isArray(items) ? items : []).slice(0, 5).forEach((item) => {
+        const li = document.createElement('li');
+        li.textContent = item;
+        active.appendChild(li);
+      });
+    }
+
+    async function completeGate() {
+      const response = await fetch('/auth/initial-plex-sync/complete', { method: 'POST' });
+      const data = response.ok ? await response.json() : { redirect_url: nextUrl };
+      window.location.href = data.redirect_url || nextUrl || '/';
+    }
+
+    function failSync(text) {
+      running = false;
+      if (source) source.close();
+      errorBox.textContent = text || 'Initial Plex sync failed. Please retry or logout.';
+      errorBox.classList.remove('hidden');
+      retryButton.classList.remove('hidden');
+    }
+
+    function startSync() {
+      if (running) return;
+      running = true;
+      errorBox.classList.add('hidden');
+      retryButton.classList.add('hidden');
+      setProgress(0);
+      source = new EventSource('/settings/api/rescan-plex/stream?mode=full');
+      source.onmessage = async (event) => {
+        const payload = JSON.parse(event.data);
+        phase.textContent = payload.phase || 'Syncing';
+        message.textContent = payload.message || message.textContent;
+        updateActive(payload.active);
+        if (payload.total && Number.isInteger(payload.current)) {
+          setProgress((payload.current / payload.total) * 100);
+        }
+        if (payload.phase === 'complete') {
+          setProgress(100);
+          source.close();
+          running = false;
+          await completeGate();
+        } else if (payload.phase === 'error') {
+          failSync(payload.message);
+        }
+      };
+      source.onerror = () => failSync('Connection to the Plex sync stream was interrupted.');
+    }
+
+    retryButton.addEventListener('click', startSync);
+    startSync();
+  </script>
+</body>
+</html>

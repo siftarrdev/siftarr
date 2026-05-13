@@ -3,6 +3,7 @@
 import asyncio
 import json
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from typing import Any, cast
 from unittest.mock import AsyncMock, MagicMock
 
@@ -16,6 +17,17 @@ from app.siftarr.models.season import Season
 from app.siftarr.routers import settings
 from app.siftarr.services.admin import settings_service
 from app.siftarr.services.integrations.plex_service import PlexService
+
+
+def test_initial_plex_sync_template_uses_full_stream_and_retry_gate():
+    """Initial setup page should run one full Plex SSE stream and clear only on complete."""
+    template = Path("app/siftarr/templates/initial_plex_sync.html").read_text()
+
+    assert "new EventSource('/settings/api/rescan-plex/stream?mode=full')" in template
+    assert "if (running) return;" in template
+    assert "payload.phase === 'complete'" in template
+    assert "'/auth/initial-plex-sync/complete'" in template
+    assert "payload.phase === 'error'" in template
 
 
 def _parse_sse_events(chunks: list[str]) -> list[dict[str, Any]]:

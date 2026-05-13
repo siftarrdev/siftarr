@@ -7,6 +7,7 @@ from fastapi import HTTPException, Request
 
 from app.siftarr.services.auth_service import (
     BrowserAuthRequired,
+    InitialPlexSyncRequired,
     _extract_api_key,
     get_session_user,
     require_auth,
@@ -100,6 +101,39 @@ class TestRequireAuth:
                 "session": {"plex_user_id": "123"},
             }
         )
+        await require_auth(request)
+
+    @patch("app.siftarr.services.auth_service.get_settings")
+    async def test_initial_sync_gate_blocks_dashboard(self, mock_get_settings):
+        """First-claim sessions should not access protected pages until sync completes."""
+        mock_get_settings.return_value.auth_enabled = True
+        request = Request(
+            scope={
+                "type": "http",
+                "method": "GET",
+                "path": "/dashboard",
+                "session": {"plex_user_id": "123", "initial_plex_sync_required": True},
+                "headers": [(b"accept", b"text/html")],
+            }
+        )
+
+        with pytest.raises(InitialPlexSyncRequired):
+            await require_auth(request)
+
+    @patch("app.siftarr.services.auth_service.get_settings")
+    async def test_initial_sync_gate_allows_full_sync_stream(self, mock_get_settings):
+        """The blocking sync page must be able to open the Plex SSE stream."""
+        mock_get_settings.return_value.auth_enabled = True
+        request = Request(
+            scope={
+                "type": "http",
+                "method": "GET",
+                "path": "/settings/api/rescan-plex/stream",
+                "session": {"plex_user_id": "123", "initial_plex_sync_required": True},
+                "headers": [(b"accept", b"text/event-stream")],
+            }
+        )
+
         await require_auth(request)
 
     @patch("app.siftarr.services.auth_service.get_settings")
