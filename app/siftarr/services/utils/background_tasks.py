@@ -1,8 +1,10 @@
 """Background task management for episode refresh operations."""
 
 import logging
+from asyncio import sleep
 
 from fastapi import BackgroundTasks
+from sqlalchemy.exc import OperationalError
 
 from app.siftarr import database as db_mod
 from app.siftarr.config import get_settings
@@ -12,6 +14,11 @@ logger = logging.getLogger(__name__)
 
 # Module-level mutable state for tracking active refresh tasks
 DETAILS_SYNC_TASKS: set[int] = set()
+SQLITE_LOCK_RETRY_DELAYS = (0.5, 1.0, 2.0)
+
+
+def _is_sqlite_locked_error(exc: OperationalError) -> bool:
+    return "database is locked" in str(exc).lower()
 
 
 async def run_background_episode_refresh(request_id: int) -> None:
@@ -31,7 +38,24 @@ async def run_background_episode_refresh(request_id: int) -> None:
 
                 plex_service = PlexService(settings=effective_settings)
                 episode_sync = EpisodeSyncService(db, plex=plex_service)
-                await episode_sync.sync_request(request_id)
+                for attempt in range(len(SQLITE_LOCK_RETRY_DELAYS) + 1):
+                    try:
+                        await episode_sync.sync_request(request_id)
+                        break
+                    except OperationalError as exc:
+                        if not _is_sqlite_locked_error(exc) or attempt == len(
+                            SQLITE_LOCK_RETRY_DELAYS
+                        ):
+                            raise
+                        await db.rollback()
+                        delay = SQLITE_LOCK_RETRY_DELAYS[attempt]
+                        logger.info(
+                            "Background episode sync hit SQLite lock; retrying: request_id=%s attempt=%s delay=%.1fs",
+                            request_id,
+                            attempt + 1,
+                            delay,
+                        )
+                        await sleep(delay)
             except Exception:
                 logger.exception("Background episode sync failed for request_id=%s", request_id)
     finally:
