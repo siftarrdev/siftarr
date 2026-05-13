@@ -9,6 +9,11 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from app.siftarr.models._base import Base
 from app.siftarr.models.release import Release
 from app.siftarr.models.request import MediaType
+from app.siftarr.services.dashboard.dashboard_service import (
+    DashboardRequestSummary,
+    RequestDetailsData,
+    serialize_request_details_response,
+)
 from app.siftarr.services.dashboard.detail_service import DetailReleaseControls, DetailService
 
 
@@ -79,3 +84,21 @@ def test_detail_release_controls_accept_resolution_aliases():
     assert DetailReleaseControls.normalize(resolution="2160").resolution == "2160p"
     assert DetailReleaseControls.normalize(resolution="4K").resolution == "2160p"
     assert DetailReleaseControls.normalize(resolution="1080").resolution == "1080p"
+
+
+def test_request_details_serializes_cache_search_hints():
+    payload = serialize_request_details_response(
+        RequestDetailsData(
+            request=DashboardRequestSummary(
+                id=1, title="Movie", status="pending", media_type="movie"
+            ),
+            releases=[],
+            total_releases=0,
+            filtered_total_releases=0,
+            has_cached_releases=False,
+            auto_search_eligible=True,
+        )
+    )
+
+    assert payload["has_cached_releases"] is False
+    assert payload["auto_search_eligible"] is True

@@ -73,15 +73,21 @@ function setPhaseStyles(bar, phase) {
     }
 }
 
-function _invokeCallback(cb, data) {
+async function _invokeCallback(cb, data) {
     if (typeof cb === 'function') {
         try {
-            cb(data);
+            await cb(data);
         } catch (e) {
             // eslint-disable-next-line no-console
             console.error('SSE callback error:', e);
         }
     }
+}
+
+async function _finishSearchEventSource(es, cb, data) {
+    if (activeSearchEventSource === es) activeSearchEventSource = null;
+    es.close();
+    await _invokeCallback(cb, data);
 }
 
 function startSearchProgress(requestId, title, onComplete, onError) {
@@ -139,7 +145,7 @@ function startSearchProgress(requestId, title, onComplete, onError) {
                         bar.style.width = '100%';
                         setPhaseStyles(bar, 'complete');
                     }
-                    _invokeCallback(onComplete, data);
+                    _finishSearchEventSource(es, onComplete, data);
                     setTimeout(() => closeSearchProgress(), 3000);
                     break;
                 case 'error':
@@ -151,7 +157,7 @@ function startSearchProgress(requestId, title, onComplete, onError) {
                     if (status && data.message) {
                         status.textContent = data.message;
                     }
-                    _invokeCallback(onError, data);
+                    _finishSearchEventSource(es, onError, data);
                     break;
             }
         }
@@ -257,7 +263,7 @@ function startBulkSearchProgress(requestIds, titles, onComplete, onError, option
             const count = data.results ? data.results.length : 0;
             if (status) status.textContent = 'Finished — ' + count + ' request(s) processed';
             if (subtitle) subtitle.textContent = 'Done';
-            _invokeCallback(onComplete, data);
+            _finishSearchEventSource(es, onComplete, data);
             setTimeout(() => closeSearchProgress(), 3000);
         }
 
@@ -270,7 +276,7 @@ function startBulkSearchProgress(requestIds, titles, onComplete, onError, option
             if (status && data.message) {
                 status.textContent = data.message;
             }
-            _invokeCallback(onError, data);
+            _finishSearchEventSource(es, onError, data);
         }
     };
 
@@ -334,7 +340,7 @@ function startTvSearchProgress(streamUrl, title, onComplete, onError) {
                         bar.style.width = '100%';
                         setPhaseStyles(bar, 'complete');
                     }
-                    _invokeCallback(onComplete, data);
+                    _finishSearchEventSource(es, onComplete, data);
                     setTimeout(() => closeSearchProgress(), 3000);
                     break;
                 case 'error':
@@ -343,7 +349,7 @@ function startTvSearchProgress(streamUrl, title, onComplete, onError) {
                         bar.style.width = '100%';
                         setPhaseStyles(bar, 'error');
                     }
-                    _invokeCallback(onError, data);
+                    _finishSearchEventSource(es, onError, data);
                     break;
             }
         }

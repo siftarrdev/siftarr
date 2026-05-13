@@ -190,6 +190,8 @@ class DetailService:
             releases=releases,
             total_releases=total_releases,
             filtered_total_releases=filtered_total_releases,
+            has_cached_releases=total_releases > 0,
+            auto_search_eligible=total_releases == 0,
             release_controls=controls.as_payload(offset=offset, limit=limit),
             active_staged_torrent=active_staged_torrents[0] if active_staged_torrents else None,
             active_staged_torrents=active_staged_torrents,

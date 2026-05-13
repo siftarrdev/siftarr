@@ -119,6 +119,22 @@ def test_dashboard_js_includes_read_only_tv_buckets():
     assert "Search Multi Season Packs" not in js
 
 
+def test_dashboard_details_auto_search_and_reload_hooks():
+    """Details modal should auto-search empty caches and reload after SSE completion."""
+    js = _read_dashboard_js()
+
+    assert "window.detailsAutoSearchStarted = window.detailsAutoSearchStarted || {};" in js
+    assert "delete window.detailsAutoSearchStarted[requestId];" in js
+    assert "if (data.auto_search_eligible && !window.detailsAutoSearchStarted[requestId])" in js
+    assert "window.searchTvRequestAll({ auto: true });" in js
+    assert "window.searchRequestFromDetails({ auto: true });" in js
+    assert "if (!data || data.reload_details !== false)" in js
+    assert (
+        "await window.openRequestDetails(window.currentRequestId, window.currentDetailsIndex, { preserveUiState: true });"
+        in js
+    )
+
+
 def test_dashboard_details_search_sets_progress_and_restores_button():
     """Movie details searches should show progress and restore controls."""
     js = _read_dashboard_js()
