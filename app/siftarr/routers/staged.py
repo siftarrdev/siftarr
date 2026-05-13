@@ -33,6 +33,7 @@ from app.siftarr.services.lifecycle.lifecycle_service import LifecycleService
 from app.siftarr.services.lifecycle.overseerr_sync_service import (
     approve_overseerr_request_best_effort,
 )
+from app.siftarr.services.stats_metrics_service import record_staged_release_fact
 
 logger = logging.getLogger(__name__)
 
@@ -250,6 +251,7 @@ async def _approve_torrent(
         request_id=torrent.request_id,
         details={"torrent_id": torrent.id, "title": torrent.title},
     )
+    await record_staged_release_fact(db, torrent)
     await activity_log.log(
         EventType.DOWNLOAD_STARTED,
         request_id=torrent.request_id,
@@ -571,6 +573,7 @@ async def replace_staged_torrent(
 
         # Mark the new torrent as approved
         new_torrent.status = "approved"
+        await record_staged_release_fact(db, new_torrent)
 
         # Delete staging files for the new torrent
         try:

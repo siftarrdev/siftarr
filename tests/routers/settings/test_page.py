@@ -265,8 +265,9 @@ async def test_settings_page_progress_script_clamps_and_handles_unknown_totals(
     response = await settings.get_settings_page(MagicMock(), db=mock_db)
     body = cast(bytes, response.body).decode()
 
-    assert "const current = Number(data.current ?? data.completed);" in body
-    assert "const total = Number(data.total);" in body
+    assert "const serverPercent = Number(data.overall_percent ?? data.progress_percent);" in body
+    assert "const current = Number(data.overall_current ?? data.current ?? data.completed);" in body
+    assert "const total = Number(data.overall_total ?? data.total);" in body
     assert "const maximumPercent = final ? 100 : 99;" in body
     assert "Working…" in body
     assert "const values = allValues.slice(0, 5);" in body

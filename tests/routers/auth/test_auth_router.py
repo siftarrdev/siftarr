@@ -83,6 +83,20 @@ class TestLoginPage:
         assert isinstance(result, RedirectResponse)
         assert result.headers.get("location") == "/"
 
+    @pytest.mark.asyncio
+    async def test_authenticated_with_initial_sync_gate_redirects_to_sync_page(self):
+        """Gated first-claim sessions should return to the sync page."""
+        from starlette.responses import RedirectResponse
+
+        request = MagicMock()
+        request.session = {"plex_user_id": "123", "initial_plex_sync_required": True}
+        request.query_params = {"next": "/dashboard"}
+
+        result = await auth_router.login_page(request)
+
+        assert isinstance(result, RedirectResponse)
+        assert result.headers.get("location") == "/auth/initial-plex-sync?next=%2Fdashboard"
+
 
 def test_login_template_redirects_to_existing_dashboard_route():
     """Login JS should redirect to the mounted dashboard route."""
@@ -128,7 +142,7 @@ class TestPlexAuth:
 
         assert result["username"] == "testuser"
         assert result["thumb"] == "http://example.com/thumb.jpg"
-        assert result["redirect_url"] == "/settings"
+        assert result["redirect_url"] == "/auth/initial-plex-sync?next=%2Fsettings"
         # Should have persisted user info and token
         assert mock_store.set.call_count >= 4
         mock_store.set.assert_any_call("plex_claimed_id", "12345")
@@ -136,9 +150,11 @@ class TestPlexAuth:
         mock_store.set.assert_any_call("plex_thumb", "http://example.com/thumb.jpg")
         mock_store.set.assert_any_call("plex_token", "valid-token")
         mock_store.load_into_environ.assert_called_once()
-        launch_sync.assert_called_once()
+        launch_sync.assert_not_called()
         # Session should be set
         assert request.session["plex_user_id"] == "12345"
+        assert request.session["initial_plex_sync_required"] is True
+        assert request.session["initial_plex_sync_next"] == "/settings"
 
     @pytest.mark.asyncio
     async def test_same_user_allowed(self, monkeypatch):
@@ -165,17 +181,91 @@ class TestPlexAuth:
 
         request = MagicMock()
         request.session = {}
-        body = PlexAuthRequest(authToken="valid-token")
+        body = PlexAuthRequest(authToken="valid-token", next="/settings")
 
         result = await auth_router.plex_auth(request, body, db=MagicMock())
 
         assert result["username"] == "testuser"
+        assert result["redirect_url"] == "/settings"
         # Should refresh metadata/token for existing admin
         mock_store.set.assert_any_call("plex_username", "testuser")
         mock_store.set.assert_any_call("plex_thumb", "")
         mock_store.set.assert_any_call("plex_token", "valid-token")
         mock_store.load_into_environ.assert_called_once()
         launch_sync.assert_called_once()
+        assert "initial_plex_sync_required" not in request.session
+        assert "initial_plex_sync_next" not in request.session
+
+    @pytest.mark.asyncio
+    async def test_initial_sync_error_retry_keeps_gate(self, _mock_get_templates):
+        """Retrying after a failed stream should keep rendering while the gate remains set."""
+        request = MagicMock()
+        request.session = {
+            "plex_user_id": "123",
+            "initial_plex_sync_required": True,
+            "initial_plex_sync_next": "/settings",
+        }
+        request.query_params = {"next": "/settings"}
+
+        result = await auth_router.initial_plex_sync_page(request)
+
+        assert result is not None
+        assert request.session["initial_plex_sync_required"] is True
+        assert request.session["initial_plex_sync_next"] == "/settings"
+        _mock_get_templates.TemplateResponse.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_initial_sync_page_requires_gate(self):
+        """The initial sync page should redirect once the gate is clear."""
+        from starlette.responses import RedirectResponse
+
+        request = MagicMock()
+        request.session = {"plex_user_id": "123"}
+        request.query_params = {"next": "/settings"}
+
+        result = await auth_router.initial_plex_sync_page(request)
+
+        assert isinstance(result, RedirectResponse)
+        assert result.headers.get("location") == "/settings"
+
+    @pytest.mark.asyncio
+    async def test_initial_sync_complete_clears_gate(self):
+        """Successful initial full-sync completion should clear the session gate."""
+        request = MagicMock()
+        request.session = {
+            "plex_user_id": "123",
+            "initial_plex_sync_required": True,
+            "initial_plex_sync_next": "/settings",
+            "initial_plex_sync_gate_id": "gate-1",
+        }
+        auth_router.pop_initial_plex_sync_completion("gate-1", "123")
+        from app.siftarr.services.admin.settings_service import record_initial_plex_sync_completion
+
+        record_initial_plex_sync_completion("gate-1", "123")
+
+        result = await auth_router.complete_initial_plex_sync(request)
+
+        assert result.status_code == 200
+        assert "initial_plex_sync_required" not in request.session
+        assert "initial_plex_sync_next" not in request.session
+        assert "initial_plex_sync_gate_id" not in request.session
+
+    @pytest.mark.asyncio
+    async def test_initial_sync_complete_requires_server_side_completion(self):
+        """Direct POST must not clear the gate without a completed full-sync record."""
+        request = MagicMock()
+        request.session = {
+            "plex_user_id": "123",
+            "initial_plex_sync_required": True,
+            "initial_plex_sync_next": "/settings",
+            "initial_plex_sync_gate_id": "missing-proof",
+        }
+
+        with pytest.raises(HTTPException) as exc_info:
+            await auth_router.complete_initial_plex_sync(request)
+
+        assert exc_info.value.status_code == 409
+        assert request.session["initial_plex_sync_required"] is True
 
     @pytest.mark.asyncio
     async def test_successful_sign_in_launches_scheduler_sync_non_blocking(self, monkeypatch):

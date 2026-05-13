@@ -10,7 +10,7 @@ import pytest
 if sys.version_info < (3, 11):  # noqa: UP036
     pytest.skip("Requires Python 3.11+ for StrEnum", allow_module_level=True)
 
-from app.siftarr.models import ActivityLog, EventType  # noqa: E402
+from app.siftarr.models import ActivityLog, EventType, StatsTimingEvent  # noqa: E402
 from app.siftarr.services.lifecycle.activity_log_service import ActivityLogService  # noqa: E402
 
 
@@ -47,13 +47,17 @@ class TestActivityLogService:
             details={"query": "test"},
         )
 
-        mock_db.add.assert_called_once()
-        added: ActivityLog = mock_db.add.call_args[0][0]
+        assert mock_db.add.call_count == 2
+        added: ActivityLog = mock_db.add.call_args_list[0][0][0]
         assert isinstance(added, ActivityLog)
         assert added.event_type == "search_started"
         assert added.request_id == 42
         assert json.loads(added.details) == {"query": "test"}  # type: ignore[arg-type]
-        mock_db.flush.assert_awaited_once()
+        timing: StatsTimingEvent = mock_db.add.call_args_list[1][0][0]
+        assert isinstance(timing, StatsTimingEvent)
+        assert timing.event_name == "search_started"
+        assert timing.request_id == 42
+        assert mock_db.flush.await_count == 2
         assert result is added
 
     @pytest.mark.asyncio

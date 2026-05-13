@@ -257,6 +257,7 @@ class PlexPollingService:
         active_lock = asyncio.Lock()
         started = 0
         finished = 0
+        concurrency_limit = self._get_concurrency_limit()
 
         async def run(req: Request) -> _PollDecision | None:
             nonlocal started, finished
@@ -276,11 +277,36 @@ class PlexPollingService:
                     "active": active_snapshot,
                     "started": started,
                     "completed": finished,
+                    "media_type": req.media_type.value,
+                    "request_id": req.id,
+                    "concurrency_limit": concurrency_limit,
                 }
             )
 
+            async def emit_detail(detail: str, item_progress: float) -> None:
+                await emit(
+                    {
+                        "phase": phase,
+                        "current": finished,
+                        "total": len(requests),
+                        "title": title,
+                        "active": active_snapshot,
+                        "started": started,
+                        "completed": finished,
+                        "media_type": req.media_type.value,
+                        "request_id": req.id,
+                        "concurrency_limit": concurrency_limit,
+                        "detail": detail,
+                        "item_progress": item_progress,
+                    }
+                )
+
             try:
-                return await self._probe_single_request(req, partial_tv_match=partial_tv_match)
+                return await self._probe_single_request(
+                    req,
+                    partial_tv_match=partial_tv_match,
+                    on_detail=emit_detail,
+                )
             except Exception:
                 logger.exception(
                     "PlexPollingService: error checking request_id=%s title=%s",
@@ -304,10 +330,13 @@ class PlexPollingService:
                         "active": active_snapshot,
                         "started": started,
                         "completed": finished,
+                        "media_type": req.media_type.value,
+                        "request_id": req.id,
+                        "concurrency_limit": concurrency_limit,
                     }
                 )
 
-        results = await gather_limited(requests, self._get_concurrency_limit(), run)
+        results = await gather_limited(requests, concurrency_limit, run)
         return [decision for decision in results if decision is not None]
 
     async def _probe_single_request(
@@ -315,26 +344,48 @@ class PlexPollingService:
         req: Request,
         *,
         partial_tv_match: bool,
+        on_detail: Callable[[str, float], Awaitable[None]] | None = None,
     ) -> _PollDecision | None:
         if req.media_type == MediaType.MOVIE:
-            return await self._probe_movie(req)
+            return await self._probe_movie(req, on_detail=on_detail)
         if req.media_type == MediaType.TV:
-            return await self._probe_tv(req, partial_tv_match=partial_tv_match)
+            return await self._probe_tv(
+                req,
+                partial_tv_match=partial_tv_match,
+                on_detail=on_detail,
+            )
         return None
 
-    async def _probe_movie(self, req: Request) -> _PollDecision | None:
+    async def _probe_movie(
+        self,
+        req: Request,
+        *,
+        on_detail: Callable[[str, float], Awaitable[None]] | None = None,
+    ) -> _PollDecision | None:
         if not req.tmdb_id:
             return None
+        if on_detail is not None:
+            await on_detail("movie_lookup", 0.5)
         available = await self.plex.check_movie_available(req.tmdb_id)
         if not available:
             return None
         return _PollDecision(request_id=req.id, reason="Found on Plex")
 
-    async def _probe_tv(self, req: Request, *, partial_tv_match: bool) -> _PollDecision | None:
+    async def _probe_tv(
+        self,
+        req: Request,
+        *,
+        partial_tv_match: bool,
+        on_detail: Callable[[str, float], Awaitable[None]] | None = None,
+    ) -> _PollDecision | None:
+        if on_detail is not None:
+            await on_detail("tv_show_lookup", 0.25)
         show = await self._find_show(req)
         if not show:
             return None
 
+        if on_detail is not None:
+            await on_detail("tv_episode_availability", 0.6)
         availability = await self.plex.get_episode_availability(str(show["rating_key"]))
         requested_episodes = self._get_requested_episodes(req)
         if not requested_episodes:

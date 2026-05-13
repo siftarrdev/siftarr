@@ -8,8 +8,14 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.siftarr.models import ActivityLog, EventType
+from app.siftarr.services.stats_metrics_service import record_timing_event
 
 logger = logging.getLogger(__name__)
+
+
+def _json_dumps_safe(value: dict) -> str:
+    """Serialize log details without failing on test doubles."""
+    return json.dumps(value, default=str)
 
 
 class ActivityLogService:
@@ -23,6 +29,7 @@ class ActivityLogService:
         event_type: EventType,
         request_id: int | None = None,
         details: dict | None = None,
+        duration_ms: float | None = None,
     ) -> ActivityLog | None:
         """Create an activity log entry within a savepoint.
 
@@ -37,12 +44,29 @@ class ActivityLogService:
                 entry = ActivityLog(
                     event_type=event_type.value,
                     request_id=request_id,
-                    details=json.dumps(details) if details is not None else None,
+                    details=_json_dumps_safe(details) if details is not None else None,
                 )
                 add_result = self.db.add(entry)
                 if inspect.isawaitable(add_result):
                     await add_result
                 await self.db.flush()
+                if event_type in {
+                    EventType.SEARCH_STARTED,
+                    EventType.SEARCH_COMPLETED,
+                    EventType.RULE_EVALUATION,
+                    EventType.RELEASE_STAGED,
+                    EventType.RELEASE_APPROVED,
+                    EventType.DOWNLOAD_STARTED,
+                    EventType.DOWNLOAD_COMPLETED,
+                }:
+                    await record_timing_event(
+                        self.db,
+                        event_name=event_type.value,
+                        request_id=request_id,
+                        activity_log_id=entry.id,
+                        duration_ms=duration_ms,
+                        details=details,
+                    )
             logger.debug("Logged %s for request_id=%s", event_type, request_id)
             return entry
         except Exception:

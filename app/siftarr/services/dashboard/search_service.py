@@ -2,6 +2,7 @@
 
 import logging
 from copy import copy
+from time import perf_counter
 from typing import Any
 
 from sqlalchemy import select
@@ -50,6 +51,7 @@ from app.siftarr.services.releases.release_storage import (
     store_search_results,
 )
 from app.siftarr.services.releases.staging_service import StagingService
+from app.siftarr.services.stats_metrics_service import record_rule_outcomes
 from app.siftarr.services.utils.media_helpers import extract_media_title_and_year
 
 logger = logging.getLogger(__name__)
@@ -78,6 +80,15 @@ class SearchService:
         """Persist and use a manual-search release through the normal selection path."""
         evaluation = await self.evaluate_manual_release(request, release)
         stored_release = await persist_manual_release(self.db, request, release, evaluation)
+        await record_rule_outcomes(
+            self.db,
+            request_id=request.id,
+            evaluations=[evaluation],
+            stored_releases_by_key={
+                release.info_hash or release.title: stored_release,
+            },
+        )
+        await self.db.commit()
         return await StagingService(self.db).use_releases(
             request, [stored_release], selection_source="manual"
         )
@@ -118,6 +129,7 @@ class SearchService:
         qbittorrent_service = QbittorrentService(settings=runtime_settings)
         queue_service = PendingQueueService(self.db)
 
+        started = perf_counter()
         if request.media_type.value == "movie":
             decision_service = MovieDecisionService(self.db, prowlarr_service, qbittorrent_service)
             result = await decision_service.process_request(request.id)
@@ -132,6 +144,7 @@ class SearchService:
         await activity_log.log(
             EventType.SEARCH_COMPLETED,
             request_id=request.id,
+            duration_ms=(perf_counter() - started) * 1000,
             details={
                 "status": result.get("status"),
                 "message": result.get("message"),

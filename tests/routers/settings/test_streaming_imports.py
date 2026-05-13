@@ -3,6 +3,7 @@
 import asyncio
 import json
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from typing import Any, cast
 from unittest.mock import AsyncMock, MagicMock
 
@@ -16,6 +17,19 @@ from app.siftarr.models.season import Season
 from app.siftarr.routers import settings
 from app.siftarr.services.admin import settings_service
 from app.siftarr.services.integrations.plex_service import PlexService
+
+
+def test_initial_plex_sync_template_uses_full_stream_and_retry_gate():
+    """Initial setup page should run one full Plex SSE stream and clear only on complete."""
+    template = Path("app/siftarr/templates/initial_plex_sync.html").read_text()
+
+    assert "new EventSource('/settings/api/rescan-plex/stream?mode=full')" in template
+    assert "if (running) return;" in template
+    assert "payload.phase === 'complete'" in template
+    assert "await completeGate();" in template
+    assert "'/auth/initial-plex-sync/complete'" in template
+    assert "payload.phase === 'error'" in template
+    assert "failSync(payload.message);" in template
 
 
 def _parse_sse_events(chunks: list[str]) -> list[dict[str, Any]]:
@@ -239,6 +253,33 @@ async def test_rescan_plex_sse_streams_partial_and_full_progress(monkeypatch, sh
 
 
 @pytest.mark.asyncio
+async def test_full_rescan_sse_rejects_overlapping_full_sync():
+    """A second full-sync SSE stream should not start overlapping full-sync work."""
+
+    async def unused_rescan(*_args, **_kwargs):
+        raise AssertionError("overlapping full sync started")
+
+    await settings_service._FULL_PLEX_SYNC_LOCK.acquire()
+    try:
+        chunks = [
+            chunk
+            async for chunk in settings_service.rescan_plex_generator(
+                shallow=False,
+                async_session_maker=lambda: AsyncMock(),
+                plex_service_cls=lambda settings: AsyncMock(),
+                rescan_plex_requests_func=unused_rescan,
+                build_sse_progress_func=settings_service.build_sse_progress,
+                logger=settings.logger,
+            )
+        ]
+    finally:
+        settings_service._FULL_PLEX_SYNC_LOCK.release()
+
+    events = _parse_sse_events(chunks)
+    assert [event["phase"] for event in events] == ["connecting", "locked"]
+
+
+@pytest.mark.asyncio
 async def test_rescan_plex_sse_reports_movies_and_tv_in_active_items(monkeypatch, mock_db):
     """Plex SSE progress should include both movie and TV requests in active items."""
 
@@ -411,6 +452,76 @@ async def test_rescan_plex_full_resyncs_all_active_non_completed_tv_and_polls(mo
     assert polling_event["mode"] == "full"
     assert "metadata refresh and availability poll" in polling_event["message"]
     polling.poll.assert_awaited_once()
+    await_args = polling.poll.await_args
+    assert await_args is not None
+    assert await_args.kwargs["priority_only"] is False
+
+
+@pytest.mark.asyncio
+async def test_rescan_plex_full_reports_weighted_overall_progress(monkeypatch, mock_db):
+    """Full Plex sync should expose bounded weighted progress across all phases."""
+
+    runtime_settings = MagicMock(plex_sync_concurrency=1)
+    plex_service = AsyncMock()
+    movie = MagicMock(id=1, title="Movie", media_type=MediaType.MOVIE)
+    movie.status = RequestStatus.PENDING
+    tv = MagicMock(id=2, title="Show", media_type=MediaType.TV)
+    tv.status = RequestStatus.PENDING
+
+    polling = AsyncMock()
+    polling.get_active_requests = AsyncMock(return_value=[movie, tv])
+
+    async def poll(on_progress=None, priority_only=True):
+        assert priority_only is False
+        assert on_progress is not None
+        await on_progress(
+            {
+                "phase": "poll",
+                "current": 0,
+                "total": 2,
+                "completed": 0,
+                "title": "Show",
+                "active": ["Show"],
+                "detail": "tv_episode_availability",
+                "item_progress": 0.6,
+            }
+        )
+        await on_progress(
+            {
+                "phase": "poll",
+                "current": 2,
+                "total": 2,
+                "completed": 2,
+                "active": [],
+            }
+        )
+        return 1
+
+    polling.poll = AsyncMock(side_effect=poll)
+    monkeypatch.setattr(settings, "PlexPollingService", lambda db, plex: polling)
+
+    import app.siftarr.routers.settings as settings_router
+
+    monkeypatch.setattr(settings_router, "_rescan_plex_tv_request", AsyncMock(return_value=True))
+
+    events: list[dict[str, Any]] = []
+
+    async def collect(payload):
+        events.append(payload)
+
+    assert await settings_router._rescan_plex_requests(
+        mock_db, runtime_settings, plex_service, on_event=collect, shallow=False
+    ) == (1, 0, 1)
+
+    weighted = [event for event in events if "overall_percent" in event]
+    percents = [event["overall_percent"] for event in weighted]
+    assert [event["phase"] for event in weighted][:3] == ["fetching", "processing", "processing"]
+    assert all(percent < 100 for percent in percents)
+    assert percents == sorted(percents)
+    assert all(percent < 90 for percent in percents[:-1])
+    assert weighted[-2]["detail"] == "tv_episode_availability"
+    assert weighted[-2]["overall_percent"] > weighted[-3]["overall_percent"]
+    assert weighted[-1]["overall_percent"] == pytest.approx(99.8)
 
 
 @pytest.mark.asyncio
@@ -520,9 +631,10 @@ async def test_rescan_plex_uses_bounded_parallel_workers_and_reports_counts(
         async def get_active_requests(self):
             return tv_requests
 
-        async def poll(self, on_progress=None):
+        async def poll(self, on_progress=None, priority_only=True):
             nonlocal poll_called
             poll_called = True
+            assert priority_only is False
             assert finished == len(tv_requests)
             return 4
 

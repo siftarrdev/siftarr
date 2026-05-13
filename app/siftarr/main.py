@@ -24,12 +24,15 @@ from app.siftarr.routers import (
     search_sse,
     settings,
     staged,
+    stats,
     webhooks,
 )
 from app.siftarr.services.admin.scheduler_service import SchedulerService
 from app.siftarr.services.admin.settings_service import SettingsStore
 from app.siftarr.services.auth_service import (
     BrowserAuthRequired,
+    InitialPlexSyncRequired,
+    build_initial_plex_sync_redirect_url,
     build_login_redirect_url,
     require_auth,
 )
@@ -183,6 +186,7 @@ def create_app() -> FastAPI:
     app.include_router(rules.router, dependencies=auth)
     app.include_router(search_sse.router, dependencies=auth)
     app.include_router(settings.router, dependencies=auth)
+    app.include_router(stats.router, dependencies=auth)
     app.include_router(staged.router, dependencies=auth)
 
     @app.get("/", dependencies=auth)
@@ -207,6 +211,14 @@ def create_app() -> FastAPI:
         """Redirect unauthenticated browser requests to Plex login."""
         del exc
         return RedirectResponse(url=build_login_redirect_url(request), status_code=303)
+
+    @app.exception_handler(InitialPlexSyncRequired)
+    async def initial_plex_sync_redirect_handler(
+        request: Request, exc: InitialPlexSyncRequired
+    ) -> RedirectResponse:
+        """Redirect gated first-claim browser requests to initial Plex sync."""
+        del exc
+        return RedirectResponse(url=build_initial_plex_sync_redirect_url(request), status_code=303)
 
     @app.exception_handler(Exception)
     async def global_exception_handler(request: Request, exc: Exception) -> JSONResponse:

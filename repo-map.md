@@ -32,11 +32,11 @@ Siftarr is a FastAPI application that sits between Overseerr, Prowlarr, Plex, an
 Primary flow:
 
 1. Overseerr webhook or manual action creates/syncs a request
-2. Browser access is gated by Plex SSO; the first Plex login claims the instance as the sole admin, while API-key auth remains for webhooks/integrations
+2. Browser access is gated by Plex SSO; the first Plex login claims the instance as the sole admin and must finish an initial full Plex sync before reaching protected pages, while API-key auth remains for webhooks/integrations
 3. Search and decision services query Prowlarr and evaluate releases (TV dashboard search uses one Search All stream that runs bounded paginated season sweeps and classifies stored coverage)
 4. Winning releases are staged or sent to qBittorrent
 5. Background services track retries, lifecycle state, Plex polling, and completion
-6. Dashboard and settings UI expose control and visibility; request details can filter/sort stored release results
+6. Dashboard, Stats, and settings UI expose control and visibility; request details can filter/sort stored release results
 
 ## Top-level repository layout
 
@@ -54,7 +54,7 @@ Primary flow:
 - `pyproject.toml` — Python project metadata, dependencies, hatchling/hatch-vcs build backend, pytest, and Ruff config
 - `ty.toml` — static type checker configuration (Python version target)
 - `uv.lock` — locked dependency graph for `uv`
-- `package.json` — Tailwind CSS build script and npm dev dependency (`@tailwindcss/cli`)
+- `package.json` — Tailwind CSS build script and npm dev dependencies (`@tailwindcss/cli`, `tailwindcss`)
 - `node_modules/` — JavaScript dependencies (gitignored)
 
 ## Documentation map
@@ -62,6 +62,7 @@ Primary flow:
 - `README.md` — end-user overview, deployment, first-run setup, integrations, rules, staging, and troubleshooting
 - `CONTRIBUTING.md` — developer prerequisites, local setup, dependency management, migrations, tests, quality gates, and PR workflow
 - `docs/README.md` — documentation index and guidance for where detailed docs should live
+- `docs/stats-metrics.md` — stats metric contract, support audit, and Phase 2 immutable metrics persistence notes
 - `app/siftarr/README.md` — application package boundaries, runtime flow, extension points, and package-level testing guidance
 - `app/siftarr/routers/README.md` — route-layer responsibilities, extension points, and router testing guidance
 - `app/siftarr/services/README.md` — service/integration responsibilities, extension points, and service testing guidance
@@ -112,6 +113,7 @@ Database entities and enums.
 - `season.py` / `episode.py` — TV coverage and availability tracking
 - `staged_torrent.py` — staged torrent persistence; indexed on `request_id` and `status`
 - `activity_log.py` — activity/audit history; indexed on `event_type`
+- `stats_metrics.py` — immutable stats metric tables for selected release facts, rule outcomes, and timing events
 - `app_setting.py` — key-value store for runtime-configurable settings, generated API key, and Plex SSO claim metadata (persisted across restarts)
 - `_base.py` — declarative base
 
@@ -119,13 +121,14 @@ Database entities and enums.
 
 HTTP route layer.
 
-- `auth_router.py` — Plex SSO auth endpoints (login page, first-login admin claim, same-admin token refresh, guarded full Plex sync kick-off after successful admin sign-in, non-admin denial UX, logout, session info); included without global auth dependency
+- `auth_router.py` — Plex SSO auth endpoints (login page, first-login admin claim, initial Plex sync gate page/completion, same-admin token refresh, guarded full Plex sync kick-off after later successful admin sign-in, non-admin denial UX, logout, session info); included without global auth dependency
 - `dashboard.py` — main dashboard page routes
 - `dashboard_api.py` — dashboard JSON endpoints for details/search data, including validated detail-release filter/sort query controls
 - `dashboard_actions.py` — dashboard-triggered actions and mutations
 - `search_sse.py` — SSE streaming endpoints for live search progress; `/requests/{id}/search/stream` is the primary TV Search All path, while TV scope-specific streams remain compatibility/debug inspect paths
 - `rules.py` — rule management UI/API, including unified rule listing, multi-title testing, modal import/export, and create/edit actions
 - `settings.py` — settings UI (connection test/save/reset, scheduler interval save/reset, staging toggle, Plex rescan, Overseerr sync, cache/reseed actions, SSE progress streams, API key management, Plex SSO status), uses SettingsStore for DB-backed persistence and keeps the SSO-managed Plex token out of connection saves/resets
+- `stats.py` — protected Stats page and JSON data endpoint for all-time, preset, and custom date ranges
 - `staged.py` — staged torrent review/approval endpoints
 - `webhooks.py` — inbound webhook handling
 
@@ -134,16 +137,18 @@ HTTP route layer.
 Business logic and integrations, organized into thematic subpackages:
 
 **Flat (cross-cutting):**
-- `auth_service.py` — authentication dependencies: `require_auth` (browser Plex SSO redirect with API-key fallback for programmatic requests), claimed-admin session validation/cleanup, request classification, `get_session_user` helper, `verify_api_key`
+- `auth_service.py` — authentication dependencies: `require_auth` (browser Plex SSO redirect with API-key fallback for programmatic requests), first-claim initial Plex sync session gate redirects, claimed-admin session validation/cleanup, request classification, `get_session_user` helper, `verify_api_key`
 - `metadata_service.py` — Overseerr metadata lookup for request details
 - `request_service.py` — request loading / validation
+- `stats_service.py` — read-side Stats aggregation and date-range validation for cards, splits, rule outcomes, and timing charts
+- `stats_metrics_service.py` — write-only instrumentation helpers for immutable stats metric facts/events consumed by the Stats service/API
 
 **`auth/`** — Plex SSO authentication
 - `plex_oauth_service.py` — `PlexOAuthService` wrapping plex.tv API calls (PIN flow, user identity, token validation)
 
 **`admin/`** — Config, scheduling, polling
 - `settings_service.py` — SettingsStore (DB-backed settings persistence, startup API key generation, runtime env loading, sync success timestamps, Plex SSO claim/token status without exposing token), SSE progress, scheduled job helpers, Plex rescan/Overseerr import orchestration
-- `scheduler_service.py` — recurring job scheduling via APScheduler using runtime-configurable sync/completion intervals, plus startup catch-up orchestration for stale Overseerr/Plex syncs and the guarded Plex sign-in full-sync trigger
+- `scheduler_service.py` — recurring job scheduling via APScheduler using runtime-configurable sync/completion intervals, plus startup catch-up orchestration for stale Overseerr/Plex syncs and the guarded Plex sign-in full-sync trigger used after later admin sign-ins
 - `plex_polling_service/` — Plex polling logic; prioritizes recent/downloading requests with periodic full reconcile every 20th poll cycle
 
 **`dashboard/`** — Dashboard, search, detail views
@@ -197,9 +202,11 @@ Server-rendered HTML templates.
 - `base.html` — shared layout (nav bar shows user avatar/name + logout when logged in)
 - `dashboard.html` — main dashboard UI, including details-modal release result filters/sorting/count controls
 - `login.html` — Plex SSO login page with JS-driven OAuth PIN flow, denied-admin message, and safe next redirect handling
+- `initial_plex_sync.html` — first-claim setup gate that opens the full Plex sync SSE stream, shows progress/retry/logout, and unlocks protected navigation only after successful completion
 - `rules.html` — single-pane rules UI with unified rule table, multi-title tester, modal create/edit wizard, and modal import/export
 - `rule_form.html` — fallback full-page create/edit rule form
 - `settings.html` — settings UI (manual actions, connection settings with Plex SSO status and API key reveal/copy/regenerate, scheduler interval controls/status, staging toggle)
+- `stats.html` — Stats UI tab with cards, range selector, empty/error/loading states, and lightweight chart containers
 
 ### `app/siftarr/static/`
 
@@ -209,6 +216,7 @@ Static assets.
 - `css/tailwind.css` — built Tailwind CSS output (generated, committed)
 - `css/tailwind-input.css` — Tailwind CSS v4 input with CSS-based theme configuration and custom component classes
 - `js/dashboard*.js` and `js/dashboard/` — dashboard client-side behavior, filters, details-modal release controls, staged actions, single-action TV Search All/read-only bucket UI, movie release search UX, and SSE progress panel
+- `js/stats.js` — Stats API fetch/range handling and lightweight bar chart rendering
 - favicon assets
 
 ## Tests map
@@ -218,11 +226,13 @@ Tests mirror the service subpackage organization under `tests/services/`:
 - `tests/routers/auth/` — auth router coverage (login, plex auth, logout, session info)
 - `tests/routers/dashboard/` — dashboard page/API/action coverage, including details controls and SSE search streams
 - `tests/routers/settings/` — settings page, connections, maintenance, and jobs coverage
+- `tests/routers/stats/` — Stats page/API coverage, including protection, range validation, and JSON payload shape
 - `tests/services/auth/` — PlexOAuthService unit tests and auth_service (require_auth, get_session_user) tests
 - `tests/services/admin/` — settings, scheduler, and Plex polling service tests
 - `tests/services/decisions/` — rule engine, rule service (including import/export-backed default seeding), TV/movie decision service tests
 - `tests/services/integrations/` — Prowlarr, qBittorrent, Overseerr, Plex service tests
 - `tests/services/lifecycle/` — lifecycle, activity log, episode sync, download completion tests
+- `tests/services/test_stats_service.py` — Stats aggregation/range unit tests
 - `tests/services/releases/` — release parser, serializers, staging, and release selection tests
 - `tests/services/utils/` — type utils tests
 - Top-level `tests/test_*.py` — integration tests (season sweep, torrent helpers, API, router-level, config)

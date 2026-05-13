@@ -28,6 +28,27 @@ OVERSEERR_LAST_SYNC_SUCCESS_KEY = "overseerr_last_sync_success_at"
 PLEX_LAST_SYNC_SUCCESS_KEY = "plex_last_sync_success_at"
 SYNC_STALE_AFTER = 24 * 60 * 60
 
+_FULL_PLEX_SYNC_LOCK = asyncio.Lock()
+_INITIAL_PLEX_SYNC_COMPLETIONS: set[tuple[str, str]] = set()
+
+
+def record_initial_plex_sync_completion(gate_id: str | None, user_id: str | None) -> None:
+    """Record server-side proof that a gated initial full sync completed."""
+    if gate_id and user_id:
+        _INITIAL_PLEX_SYNC_COMPLETIONS.add((gate_id, user_id))
+
+
+def pop_initial_plex_sync_completion(gate_id: str | None, user_id: str | None) -> bool:
+    """Consume server-side proof for a gated initial full sync completion."""
+    if not gate_id or not user_id:
+        return False
+    key = (gate_id, user_id)
+    if key not in _INITIAL_PLEX_SYNC_COMPLETIONS:
+        return False
+    _INITIAL_PLEX_SYNC_COMPLETIONS.discard(key)
+    return True
+
+
 # ── Runtime-to-environment key mapping ────────────────────────────────────
 
 ENV_KEY_MAP: dict[str, str] = {
@@ -516,6 +537,23 @@ def build_sse_progress(
     return payload
 
 
+def add_overall_progress(
+    payload: dict[str, Any],
+    *,
+    current: float,
+    total: int,
+    terminal: bool = False,
+) -> dict[str, Any]:
+    """Attach weighted overall progress fields for SSE consumers."""
+    safe_total = max(1, total)
+    maximum = safe_total if terminal else max(0, safe_total - 0.01)
+    safe_current = max(0.0, min(float(current), float(maximum)))
+    payload["overall_current"] = round(safe_current, 2)
+    payload["overall_total"] = safe_total
+    payload["overall_percent"] = round((safe_current / safe_total) * 100, 1)
+    return payload
+
+
 def serialize_sse(data: dict[str, Any]) -> str:
     """Serialize a payload as an SSE event."""
     return f"data: {json.dumps(data)}\n\n"
@@ -687,6 +725,7 @@ async def rescan_plex_requests(
         return req.title or f"Request #{req.id}"
 
     tv_requests = [req for req in active_requests if req.media_type == MediaType.TV]
+    overall_total = max(1, 1 + len(tv_requests) + len(active_requests))
 
     configured_concurrency = getattr(runtime_settings, "plex_sync_concurrency", 1)
     sync_concurrency = (
@@ -697,14 +736,32 @@ async def rescan_plex_requests(
 
     if on_event is not None:
         await on_event(
-            build_sse_progress_func(
-                "fetching",
-                current=0,
-                total=max(1, len(active_requests)),
-                title="Finding active Plex requests for full sync...",
-                active=[title_for(req) for req in active_requests[:16]],
-                mode=mode,
-                message="Full Plex sync: refreshing active non-completed TV metadata.",
+            add_overall_progress(
+                build_sse_progress_func(
+                    "fetching",
+                    current=0,
+                    total=max(1, len(active_requests)),
+                    title="Finding active Plex requests for full sync...",
+                    active=[title_for(req) for req in active_requests[:16]],
+                    mode=mode,
+                    message="Full Plex sync: refreshing active non-completed TV metadata.",
+                ),
+                current=1,
+                total=overall_total,
+            )
+        )
+
+    async def emit_tv_resync_progress(payload: dict[str, Any]) -> None:
+        if on_event is None:
+            return
+        completed_count = payload.get("completed", payload.get("current", 0))
+        if not isinstance(completed_count, int):
+            completed_count = 0
+        await on_event(
+            add_overall_progress(
+                payload,
+                current=1 + completed_count,
+                total=overall_total,
             )
         )
 
@@ -720,7 +777,7 @@ async def rescan_plex_requests(
             tv_requests,
             sync_concurrency,
             resync_worker,
-            on_event=on_event or (lambda _payload: None),
+            on_event=emit_tv_resync_progress,
             phase="processing",
         )
     else:
@@ -731,14 +788,18 @@ async def rescan_plex_requests(
 
     if on_event is not None:
         await on_event(
-            build_sse_progress_func(
-                "polling",
-                current=0,
-                total=1,
-                title="Refreshing metadata and polling Plex availability...",
-                active=[],
-                mode=mode,
-                message="Running full Plex metadata refresh and availability poll...",
+            add_overall_progress(
+                build_sse_progress_func(
+                    "polling",
+                    current=0,
+                    total=max(1, len(active_requests)),
+                    title="Refreshing metadata and polling Plex availability...",
+                    active=[],
+                    mode=mode,
+                    message="Running full Plex metadata refresh and availability poll...",
+                ),
+                current=1 + len(tv_requests),
+                total=overall_total,
             )
         )
 
@@ -747,21 +808,43 @@ async def rescan_plex_requests(
             return
         phase = "polling" if payload.get("phase") == "poll" else payload.get("phase", "polling")
         completed_count = payload.get("completed", payload.get("current", 0))
+        item_progress = payload.get("item_progress", 0)
+        if not isinstance(item_progress, (int, float)):
+            item_progress = 0
+        poll_current = completed_count if isinstance(completed_count, int) else 0
+        poll_total = (
+            payload.get("total") if isinstance(payload.get("total"), int) else len(active_requests)
+        )
+        detail = payload.get("detail") if isinstance(payload.get("detail"), str) else None
+        message = "Running full Plex metadata refresh and availability poll..."
+        if detail == "tv_episode_availability":
+            message = "Checking TV episode availability in Plex..."
+        elif detail == "tv_show_lookup":
+            message = "Matching TV shows in Plex..."
+        elif detail == "movie_lookup":
+            message = "Checking movie availability in Plex..."
         await on_event(
-            build_sse_progress_func(
-                str(phase),
-                current=completed_count if isinstance(completed_count, int) else 0,
-                total=payload.get("total") if isinstance(payload.get("total"), int) else None,
-                title=payload.get("title") if isinstance(payload.get("title"), str) else None,
-                active=payload.get("active") if isinstance(payload.get("active"), list) else [],
-                mode=mode,
-                started=payload.get("started"),
-                completed=completed_count,
-                message="Running full Plex metadata refresh and availability poll...",
+            add_overall_progress(
+                build_sse_progress_func(
+                    str(phase),
+                    current=poll_current,
+                    total=poll_total,
+                    title=payload.get("title") if isinstance(payload.get("title"), str) else None,
+                    active=payload.get("active") if isinstance(payload.get("active"), list) else [],
+                    mode=mode,
+                    started=payload.get("started"),
+                    completed=completed_count,
+                    detail=detail,
+                    media_type=payload.get("media_type"),
+                    concurrency_limit=payload.get("concurrency_limit"),
+                    message=message,
+                ),
+                current=1 + len(tv_requests) + poll_current + float(item_progress),
+                total=overall_total,
             )
         )
 
-    completed = await polling_service.poll(on_progress=emit_polling_progress)
+    completed = await polling_service.poll(on_progress=emit_polling_progress, priority_only=False)
     return tv_resynced, tv_failed, completed
 
 
@@ -773,11 +856,27 @@ async def rescan_plex_generator(
     rescan_plex_requests_func,
     build_sse_progress_func,
     logger,
+    on_full_sync_complete=None,
 ):
     """Yield SSE events for Plex re-scan progress."""
     mode = "partial" if shallow else "full"
+    lock_acquired = False
     try:
         yield serialize_sse({"phase": "connecting", "mode": mode})
+
+        if not shallow:
+            if _FULL_PLEX_SYNC_LOCK.locked():
+                yield serialize_sse(
+                    build_sse_progress_func(
+                        "locked",
+                        mode=mode,
+                        active=[],
+                        message="A full Plex sync is already running. Please wait and retry.",
+                    )
+                )
+                return
+            await _FULL_PLEX_SYNC_LOCK.acquire()
+            lock_acquired = True
 
         async with async_session_maker() as db:
             runtime_settings = get_settings()
@@ -835,6 +934,8 @@ async def rescan_plex_generator(
                     f"{errors} failed, "
                     f"{completed} transitioned to completed."
                 )
+            if not shallow and on_full_sync_complete is not None:
+                on_full_sync_complete()
             yield serialize_sse(
                 build_sse_progress_func(
                     "complete",
@@ -850,6 +951,9 @@ async def rescan_plex_generator(
     except Exception as exc:
         logger.exception("Plex SSE re-scan failed")
         yield serialize_sse({"phase": "error", "message": f"Plex re-scan error: {exc}"})
+    finally:
+        if lock_acquired:
+            _FULL_PLEX_SYNC_LOCK.release()
 
 
 @dataclass(slots=True)

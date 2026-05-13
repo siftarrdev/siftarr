@@ -13,10 +13,52 @@ from app.siftarr.models._base import Base
 from app.siftarr.models.release import Release
 from app.siftarr.models.request import MediaType, RequestStatus
 from app.siftarr.models.request import Request as RequestModel
+from app.siftarr.models.stats_metrics import StatsTimingEvent
 from app.siftarr.routers import dashboard_api
 from app.siftarr.services.dashboard import search_service
 from app.siftarr.services.dashboard.search_service import SearchService
 from app.siftarr.services.integrations.prowlarr_service import ProwlarrRelease, ProwlarrSearchResult
+
+
+@pytest.mark.asyncio
+async def test_process_request_search_persists_search_completed_duration(monkeypatch):
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+    session_maker = async_sessionmaker(engine, expire_on_commit=False)
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+
+    class FakeMovieDecisionService:
+        def __init__(self, *args):
+            pass
+
+        async def process_request(self, request_id):
+            assert request_id is not None
+            return {"status": "pending", "message": "searched"}
+
+    monkeypatch.setattr(search_service, "MovieDecisionService", FakeMovieDecisionService)
+
+    async with session_maker() as session:
+        request = RequestModel(
+            external_id="search-duration-1",
+            media_type=MediaType.MOVIE,
+            title="Duration Movie",
+            status=RequestStatus.PENDING,
+        )
+        session.add(request)
+        await session.commit()
+
+        await SearchService(session).process_request_search(request)
+        await session.commit()
+
+        timing = (
+            await session.execute(
+                select(StatsTimingEvent).where(StatsTimingEvent.event_name == "search_completed")
+            )
+        ).scalar_one()
+
+    assert timing.duration_ms is not None
+    assert timing.duration_ms >= 0
+    await engine.dispose()
 
 
 @pytest.mark.asyncio
