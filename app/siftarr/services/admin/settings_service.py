@@ -23,6 +23,7 @@ from app.siftarr.models.app_setting import AppSetting
 from app.siftarr.models.request import MediaType, RequestStatus
 from app.siftarr.models.request import Request as RequestModel
 from app.siftarr.services.lifecycle.pending_queue_service import PendingQueueService
+from app.siftarr.version import __version__
 
 OVERSEERR_LAST_SYNC_SUCCESS_KEY = "overseerr_last_sync_success_at"
 PLEX_LAST_SYNC_SUCCESS_KEY = "plex_last_sync_success_at"
@@ -386,6 +387,7 @@ async def build_settings_page_context(
 
     return {
         "request": request,
+        "app_version": __version__,
         "staging_enabled": staging_enabled,
         "pending_count": pending_count,
         "plex_jobs": await build_plex_job_statuses_func(db),
