@@ -284,6 +284,15 @@ class QbittorrentService:
                         if magnet_uri in (t.magnet_uri or ""):
                             return str(t.hash)
                 return "Ok."
+            if info_hash:
+                existing = await self.get_torrent_info(info_hash)
+                if existing:
+                    logger.info(
+                        "Torrent add returned %r but torrent already exists (hash=%s)",
+                        result,
+                        info_hash,
+                    )
+                    return info_hash
             return None
         except Exception as e:
             logger.error("Error adding torrent: %s", e)
