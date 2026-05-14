@@ -625,8 +625,8 @@ async def test_recheck_unreleased_persists_tv_unreleased_and_pending_transitions
     async with session_maker() as session:
         refreshed = await session.get(Request, request_id)
         assert refreshed is not None
-        # Episode-centric: {COMPLETED, UNRELEASED} → PENDING (mixed state)
-        assert refreshed.status == RequestStatus.PENDING
+        # Episode-centric: {COMPLETED, UNRELEASED} → UNRELEASED (no true pending work)
+        assert refreshed.status == RequestStatus.UNRELEASED
 
         future_episode = await session.scalar(
             select(Episode)
@@ -638,7 +638,6 @@ async def test_recheck_unreleased_persists_tv_unreleased_and_pending_transitions
         )
         assert future_episode is not None
         future_episode.air_date = today - timedelta(days=1)
-        future_episode.status = RequestStatus.COMPLETED
         await session.commit()
 
     await service._recheck_unreleased()
@@ -646,8 +645,19 @@ async def test_recheck_unreleased_persists_tv_unreleased_and_pending_transitions
     async with session_maker() as session:
         refreshed = await session.get(Request, request_id)
         assert refreshed is not None
-        # Episode-centric: all COMPLETED → COMPLETED
-        assert refreshed.status == RequestStatus.COMPLETED
+        # Episode-centric: aired UNRELEASED episode becomes PENDING and queues search
+        assert refreshed.status == RequestStatus.PENDING
+
+        released_episode = await session.scalar(
+            select(Episode)
+            .join(Season, Season.id == Episode.season_id)
+            .where(
+                Season.request_id == request_id,
+                Episode.episode_number == 3,
+            )
+        )
+        assert released_episode is not None
+        assert released_episode.status == RequestStatus.PENDING
 
     assert queued_request_ids == [request_id]
     await engine.dispose()

@@ -102,6 +102,7 @@ function applyLocalReleaseSort() {
         if (preservedDetailsState && window.restoreDetailsAccordionState) {
             window.restoreDetailsAccordionState(preservedDetailsState);
         }
+        if (window.updateTvAccordionControls) window.updateTvAccordionControls();
         window.currentDetailsData = data;
         window.currentReleases = data.releases || [];
         return true;
@@ -291,6 +292,7 @@ async function openRequestDetails(requestId, explicitIndex = null, options = {})
             if (preservedDetailsState && window.restoreDetailsAccordionState) {
                 window.restoreDetailsAccordionState(preservedDetailsState);
             }
+            if (window.updateTvAccordionControls) window.updateTvAccordionControls();
         } else {
             document.getElementById('release-results-header').classList.remove('hidden');
             document.getElementById('release-controls').classList.remove('hidden');

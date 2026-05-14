@@ -65,15 +65,20 @@ def derive_season_status(episodes: Sequence[Episode]) -> RequestStatus:
     if statuses == {RequestStatus.COMPLETED}:
         return RequestStatus.COMPLETED
 
-    # Mixed completed with anything non-terminal → PENDING
+    # Mixed completed with true in-progress work → PENDING, but completed aired
+    # episodes plus only future/unreleased episodes means no current search work.
     if RequestStatus.COMPLETED in statuses:
         non_terminal = statuses - {
             RequestStatus.COMPLETED,
             RequestStatus.FAILED,
             RequestStatus.DENIED,
+            RequestStatus.UNRELEASED,
         }
         if non_terminal:
             return RequestStatus.PENDING
+
+        if RequestStatus.UNRELEASED in statuses:
+            return RequestStatus.UNRELEASED
 
     # Any PENDING episode → treat as in-progress
     if RequestStatus.PENDING in statuses:
@@ -85,7 +90,7 @@ def derive_season_status(episodes: Sequence[Episode]) -> RequestStatus:
         return RequestStatus.DENIED
 
     # Only unreleased episodes remain
-    if episodes_are_unreleased(episodes):
+    if RequestStatus.UNRELEASED in statuses or episodes_are_unreleased(episodes):
         return RequestStatus.UNRELEASED
 
     return RequestStatus.PENDING

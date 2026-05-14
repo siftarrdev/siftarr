@@ -578,6 +578,74 @@ async def test_dashboard_separates_mixed_pending_from_true_unreleased(mock_db, m
 
 
 @pytest.mark.asyncio
+async def test_dashboard_classifies_completed_with_future_unreleased_tv_as_unreleased_only(
+    mock_db, monkeypatch
+):
+    request = MagicMock()
+    request.id = 18
+    request.status = RequestStatus.PENDING
+    request.overseerr_request_id = 18
+    request.title = "Only Future Left"
+    request.media_type = MediaType.TV
+    request.created_at = datetime(2026, 4, 1, 12, 0, tzinfo=UTC)
+    request.requester_username = "lucas"
+    request.year = 2026
+    request.tmdb_id = 1818
+    request.tvdb_id = 1819
+
+    lifecycle_service = AsyncMock()
+    lifecycle_service.get_active_requests.return_value = [request]
+    lifecycle_service.get_requests_by_status.return_value = []
+    lifecycle_service.get_unreleased_requests.return_value = [request]
+    lifecycle_service.get_requests_stats.return_value = {
+        "by_status": {RequestStatus.PENDING.value: 1}
+    }
+    monkeypatch.setattr(dashboard, "LifecycleService", lambda db: lifecycle_service)
+    monkeypatch.setattr(
+        dashboard,
+        "get_settings",
+        lambda: MagicMock(
+            overseerr_url="http://overseerr.test",
+            staging_mode_enabled=False,
+            qbittorrent_url="http://qb.test",
+        ),
+    )
+
+    fake_overseerr = AsyncMock()
+    fake_overseerr.get_media_details.return_value = {"nextEpisodeToAir": {"airDate": "2026-05-01"}}
+    monkeypatch.setattr(dashboard, "OverseerrService", lambda settings: fake_overseerr)
+    mock_db.execute.side_effect = [
+        MagicMock(scalars=MagicMock(return_value=MagicMock(all=MagicMock(return_value=[])))),
+        MagicMock(scalars=MagicMock(return_value=MagicMock(all=MagicMock(return_value=[])))),
+        MagicMock(scalars=MagicMock(return_value=MagicMock(all=MagicMock(return_value=[])))),
+    ]
+    monkeypatch.setattr(
+        dashboard,
+        "load_tv_seasons_with_episodes_bulk",
+        AsyncMock(
+            return_value={
+                request.id: (
+                    [MagicMock(id=1, season_number=1, synced_at=None)],
+                    [
+                        MagicMock(status=RequestStatus.COMPLETED),
+                        MagicMock(status=RequestStatus.UNRELEASED),
+                    ],
+                )
+            }
+        ),
+    )
+
+    response = await dashboard.dashboard(MagicMock(), db=mock_db)
+
+    context = response.context
+    assert request in context["unreleased_requests"]
+    assert request not in context["pending_requests"]
+    assert request not in context["active_requests"]
+    assert context["stats"]["pending"] == 0
+    assert context["stats"]["unreleased"] == 1
+
+
+@pytest.mark.asyncio
 async def test_dashboard_hides_completed_ongoing_tv_from_finished_when_unreleased(
     mock_db, monkeypatch
 ):

@@ -1,12 +1,14 @@
 """Tests for LifecycleService."""
 
-from datetime import date
+from datetime import UTC, date, datetime, timedelta
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from app.siftarr.models.episode import Episode
 from app.siftarr.models.request import Request, RequestStatus
+from app.siftarr.services.lifecycle.episode_derive import derive_request_status_from_episodes
 from app.siftarr.services.lifecycle.lifecycle_service import LifecycleService
 from app.siftarr.services.lifecycle.unreleased_service import is_unreleased
 
@@ -198,6 +200,31 @@ def test_is_unreleased_tv_all_aired_downloaded_with_future_remaining():
     assert (
         is_unreleased(request, media_details=details, local_episodes=episodes, today=TODAY) is True
     )
+
+
+def test_derive_tv_status_completed_so_far_with_future_remaining_is_unreleased():
+    tomorrow = datetime.now(UTC).date() + timedelta(days=1)
+    episodes = [
+        Episode(
+            season_id=1, episode_number=1, air_date=date(2026, 4, 1), status=RequestStatus.COMPLETED
+        ),
+        Episode(season_id=1, episode_number=2, air_date=tomorrow, status=RequestStatus.UNRELEASED),
+    ]
+
+    assert derive_request_status_from_episodes(episodes) == RequestStatus.UNRELEASED
+
+
+def test_derive_tv_status_completed_with_true_pending_remains_pending():
+    episodes = [
+        Episode(
+            season_id=1, episode_number=1, air_date=date(2026, 4, 1), status=RequestStatus.COMPLETED
+        ),
+        Episode(
+            season_id=1, episode_number=2, air_date=date(2026, 4, 8), status=RequestStatus.PENDING
+        ),
+    ]
+
+    assert derive_request_status_from_episodes(episodes) == RequestStatus.PENDING
 
 
 def test_is_unreleased_tv_actively_airing_completed_so_far_with_future_episode():

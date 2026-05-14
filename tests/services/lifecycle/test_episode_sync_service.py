@@ -467,14 +467,14 @@ class TestEpisodeSyncService:
             == RequestStatus.PENDING
         )
 
-    def testderive_season_status_keeps_pending_when_completed_and_unreleased_mix(self):
-        """Mixed completed and unreleased episodes should keep the season pending."""
+    def testderive_season_status_completed_and_unreleased_mix_is_unreleased(self):
+        """Completed episodes plus only unreleased episodes means no pending work."""
         episode_one = _make_episode()
         episode_one.status = RequestStatus.COMPLETED
         episode_two = _make_episode(episode_number=2)
         episode_two.status = RequestStatus.UNRELEASED
 
-        assert derive_season_status([episode_one, episode_two]) == RequestStatus.PENDING
+        assert derive_season_status([episode_one, episode_two]) == RequestStatus.UNRELEASED
 
     def testderive_request_status_from_episodes_supports_pending_and_unreleased(self):
         """Request aggregate status should roll up directly from episode states."""
@@ -488,7 +488,7 @@ class TestEpisodeSyncService:
 
         assert derive_request_status_from_episodes([available]) == RequestStatus.COMPLETED
         assert derive_request_status_from_episodes([future]) == RequestStatus.UNRELEASED
-        assert derive_request_status_from_episodes([available, future]) == RequestStatus.PENDING
+        assert derive_request_status_from_episodes([available, future]) == RequestStatus.UNRELEASED
         assert derive_request_status_from_episodes([pending, future]) == RequestStatus.PENDING
 
     def test_derive_request_status_from_seasons_uses_episode_rollup_when_present(self):
@@ -509,7 +509,7 @@ class TestEpisodeSyncService:
         assert derive_request_status_from_episodes(future.episodes) == RequestStatus.UNRELEASED
         assert (
             derive_request_status_from_episodes(available.episodes + future.episodes)
-            == RequestStatus.PENDING
+            == RequestStatus.UNRELEASED
         )
 
     @pytest.mark.asyncio
@@ -591,7 +591,7 @@ class TestEpisodeSyncService:
         mock_db.commit.assert_awaited_once()
 
     @pytest.mark.asyncio
-    async def test_reconcile_existing_seasons_preserves_pending_season_with_future_episodes(
+    async def test_reconcile_existing_seasons_marks_future_only_remainder_unreleased(
         self, mock_db, mock_overseerr
     ):
         """Future unreleased episodes should keep the season and request pending."""
@@ -622,15 +622,15 @@ class TestEpisodeSyncService:
 
         assert aired_episode.status == RequestStatus.COMPLETED
         assert future_episode.status == RequestStatus.UNRELEASED
-        assert season.status == RequestStatus.PENDING
-        assert request.status == RequestStatus.PENDING
+        assert season.status == RequestStatus.UNRELEASED
+        assert request.status == RequestStatus.UNRELEASED
         mock_db.commit.assert_awaited_once()
 
     @pytest.mark.asyncio
-    async def test_reconcile_existing_seasons_keeps_ongoing_show_pending(
+    async def test_reconcile_existing_seasons_marks_ongoing_show_unreleased(
         self, mock_db, mock_overseerr
     ):
-        """Ongoing shows with all currently aired episodes on Plex should not flatten to completed."""
+        """Ongoing shows with all currently aired episodes on Plex are unreleased."""
         request = _make_request(id=1)
         request.status = RequestStatus.DOWNLOADING
 
@@ -660,7 +660,7 @@ class TestEpisodeSyncService:
 
         assert available_season.status == RequestStatus.COMPLETED
         assert future_season.status == RequestStatus.UNRELEASED
-        assert request.status == RequestStatus.PENDING
+        assert request.status == RequestStatus.UNRELEASED
         mock_db.commit.assert_awaited_once()
 
     @pytest.mark.asyncio
