@@ -52,6 +52,53 @@ def _staged_download_url(torrent: StagedTorrent) -> str | None:
     return download_url if isinstance(download_url, str) and download_url else None
 
 
+def _torrent_known_hash(torrent: StagedTorrent) -> str | None:
+    info_hash = getattr(torrent, "info_hash", None)
+    if isinstance(info_hash, str) and info_hash:
+        return info_hash.lower()
+    magnet_url = getattr(torrent, "magnet_url", None)
+    if isinstance(magnet_url, str):
+        match = _BTIH_RE.search(magnet_url)
+        if match:
+            return match.group(1).lower()
+    return None
+
+
+def _is_hash_like(value: str | None) -> bool:
+    return isinstance(value, str) and bool(re.fullmatch(r"[0-9a-fA-F]{40}", value))
+
+
+async def _confirm_existing_torrent(
+    qbittorrent: QbittorrentService,
+    torrent: StagedTorrent,
+) -> str | None:
+    """Return an existing qBit hash for an already-added torrent, if verifiable."""
+    known_hash = _torrent_known_hash(torrent)
+    if known_hash:
+        info = await qbittorrent.get_torrent_info(known_hash)
+        if info:
+            found_hash = info.get("hash")
+            return found_hash if _is_hash_like(found_hash) else known_hash
+
+    info = await qbittorrent.get_torrent_info_by_name(torrent.title)
+    if info:
+        found_hash = info.get("hash")
+        if isinstance(found_hash, str) and _is_hash_like(found_hash):
+            return found_hash.lower()
+    return None
+
+
+def _delete_staging_files(paths: list[tuple[str, str]]) -> None:
+    for torrent_path, json_path in paths:
+        try:
+            if os.path.exists(torrent_path):
+                os.remove(torrent_path)
+            if os.path.exists(json_path):
+                os.remove(json_path)
+        except OSError:
+            pass
+
+
 STAGING_DECISION_LOG_PATH = Path("/data/staging/decision-log.jsonl")
 
 router = APIRouter(prefix="/staged", tags=["staged"])
@@ -197,6 +244,7 @@ async def _approve_torrent(
     db: AsyncSession,
     *,
     commit_transition: bool = True,
+    cleanup_paths: list[tuple[str, str]] | None = None,
 ) -> bool:
     request = None
     if torrent.request_id:
@@ -241,9 +289,16 @@ async def _approve_torrent(
         )
 
     if torrent_hash is None:
-        return False
+        torrent_hash = await _confirm_existing_torrent(qbittorrent, torrent)
+        if torrent_hash is None:
+            return False
 
-    await approve_overseerr_request_best_effort(db, request, reason="staged_approval_qbit_sent")
+    try:
+        await approve_overseerr_request_best_effort(db, request, reason="staged_approval_qbit_sent")
+    except Exception:
+        logger.exception(
+            "Best-effort Overseerr approval failed for request_id=%s", torrent.request_id
+        )
 
     activity_log = ActivityLogService(db)
     await activity_log.log(
@@ -264,11 +319,13 @@ async def _approve_torrent(
         rules_selected_torrent=rules_selected_torrent,
     )
 
-    # Snapshot paths before any commit that might expire the torrent object
+    # Snapshot paths for deletion by caller after commit succeeds.
     torrent_path = torrent.torrent_path
     json_path = torrent.json_path
 
     torrent.status = "approved"
+    if _is_hash_like(torrent_hash):
+        torrent.info_hash = torrent_hash.lower()
     if request:
         lifecycle_service = LifecycleService(db)
         if request.status not in (
@@ -285,13 +342,8 @@ async def _approve_torrent(
                     commit=False,
                 )
 
-    try:
-        if os.path.exists(torrent_path):
-            os.remove(torrent_path)
-        if os.path.exists(json_path):
-            os.remove(json_path)
-    except OSError:
-        pass
+    if cleanup_paths is not None:
+        cleanup_paths.append((torrent_path, json_path))
 
     return True
 
@@ -401,8 +453,11 @@ async def approve_staged_torrent(
     if not torrent:
         raise HTTPException(status_code=404, detail="Staged torrent not found")
 
-    success = await _approve_torrent(torrent, db)
+    cleanup_paths: list[tuple[str, str]] = []
+    success = await _approve_torrent(torrent, db, cleanup_paths=cleanup_paths)
     await db.commit()
+    if success:
+        _delete_staging_files(cleanup_paths)
 
     if not success:
         raise HTTPException(status_code=500, detail="Failed to approve staged torrent")
@@ -458,17 +513,41 @@ async def bulk_staged_action(
         raise HTTPException(status_code=400, detail="Invalid bulk action")
 
     processed = 0
+    failed: list[dict[str, Any]] = []
+    cleanup_paths: list[tuple[str, str]] = []
     for torrent in torrents:
         if action == "approve":
-            success = await _approve_torrent(torrent, db, commit_transition=False)
+            success = await _approve_torrent(
+                torrent,
+                db,
+                commit_transition=False,
+                cleanup_paths=cleanup_paths,
+            )
         else:
             success = await _discard_torrent(torrent, db)
         if success:
             processed += 1
+        else:
+            failed.append({"id": torrent.id, "title": torrent.title})
 
     await db.commit()
+    if action == "approve":
+        _delete_staging_files(cleanup_paths)
     action_label = "Approved" if action == "approve" else "Discarded"
     message = f"{action_label} {processed} staged torrent(s)."
+    if failed:
+        message = f"{message} Failed {len(failed)}: " + ", ".join(
+            f"#{item['id']} {item['title']}" for item in failed
+        )
+    if _wants_json(http_request):
+        return JSONResponse(
+            {
+                "status": "partial" if failed else "ok",
+                "message": message,
+                "processed": processed,
+                "failed": failed,
+            }
+        )
     return await _finalize_action_response(
         http_request,
         message,
@@ -658,7 +737,7 @@ async def get_download_status(
 
         # Try to get progress via stored info_hash first, then magnet URL,
         # then fall back to name matching
-        torrent_hash: str | None = torrent.info_hash
+        torrent_hash: str | None = _torrent_known_hash(torrent)
         if not torrent_hash and torrent.magnet_url:
             m = _BTIH_RE.search(torrent.magnet_url)
             if m:
@@ -750,7 +829,7 @@ async def check_now(
     qbit_progress: float | None = None
     qbit_state: str | None = None
 
-    torrent_hash: str | None = torrent.info_hash
+    torrent_hash: str | None = _torrent_known_hash(torrent)
     if not torrent_hash and torrent.magnet_url:
         m = _BTIH_RE.search(torrent.magnet_url)
         if m:

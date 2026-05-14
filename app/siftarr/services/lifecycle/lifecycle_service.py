@@ -101,9 +101,13 @@ class LifecycleService:
                             ep.status = RequestStatus.FAILED
                 elif new_status == RequestStatus.DOWNLOADING:
                     for ep in all_episodes:
-                        if ep.status == RequestStatus.STAGED:
+                        if ep.status in (
+                            RequestStatus.STAGED,
+                            RequestStatus.PENDING,
+                            RequestStatus.SEARCHING,
+                        ):
                             ep.status = RequestStatus.DOWNLOADING
-                # COMPLETED, PENDING, SEARCHING — no episode-level changes needed
+                # COMPLETED — no episode-level changes needed
                 # Recompute season statuses and derive request status from episodes
                 for season in request.seasons:
                     season_eps = [ep for ep in all_episodes if ep.season_id == season.id]

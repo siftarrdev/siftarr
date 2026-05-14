@@ -429,3 +429,30 @@ class TestQbittorrentServiceUnit:
             with patch("asyncio.to_thread", AsyncMock()):
                 result = await service.delete_torrent("abc123", delete_files=True)
                 assert result is True
+
+    @pytest.mark.asyncio
+    async def test_add_torrent_treats_duplicate_response_as_success(self):
+        """Unexpected add responses are success when qBit confirms the hash exists."""
+        with patch("app.siftarr.config.get_settings") as mock_get_settings:
+            mock_get_settings.return_value = MagicMock()
+            service = QbittorrentService()
+            service._client = MagicMock()
+            torrent_hash = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+            magnet = f"magnet:?xt=urn:btih:{torrent_hash}"
+
+            with (
+                patch.object(service, "ensure_category_exists", AsyncMock(return_value=True)),
+                patch.object(
+                    service,
+                    "get_torrent_info",
+                    AsyncMock(side_effect=[None, {"hash": torrent_hash}]),
+                ) as get_info,
+                patch("asyncio.to_thread", AsyncMock(return_value="Fails.")),
+            ):
+                result = await service.add_torrent(
+                    magnet_uri=magnet,
+                    category=MediaCategory.MOVIES,
+                )
+
+            assert result == torrent_hash
+            assert get_info.await_count == 2
