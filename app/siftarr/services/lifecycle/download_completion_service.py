@@ -3,10 +3,12 @@
 import json
 import logging
 import re
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from app.siftarr.models.activity_log import ActivityLog, EventType
 from app.siftarr.models.request import (
@@ -15,6 +17,7 @@ from app.siftarr.models.request import (
     RequestStatus,
     is_active_staging_workflow_status,
 )
+from app.siftarr.models.season import Season
 from app.siftarr.models.staged_torrent import StagedTorrent
 from app.siftarr.services.admin.plex_polling_service import PlexPollingService
 from app.siftarr.services.integrations.qbittorrent_service import (
@@ -25,6 +28,10 @@ from app.siftarr.services.lifecycle.activity_log_service import ActivityLogServi
 from app.siftarr.services.lifecycle.lifecycle_service import LifecycleService
 from app.siftarr.services.lifecycle.overseerr_sync_service import (
     approve_overseerr_request_best_effort,
+)
+from app.siftarr.services.releases.release_serializers import (
+    scope_to_episode_set,
+    serialize_target_scope,
 )
 
 logger = logging.getLogger(__name__)
@@ -77,6 +84,9 @@ def _normalize_name(name: str) -> str:
 class DownloadCompletionService:
     """Checks finished downloads and reconciles request availability via Plex."""
 
+    _plex_error_backoff_until_by_request_id: dict[int, datetime] = {}
+    _PLEX_ERROR_BACKOFF_SECONDS = 60
+
     def __init__(
         self,
         db: AsyncSession,
@@ -109,6 +119,7 @@ class DownloadCompletionService:
                 StagedTorrent.status == "approved",
                 Request.status.in_(ACTIVE_STAGING_WORKFLOW_STATUSES),
             )
+            .options(selectinload(Request.seasons).selectinload(Season.episodes))
         )
         rows = [
             (torrent, request)
@@ -265,8 +276,21 @@ class DownloadCompletionService:
                 existing_torrent_ids.update(t.id for t in newly_done_torrents)
                 await self.db.commit()
 
+            backoff_until = self._plex_error_backoff_until_by_request_id.get(request_id)
+            if backoff_until and backoff_until > datetime.now(UTC):
+                logger.info(
+                    "DownloadCompletionService: request_id=%s Plex check in transient-error backoff until %s",
+                    request_id,
+                    backoff_until.isoformat(),
+                )
+                continue
+
             try:
-                reconcile_result = await self.plex_polling.check_request(request_id)
+                reconcile_result = await self._check_completed_download_waiting_for_plex(
+                    request,
+                    done_torrents,
+                )
+                self._plex_error_backoff_until_by_request_id.pop(request_id, None)
 
                 if (
                     reconcile_result.available
@@ -297,9 +321,52 @@ class DownloadCompletionService:
                         request_id,
                     )
             except Exception:
+                self._plex_error_backoff_until_by_request_id[request_id] = datetime.now(
+                    UTC
+                ) + timedelta(seconds=self._PLEX_ERROR_BACKOFF_SECONDS)
                 logger.exception(
                     "DownloadCompletionService: error checking Plex for request_id=%s", request_id
                 )
 
         logger.info("DownloadCompletionService: completed %d request(s) this cycle", completed)
         return completed
+
+    async def _check_completed_download_waiting_for_plex(
+        self,
+        request: Request,
+        done_torrents: list[StagedTorrent],
+    ):
+        if hasattr(type(self.plex_polling), "check_completed_download_waiting_for_plex"):
+            return await self.plex_polling.check_completed_download_waiting_for_plex(
+                request,
+                episode_keys=self._covered_episode_keys(request, done_torrents),
+            )
+        return await self.plex_polling.check_request(request.id)
+
+    def _covered_episode_keys(
+        self,
+        request: Request,
+        done_torrents: list[StagedTorrent],
+    ) -> set[tuple[int, int]] | None:
+        if request.media_type.value != "tv":
+            return None
+        requested_episode_keys = {
+            (season.season_number, episode.episode_number)
+            for season in request.seasons
+            for episode in season.episodes
+        }
+        if not requested_episode_keys:
+            return None
+        known_season_numbers = [season.season_number for season in request.seasons]
+        covered: set[tuple[int, int]] = set()
+        for torrent in done_torrents:
+            scope = serialize_target_scope(media_type=request.media_type, title=torrent.title)
+            scope_keys = scope_to_episode_set(scope, known_season_numbers)
+            if not scope_keys:
+                return requested_episode_keys
+            for season_number, episode_number in scope_keys:
+                if episode_number is None:
+                    covered.update(key for key in requested_episode_keys if key[0] == season_number)
+                elif (season_number, episode_number) in requested_episode_keys:
+                    covered.add((season_number, episode_number))
+        return covered or None

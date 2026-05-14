@@ -196,6 +196,50 @@ class PlexPollingService:
             reason=decision.reason,
         )
 
+    async def check_completed_download_waiting_for_plex(
+        self,
+        request_or_id: Request | int,
+        *,
+        episode_keys: set[EpisodeKey] | None = None,
+    ) -> CheckRequestResult:
+        """Targeted Plex check for qBit-finished downloads not yet available.
+
+        Movies use the direct movie availability lookup. TV requests can pass a
+        covered episode subset; only requested/covered episodes are considered
+        newly available, while the normal episode sync path derives parent state.
+        """
+        if isinstance(request_or_id, int):
+            request_id = request_or_id
+            req = await self._load_request(request_id)
+        else:
+            request_id = int(request_or_id.id)
+            req = request_or_id
+        if req is None:
+            return CheckRequestResult(request_id=request_id)
+
+        before_status = req.status
+        decision = await self._probe_single_request(
+            req,
+            partial_tv_match=True,
+            episode_filter=episode_keys,
+        )
+        if decision is None:
+            return CheckRequestResult(
+                request_id=req.id,
+                status_before=before_status,
+                status_after=req.status,
+            )
+
+        await self._run_serialized_write(self._apply_decision(req, decision))
+        return CheckRequestResult(
+            request_id=req.id,
+            matched=True,
+            available=True,
+            status_before=before_status,
+            status_after=req.status,
+            reason=decision.reason,
+        )
+
     async def scan_recent(self, on_progress: ProgressCallback | None = None) -> ScanRecentResult:
         requests = await self.get_active_requests()
         metrics = ScanMetrics()
@@ -344,6 +388,7 @@ class PlexPollingService:
         req: Request,
         *,
         partial_tv_match: bool,
+        episode_filter: set[EpisodeKey] | None = None,
         on_detail: Callable[[str, float], Awaitable[None]] | None = None,
     ) -> _PollDecision | None:
         if req.media_type == MediaType.MOVIE:
@@ -352,6 +397,7 @@ class PlexPollingService:
             return await self._probe_tv(
                 req,
                 partial_tv_match=partial_tv_match,
+                episode_filter=episode_filter,
                 on_detail=on_detail,
             )
         return None
@@ -376,6 +422,7 @@ class PlexPollingService:
         req: Request,
         *,
         partial_tv_match: bool,
+        episode_filter: set[EpisodeKey] | None = None,
         on_detail: Callable[[str, float], Awaitable[None]] | None = None,
     ) -> _PollDecision | None:
         if on_detail is not None:
@@ -388,6 +435,8 @@ class PlexPollingService:
             await on_detail("tv_episode_availability", 0.6)
         availability = await self.plex.get_episode_availability(str(show["rating_key"]))
         requested_episodes = self._get_requested_episodes(req)
+        if episode_filter is not None:
+            requested_episodes = [key for key in requested_episodes if key in episode_filter]
         if not requested_episodes:
             return None
 
@@ -402,7 +451,12 @@ class PlexPollingService:
             if len(completed_episodes) == len(requested_episodes)
             else "Some episodes found on Plex"
         )
-        return _PollDecision(request_id=req.id, reason=reason, availability=dict(availability))
+        filtered_availability = {key: availability.get(key, False) for key in requested_episodes}
+        return _PollDecision(
+            request_id=req.id,
+            reason=reason,
+            availability=filtered_availability,
+        )
 
     async def _probe_recent_requests(
         self,

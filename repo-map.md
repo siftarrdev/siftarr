@@ -149,7 +149,7 @@ Business logic and integrations, organized into thematic subpackages:
 **`admin/`** — Config, scheduling, polling
 - `settings_service.py` — SettingsStore (DB-backed settings persistence, startup API key generation, runtime env loading, sync success timestamps, Plex SSO claim/token status without exposing token), SSE progress, scheduled job helpers, Plex rescan/Overseerr import orchestration
 - `scheduler_service.py` — recurring job scheduling via APScheduler using runtime-configurable sync/completion intervals, plus startup catch-up orchestration for stale Overseerr/Plex syncs and the guarded Plex sign-in full-sync trigger used after later admin sign-ins; `_check_download_completion()` now also runs the qBit move/retention service; `trigger_download_completion_now()` allows manual invocation from settings with structured result reporting
-- `plex_polling_service/` — Plex polling logic; prioritizes recent/downloading requests with periodic full reconcile every 20th poll cycle
+- `plex_polling_service/` — Plex polling logic; prioritizes recent/downloading requests, supports explicit full reconcile, and provides targeted checks for qBit-finished downloads waiting on Plex availability
 
 **`dashboard/`** — Dashboard, search, detail views
 - `dashboard_service.py` — dashboard DTOs and response serializers only (load/assembly logic in sub-services)
@@ -178,7 +178,7 @@ Business logic and integrations, organized into thematic subpackages:
 - `pending_queue_service.py` — retry pending queue management; supports optional `commit=False` for batched transactions
 - `episode_derive.py` — canonical derivation functions for TV episode/season/request statuses
 - `episode_sync_service.py` — syncing episode availability from Overseerr and Plex
-- `download_completion_service.py` — completion detection via qBit torrent list matching
+- `download_completion_service.py` — completion detection via qBit torrent list matching; qBit-finished torrents stay active until targeted Plex checks confirm availability
 - `qbit_move_service.py` — qBit move and retention service: selects eligible completed torrents (managed first, optional unmanaged fallback), computes safe destinations using Siftarr metadata then regex fallback, moves via qBittorrent `set_location(move=True)`, updates move tracking fields on managed torrents, performs retention cleanup (remove old completed torrents by seeding_time, keep files); called from scheduler's download-completion loop
 - `overseerr_sync_service.py` — best-effort lifecycle sync back to Overseerr (approval evidence)
 - `unreleased_service.py` — unreleased content handling

@@ -53,6 +53,9 @@ class TVEnrichmentService:
     ) -> DashboardTVDetails:
         """Build TV detail payload with seasons, episodes, and release grouping."""
         active_staged_torrents = active_staged_torrents or []
+        staged_overlay_torrents = [
+            staged for staged in active_staged_torrents if staged.get("status") == "staged"
+        ]
         seasons, episodes = await load_tv_seasons_with_episodes(self.db, request_id)
 
         episodes_by_season: dict[int, list[Any]] = {}
@@ -72,7 +75,7 @@ class TVEnrichmentService:
             )
             state_counts = count_season_episode_states(season_episodes)
             season_staged = self._season_has_staged_scope(
-                season.season_number, active_staged_torrents, known_season_numbers
+                season.season_number, staged_overlay_torrents, known_season_numbers
             )
             staged_episode_numbers = {
                 ep.episode_number
@@ -80,7 +83,7 @@ class TVEnrichmentService:
                 if self._episode_has_staged_scope(
                     season.season_number,
                     ep.episode_number,
-                    active_staged_torrents,
+                    staged_overlay_torrents,
                     known_season_numbers,
                 )
             }

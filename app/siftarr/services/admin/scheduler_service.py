@@ -40,6 +40,8 @@ from app.siftarr.services.utils.media_helpers import extract_media_title_and_yea
 
 PLEX_RECENT_SCAN_JOB_NAME = "plex_recent_scan"
 PLEX_POLL_JOB_NAME = "plex_poll"
+MIN_TARGETED_PLEX_WAIT_SECONDS = 30
+MAX_TARGETED_PLEX_WAIT_SECONDS = 60
 
 
 def _parse_full_sync_time(value: str) -> tuple[int, int]:
@@ -386,7 +388,7 @@ class SchedulerService:
                 runtime_settings = get_settings()
                 plex = PlexService(settings=runtime_settings)
                 polling_service = PlexPollingService(db, plex)
-                count = await polling_service.poll()
+                count = await polling_service.poll(priority_only=False)
                 return PlexPollResult(completed_requests=count)
 
         return await self._run_guarded_plex_scan_job(
@@ -623,9 +625,16 @@ class SchedulerService:
             replace_existing=True,
         )
 
+        completion_interval_seconds = min(
+            max(
+                settings.qbittorrent_completion_poll_interval_seconds,
+                MIN_TARGETED_PLEX_WAIT_SECONDS,
+            ),
+            MAX_TARGETED_PLEX_WAIT_SECONDS,
+        )
         self.scheduler.add_job(
             self._check_download_completion,
-            trigger=IntervalTrigger(seconds=settings.qbittorrent_completion_poll_interval_seconds),
+            trigger=IntervalTrigger(seconds=completion_interval_seconds),
             id="check_download_completion",
             name="Check qBittorrent download completion",
             replace_existing=True,

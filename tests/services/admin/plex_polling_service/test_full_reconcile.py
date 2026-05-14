@@ -138,3 +138,30 @@ async def test_check_request_tv_partial_season_pack_preserves_downloading_episod
     assert [s1e1.status, s1e2.status] == [RequestStatus.COMPLETED, RequestStatus.COMPLETED]
     assert [s2e1.status, s2e2.status] == [RequestStatus.DOWNLOADING, RequestStatus.DOWNLOADING]
     assert req.status == RequestStatus.DOWNLOADING
+
+
+@pytest.mark.asyncio
+async def test_targeted_completed_download_tv_filters_to_covered_episodes(
+    service, mock_db, mock_plex
+):
+    s1e1 = make_episode(1, status=RequestStatus.DOWNLOADING)
+    s1e2 = make_episode(2, status=RequestStatus.DOWNLOADING)
+    req = make_request(
+        id=81,
+        media_type=MediaType.TV,
+        status=RequestStatus.DOWNLOADING,
+        tmdb_id=999,
+        seasons=[make_season(1, [s1e1, s1e2])],
+    )
+    mock_plex.get_show_by_tmdb.return_value = {"rating_key": "42"}
+    mock_plex.get_episode_availability.return_value = {(1, 1): True, (1, 2): True}
+
+    result = await service.check_completed_download_waiting_for_plex(
+        req,
+        episode_keys={(1, 1)},
+    )
+
+    assert result.matched is True
+    assert result.status_after == RequestStatus.DOWNLOADING
+    assert s1e1.status == RequestStatus.COMPLETED
+    assert s1e2.status == RequestStatus.DOWNLOADING

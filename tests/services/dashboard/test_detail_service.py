@@ -1,20 +1,24 @@
 """Focused tests for dashboard detail release controls."""
 
 from datetime import datetime
+from typing import cast
 from unittest.mock import MagicMock
 
 import pytest
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from app.siftarr.models._base import Base
+from app.siftarr.models.episode import Episode
 from app.siftarr.models.release import Release
-from app.siftarr.models.request import MediaType
+from app.siftarr.models.request import MediaType, Request, RequestStatus
+from app.siftarr.models.season import Season
 from app.siftarr.services.dashboard.dashboard_service import (
     DashboardRequestSummary,
     RequestDetailsData,
     serialize_request_details_response,
 )
 from app.siftarr.services.dashboard.detail_service import DetailReleaseControls, DetailService
+from app.siftarr.services.dashboard.tv_enrichment_service import TVEnrichmentService
 
 
 @pytest.fixture
@@ -102,3 +106,51 @@ def test_request_details_serializes_cache_search_hints():
 
     assert payload["has_cached_releases"] is False
     assert payload["auto_search_eligible"] is True
+
+
+@pytest.mark.asyncio
+async def test_tv_details_do_not_overlay_approved_torrent_as_staged(db_session):
+    request = Request(
+        external_id="tv-approved-no-staged-overlay",
+        media_type=MediaType.TV,
+        title="Show",
+        status=RequestStatus.DOWNLOADING,
+    )
+    db_session.add(request)
+    await db_session.flush()
+    season = Season(
+        request_id=request.id,
+        season_number=1,
+        status=RequestStatus.DOWNLOADING,
+    )
+    db_session.add(season)
+    await db_session.flush()
+    db_session.add_all(
+        [
+            Episode(season_id=season.id, episode_number=1, status=RequestStatus.DOWNLOADING),
+            Episode(season_id=season.id, episode_number=2, status=RequestStatus.DOWNLOADING),
+        ]
+    )
+    await db_session.commit()
+
+    tv_info = await TVEnrichmentService(db_session).load_tv_info(
+        request_id=request.id,
+        background_tasks=None,
+        releases=[],
+        active_staged_torrents=[
+            {
+                "status": "approved",
+                "target_scope": {"type": "season_pack", "season_numbers": [1]},
+            }
+        ],
+    )
+
+    season_payload = tv_info.seasons[0]
+    assert season_payload["status"] == "downloading"
+    assert season_payload["staged_count"] == 0
+    episodes = cast("list[dict[str, object]]", season_payload["episodes"])
+    assert [episode["status"] for episode in episodes] == [
+        "downloading",
+        "downloading",
+    ]
+    assert tv_info.aggregate_counts.get("staged", 0) == 0
