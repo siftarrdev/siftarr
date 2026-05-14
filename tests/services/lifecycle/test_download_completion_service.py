@@ -126,6 +126,110 @@ class TestDownloadCompletionService:
         mock_plex_polling.check_request.assert_called_once_with(10)
 
     @pytest.mark.asyncio
+    async def test_qbit_completed_uses_targeted_plex_wait_check_with_tv_coverage(
+        self, mock_db, mock_qbit
+    ):
+        from app.siftarr.models.request import MediaType, RequestStatus
+        from app.siftarr.services.admin.plex_polling_service import CheckRequestResult
+
+        episode_1 = MagicMock(episode_number=1)
+        episode_2 = MagicMock(episode_number=2)
+        season = MagicMock(season_number=1, episodes=[episode_1, episode_2])
+
+        torrent = MagicMock()
+        torrent.id = 4
+        torrent.request_id = 42
+        torrent.title = "Test.Show.S01E01.1080p"
+        torrent.magnet_url = "magnet:?xt=urn:btih:da39a3ee5e6b4b0d3255bfef95601890afd80709"
+
+        request = MagicMock()
+        request.id = 42
+        request.title = "Test Show"
+        request.media_type = MediaType.TV
+        request.status = RequestStatus.DOWNLOADING
+        request.seasons = [season]
+
+        class TargetedPlexPolling:
+            def __init__(self):
+                self._check_completed_download_waiting_for_plex = AsyncMock(
+                    return_value=CheckRequestResult(
+                        request_id=42,
+                        available=False,
+                        status_before=RequestStatus.DOWNLOADING,
+                        status_after=RequestStatus.DOWNLOADING,
+                    )
+                )
+
+            async def check_completed_download_waiting_for_plex(self, *args, **kwargs):
+                return await self._check_completed_download_waiting_for_plex(*args, **kwargs)
+
+        plex_polling = TargetedPlexPolling()
+        mock_qbit.get_all_active_torrents = AsyncMock(return_value=[])
+        mock_db.execute.side_effect = [
+            _rows_result([(torrent, request)]),
+            _request_id_rows([]),
+        ]
+
+        service = DownloadCompletionService(mock_db, mock_qbit, plex_polling)
+        result = await service.check_downloading_requests()
+
+        assert result == 0
+        plex_polling._check_completed_download_waiting_for_plex.assert_awaited_once_with(
+            request,
+            episode_keys={(1, 1)},
+        )
+
+    @pytest.mark.asyncio
+    async def test_plex_transient_error_backs_off_without_duplicate_download_log(
+        self, mock_db, mock_qbit
+    ):
+        from app.siftarr.models.request import MediaType, RequestStatus
+
+        torrent = MagicMock()
+        torrent.id = 5
+        torrent.request_id = 43
+        torrent.title = "Test Movie 2025"
+        torrent.magnet_url = "magnet:?xt=urn:btih:da39a3ee5e6b4b0d3255bfef95601890afd80709"
+
+        request = MagicMock()
+        request.id = 43
+        request.title = "Test Movie"
+        request.media_type = MediaType.MOVIE
+        request.status = RequestStatus.DOWNLOADING
+
+        class TargetedPlexPolling:
+            def __init__(self):
+                self._check_completed_download_waiting_for_plex = AsyncMock(
+                    side_effect=RuntimeError("plex timeout")
+                )
+
+            async def check_completed_download_waiting_for_plex(self, *args, **kwargs):
+                return await self._check_completed_download_waiting_for_plex(*args, **kwargs)
+
+        plex_polling = TargetedPlexPolling()
+        mock_qbit.get_all_active_torrents = AsyncMock(return_value=[])
+        mock_db.execute.side_effect = [
+            _rows_result([(torrent, request)]),
+            _request_id_rows([]),
+            _rows_result([(torrent, request)]),
+            _completion_log_rows([(43, {"done_torrents": [{"torrent_id": 5}]})]),
+        ]
+
+        service = DownloadCompletionService(mock_db, mock_qbit, plex_polling)
+        assert await service.check_downloading_requests() == 0
+        assert await service.check_downloading_requests() == 0
+
+        plex_polling._check_completed_download_waiting_for_plex.assert_awaited_once()
+        from app.siftarr.models.activity_log import ActivityLog
+
+        activity_entries = [
+            call.args[0]
+            for call in mock_db.add.call_args_list
+            if isinstance(call.args[0], ActivityLog)
+        ]
+        assert len(activity_entries) == 1
+
+    @pytest.mark.asyncio
     async def test_name_only_torrent_match_logs_qbit_finished_evidence(
         self, mock_db, mock_qbit, mock_plex_polling
     ):

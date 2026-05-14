@@ -102,6 +102,59 @@ async def test_start_registers_recent_scan_and_poll_jobs(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_start_clamps_download_completion_interval_for_targeted_plex_wait(monkeypatch):
+    created = {}
+
+    def fake_scheduler(**kwargs):
+        created["scheduler"] = _FakeScheduler(**kwargs)
+        return created["scheduler"]
+
+    monkeypatch.setattr(scheduler_service, "AsyncIOScheduler", fake_scheduler)
+    monkeypatch.setattr(
+        scheduler_service,
+        "get_settings",
+        lambda: SimpleNamespace(
+            overseerr_poll_interval_minutes=17,
+            qbittorrent_completion_poll_interval_seconds=5,
+            plex_fast_sync_interval_minutes=7,
+            plex_full_sync_frequency="daily",
+            plex_full_sync_time="04:30",
+        ),
+    )
+
+    service = SchedulerService(lambda: _FakeSessionContext(AsyncMock()), logger=MagicMock())
+    service.start()
+
+    job_kwargs = {job["id"]: job for job in created["scheduler"].jobs}
+    assert job_kwargs["check_download_completion"]["trigger"].interval.total_seconds() == 30
+
+
+@pytest.mark.asyncio
+async def test_plex_poll_job_uses_explicit_full_reconcile(monkeypatch):
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+    session_maker = async_sessionmaker(engine, expire_on_commit=False)
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+    monkeypatch.setattr(scheduler_service, "get_settings", lambda: SimpleNamespace())
+
+    polling_service = MagicMock()
+    polling_service.poll = AsyncMock(return_value=3)
+    monkeypatch.setattr(scheduler_service, "PlexService", lambda settings: MagicMock())
+    monkeypatch.setattr(
+        scheduler_service,
+        "PlexPollingService",
+        lambda db_session, plex: polling_service,
+    )
+
+    service = SchedulerService(session_maker, logger=MagicMock())
+    result = await service.trigger_plex_poll_now()
+
+    assert result.completed_requests == 3
+    polling_service.poll.assert_awaited_once_with(priority_only=False)
+    await engine.dispose()
+
+
+@pytest.mark.asyncio
 async def test_poll_overseerr_uses_settings_service_import_helper(monkeypatch):
     """Overseerr polling should call the extracted settings import helper directly."""
 
