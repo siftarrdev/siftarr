@@ -248,27 +248,37 @@ class TestProwlarrService:
 
     def test_build_tv_season_strategy_queries_for_iptorrents(self) -> None:
         """Season strategies should produce IPTorrents-compatible query params."""
-        service = ProwlarrService(Settings(prowlarr_tv_strategy_tvdb_enabled=True))
+        service = ProwlarrService(
+            Settings(
+                prowlarr_tv_strategy_title_sxx_enabled=True,
+                prowlarr_tv_strategy_imdb_enabled=True,
+                prowlarr_tv_strategy_tvdb_enabled=True,
+            )
+        )
 
         strategies = service._tv_season_strategy_queries(
             "The Rookie", 1, imdbid="tt7587890", tvdbid=350665
         )
 
         assert strategies == [
+            ("title_season_token", "tvsearch", "The Rookie {season:1}"),
             ("title_sxx", "search", "The Rookie S01"),
             ("imdb_season", "tvsearch", "The Rookie {imdbid:7587890} {season:1}"),
-            ("title_season_token", "tvsearch", "The Rookie {season:1}"),
             ("tvdb_season", "tvsearch", "The Rookie {tvdbid:350665} {season:1}"),
         ]
 
     def test_build_tv_season_strategy_queries_skip_unavailable_optional_metadata(self) -> None:
-        service = ProwlarrService(Settings(prowlarr_tv_strategy_tvdb_enabled=True))
+        service = ProwlarrService(
+            Settings(
+                prowlarr_tv_strategy_title_sxx_enabled=True, prowlarr_tv_strategy_tvdb_enabled=True
+            )
+        )
 
         strategies = service._tv_season_strategy_queries("The Rookie", 1)
 
         assert [strategy[0] for strategy in strategies] == [
-            "title_sxx",
             "title_season_token",
+            "title_sxx",
         ]
 
     @pytest.mark.asyncio
@@ -410,7 +420,9 @@ class TestProwlarrService:
 
     @pytest.mark.asyncio
     async def test_search_tv_season_page_sets_offset_without_limit(self, monkeypatch) -> None:
-        service = ProwlarrService(Settings(prowlarr_tv_page_size=100))
+        service = ProwlarrService(
+            Settings(prowlarr_tv_page_size=100, prowlarr_tv_strategy_title_sxx_enabled=True)
+        )
         calls = []
 
         async def fake_search(params, **kwargs):
@@ -443,6 +455,7 @@ class TestProwlarrService:
         service = ProwlarrService(
             Settings(
                 prowlarr_tv_page_size=100,
+                prowlarr_tv_strategy_title_sxx_enabled=True,
                 prowlarr_tv_strategy_imdb_enabled=False,
                 prowlarr_tv_strategy_title_season_token_enabled=False,
             )
@@ -470,6 +483,7 @@ class TestProwlarrService:
         service = ProwlarrService(
             Settings(
                 prowlarr_tv_page_size=100,
+                prowlarr_tv_strategy_title_sxx_enabled=True,
                 prowlarr_tv_strategy_imdb_enabled=False,
                 prowlarr_tv_strategy_title_season_token_enabled=False,
             )
@@ -489,10 +503,38 @@ class TestProwlarrService:
         assert len(result.releases) == 100
 
     @pytest.mark.asyncio
+    async def test_search_tv_season_sweep_stops_when_page_adds_no_new_releases(
+        self, monkeypatch
+    ) -> None:
+        service = ProwlarrService(
+            Settings(
+                prowlarr_tv_page_size=100,
+                prowlarr_tv_strategy_title_sxx_enabled=True,
+                prowlarr_tv_strategy_title_season_token_enabled=False,
+            )
+        )
+        calls = []
+
+        async def fake_search(params, **kwargs):
+            calls.append(params)
+            start = 0 if params["offset"] == 0 else 50
+            return ProwlarrSearchResult(
+                releases=[_release(start + i) for i in range(100)], query_time_ms=10
+            )
+
+        monkeypatch.setattr(service, "_search", fake_search)
+
+        result = await service.search_tv_season_sweep("The Rookie", 1)
+
+        assert [call["offset"] for call in calls] == [0, 100, 200]
+        assert len(result.releases) == 150
+
+    @pytest.mark.asyncio
     async def test_search_tv_season_sweep_continues_past_old_max_pages(self, monkeypatch) -> None:
         service = ProwlarrService(
             Settings(
                 prowlarr_tv_page_size=100,
+                prowlarr_tv_strategy_title_sxx_enabled=True,
                 prowlarr_tv_strategy_imdb_enabled=False,
                 prowlarr_tv_strategy_title_season_token_enabled=False,
             )
@@ -504,7 +546,7 @@ class TestProwlarrService:
             if params["offset"] == 300:
                 return ProwlarrSearchResult(releases=[_release(300)], query_time_ms=10)
             return ProwlarrSearchResult(
-                releases=[_release(i) for i in range(100)], query_time_ms=10
+                releases=[_release(params["offset"] + i) for i in range(100)], query_time_ms=10
             )
 
         monkeypatch.setattr(service, "_search", fake_search)
@@ -521,6 +563,7 @@ class TestProwlarrService:
         service = ProwlarrService(
             Settings(
                 prowlarr_tv_page_size=100,
+                prowlarr_tv_strategy_title_sxx_enabled=True,
                 prowlarr_tv_strategy_imdb_enabled=False,
                 prowlarr_tv_strategy_title_season_token_enabled=False,
             )
@@ -532,7 +575,7 @@ class TestProwlarrService:
             if params["offset"] == 200:
                 return ProwlarrSearchResult(releases=[_release(200)], query_time_ms=10)
             return ProwlarrSearchResult(
-                releases=[_release(i) for i in range(100)], query_time_ms=10
+                releases=[_release(params["offset"] + i) for i in range(100)], query_time_ms=10
             )
 
         monkeypatch.setattr(service, "_search", fake_search)
@@ -550,6 +593,8 @@ class TestProwlarrService:
         service = ProwlarrService(
             Settings(
                 prowlarr_tv_page_size=100,
+                prowlarr_tv_strategy_title_sxx_enabled=True,
+                prowlarr_tv_strategy_imdb_enabled=True,
                 prowlarr_tv_strategy_title_season_token_enabled=False,
                 prowlarr_tv_strategy_tvdb_enabled=True,
             )
@@ -575,3 +620,55 @@ class TestProwlarrService:
             "The Rookie {tvdbid:350665} {season:1}",
         ]
         assert len(result.releases) == 2
+
+    @pytest.mark.asyncio
+    async def test_search_tv_season_sweep_stops_on_repeated_full_page(self, monkeypatch) -> None:
+        service = ProwlarrService(
+            Settings(
+                prowlarr_tv_page_size=100,
+                prowlarr_tv_strategy_title_sxx_enabled=True,
+                prowlarr_tv_strategy_imdb_enabled=False,
+                prowlarr_tv_strategy_title_season_token_enabled=False,
+            )
+        )
+        calls = []
+
+        async def fake_search(params, **kwargs):
+            calls.append(params)
+            return ProwlarrSearchResult(
+                releases=[_release(i) for i in range(100)], query_time_ms=10
+            )
+
+        monkeypatch.setattr(service, "_search", fake_search)
+
+        result = await service.search_tv_season_sweep("The Rookie", 1)
+
+        assert [call["offset"] for call in calls] == [0, 100]
+        assert len(result.releases) == 100
+
+    @pytest.mark.asyncio
+    async def test_search_tv_season_sweep_stops_at_total_max_pages(self, monkeypatch) -> None:
+        service = ProwlarrService(
+            Settings(
+                prowlarr_tv_page_size=100,
+                prowlarr_tv_max_pages_per_strategy=3,
+                prowlarr_tv_strategy_title_sxx_enabled=True,
+                prowlarr_tv_strategy_imdb_enabled=True,
+                prowlarr_tv_strategy_title_season_token_enabled=False,
+            )
+        )
+        calls = []
+
+        async def fake_search(params, **kwargs):
+            calls.append(params)
+            return ProwlarrSearchResult(
+                releases=[_release(params["offset"] + i) for i in range(100)], query_time_ms=10
+            )
+
+        monkeypatch.setattr(service, "_search", fake_search)
+
+        result = await service.search_tv_season_sweep("The Rookie", 1)
+
+        assert [call["offset"] for call in calls] == [0, 100, 200]
+        assert len(result.releases) == 300
+        assert result.hit_limit is True

@@ -101,6 +101,32 @@ class ProwlarrService:
             api_key = ""
         return {"X-Api-Key": api_key}
 
+    @staticmethod
+    def _release_page_signature(
+        releases: list[ProwlarrRelease],
+    ) -> tuple[tuple[str, str, str, int], ...]:
+        """Return a stable signature for detecting repeated paginated pages."""
+        return tuple(
+            (
+                release.download_url or release.magnet_url or release.info_hash or release.title,
+                release.title,
+                release.indexer,
+                release.size,
+            )
+            for release in releases
+        )
+
+    @staticmethod
+    def _release_key(release: ProwlarrRelease) -> str:
+        """Return a stable release key for sweep-level deduplication."""
+        if release.info_hash:
+            return f"ih:{release.info_hash.lower()}"
+        if release.download_url:
+            return f"url:{release.download_url.lower()}"
+        if release.magnet_url:
+            return f"mag:{release.magnet_url.lower()}"
+        return f"title:{release.indexer.lower()}:{release.title.lower()}:{release.size}"
+
     async def close(self) -> None:
         """Close the service (no-op since using shared client)."""
         pass
@@ -493,12 +519,6 @@ class ProwlarrService:
     ) -> list[tuple[str, str, str]]:
         """Return enabled TV season query strategies as (name, type, query)."""
         strategies: list[tuple[str, str, str]] = []
-        if self.settings.prowlarr_tv_strategy_title_sxx_enabled:
-            strategies.append(("title_sxx", "search", self._build_tv_title_query(title, season)))
-        if imdbid and self.settings.prowlarr_tv_strategy_imdb_enabled:
-            strategies.append(
-                ("imdb_season", "tvsearch", self._build_tv_imdb_season_query(title, imdbid, season))
-            )
         if self.settings.prowlarr_tv_strategy_title_season_token_enabled:
             strategies.append(
                 (
@@ -506,6 +526,12 @@ class ProwlarrService:
                     "tvsearch",
                     self._build_tv_title_season_token_query(title, season),
                 )
+            )
+        if self.settings.prowlarr_tv_strategy_title_sxx_enabled:
+            strategies.append(("title_sxx", "search", self._build_tv_title_query(title, season)))
+        if imdbid and self.settings.prowlarr_tv_strategy_imdb_enabled:
+            strategies.append(
+                ("imdb_season", "tvsearch", self._build_tv_imdb_season_query(title, imdbid, season))
             )
         if tvdbid and self.settings.prowlarr_tv_strategy_tvdb_enabled:
             strategies.append(
@@ -594,8 +620,12 @@ class ProwlarrService:
             categories = [5000]
 
         page_size = self.settings.prowlarr_tv_page_size
+        max_pages = self.settings.prowlarr_tv_max_pages_per_strategy
         total_query_time_ms = 0
         all_releases: list[ProwlarrRelease] = []
+        pages_searched = 0
+        hit_limit = False
+        seen_release_keys: set[str] = set()
 
         logger.info(
             "TV season sweep started: request_id=%s title=%s season=%s source=prowlarr page_size=%s",
@@ -609,7 +639,8 @@ class ProwlarrService:
             title, season, imdbid=imdbid, tvdbid=tvdbid
         ):
             page = 0
-            while True:
+            seen_page_signatures: set[tuple[tuple[str, str, str, int], ...]] = set()
+            while pages_searched < max_pages:
                 result = await self.search_tv_season_page(
                     title,
                     season,
@@ -621,11 +652,61 @@ class ProwlarrService:
                     cacheable=cacheable,
                     request_id=request_id,
                 )
+                pages_searched += 1
                 total_query_time_ms += result.query_time_ms
-                all_releases.extend(result.releases)
+                page_signature = self._release_page_signature(result.releases)
+                if result.releases and page_signature in seen_page_signatures:
+                    logger.warning(
+                        "TV season sweep stopped on repeated page: request_id=%s title=%s season=%s strategy=%s offset=%s count=%s source=%s",
+                        request_id,
+                        title,
+                        season,
+                        strategy,
+                        result.offset,
+                        len(result.releases),
+                        result.source or "prowlarr",
+                    )
+                    break
+                seen_page_signatures.add(page_signature)
+
+                new_releases: list[ProwlarrRelease] = []
+                for release in result.releases:
+                    release_key = self._release_key(release)
+                    if release_key in seen_release_keys:
+                        continue
+                    seen_release_keys.add(release_key)
+                    new_releases.append(release)
+
+                if result.releases and not new_releases:
+                    logger.warning(
+                        "TV season sweep stopped on page with no new releases: request_id=%s title=%s season=%s strategy=%s offset=%s count=%s source=%s",
+                        request_id,
+                        title,
+                        season,
+                        strategy,
+                        result.offset,
+                        len(result.releases),
+                        result.source or "prowlarr",
+                    )
+                    break
+
+                all_releases.extend(new_releases)
                 if result.error or result.is_short_page:
                     break
                 page += 1
+            else:
+                hit_limit = True
+                logger.warning(
+                    "TV season sweep stopped at max pages: request_id=%s title=%s season=%s strategy=%s max_pages=%s pages_searched=%s page_size=%s source=prowlarr",
+                    request_id,
+                    title,
+                    season,
+                    strategy,
+                    max_pages,
+                    pages_searched,
+                    page_size,
+                )
+                break
 
         logger.info(
             "TV season sweep done: request_id=%s title=%s season=%s total_results=%s elapsed_ms=%s source=prowlarr",
@@ -642,6 +723,7 @@ class ProwlarrService:
             page_size=page_size,
             page_count=len(all_releases),
             source="prowlarr",
+            hit_limit=hit_limit,
         )
 
     async def _broad_tv_search(
