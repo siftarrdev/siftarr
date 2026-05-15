@@ -182,6 +182,22 @@ function renderCoverageBadge(release) {
     '</div>';
 }
 
+const TV_ACCORDION_TOGGLE_CLASS = 'tv-accordion-toggle inline-flex items-center justify-center rounded-md border border-gray-600/80 bg-surface-900/70 px-2.5 py-1 text-xs font-medium leading-4 text-gray-200 shadow-sm transition-colors hover:border-brand-400/70 hover:bg-surface-800 hover:text-white focus:outline-none focus:ring-2 focus:ring-brand-400/60 focus:ring-offset-2 focus:ring-offset-surface-900';
+
+function renderTvAccordionToggle(scope, requestId, seasonNumber = null) {
+    const toggleAttr = scope === 'season'
+        ? 'data-tv-accordion-toggle="season"'
+        : 'data-tv-accordion-toggle="panel"';
+    const seasonAttrs = scope === 'season'
+        ? ' data-season-number="' + seasonNumber + '"'
+        : '';
+    const clickHandler = scope === 'season'
+        ? 'event.preventDefault(); event.stopPropagation(); toggleTvSeasonDetails(' + requestId + ', ' + seasonNumber + ');'
+        : 'toggleTvDetailsAll(' + requestId + ');';
+
+    return '<button type="button" ' + toggleAttr + ' data-request-id="' + requestId + '"' + seasonAttrs + ' aria-expanded="false" onclick="' + clickHandler + '" class="' + TV_ACCORDION_TOGGLE_CLASS + '">Expand all</button>';
+}
+
 function episodeStatusBadge(status) {
     const colors = {
         'received': 'badge-gray',
@@ -234,9 +250,7 @@ function renderSeasonAccordion(data) {
         '<div class="space-y-1">' + (multiSeasonReleases.map(function(r) { return renderReleaseCard(r, requestId); }).join('') || '<div class="text-gray-500 text-sm py-2">No season pack or complete-series results yet. Use Refresh Search to look again.</div>') + '</div>' +
     '</div>';
 
-    var panelToggle = '<div class="flex justify-end">' +
-        '<button type="button" data-tv-accordion-toggle="panel" data-request-id="' + requestId + '" aria-expanded="false" onclick="toggleTvDetailsAll(' + requestId + ');" class="text-xs text-brand-300 hover:text-brand-200 underline-offset-2 hover:underline">Expand all</button>' +
-    '</div>';
+    var panelToggle = '<div class="flex justify-end">' + renderTvAccordionToggle('panel', requestId) + '</div>';
 
     return '<div class="space-y-3">' + syncBanner + panelToggle + multiSeasonSection + tvInfo.seasons.map(function(season) {
         var seasonKey = String(season.season_number);
@@ -287,7 +301,7 @@ function renderSeasonAccordion(data) {
                     '<span class="text-gray-500 text-xs">' + availableText + '</span>' +
                 '</div>' +
                 '<div class="flex items-center gap-2 shrink-0">' +
-                    '<button type="button" data-tv-accordion-toggle="season" data-request-id="' + requestId + '" data-season-number="' + season.season_number + '" aria-expanded="false" onclick="event.preventDefault(); event.stopPropagation(); toggleTvSeasonDetails(' + requestId + ', ' + season.season_number + ');" class="text-gray-300 hover:text-white text-xs px-2 py-0.5 rounded border border-gray-600 hover:border-gray-500">Expand all</button>' +
+                    renderTvAccordionToggle('season', requestId, season.season_number) +
                     '<span class="badge ' + seasonBadgeClass + '">' + window.escapeHtml(season.status || 'unknown') + '</span>' +
                     (hasMarkable
                         ? '<button onclick="markSeasonAvailable(' + requestId + ', ' + season.id + '); event.stopPropagation();" class="bg-brand-500 hover:bg-brand-400 text-white text-xs px-2 py-0.5 rounded">Mark All Available</button>'

@@ -111,12 +111,27 @@ def test_dashboard_js_includes_read_only_tv_buckets():
 def test_dashboard_js_includes_tv_details_expand_collapse_controls():
     js = _read_dashboard_js()
 
+    shared_toggle_class = (
+        "tv-accordion-toggle inline-flex items-center justify-center rounded-md border "
+        "border-gray-600/80 bg-surface-900/70 px-2.5 py-1 text-xs font-medium "
+        "leading-4 text-gray-200 shadow-sm transition-colors hover:border-brand-400/70 "
+        "hover:bg-surface-800 hover:text-white focus:outline-none focus:ring-2 "
+        "focus:ring-brand-400/60 focus:ring-offset-2 focus:ring-offset-surface-900"
+    )
+
     assert 'data-tv-accordion-toggle="panel"' in js
     assert 'data-tv-accordion-toggle="season"' in js
+    assert "const TV_ACCORDION_TOGGLE_CLASS" in js
+    assert shared_toggle_class in js
+    assert "function renderTvAccordionToggle(scope, requestId, seasonNumber = null)" in js
+    assert "renderTvAccordionToggle('panel', requestId)" in js
+    assert "renderTvAccordionToggle('season', requestId, season.season_number)" in js
     assert "toggleTvDetailsAll" in js
     assert "toggleTvSeasonDetails" in js
     assert "updateTvAccordionControls" in js
     assert "aria-expanded" in js
+    assert "button.textContent = allOpen ? 'Collapse all' : 'Expand all';" in js
+    assert "event.preventDefault(); event.stopPropagation(); toggleTvSeasonDetails" in js
     assert "No cached season-pack results yet" in js
     assert "function searchTvRequestAll()" in js
     assert "const streamUrl = '/requests/' + window.currentRequestId + '/search/stream';" in js
