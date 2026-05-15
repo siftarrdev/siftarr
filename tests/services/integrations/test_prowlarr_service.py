@@ -443,8 +443,6 @@ class TestProwlarrService:
         service = ProwlarrService(
             Settings(
                 prowlarr_tv_page_size=100,
-                prowlarr_tv_max_pages_per_query=6,
-                prowlarr_tv_max_results_per_season=600,
                 prowlarr_tv_strategy_imdb_enabled=False,
                 prowlarr_tv_strategy_title_season_token_enabled=False,
             )
@@ -491,12 +489,10 @@ class TestProwlarrService:
         assert len(result.releases) == 100
 
     @pytest.mark.asyncio
-    async def test_search_tv_season_sweep_honors_max_pages(self, monkeypatch) -> None:
+    async def test_search_tv_season_sweep_continues_past_old_max_pages(self, monkeypatch) -> None:
         service = ProwlarrService(
             Settings(
                 prowlarr_tv_page_size=100,
-                prowlarr_tv_max_pages_per_query=2,
-                prowlarr_tv_max_results_per_season=1000,
                 prowlarr_tv_strategy_imdb_enabled=False,
                 prowlarr_tv_strategy_title_season_token_enabled=False,
             )
@@ -505,6 +501,8 @@ class TestProwlarrService:
 
         async def fake_search(params, **kwargs):
             calls.append(params)
+            if params["offset"] == 300:
+                return ProwlarrSearchResult(releases=[_release(300)], query_time_ms=10)
             return ProwlarrSearchResult(
                 releases=[_release(i) for i in range(100)], query_time_ms=10
             )
@@ -513,16 +511,16 @@ class TestProwlarrService:
 
         result = await service.search_tv_season_sweep("The Rookie", 1)
 
-        assert [call["offset"] for call in calls] == [0, 100]
-        assert len(result.releases) == 200
+        assert [call["offset"] for call in calls] == [0, 100, 200, 300]
+        assert len(result.releases) == 301
 
     @pytest.mark.asyncio
-    async def test_search_tv_season_sweep_honors_max_results(self, monkeypatch) -> None:
+    async def test_search_tv_season_sweep_keeps_all_results_past_old_max_results(
+        self, monkeypatch
+    ) -> None:
         service = ProwlarrService(
             Settings(
                 prowlarr_tv_page_size=100,
-                prowlarr_tv_max_pages_per_query=6,
-                prowlarr_tv_max_results_per_season=150,
                 prowlarr_tv_strategy_imdb_enabled=False,
                 prowlarr_tv_strategy_title_season_token_enabled=False,
             )
@@ -531,6 +529,8 @@ class TestProwlarrService:
 
         async def fake_search(params, **kwargs):
             calls.append(params)
+            if params["offset"] == 200:
+                return ProwlarrSearchResult(releases=[_release(200)], query_time_ms=10)
             return ProwlarrSearchResult(
                 releases=[_release(i) for i in range(100)], query_time_ms=10
             )
@@ -539,8 +539,8 @@ class TestProwlarrService:
 
         result = await service.search_tv_season_sweep("The Rookie", 1)
 
-        assert [call["offset"] for call in calls] == [0, 100]
-        assert len(result.releases) == 150
+        assert [call["offset"] for call in calls] == [0, 100, 200]
+        assert len(result.releases) == 201
 
     @pytest.mark.asyncio
     async def test_search_tv_season_sweep_keeps_title_and_imdb_when_tvdb_empty(
@@ -550,7 +550,6 @@ class TestProwlarrService:
         service = ProwlarrService(
             Settings(
                 prowlarr_tv_page_size=100,
-                prowlarr_tv_max_pages_per_query=1,
                 prowlarr_tv_strategy_title_season_token_enabled=False,
                 prowlarr_tv_strategy_tvdb_enabled=True,
             )

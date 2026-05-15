@@ -106,8 +106,6 @@ def test_prowlarr_tv_sweep_defaults():
     settings = Settings()
 
     assert settings.prowlarr_tv_page_size == 100
-    assert settings.prowlarr_tv_max_pages_per_query == 6
-    assert settings.prowlarr_tv_max_results_per_season == 600
     assert settings.prowlarr_tv_strategy_title_sxx_enabled is True
     assert settings.prowlarr_tv_strategy_imdb_enabled is True
     assert settings.prowlarr_tv_strategy_title_season_token_enabled is True
@@ -119,10 +117,6 @@ def test_prowlarr_tv_sweep_defaults():
     [
         ("prowlarr_tv_page_size", 0),
         ("prowlarr_tv_page_size", 501),
-        ("prowlarr_tv_max_pages_per_query", 0),
-        ("prowlarr_tv_max_pages_per_query", 51),
-        ("prowlarr_tv_max_results_per_season", 0),
-        ("prowlarr_tv_max_results_per_season", 5001),
     ],
 )
 def test_prowlarr_tv_sweep_rejects_bad_bounds(field, value):

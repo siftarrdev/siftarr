@@ -325,32 +325,23 @@ class TestProcessRequest:
         assert searched_seasons == [1, 2]
 
     @pytest.mark.asyncio
-    async def test_capped_sweep_exact_fallback_stores_missing_episode_and_skips_empty_season(
-        self, service, mock_db
-    ):
+    async def test_limited_sweep_no_longer_triggers_exact_episode_fallback(self, service, mock_db):
         request = _make_request(seasons=[2, 3], episodes={2: [1, 2]})
         mock_db.execute.return_value = MagicMock(scalar_one_or_none=MagicMock(return_value=request))
         mock_db.commit = AsyncMock()
         mock_db.flush = AsyncMock()
 
         sweep_ep2 = _make_release(title="Show.S02E02.1080p", info_hash="s02e02-sweep")
-        fallback_ep1 = _make_release(title="Show.S02E01.1080p", info_hash="s02e01-exact")
         service.prowlarr.search_tv_season_sweep = AsyncMock(
             return_value=ProwlarrSearchResult(
                 releases=[sweep_ep2], query_time_ms=100, hit_limit=True
             )
         )
-        service.prowlarr.search_by_tvdbid = AsyncMock(
-            return_value=ProwlarrSearchResult(releases=[fallback_ep1], query_time_ms=50)
-        )
+        service.prowlarr.search_by_tvdbid = AsyncMock()
 
         rule_engine = MagicMock()
-        rule_engine.evaluate.side_effect = [
-            _passing_eval(sweep_ep2, score=50),
-            _passing_eval(fallback_ep1, score=60),
-        ]
+        rule_engine.evaluate.side_effect = [_passing_eval(sweep_ep2, score=50)]
         stored_ep2 = MagicMock(title="Show.S02E02.1080p")
-        stored_ep1 = MagicMock(title="Show.S02E01.1080p")
         mock_staging = _mock_staging()
 
         with (
@@ -360,7 +351,7 @@ class TestProcessRequest:
             patch(
                 "app.siftarr.services.decisions.tv_decision_service.store_search_results",
                 new_callable=AsyncMock,
-                return_value={"s02e02-sweep": stored_ep2, "s02e01-exact": stored_ep1},
+                return_value={"s02e02-sweep": stored_ep2},
             ) as store_mock,
             patch(
                 "app.siftarr.services.decisions.tv_decision_service.StagingService",
@@ -372,20 +363,14 @@ class TestProcessRequest:
         assert [
             c.kwargs["season"] for c in service.prowlarr.search_tv_season_sweep.await_args_list
         ] == [2]
-        service.prowlarr.search_by_tvdbid.assert_awaited_once_with(
-            tvdbid=12345,
-            title="Test Show",
-            season=2,
-            episode=1,
-            year=2024,
-        )
+        service.prowlarr.search_by_tvdbid.assert_not_awaited()
         store_call = store_mock.await_args
         assert store_call is not None
         stored_titles = [evaluation.release.title for evaluation in store_call.args[2]]
-        assert stored_titles == ["Show.S02E02.1080p", "Show.S02E01.1080p"]
+        assert stored_titles == ["Show.S02E02.1080p"]
 
     @pytest.mark.asyncio
-    async def test_capped_sweep_skips_exact_fallback_when_episode_present(self, service, mock_db):
+    async def test_limited_sweep_skips_exact_fallback_when_episode_present(self, service, mock_db):
         request = _make_request(seasons=[2], episodes={2: [1]})
         mock_db.execute.return_value = MagicMock(scalar_one_or_none=MagicMock(return_value=request))
         mock_db.commit = AsyncMock()
@@ -423,9 +408,7 @@ class TestProcessRequest:
         service.prowlarr.search_by_tvdbid.assert_not_awaited()
 
     @pytest.mark.asyncio
-    async def test_selects_passing_s02_exact_releases_from_sweep_and_fallback(
-        self, service, mock_db
-    ):
+    async def test_selects_only_passing_s02_exact_releases_from_sweep(self, service, mock_db):
         request = _make_request(seasons=[2], episodes={2: [1, 2, 3]})
         mock_db.execute.return_value = MagicMock(scalar_one_or_none=MagicMock(return_value=request))
         mock_db.commit = AsyncMock()
@@ -433,30 +416,19 @@ class TestProcessRequest:
 
         sweep_ep1 = _make_release(title="Show.S02E01.1080p", info_hash="s02e01-sweep")
         failed_sweep_ep2 = _make_release(title="Show.S02E02.720p", info_hash="s02e02-failed")
-        fallback_ep2 = _make_release(title="Show.S02E02.1080p", info_hash="s02e02-fallback")
-        fallback_ep3 = _make_release(title="Show.S02E03.1080p", info_hash="s02e03-fallback")
         service.prowlarr.search_tv_season_sweep = AsyncMock(
             return_value=ProwlarrSearchResult(
                 releases=[sweep_ep1, failed_sweep_ep2], query_time_ms=100, hit_limit=True
             )
         )
-        service.prowlarr.search_by_tvdbid = AsyncMock(
-            side_effect=[
-                ProwlarrSearchResult(releases=[fallback_ep2], query_time_ms=50),
-                ProwlarrSearchResult(releases=[fallback_ep3], query_time_ms=50),
-            ]
-        )
+        service.prowlarr.search_by_tvdbid = AsyncMock()
 
         rule_engine = MagicMock()
         rule_engine.evaluate.side_effect = [
             _passing_eval(sweep_ep1, score=70),
             _failing_eval(failed_sweep_ep2),
-            _passing_eval(fallback_ep2, score=80),
-            _passing_eval(fallback_ep3, score=75),
         ]
         stored_ep1 = MagicMock(title="Show.S02E01.1080p")
-        stored_ep2 = MagicMock(title="Show.S02E02.1080p")
-        stored_ep3 = MagicMock(title="Show.S02E03.1080p")
         mock_staging = _mock_staging()
 
         with (
@@ -468,8 +440,6 @@ class TestProcessRequest:
                 new_callable=AsyncMock,
                 return_value={
                     "s02e01-sweep": stored_ep1,
-                    "s02e02-fallback": stored_ep2,
-                    "s02e03-fallback": stored_ep3,
                 },
             ),
             patch(
@@ -480,13 +450,10 @@ class TestProcessRequest:
             result = await service.process_request(1)
 
         selected_titles = [release["title"] for release in result["selected_releases"]]
-        assert selected_titles == [
-            "Show.S02E01.1080p",
-            "Show.S02E02.1080p",
-            "Show.S02E03.1080p",
-        ]
+        assert selected_titles == ["Show.S02E01.1080p"]
         staged_releases = mock_staging.use_releases.await_args.args[1]
-        assert staged_releases == [stored_ep1, stored_ep2, stored_ep3]
+        assert staged_releases == [stored_ep1]
+        service.prowlarr.search_by_tvdbid.assert_not_awaited()
 
     @pytest.mark.asyncio
     async def test_season_packs_preferred_over_episodes(self, service, mock_db):

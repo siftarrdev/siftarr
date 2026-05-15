@@ -41,8 +41,6 @@ class FakeIPTProwlarr(ProwlarrService):
         super().__init__(
             Settings(
                 prowlarr_tv_page_size=100,
-                prowlarr_tv_max_pages_per_query=5,
-                prowlarr_tv_max_results_per_season=300,
                 prowlarr_tv_strategy_imdb_enabled=False,
                 prowlarr_tv_strategy_title_season_token_enabled=False,
                 prowlarr_tv_strategy_tvdb_enabled=False,
@@ -290,7 +288,7 @@ async def test_tv_request_season_sweep_persists_buckets_and_statuses(monkeypatch
 
 
 @pytest.mark.asyncio
-async def test_capped_season_sweep_exact_fallback_fills_detail_episode_bucket(
+async def test_limited_season_sweep_does_not_trigger_exact_fallback(
     monkeypatch,
 ) -> None:
     engine = create_async_engine("sqlite+aiosqlite:///:memory:")
@@ -343,13 +341,10 @@ async def test_capped_season_sweep_exact_fallback_fills_detail_episode_bucket(
 
             assert result["status"] == "staged"
             assert prowlarr.swept_seasons == [2]
-            assert prowlarr.exact_episode_calls == [(2, 1)]
+            assert prowlarr.exact_episode_calls == []
 
             stored = (await db.execute(select(Release))).scalars().all()
-            assert {release.title for release in stored} == {
-                "Show.S02E01.1080p",
-                "Show.S02E02.1080p",
-            }
+            assert {release.title for release in stored} == {"Show.S02E02.1080p"}
 
             details = await DetailService(db).load_request_details(
                 request,
@@ -358,13 +353,13 @@ async def test_capped_season_sweep_exact_fallback_fills_detail_episode_bucket(
                 limit=25,
             )
             assert details.tv_info is not None
-            assert set(details.tv_info.releases_by_episode) == {"2-1", "2-2"}
+            assert set(details.tv_info.releases_by_episode) == {"2-2"}
     finally:
         await engine.dispose()
 
 
 @pytest.mark.asyncio
-async def test_capped_georgie_fallback_preserves_sweep_episode_rows_in_db_and_details(
+async def test_georgie_sweep_episode_rows_persist_without_exact_fallbacks(
     monkeypatch,
 ) -> None:
     engine = create_async_engine("sqlite+aiosqlite:///:memory:")
@@ -418,14 +413,11 @@ async def test_capped_georgie_fallback_preserves_sweep_episode_rows_in_db_and_de
 
             assert result["status"] == "staged"
             assert prowlarr.swept_seasons == [1, 2]
-            assert (2, 1) in prowlarr.exact_episode_calls
-            assert all(
-                (2, episode) not in prowlarr.exact_episode_calls for episode in range(12, 19)
-            )
+            assert prowlarr.exact_episode_calls == []
 
             stored = (await db.execute(select(Release))).scalars().all()
             stored_titles = {release.title for release in stored}
-            assert "Georgie.And.Mandys.First.Marriage.S02E01.1080p.WEB-DL" in stored_titles
+            assert "Georgie.And.Mandys.First.Marriage.S02E01.1080p.WEB-DL" not in stored_titles
             for episode in range(12, 19):
                 assert (
                     f"Georgie.and.Mandys.First.Marriage.S02E{episode:02d}.1080p.WEB-DL"
@@ -442,6 +434,6 @@ async def test_capped_georgie_fallback_preserves_sweep_episode_rows_in_db_and_de
             s2_episode_keys = {
                 key for key in details.tv_info.releases_by_episode if key.startswith("2-")
             }
-            assert {"2-1", *(f"2-{episode}" for episode in range(12, 19))} <= s2_episode_keys
+            assert {*(f"2-{episode}" for episode in range(12, 19))} <= s2_episode_keys
     finally:
         await engine.dispose()

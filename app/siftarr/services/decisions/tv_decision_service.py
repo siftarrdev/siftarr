@@ -350,10 +350,10 @@ class TVDecisionService:
         request: Request,
         rule_engine: RuleEngine,
         seasons: Sequence[int],
-    ) -> tuple[list[ReleaseEvaluation], list[ReleaseEvaluation], list[str], set[int]]:
+    ) -> tuple[list[ReleaseEvaluation], list[ReleaseEvaluation], list[str]]:
         """Run one logical paginated season sweep per requested season and dedupe results."""
         if not seasons:
-            return [], [], [], set()
+            return [], [], []
 
         imdb_id = await self._load_imdb_id(request)
         logger.info(
@@ -380,7 +380,6 @@ class TVDecisionService:
         passing_releases: list[ReleaseEvaluation] = []
         errors: list[str] = []
         seen_keys: set[str] = set()
-        limited_seasons: set[int] = set()
 
         for season, search_result in zip(seasons, search_results, strict=False):
             if isinstance(search_result, Exception):
@@ -415,9 +414,6 @@ class TVDecisionService:
                 search_result.source or "prowlarr",
             )
 
-            if search_result.hit_limit:
-                limited_seasons.add(season)
-
             for release in search_result.releases:
                 dedup_key = self._release_dedup_key(release)
                 if dedup_key in seen_keys:
@@ -429,7 +425,7 @@ class TVDecisionService:
                 if evaluation.passed:
                     passing_releases.append(evaluation)
 
-        return evaluated_releases, passing_releases, errors, limited_seasons
+        return evaluated_releases, passing_releases, errors
 
     async def _search_exact_episode_fallbacks_and_evaluate(
         self,
@@ -644,7 +640,6 @@ class TVDecisionService:
             sweep_evaluations,
             sweep_candidates,
             sweep_errors,
-            limited_sweep_seasons,
         ) = await self._search_season_sweeps_and_evaluate(request, rule_engine, requested_seasons)
         all_evaluated_releases.extend(sweep_evaluations)
         all_search_errors.extend(sweep_errors)
@@ -703,48 +698,6 @@ class TVDecisionService:
                         existing = best_episodes_by_key.get(key)
                         if existing is None or evaluation.total_score > existing.total_score:
                             best_episodes_by_key[key] = evaluation
-
-            selected_sweep_episode_keys = set(best_episodes_by_key)
-            capped_missing_targets = [
-                (season, episode)
-                for season, episodes in episode_targets.items()
-                if season in limited_sweep_seasons
-                for episode in episodes
-                if (season, episode) not in selected_sweep_episode_keys
-            ]
-            if capped_missing_targets:
-                fallback_target_count = len(capped_missing_targets)
-                logger.info(
-                    "TV exact episode fallbacks started: request_id=%s targets=%s source=prowlarr",
-                    request.id,
-                    capped_missing_targets,
-                )
-                seen_keys = {
-                    self._release_dedup_key(evaluation.release)
-                    for evaluation in all_evaluated_releases
-                }
-                (
-                    fallback_evaluations,
-                    fallback_candidates,
-                    fallback_errors,
-                ) = await self._search_exact_episode_fallbacks_and_evaluate(
-                    request,
-                    rule_engine,
-                    capped_missing_targets,
-                    seen_keys,
-                )
-                fallback_release_count = len(fallback_evaluations)
-                all_evaluated_releases = self._merge_evaluations_for_storage(
-                    all_evaluated_releases,
-                    fallback_evaluations,
-                )
-                all_search_errors.extend(fallback_errors)
-                for season, episode, evaluation in fallback_candidates:
-                    episode_evaluations.append((season, episode, evaluation))
-                    key = (season, episode)
-                    existing = best_episodes_by_key.get(key)
-                    if existing is None or evaluation.total_score > existing.total_score:
-                        best_episodes_by_key[key] = evaluation
 
             all_selected_releases.extend(best_episodes_by_key.values())
 

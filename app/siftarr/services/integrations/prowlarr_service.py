@@ -589,34 +589,27 @@ class ProwlarrService:
         cacheable: bool = True,
         request_id: int | None = None,
     ) -> ProwlarrSearchResult:
-        """Run bounded paginated TV season strategy searches."""
+        """Run paginated TV season strategy searches until Prowlarr is exhausted."""
         if categories is None:
             categories = [5000]
 
         page_size = self.settings.prowlarr_tv_page_size
-        max_pages = self.settings.prowlarr_tv_max_pages_per_query
-        max_results = self.settings.prowlarr_tv_max_results_per_season
         total_query_time_ms = 0
         all_releases: list[ProwlarrRelease] = []
-        hit_limit = False
 
         logger.info(
-            "TV season sweep started: request_id=%s title=%s season=%s source=prowlarr page_size=%s max_pages=%s max_results=%s",
+            "TV season sweep started: request_id=%s title=%s season=%s source=prowlarr page_size=%s",
             request_id,
             title,
             season,
             page_size,
-            max_pages,
-            max_results,
         )
 
         for strategy, _, _ in self._tv_season_strategy_queries(
             title, season, imdbid=imdbid, tvdbid=tvdbid
         ):
-            for page in range(max_pages):
-                if len(all_releases) >= max_results:
-                    hit_limit = True
-                    break
+            page = 0
+            while True:
                 result = await self.search_tv_season_page(
                     title,
                     season,
@@ -629,22 +622,17 @@ class ProwlarrService:
                     request_id=request_id,
                 )
                 total_query_time_ms += result.query_time_ms
-                remaining = max_results - len(all_releases)
-                all_releases.extend(result.releases[:remaining])
-                if len(result.releases) > remaining or len(all_releases) >= max_results:
-                    hit_limit = True
+                all_releases.extend(result.releases)
                 if result.error or result.is_short_page:
                     break
-            else:
-                hit_limit = True
+                page += 1
 
         logger.info(
-            "TV season sweep done: request_id=%s title=%s season=%s total_results=%s hit_limit=%s elapsed_ms=%s source=prowlarr",
+            "TV season sweep done: request_id=%s title=%s season=%s total_results=%s elapsed_ms=%s source=prowlarr",
             request_id,
             title,
             season,
             len(all_releases),
-            hit_limit,
             total_query_time_ms,
         )
         return ProwlarrSearchResult(
@@ -654,7 +642,6 @@ class ProwlarrService:
             page_size=page_size,
             page_count=len(all_releases),
             source="prowlarr",
-            hit_limit=hit_limit,
         )
 
     async def _broad_tv_search(
