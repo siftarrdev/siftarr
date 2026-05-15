@@ -234,7 +234,11 @@ function renderSeasonAccordion(data) {
         '<div class="space-y-1">' + (multiSeasonReleases.map(function(r) { return renderReleaseCard(r, requestId); }).join('') || '<div class="text-gray-500 text-sm py-2">No season pack or complete-series results yet. Use Refresh Search to look again.</div>') + '</div>' +
     '</div>';
 
-    return '<div class="space-y-3">' + syncBanner + multiSeasonSection + tvInfo.seasons.map(function(season) {
+    var panelToggle = '<div class="flex justify-end">' +
+        '<button type="button" data-tv-accordion-toggle="panel" data-request-id="' + requestId + '" aria-expanded="false" onclick="toggleTvDetailsAll(' + requestId + ');" class="text-xs text-brand-300 hover:text-brand-200 underline-offset-2 hover:underline">Expand all</button>' +
+    '</div>';
+
+    return '<div class="space-y-3">' + syncBanner + panelToggle + multiSeasonSection + tvInfo.seasons.map(function(season) {
         var seasonKey = String(season.season_number);
         var seasonBadgeClass = episodeStatusBadge(season.status);
         var seasonReleases = (tvInfo.releases_by_season && tvInfo.releases_by_season[seasonKey]) || [];
@@ -248,7 +252,7 @@ function renderSeasonAccordion(data) {
             var isOpen = episodeReleases.length > 0 ? ' open' : '';
             var episodeBucketHtml = episodeReleasesHtml || '<div class="text-gray-500 text-sm py-2">No cached episode results yet. Refresh Search sweeps requested seasons and stores matching episode releases here.</div>';
 
-            return '<details id="' + episodeDetailsId + '" class="group rounded-lg border border-gray-700/40 bg-surface-800/50"' + isOpen + '>' +
+            return '<details id="' + episodeDetailsId + '" class="group rounded-lg border border-gray-700/40 bg-surface-800/50" ontoggle="window.updateTvAccordionControls && window.updateTvAccordionControls()"' + isOpen + '>' +
                 '<summary class="flex items-center justify-between gap-3 cursor-pointer px-3 py-2 hover:bg-surface-850/60 transition-colors">' +
                     '<div class="flex items-center gap-3 min-w-0 flex-1">' +
                         '<svg class="accordion-chevron w-4 h-4 text-gray-500 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>' +
@@ -275,7 +279,7 @@ function renderSeasonAccordion(data) {
         if (season.unreleased_count) summaryBits.push(season.unreleased_count + ' unreleased');
         var availableText = summaryBits.join(' \u00B7 ');
 
-        return '<details id="season-details-' + requestId + '-' + season.season_number + '" class="group">' +
+        return '<details id="season-details-' + requestId + '-' + season.season_number + '" class="group" ontoggle="window.updateTvAccordionControls && window.updateTvAccordionControls()">' +
             '<summary class="flex items-center justify-between gap-3 cursor-pointer rounded-xl border border-gray-700/60 bg-surface-800 p-3 hover:bg-surface-850/80 transition-colors">' +
                 '<div class="flex items-center gap-3">' +
                     '<svg class="accordion-chevron w-4 h-4 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>' +
@@ -283,6 +287,7 @@ function renderSeasonAccordion(data) {
                     '<span class="text-gray-500 text-xs">' + availableText + '</span>' +
                 '</div>' +
                 '<div class="flex items-center gap-2 shrink-0">' +
+                    '<button type="button" data-tv-accordion-toggle="season" data-request-id="' + requestId + '" data-season-number="' + season.season_number + '" aria-expanded="false" onclick="event.preventDefault(); event.stopPropagation(); toggleTvSeasonDetails(' + requestId + ', ' + season.season_number + ');" class="text-gray-300 hover:text-white text-xs px-2 py-0.5 rounded border border-gray-600 hover:border-gray-500">Expand all</button>' +
                     '<span class="badge ' + seasonBadgeClass + '">' + window.escapeHtml(season.status || 'unknown') + '</span>' +
                     (hasMarkable
                         ? '<button onclick="markSeasonAvailable(' + requestId + ', ' + season.id + '); event.stopPropagation();" class="bg-brand-500 hover:bg-brand-400 text-white text-xs px-2 py-0.5 rounded">Mark All Available</button>'
@@ -412,6 +417,44 @@ function restoreDetailsAccordionState(state) {
             details.open = !!state[details.id];
         }
     });
+    updateTvAccordionControls();
+}
+
+function tvDetailsNodesForRequest(requestId) {
+    return Array.from(document.querySelectorAll('#request-details-releases details[id^="season-details-' + requestId + '-"], #request-details-releases details[id^="episode-details-' + requestId + '-"]'));
+}
+
+function tvSeasonNodes(requestId, seasonNumber) {
+    return Array.from(document.querySelectorAll('#season-details-' + requestId + '-' + seasonNumber + ', #request-details-releases details[id^="episode-details-' + requestId + '-' + seasonNumber + '-"]'));
+}
+
+function setTvAccordionNodesOpen(nodes, open) {
+    nodes.forEach(function(details) { details.open = open; });
+    updateTvAccordionControls();
+}
+
+function toggleTvDetailsAll(requestId) {
+    var nodes = tvDetailsNodesForRequest(requestId);
+    var shouldOpen = nodes.some(function(details) { return !details.open; });
+    setTvAccordionNodesOpen(nodes, shouldOpen);
+}
+
+function toggleTvSeasonDetails(requestId, seasonNumber) {
+    var nodes = tvSeasonNodes(requestId, seasonNumber);
+    var shouldOpen = nodes.some(function(details) { return !details.open; });
+    setTvAccordionNodesOpen(nodes, shouldOpen);
+}
+
+function updateTvAccordionControls() {
+    document.querySelectorAll('[data-tv-accordion-toggle]').forEach(function(button) {
+        var requestId = button.dataset.requestId;
+        var nodes = button.dataset.tvAccordionToggle === 'season'
+            ? tvSeasonNodes(requestId, button.dataset.seasonNumber)
+            : tvDetailsNodesForRequest(requestId);
+        var allOpen = nodes.length > 0 && nodes.every(function(details) { return details.open; });
+        button.textContent = allOpen ? 'Collapse all' : 'Expand all';
+        button.setAttribute('aria-expanded', allOpen ? 'true' : 'false');
+    });
 }
 
 function collapseStagedTvScope(requestId, scope) {
@@ -471,4 +514,7 @@ window.stageRelease = stageRelease;
 window.collapseStagedTvScope = collapseStagedTvScope;
 window.captureDetailsAccordionState = captureDetailsAccordionState;
 window.restoreDetailsAccordionState = restoreDetailsAccordionState;
+window.toggleTvDetailsAll = toggleTvDetailsAll;
+window.toggleTvSeasonDetails = toggleTvSeasonDetails;
+window.updateTvAccordionControls = updateTvAccordionControls;
 window.updateActiveStageBanner = updateActiveStageBanner;

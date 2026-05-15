@@ -106,6 +106,17 @@ def test_dashboard_js_includes_read_only_tv_buckets():
     assert "Larger releases that may cover more than one requested season" in js
     assert "No season pack or complete-series results yet. Use Refresh Search to look again." in js
     assert "No cached episode results yet" in js
+
+
+def test_dashboard_js_includes_tv_details_expand_collapse_controls():
+    js = _read_dashboard_js()
+
+    assert 'data-tv-accordion-toggle="panel"' in js
+    assert 'data-tv-accordion-toggle="season"' in js
+    assert "toggleTvDetailsAll" in js
+    assert "toggleTvSeasonDetails" in js
+    assert "updateTvAccordionControls" in js
+    assert "aria-expanded" in js
     assert "No cached season-pack results yet" in js
     assert "function searchTvRequestAll()" in js
     assert "const streamUrl = '/requests/' + window.currentRequestId + '/search/stream';" in js

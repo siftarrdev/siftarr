@@ -1,6 +1,6 @@
 """Focused tests for dashboard detail release controls."""
 
-from datetime import datetime
+from datetime import date, datetime
 from typing import cast
 from unittest.mock import MagicMock
 
@@ -154,3 +154,47 @@ async def test_tv_details_do_not_overlay_approved_torrent_as_staged(db_session):
         "downloading",
     ]
     assert tv_info.aggregate_counts.get("staged", 0) == 0
+
+
+@pytest.mark.asyncio
+async def test_tv_details_count_completed_as_available_and_unreleased_separate(db_session):
+    request = Request(
+        external_id="tv-completed-unreleased-counts",
+        media_type=MediaType.TV,
+        title="Show",
+        status=RequestStatus.UNRELEASED,
+    )
+    db_session.add(request)
+    await db_session.flush()
+    season = Season(request_id=request.id, season_number=1, status=RequestStatus.UNRELEASED)
+    db_session.add(season)
+    await db_session.flush()
+    db_session.add_all(
+        [
+            Episode(season_id=season.id, episode_number=1, status=RequestStatus.COMPLETED),
+            Episode(
+                season_id=season.id,
+                episode_number=2,
+                status=RequestStatus.UNRELEASED,
+                air_date=date(2026, 5, 1),
+            ),
+        ]
+    )
+    await db_session.commit()
+
+    tv_info = await TVEnrichmentService(db_session).load_tv_info(
+        request_id=request.id,
+        background_tasks=None,
+        releases=[],
+    )
+
+    season_payload = tv_info.seasons[0]
+    assert season_payload["available_count"] == 1
+    assert season_payload["pending_count"] == 0
+    assert season_payload["unreleased_count"] == 1
+    assert tv_info.aggregate_counts == {
+        "available": 1,
+        "pending": 0,
+        "unreleased": 1,
+        "total": 2,
+    }

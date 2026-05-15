@@ -38,7 +38,9 @@ def count_season_episode_states(episodes: list[Any]) -> dict[str, int]:
     counts = {"available": 0, "pending": 0, "unreleased": 0}
     for episode in episodes:
         status = getattr(episode.status, "value", episode.status)
-        if status in counts:
+        if status == RequestStatus.COMPLETED.value:
+            counts["available"] += 1
+        elif status in counts:
             counts[status] += 1
     return counts
 
