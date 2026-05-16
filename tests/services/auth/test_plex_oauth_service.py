@@ -1,6 +1,6 @@
 """Tests for PlexOAuthService."""
 
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import httpx
 
@@ -25,9 +25,8 @@ class TestRequestPin:
     async def test_success(self, mock_get_client):
         """Should return the PIN data on success."""
         mock_client = AsyncMock(spec=httpx.AsyncClient)
-        mock_response = AsyncMock(spec=httpx.Response)
+        mock_response = MagicMock(spec=httpx.Response)
         mock_response.json.return_value = {"id": 123, "code": "abc123"}
-        mock_response.raise_for_status = AsyncMock()
         mock_client.post.return_value = mock_response
         mock_get_client.return_value = mock_client
 
@@ -53,9 +52,8 @@ class TestCheckPin:
     async def test_authorized_returns_auth_token(self, mock_get_client):
         """Should return the full response when authToken is present."""
         mock_client = AsyncMock(spec=httpx.AsyncClient)
-        mock_response = AsyncMock(spec=httpx.Response)
+        mock_response = MagicMock(spec=httpx.Response)
         mock_response.json.return_value = {"id": 123, "authToken": "token123"}
-        mock_response.raise_for_status = AsyncMock()
         mock_client.get.return_value = mock_response
         mock_get_client.return_value = mock_client
 
@@ -66,9 +64,8 @@ class TestCheckPin:
     async def test_pending_returns_no_auth_token(self, mock_get_client):
         """Should return response without authToken when still pending."""
         mock_client = AsyncMock(spec=httpx.AsyncClient)
-        mock_response = AsyncMock(spec=httpx.Response)
+        mock_response = MagicMock(spec=httpx.Response)
         mock_response.json.return_value = {"id": 123}  # No authToken
-        mock_response.raise_for_status = AsyncMock()
         mock_client.get.return_value = mock_response
         mock_get_client.return_value = mock_client
 
@@ -95,7 +92,7 @@ class TestGetUserIdentity:
     async def test_valid_token_returns_user_data(self, mock_get_client):
         """Should return user data for a valid token."""
         mock_client = AsyncMock(spec=httpx.AsyncClient)
-        mock_response = AsyncMock(spec=httpx.Response)
+        mock_response = MagicMock(spec=httpx.Response)
         mock_response.json.return_value = {
             "user": {
                 "id": 1,
@@ -104,7 +101,6 @@ class TestGetUserIdentity:
                 "thumb": "http://example.com/thumb.jpg",
             }
         }
-        mock_response.raise_for_status = AsyncMock()
         mock_client.get.return_value = mock_response
         mock_get_client.return_value = mock_client
 

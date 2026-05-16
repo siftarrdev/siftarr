@@ -7,7 +7,9 @@ from app.siftarr.models.request import MediaType, Request, RequestStatus
 
 @pytest.fixture
 def mock_db():
-    return AsyncMock()
+    db = AsyncMock()
+    db.add = MagicMock()
+    return db
 
 
 @pytest.fixture

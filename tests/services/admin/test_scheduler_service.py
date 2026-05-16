@@ -159,6 +159,8 @@ async def test_poll_overseerr_uses_settings_service_import_helper(monkeypatch):
     """Overseerr polling should call the extracted settings import helper directly."""
 
     db = AsyncMock()
+    db.add = MagicMock()
+    db.execute.return_value = MagicMock(scalar_one_or_none=MagicMock(return_value=None))
     runtime_settings = SimpleNamespace(overseerr_url="https://overseerr", overseerr_api_key="key")
     monkeypatch.setattr(scheduler_service, "get_settings", lambda: runtime_settings)
 
