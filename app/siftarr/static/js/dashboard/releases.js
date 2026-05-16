@@ -247,7 +247,7 @@ function renderSeasonAccordion(data) {
             '<div class="text-white font-medium">Season packs and complete series</div>' +
             '<div class="text-xs text-gray-500">Larger releases that may cover more than one requested season.</div>' +
         '</div>' +
-        '<div class="space-y-1">' + (multiSeasonReleases.map(function(r) { return renderReleaseCard(r, requestId); }).join('') || '<div class="text-gray-500 text-sm py-2">No season pack or complete-series results yet. Use Refresh Search to look again.</div>') + '</div>' +
+        '<div class="space-y-1">' + (multiSeasonReleases.map(function(r) { return renderReleaseCard(r, requestId); }).join('') || '<div class="text-gray-500 text-sm py-2">No season pack or complete-series results yet. Full search refreshes all aired episode and pack results.</div>') + '</div>' +
     '</div>';
 
     var panelToggle = '<div class="flex justify-end">' + renderTvAccordionToggle('panel', requestId) + '</div>';
@@ -264,7 +264,7 @@ function renderSeasonAccordion(data) {
             var episodeReleasesHtml = episodeReleases.map(function(r) { return renderReleaseCard(r, requestId); }).join('');
             var episodeDetailsId = 'episode-details-' + requestId + '-' + season.season_number + '-' + ep.episode_number;
             var isOpen = episodeReleases.length > 0 ? ' open' : '';
-            var episodeBucketHtml = episodeReleasesHtml || '<div class="text-gray-500 text-sm py-2">No cached episode results yet. Refresh Search sweeps requested seasons and stores matching episode releases here.</div>';
+            var episodeBucketHtml = episodeReleasesHtml || '<div class="text-gray-500 text-sm py-2">No cached episode results yet. Search for new checks missing aired episodes; Full search refreshes all aired episode results.</div>';
 
             return '<details id="' + episodeDetailsId + '" class="group rounded-lg border border-gray-700/40 bg-surface-800/50" ontoggle="window.updateTvAccordionControls && window.updateTvAccordionControls()"' + isOpen + '>' +
                 '<summary class="flex items-center justify-between gap-3 cursor-pointer px-3 py-2 hover:bg-surface-850/60 transition-colors">' +
@@ -309,7 +309,7 @@ function renderSeasonAccordion(data) {
                 '</div>' +
             '</summary>' +
             '<div class="mt-2 ml-2 space-y-2">' +
-                '<div class="space-y-1">' + (seasonReleasesHtml || '<div class="text-gray-500 text-sm py-2">No cached season-pack results yet. Refresh Search sweeps requested seasons and stores season-pack matches here.</div>') + '</div>' +
+                '<div class="space-y-1">' + (seasonReleasesHtml || '<div class="text-gray-500 text-sm py-2">No cached season-pack results yet. Full search runs one broad TV pack query and refreshes pack matches here.</div>') + '</div>' +
                 episodeHtml +
             '</div>' +
         '</details>';

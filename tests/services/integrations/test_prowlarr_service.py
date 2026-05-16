@@ -293,6 +293,21 @@ class TestProwlarrService:
         assert calls == [{"type": "search", "query": "Margos Show S02E03", "categories": [5000]}]
 
     @pytest.mark.asyncio
+    async def test_search_tv_packs_broad_uses_one_title_query(self, monkeypatch) -> None:
+        service = ProwlarrService()
+        calls = []
+
+        async def fake_search(params, **kwargs):
+            calls.append(params)
+            return ProwlarrSearchResult(releases=[], query_time_ms=10)
+
+        monkeypatch.setattr(service, "_search", fake_search)
+
+        await service.search_tv_packs_broad("Margo's Show")
+
+        assert calls == [{"type": "search", "query": "Margos Show", "categories": [5000]}]
+
+    @pytest.mark.asyncio
     async def test_search_by_tmdbid_falls_back_to_title_query(self, monkeypatch) -> None:
         """Movie search should retry with a title query when metadata search is empty."""
         service = ProwlarrService()

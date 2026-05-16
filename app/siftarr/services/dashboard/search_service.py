@@ -100,6 +100,7 @@ class SearchService:
         self,
         request: RequestModel,
         progress_callback: SearchProgressCallback | None = None,
+        search_mode: str = "new",
     ) -> dict:
         """Run torrent search for a request and clean up queue state on success."""
         activity_log = ActivityLogService(self.db)
@@ -146,6 +147,7 @@ class SearchService:
                 request.id,
                 search_episodes=True,
                 progress_callback=progress_callback,
+                search_mode=search_mode,
             )
 
         activity_log = ActivityLogService(self.db)

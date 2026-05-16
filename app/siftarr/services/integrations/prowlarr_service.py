@@ -561,6 +561,41 @@ class ProwlarrService:
         )
         return result
 
+    async def search_tv_packs_broad(
+        self,
+        title: str,
+        categories: list[int] | None = None,
+        cacheable: bool = True,
+        request_id: int | None = None,
+        progress_callback: ProgressCallback | None = None,
+    ) -> ProwlarrSearchResult:
+        """Search once for broad TV pack candidates by show title."""
+        if categories is None:
+            categories = [5000]
+        params = {
+            "type": "search",
+            "query": self._normalize_search_title(title),
+            "categories": categories,
+        }
+        result = await self._search(params, cacheable=cacheable)
+        if progress_callback is not None:
+            await progress_callback(
+                {
+                    "phase": "broad_tv_pack_search",
+                    "percent": 58,
+                    "message": f"Broad TV pack query returned {len(result.releases)} release(s).",
+                    "detail": params["query"],
+                }
+            )
+        logger.info(
+            "TV broad pack search loaded: request_id=%s title=%s count=%s source=%s",
+            request_id,
+            title,
+            len(result.releases),
+            result.source or "prowlarr",
+        )
+        return result
+
     async def search_tv_season_page(
         self,
         title: str,
