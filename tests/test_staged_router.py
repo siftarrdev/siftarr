@@ -19,7 +19,9 @@ class TestStagedRouter:
     @pytest.fixture
     def mock_db(self):
         """Create a mock database session."""
-        return AsyncMock()
+        db = AsyncMock()
+        db.add = MagicMock()
+        return db
 
     @pytest.mark.asyncio
     async def test_approve_staged_torrent_logs_rule_accept(self, mock_db, monkeypatch):
