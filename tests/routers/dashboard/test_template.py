@@ -75,22 +75,24 @@ def test_dashboard_js_uses_shared_search_loading_state():
     assert "search-progress-toast" in js
     assert "document.createElement('div')" in js
     assert js.count("window.escapeHtml = escapeHtml;") == 1
-    assert "Refresh Search sweeps requested seasons" in js
+    assert "Search for new checks missing aired episodes" in js
     assert "window.renderMovieSearchLoadingState()" in js
     assert "Searching movie torrents" in js
     assert "Checking indexers now" in js
 
 
-def test_dashboard_tv_details_use_single_search_all_action():
-    """Dashboard TV search UI should expose one Search All/refresh action."""
+def test_dashboard_tv_details_use_new_and_full_search_actions():
+    """Dashboard TV search UI should expose Search for new and Full search actions."""
     with open(
         os.path.join(os.path.dirname(__file__), "../../../app/siftarr/templates/dashboard.html"),
         encoding="utf-8",
     ) as handle:
         template = handle.read()
 
-    assert 'id="request-details-tv-search-btn" onclick="searchTvRequestAll()"' in template
-    assert "Refresh Search" in template
+    assert 'id="request-details-tv-search-btn" onclick="searchTvRequestNew()"' in template
+    assert 'id="request-details-tv-full-search-btn" onclick="searchTvRequestFull()"' in template
+    assert "Search for new" in template
+    assert "Full search" in template
     assert "Search Scope" not in template
     assert "TV Search Scope" not in template
     assert "Search All Pending Episodes" not in template
@@ -104,23 +106,39 @@ def test_dashboard_js_includes_read_only_tv_buckets():
 
     assert "Season packs and complete series" in js
     assert "Larger releases that may cover more than one requested season" in js
-    assert "No season pack or complete-series results yet. Use Refresh Search to look again." in js
+    assert "Full search refreshes all aired episode and pack results." in js
     assert "No cached episode results yet" in js
 
 
 def test_dashboard_js_includes_tv_details_expand_collapse_controls():
     js = _read_dashboard_js()
 
+    shared_toggle_class = (
+        "tv-accordion-toggle inline-flex items-center justify-center rounded-md border "
+        "border-gray-600/80 bg-surface-900/70 px-2.5 py-1 text-xs font-medium "
+        "leading-4 text-gray-200 shadow-sm transition-colors hover:border-brand-400/70 "
+        "hover:bg-surface-800 hover:text-white focus:outline-none focus:ring-2 "
+        "focus:ring-brand-400/60 focus:ring-offset-2 focus:ring-offset-surface-900"
+    )
+
     assert 'data-tv-accordion-toggle="panel"' in js
     assert 'data-tv-accordion-toggle="season"' in js
+    assert "const TV_ACCORDION_TOGGLE_CLASS" in js
+    assert shared_toggle_class in js
+    assert "function renderTvAccordionToggle(scope, requestId, seasonNumber = null)" in js
+    assert "renderTvAccordionToggle('panel', requestId)" in js
+    assert "renderTvAccordionToggle('season', requestId, season.season_number)" in js
     assert "toggleTvDetailsAll" in js
     assert "toggleTvSeasonDetails" in js
     assert "updateTvAccordionControls" in js
     assert "aria-expanded" in js
+    assert "button.textContent = allOpen ? 'Collapse all' : 'Expand all';" in js
+    assert "event.preventDefault(); event.stopPropagation(); toggleTvSeasonDetails" in js
     assert "No cached season-pack results yet" in js
-    assert "function searchTvRequestAll()" in js
-    assert "const streamUrl = '/requests/' + window.currentRequestId + '/search/stream';" in js
-    assert "window.startTvSearchProgress(streamUrl, 'TV Search All: ' + detailsTitle" in js
+    assert "function searchTvRequestNew()" in js
+    assert "function searchTvRequestFull()" in js
+    assert "search/stream?search_mode=' + encodeURIComponent(fullSearch ? 'full' : 'new')" in js
+    assert "window.startTvSearchProgress(streamUrl, modeLabel + ': ' + detailsTitle" in js
     assert "function searchRequestFromDetails()" in js
     assert (
         "window.openRequestDetails(window.currentRequestId, window.currentDetailsIndex, { preserveUiState: true })"
@@ -137,7 +155,7 @@ def test_dashboard_details_auto_search_and_reload_hooks():
     assert "window.detailsAutoSearchStarted = window.detailsAutoSearchStarted || {};" in js
     assert "delete window.detailsAutoSearchStarted[requestId];" in js
     assert "if (data.auto_search_eligible && !window.detailsAutoSearchStarted[requestId])" in js
-    assert "window.searchTvRequestAll({ auto: true });" in js
+    assert "window.searchTvRequestNew({ auto: true });" in js
     assert "window.searchRequestFromDetails({ auto: true });" in js
     assert "if (!data || data.reload_details !== false)" in js
     assert (

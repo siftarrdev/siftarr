@@ -173,10 +173,9 @@ class Settings(BaseSettings):
 
     # Prowlarr TV season-sweep settings
     prowlarr_tv_page_size: int = Field(default=100, ge=1, le=500)
-    prowlarr_tv_max_pages_per_query: int = Field(default=6, ge=1, le=50)
-    prowlarr_tv_max_results_per_season: int = Field(default=600, ge=1, le=5000)
-    prowlarr_tv_strategy_title_sxx_enabled: bool = True
-    prowlarr_tv_strategy_imdb_enabled: bool = True
+    prowlarr_tv_max_pages_per_strategy: int = Field(default=15, ge=1, le=500)
+    prowlarr_tv_strategy_title_sxx_enabled: bool = False
+    prowlarr_tv_strategy_imdb_enabled: bool = False
     prowlarr_tv_strategy_title_season_token_enabled: bool = True
     prowlarr_tv_strategy_tvdb_enabled: bool = False
 

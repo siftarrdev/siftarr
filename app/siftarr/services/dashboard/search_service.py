@@ -1,6 +1,7 @@
 """Search service for request processing and manual release selection."""
 
 import logging
+from collections.abc import Awaitable, Callable
 from copy import copy
 from time import perf_counter
 from typing import Any
@@ -56,6 +57,8 @@ from app.siftarr.services.utils.media_helpers import extract_media_title_and_yea
 
 logger = logging.getLogger(__name__)
 
+SearchProgressCallback = Callable[[dict[str, Any]], Awaitable[None]]
+
 
 class SearchService:
     """Service for running torrent searches and processing manual release selections."""
@@ -96,6 +99,8 @@ class SearchService:
     async def process_request_search(
         self,
         request: RequestModel,
+        progress_callback: SearchProgressCallback | None = None,
+        search_mode: str = "new",
     ) -> dict:
         """Run torrent search for a request and clean up queue state on success."""
         activity_log = ActivityLogService(self.db)
@@ -138,7 +143,12 @@ class SearchService:
             # Dashboard-triggered searches for TV shows search for season packs,
             # multi-season packs, AND individual PENDING episodes so that all
             # unresolved episodes are covered in a single search pass.
-            result = await decision_service.process_request(request.id, search_episodes=True)
+            result = await decision_service.process_request(
+                request.id,
+                search_episodes=True,
+                progress_callback=progress_callback,
+                search_mode=search_mode,
+            )
 
         activity_log = ActivityLogService(self.db)
         await activity_log.log(

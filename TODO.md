@@ -1,6 +1,7 @@
 ## New Features
-- tv shows with unreleased episodes, but all released episodes are available should be in the unreleased section and not show in the pending search section
 
-- in the details panel please add a collapse|expand all toggle button for everything, and then also one for each season.
 
 ## Bugs
+- tv episode searches dont seem to find all releases. we seem to hard cap at 600 results, but there are more than 600 releases for some seasons of tv shows. we should remove the cap and just show all results. 
+
+- slightly re work the expand all colapse all to harmonise the design elements of them 

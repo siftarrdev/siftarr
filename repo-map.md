@@ -33,7 +33,7 @@ Primary flow:
 
 1. Overseerr webhook or manual action creates/syncs a request
 2. Browser access is gated by Plex SSO; the first Plex login claims the instance as the sole admin and must finish an initial full Plex sync before reaching protected pages, while API-key auth remains for webhooks/integrations
-3. Search and decision services query Prowlarr and evaluate releases (TV dashboard search uses one Search All stream that runs bounded paginated season sweeps and classifies stored coverage)
+3. Search and decision services query Prowlarr and evaluate releases (TV dashboard “Search for new” uses targeted exact `SxxEyy` searches for missing/actionable aired episodes; “Full search” refreshes all aired episode results and runs one broad TV pack query)
 4. Winning releases are staged or sent to qBittorrent
 5. Background services track retries, lifecycle state, Plex polling, and completion
 6. Dashboard, Stats, and settings UI expose control and visibility; request details can filter/sort stored release results
@@ -125,7 +125,7 @@ HTTP route layer.
 - `dashboard.py` — main dashboard page routes
 - `dashboard_api.py` — dashboard JSON endpoints for details/search data, including validated detail-release filter/sort query controls
 - `dashboard_actions.py` — dashboard-triggered actions and mutations
-- `search_sse.py` — SSE streaming endpoints for live search progress; `/requests/{id}/search/stream` is the primary TV Search All path, while TV scope-specific streams remain compatibility/debug inspect paths
+- `search_sse.py` — SSE streaming endpoints for live search progress; `/requests/{id}/search/stream` supports TV `search_mode=new|full`, while TV scope-specific streams remain compatibility/debug inspect paths
 - `rules.py` — rule management UI/API, including unified rule listing, multi-title testing, modal import/export, and create/edit actions
 - `settings.py` — settings UI (connection test/save/reset, scheduler interval save/reset, staging toggle, Plex rescan, Overseerr sync, cache/reseed actions, SSE progress streams, API key management, Plex SSO status, qBit mover enable/paths/retention settings and manual trigger), uses SettingsStore for DB-backed persistence and keeps the SSO-managed Plex token out of connection saves/resets
 - `stats.py` — protected Stats page and JSON data endpoint for all-time, preset, and custom date ranges
@@ -162,11 +162,11 @@ Business logic and integrations, organized into thematic subpackages:
 - `rule_engine.py` — release filtering and scoring evaluation; module-level rule version cache (`_rule_version`)
 - `rule_service.py` — CRUD/order logic for rules, import/export validation, and empty-database default-rule seeding from configured `rules.json`
 - `decision_pipeline.py` — shared decision pipeline helpers (rule loading, activity logging, pending queue, best-release selection)
-- `tv_decision_service.py` — TV-specific decision logic (season sweeps, episode fallback)
+- `tv_decision_service.py` — TV-specific decision logic (targeted exact episode search, Full-search broad pack evaluation, actionable staged selection)
 - `movie_decision_service.py` — movie-specific decision logic
 
 **`integrations/`** — External service adapters
-- `prowlarr_service.py` — Prowlarr indexer integration; LRU search cache (45s TTL, 50 entries), bounded paginated TV sweeps
+- `prowlarr_service.py` — Prowlarr indexer integration; LRU search cache (45s TTL, 50 entries), TV exact-episode, broad-pack, and guarded season-search helpers
 - `qbittorrent_service.py` — qBittorrent download client integration; includes serialized `save_path`/`seeding_time` access, listing completed torrents, `set_torrent_location()` with `move=True`, and batch delete with `delete_files=False`
 - `overseerr_service.py` — Overseerr request management integration
 - `connection_tester.py` — external connectivity test helpers
@@ -216,7 +216,7 @@ Static assets.
 - `css/dashboard.css` — supplemental UI styling
 - `css/tailwind.css` — built Tailwind CSS output (generated, committed)
 - `css/tailwind-input.css` — Tailwind CSS v4 input with CSS-based theme configuration and custom component classes
-- `js/dashboard*.js` and `js/dashboard/` — dashboard client-side behavior, filters, details-modal release controls, staged actions, single-action TV Search All/read-only bucket UI, movie release search UX, and SSE progress panel; polls move status fields in download-status endpoint and shows badges/paths
+- `js/dashboard*.js` and `js/dashboard/` — dashboard client-side behavior, filters, details-modal release controls, staged actions, TV “Search for new”/“Full search” controls, movie release search UX, and SSE progress panel; polls move status fields in download-status endpoint and shows badges/paths
 - `js/stats.js` — Stats API fetch/range handling and lightweight bar chart rendering
 - favicon assets
 

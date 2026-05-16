@@ -117,6 +117,9 @@ function startSearchProgress(requestId, title, onComplete, onError) {
         const bar = getProgressBar();
         const status = getProgressStatus();
         const titleEl = getProgressTitle();
+        const subtitle = getProgressSubtitle();
+        const activeWrap = getProgressActiveWrap();
+        const activeList = getProgressActiveList();
 
         if (data.percent !== undefined && bar) {
             bar.style.width = data.percent + '%';
@@ -124,21 +127,26 @@ function startSearchProgress(requestId, title, onComplete, onError) {
         if (data.message && status) {
             status.textContent = data.message;
         }
+        if (subtitle) {
+            if (data.subtitle) {
+                subtitle.textContent = data.subtitle;
+            } else if (data.detail) {
+                subtitle.textContent = data.detail;
+            }
+        }
+        if (activeWrap && activeList && Array.isArray(data.active) && data.active.length > 0) {
+            activeWrap.classList.remove('hidden');
+            activeList.innerHTML = data.active.map(function(item) {
+                return '<li class="text-xs truncate">' + window.escapeHtml(String(item)) + '</li>';
+            }).join('');
+        }
         if (title && titleEl) {
             titleEl.textContent = title;
         }
 
         if (data.phase) {
+            if (bar) setPhaseStyles(bar, data.phase);
             switch (data.phase) {
-                case 'starting':
-                    if (bar) bar.style.width = '5%';
-                    break;
-                case 'backfilling':
-                    if (bar) bar.style.width = '15%';
-                    break;
-                case 'searching':
-                    if (bar) bar.style.width = '50%';
-                    break;
                 case 'complete':
                     finished = true;
                     if (bar) {

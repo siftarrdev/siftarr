@@ -175,6 +175,7 @@ async function openRequestDetails(requestId, explicitIndex = null, options = {})
     const refreshPlexBtn = document.getElementById('request-details-refresh-plex');
     const searchBtn = document.getElementById('request-details-search-btn');
     const tvSearchBtn = document.getElementById('request-details-tv-search-btn');
+    const tvFullSearchBtn = document.getElementById('request-details-tv-full-search-btn');
     const filterInput = document.getElementById('release-filter-input');
     window.ensureDetailsControlHandlers();
 
@@ -211,6 +212,9 @@ async function openRequestDetails(requestId, explicitIndex = null, options = {})
     }
     if (tvSearchBtn) {
         tvSearchBtn.classList.add('hidden');
+    }
+    if (tvFullSearchBtn) {
+        tvFullSearchBtn.classList.add('hidden');
     }
     window.currentTvSeasons = [];
     window.updateActiveStageBanner({ active_staged_torrent: null });
@@ -273,6 +277,9 @@ async function openRequestDetails(requestId, explicitIndex = null, options = {})
         if (data.request.media_type === 'tv' && tvSearchBtn) {
             tvSearchBtn.classList.remove('hidden');
         }
+        if (data.request.media_type === 'tv' && tvFullSearchBtn) {
+            tvFullSearchBtn.classList.remove('hidden');
+        }
 
         window.currentReleases = data.releases || [];
         window.currentDetailsData = data;
@@ -316,8 +323,8 @@ async function openRequestDetails(requestId, explicitIndex = null, options = {})
         if (data.auto_search_eligible && !window.detailsAutoSearchStarted[requestId]) {
             window.detailsAutoSearchStarted[requestId] = true;
             if (data.request.media_type === 'tv') {
-                releases.innerHTML = '<div class="text-gray-500 text-sm">Searching indexers for TV results...</div>';
-                window.searchTvRequestAll({ auto: true });
+                releases.innerHTML = '<div class="text-gray-500 text-sm">Searching indexers for new TV results...</div>';
+                window.searchTvRequestNew({ auto: true });
             } else {
                 releases.innerHTML = window.renderMovieSearchLoadingState();
                 window.searchRequestFromDetails({ auto: true });
@@ -333,30 +340,49 @@ async function openRequestDetails(requestId, explicitIndex = null, options = {})
     }
 }
 
-async function searchTvRequestAll() {
+async function searchTvRequest(mode = 'new') {
     if (!window.currentRequestId) return;
-    const btn = document.getElementById('request-details-tv-search-btn');
+    const fullSearch = mode === 'full';
+    const btn = document.getElementById(fullSearch ? 'request-details-tv-full-search-btn' : 'request-details-tv-search-btn');
+    const otherBtn = document.getElementById(fullSearch ? 'request-details-tv-search-btn' : 'request-details-tv-full-search-btn');
     const originalText = btn ? btn.innerHTML : '';
     if (btn) {
         btn.disabled = true;
         btn.textContent = 'Searching...';
     }
-    const detailsTitle = document.getElementById('request-details-title')?.textContent?.trim() || 'TV Search All';
-    const streamUrl = '/requests/' + window.currentRequestId + '/search/stream';
-    window.startTvSearchProgress(streamUrl, 'TV Search All: ' + detailsTitle, async function(data) {
+    if (otherBtn) otherBtn.disabled = true;
+    const modeLabel = fullSearch ? 'Full search' : 'Search for new';
+    const fallbackLabel = fullSearch ? 'Full search' : 'Search for new';
+    const detailsTitle = document.getElementById('request-details-title')?.textContent?.trim() || modeLabel;
+    const streamUrl = '/requests/' + window.currentRequestId + '/search/stream?search_mode=' + encodeURIComponent(fullSearch ? 'full' : 'new');
+    window.startTvSearchProgress(streamUrl, modeLabel + ': ' + detailsTitle, async function(data) {
         if (!data || data.reload_details !== false) {
             await window.openRequestDetails(window.currentRequestId, window.currentDetailsIndex, { preserveUiState: true });
         }
         if (btn) {
             btn.disabled = false;
-            btn.innerHTML = originalText || 'Refresh Search';
+            btn.innerHTML = originalText || fallbackLabel;
         }
+        if (otherBtn) otherBtn.disabled = false;
     }, function() {
         if (btn) {
             btn.disabled = false;
-            btn.innerHTML = originalText || 'Refresh Search';
+            btn.innerHTML = originalText || fallbackLabel;
         }
+        if (otherBtn) otherBtn.disabled = false;
     });
+}
+
+async function searchTvRequestNew() {
+    return searchTvRequest('new');
+}
+
+async function searchTvRequestFull() {
+    return searchTvRequest('full');
+}
+
+async function searchTvRequestAll() {
+    return searchTvRequestNew();
 }
 
 async function refreshPlexAndReload() {
@@ -496,4 +522,7 @@ window.updateReleaseCountText = updateReleaseCountText;
 window.applyLocalReleaseSort = applyLocalReleaseSort;
 window.refreshPlexAndReload = refreshPlexAndReload;
 window.searchRequestFromDetails = searchRequestFromDetails;
+window.searchTvRequest = searchTvRequest;
+window.searchTvRequestNew = searchTvRequestNew;
+window.searchTvRequestFull = searchTvRequestFull;
 window.searchTvRequestAll = searchTvRequestAll;

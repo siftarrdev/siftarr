@@ -24,7 +24,7 @@ async def test_stream_search_request_yields_phases_and_result(mock_db, monkeypat
     monkeypatch.setattr(search_sse, "load_request_or_404", fake_load)
 
     process_search = AsyncMock(return_value={"status": "completed", "message": "Found 5 releases"})
-    monkeypatch.setattr(search_service_mod.SearchService, "process_request_search", process_search)
+    monkeypatch.setattr(search_sse.SearchService, "process_request_search", process_search)
 
     response = await search_sse.stream_search_request(request_id=1, db=mock_db)
     chunks = []
@@ -49,8 +49,8 @@ async def test_stream_search_request_yields_phases_and_result(mock_db, monkeypat
 
 
 @pytest.mark.asyncio
-async def test_stream_search_request_tv_search_all_reload_signal(mock_db, monkeypatch):
-    """Request-level TV stream is the Search All path and tells clients to reload DB buckets."""
+async def test_stream_search_request_tv_search_for_new_reload_signal(mock_db, monkeypatch):
+    """Request-level TV stream defaults to Search for new and reloads DB buckets."""
     request_record = MagicMock()
     request_record.title = "Test Show"
     request_record.year = 2020
@@ -62,7 +62,19 @@ async def test_stream_search_request_tv_search_all_reload_signal(mock_db, monkey
 
     monkeypatch.setattr(search_sse, "load_request_or_404", fake_load)
 
-    process_search = AsyncMock(return_value={"status": "staged", "message": "Selected pack"})
+    async def fake_process(request, progress_callback=None, search_mode="new"):
+        assert progress_callback is not None
+        assert search_mode == "new"
+        await progress_callback(
+            {
+                "phase": "starting",
+                "percent": 5,
+                "message": "Starting TV Search for new for Test Show…",
+            }
+        )
+        return {"status": "staged", "message": "Selected pack"}
+
+    process_search = AsyncMock(side_effect=fake_process)
     monkeypatch.setattr(search_service_mod.SearchService, "process_request_search", process_search)
 
     response = await search_sse.stream_search_request(request_id=1, db=mock_db)
@@ -71,12 +83,55 @@ async def test_stream_search_request_tv_search_all_reload_signal(mock_db, monkey
         chunks.append(chunk)
     body = "".join(chunks)
 
-    process_search.assert_awaited_once_with(request_record)
-    assert "Starting TV Search All for Test Show" in body
-    assert "Sweeping requested seasons across indexer pages" in body
-    assert "evaluated releases, applied auto-stage/select rules" in body
+    assert process_search.await_args is not None
+    args, kwargs = process_search.await_args
+    assert args == (request_record,)
+    assert callable(kwargs.get("progress_callback"))
+    assert kwargs.get("search_mode") == "new"
+    assert "Starting TV Search for new for Test Show" in body
+    assert "TV Search for new complete" in body
+    assert "applied auto-stage/select rules for actionable episodes" in body
     assert '"reload_details": true' in body
     assert '"buckets_source": "db"' in body
+
+
+@pytest.mark.asyncio
+async def test_stream_search_request_tv_full_search_mode(mock_db, monkeypatch):
+    request_record = MagicMock()
+    request_record.title = "Test Show"
+    request_record.year = 2020
+    request_record.tmdb_id = 123
+    request_record.media_type = MediaType.TV
+
+    async def fake_load(db, req_id):
+        return request_record
+
+    async def fake_process(request, progress_callback=None, search_mode="new"):
+        assert progress_callback is not None
+        assert search_mode == "full"
+        await progress_callback(
+            {
+                "phase": "broad_tv_pack_search_starting",
+                "percent": 79,
+                "message": "Running one broad TV pack query for Full search…",
+            }
+        )
+        return {"status": "pending", "message": "Refreshed"}
+
+    monkeypatch.setattr(search_sse, "load_request_or_404", fake_load)
+    process_search = AsyncMock(side_effect=fake_process)
+    monkeypatch.setattr(search_service_mod.SearchService, "process_request_search", process_search)
+
+    response = await search_sse.stream_search_request(request_id=1, search_mode="full", db=mock_db)
+    chunks = []
+    async for chunk in response.body_iterator:
+        chunks.append(chunk)
+    body = "".join(chunks)
+
+    assert process_search.await_args is not None
+    assert process_search.await_args.kwargs["search_mode"] == "full"
+    assert "Running one broad TV pack query for Full search" in body
+    assert "TV Full search complete" in body
 
 
 @pytest.mark.asyncio
@@ -93,7 +148,8 @@ async def test_stream_search_request_continues_after_client_disconnect(mock_db, 
     search_started = asyncio.Event()
     allow_search_finish = asyncio.Event()
 
-    async def fake_process(request):
+    async def fake_process(request, progress_callback=None):
+        assert progress_callback is None
         search_started.set()
         await allow_search_finish.wait()
         return {"status": "completed"}
@@ -111,7 +167,62 @@ async def test_stream_search_request_continues_after_client_disconnect(mock_db, 
     allow_search_finish.set()
     await asyncio.sleep(0)
 
-    process_search.assert_awaited_once_with(request_record)
+    process_search.assert_awaited_once_with(request_record, progress_callback=None)
+
+
+@pytest.mark.asyncio
+async def test_stream_search_request_tv_streams_progress_callback_events(mock_db, monkeypatch):
+    request_record = MagicMock()
+    request_record.title = "Test Show"
+    request_record.year = 2020
+    request_record.tmdb_id = 123
+    request_record.media_type = MediaType.TV
+
+    async def fake_load(db, req_id):
+        return request_record
+
+    async def fake_process(request, progress_callback=None, search_mode="new"):
+        assert request is request_record
+        assert progress_callback is not None
+        assert search_mode == "new"
+        await progress_callback(
+            {
+                "phase": "season_query",
+                "percent": 22,
+                "message": "Searching season 1 with one normalized season query…",
+                "subtitle": "Page size 100",
+            }
+        )
+        await progress_callback(
+            {
+                "phase": "season_stop",
+                "percent": 45,
+                "message": "Stopped season 1: page had no new releases.",
+                "detail": "100 unique release(s) kept.",
+            }
+        )
+        return {"status": "staged", "message": "Selected pack"}
+
+    monkeypatch.setattr(search_sse, "load_request_or_404", fake_load)
+    monkeypatch.setattr(
+        search_service_mod.SearchService,
+        "process_request_search",
+        AsyncMock(side_effect=fake_process),
+    )
+
+    response = await search_sse.stream_search_request(request_id=1, db=mock_db)
+    chunks = []
+    async for chunk in response.body_iterator:
+        chunks.append(chunk)
+    body = "".join(chunks)
+
+    assert '"phase": "season_query"' in body
+    assert '"percent": 22' in body
+    assert "Searching season 1 with one normalized season query" in body
+    assert '"subtitle": "Page size 100"' in body
+    assert '"phase": "season_stop"' in body
+    assert '"detail": "100 unique release(s) kept."' in body
+    assert '"phase": "complete"' in body
 
 
 @pytest.mark.asyncio

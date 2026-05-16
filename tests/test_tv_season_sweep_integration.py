@@ -41,41 +41,51 @@ class FakeIPTProwlarr(ProwlarrService):
         super().__init__(
             Settings(
                 prowlarr_tv_page_size=100,
-                prowlarr_tv_max_pages_per_query=5,
-                prowlarr_tv_max_results_per_season=300,
+                prowlarr_tv_strategy_title_sxx_enabled=True,
                 prowlarr_tv_strategy_imdb_enabled=False,
                 prowlarr_tv_strategy_title_season_token_enabled=False,
                 prowlarr_tv_strategy_tvdb_enabled=False,
             )
         )
-        self.calls: list[dict] = []
+        self.exact_episode_calls: list[tuple[int, int]] = []
+        self.pack_calls = 0
 
-    async def _search(self, params: dict, cacheable: bool = True) -> ProwlarrSearchResult:
-        self.calls.append(params)
-        offset = params["offset"]
-        if offset == 0:
-            releases = [
-                _release("Show.S01E01.1080p", 1, info_hash="exact-s01e01"),
-                _release("Show.S02E01.1080p", 2, info_hash="exact-s02e01"),
-                _release("Show.S01.1080p", 3, info_hash="season-s01"),
-                _release("Show.S01-S02.1080p", 4, info_hash="multi-s01-s02"),
-                _release("Show.S01E03.REJECT.1080p", 5, info_hash="rejected-s01e03"),
-            ]
-            releases.extend(
-                _release(f"Show.Unrelated.Result.{i:03d}.1080p", i, info_hash=f"filler-{i}")
-                for i in range(5, 100)
-            )
-        elif offset == 100:
-            releases = [
-                _release("Show.S01E01.1080p", 101, info_hash="exact-s01e01"),
-                _release("Show.S01E02.1080p", 102, info_hash="exact-s01e02"),
-            ]
-            releases.extend(
-                _release(f"Show.Final.Page.{i:03d}.1080p", i, info_hash=f"final-filler-{i}")
-                for i in range(103, 111)
-            )
-        else:
-            releases = []
+    async def search_tv_episode_exact(
+        self,
+        title: str,
+        season: int,
+        episode: int,
+        categories: list[int] | None = None,
+        cacheable: bool = True,
+        request_id: int | None = None,
+        progress_callback=None,
+    ) -> ProwlarrSearchResult:
+        self.exact_episode_calls.append((season, episode))
+        releases_by_episode = {
+            (1, 1): [_release("Show.S01E01.1080p", 1, info_hash="exact-s01e01")],
+            (1, 2): [_release("Show.S01E02.1080p", 2, info_hash="exact-s01e02")],
+            (1, 3): [_release("Show.S01E03.REJECT.1080p", 3, info_hash="rejected-s01e03")],
+            (2, 1): [_release("Show.S02E01.1080p", 4, info_hash="exact-s02e01")],
+        }
+        return ProwlarrSearchResult(
+            releases=releases_by_episode.get((season, episode), []),
+            query_time_ms=10,
+        )
+
+    async def search_tv_packs_broad(
+        self,
+        title: str,
+        categories: list[int] | None = None,
+        cacheable: bool = True,
+        request_id: int | None = None,
+        progress_callback=None,
+    ) -> ProwlarrSearchResult:
+        self.pack_calls += 1
+        releases = [
+            _release("Show.S01E01.1080p", 101, info_hash="exact-s01e01"),
+            _release("Show.S01.1080p", 102, info_hash="season-s01"),
+            _release("Show.S01-S02.1080p", 103, info_hash="multi-s01-s02"),
+        ]
         return ProwlarrSearchResult(releases=releases, query_time_ms=10)
 
 
@@ -114,6 +124,7 @@ class FakeCappedEpisodeGapProwlarr(ProwlarrService):
         categories: list[int] | None = None,
         cacheable: bool = True,
         request_id: int | None = None,
+        progress_callback=None,
     ) -> ProwlarrSearchResult:
         self.swept_seasons.append(season)
         return ProwlarrSearchResult(
@@ -122,22 +133,21 @@ class FakeCappedEpisodeGapProwlarr(ProwlarrService):
             hit_limit=True,
         )
 
-    async def search_by_tvdbid(
+    async def search_tv_episode_exact(
         self,
-        tvdbid: int,
-        title: str | None = None,
-        season: int | None = None,
-        episode: int | None = None,
-        year: int | None = None,
+        title: str,
+        season: int,
+        episode: int,
         categories: list[int] | None = None,
         cacheable: bool = True,
+        request_id: int | None = None,
+        progress_callback=None,
     ) -> ProwlarrSearchResult:
-        assert season is not None and episode is not None
         self.exact_episode_calls.append((season, episode))
-        return ProwlarrSearchResult(
-            releases=[_release("Show.S02E01.1080p", 1, info_hash="s02e01-exact")],
-            query_time_ms=10,
-        )
+        releases = []
+        if (season, episode) == (2, 2):
+            releases = [_release("Show.S02E02.1080p", 2, info_hash="s02e02-exact")]
+        return ProwlarrSearchResult(releases=releases, query_time_ms=10)
 
 
 class FakeCappedGeorgieProwlarr(ProwlarrService):
@@ -155,6 +165,7 @@ class FakeCappedGeorgieProwlarr(ProwlarrService):
         categories: list[int] | None = None,
         cacheable: bool = True,
         request_id: int | None = None,
+        progress_callback=None,
     ) -> ProwlarrSearchResult:
         self.swept_seasons.append(season)
         if season == 1:
@@ -176,25 +187,35 @@ class FakeCappedGeorgieProwlarr(ProwlarrService):
             ]
         return ProwlarrSearchResult(releases=releases, query_time_ms=10, hit_limit=True)
 
-    async def search_by_tvdbid(
+    async def search_tv_episode_exact(
         self,
-        tvdbid: int,
-        title: str | None = None,
-        season: int | None = None,
-        episode: int | None = None,
-        year: int | None = None,
+        title: str,
+        season: int,
+        episode: int,
         categories: list[int] | None = None,
         cacheable: bool = True,
+        request_id: int | None = None,
+        progress_callback=None,
     ) -> ProwlarrSearchResult:
-        assert season is not None and episode is not None
         self.exact_episode_calls.append((season, episode))
-        if (season, episode) == (2, 1):
+        if season == 1 and episode == 1:
             return ProwlarrSearchResult(
                 releases=[
                     _release(
-                        "Georgie.And.Mandys.First.Marriage.S02E01.1080p.WEB-DL",
+                        "Georgie.And.Mandys.First.Marriage.S01E01.1080p.WEB-DL",
                         1,
-                        info_hash="georgie-s02e01-fallback",
+                        info_hash="georgie-s01e01-exact",
+                    )
+                ],
+                query_time_ms=10,
+            )
+        if season == 2 and 12 <= episode <= 18:
+            return ProwlarrSearchResult(
+                releases=[
+                    _release(
+                        f"Georgie.and.Mandys.First.Marriage.S02E{episode:02d}.1080p.WEB-DL",
+                        episode,
+                        info_hash=f"georgie-s02e{episode:02d}-exact",
                     )
                 ],
                 query_time_ms=10,
@@ -251,14 +272,14 @@ async def test_tv_request_season_sweep_persists_buckets_and_statuses(monkeypatch
 
             monkeypatch.setattr(service, "_get_rule_engine", fake_rule_engine)
 
-            result = await service.process_request(request.id)
+            result = await service.process_request(request.id, search_mode="full")
 
             assert result["status"] == "staged"
-            assert [call["offset"] for call in prowlarr.calls] == [0, 100, 0, 100]
-            assert all("limit" not in call for call in prowlarr.calls)
+            assert prowlarr.exact_episode_calls == [(1, 1), (1, 2), (1, 3), (2, 1)]
+            assert prowlarr.pack_calls == 1
 
             stored = (await db.execute(select(Release))).scalars().all()
-            assert len(stored) == 109  # 110 returned across pages, one duplicate info hash.
+            assert len(stored) == 6  # Exact episodes plus broad pack results, with one duplicate.
             by_title = {release.title: release for release in stored}
             assert by_title["Show.S01E01.1080p"].episode_number == 1
             assert by_title["Show.S01.1080p"].season_number == 1
@@ -275,8 +296,8 @@ async def test_tv_request_season_sweep_persists_buckets_and_statuses(monkeypatch
                 background_tasks=BackgroundTasks(),
                 limit=25,
             )
-            assert details.total_releases == 109
-            assert len(details.releases) == 25
+            assert details.total_releases == 6
+            assert len(details.releases) == 6
             assert details.tv_info is not None
             assert "1" in details.tv_info.releases_by_season
             assert "2" in details.tv_info.releases_by_season
@@ -290,7 +311,7 @@ async def test_tv_request_season_sweep_persists_buckets_and_statuses(monkeypatch
 
 
 @pytest.mark.asyncio
-async def test_capped_season_sweep_exact_fallback_fills_detail_episode_bucket(
+async def test_limited_season_sweep_does_not_trigger_exact_fallback(
     monkeypatch,
 ) -> None:
     engine = create_async_engine("sqlite+aiosqlite:///:memory:")
@@ -342,14 +363,11 @@ async def test_capped_season_sweep_exact_fallback_fills_detail_episode_bucket(
             result = await service.process_request(request.id)
 
             assert result["status"] == "staged"
-            assert prowlarr.swept_seasons == [2]
-            assert prowlarr.exact_episode_calls == [(2, 1)]
+            assert prowlarr.swept_seasons == []
+            assert prowlarr.exact_episode_calls == [(2, 1), (2, 2)]
 
             stored = (await db.execute(select(Release))).scalars().all()
-            assert {release.title for release in stored} == {
-                "Show.S02E01.1080p",
-                "Show.S02E02.1080p",
-            }
+            assert {release.title for release in stored} == {"Show.S02E02.1080p"}
 
             details = await DetailService(db).load_request_details(
                 request,
@@ -358,13 +376,13 @@ async def test_capped_season_sweep_exact_fallback_fills_detail_episode_bucket(
                 limit=25,
             )
             assert details.tv_info is not None
-            assert set(details.tv_info.releases_by_episode) == {"2-1", "2-2"}
+            assert set(details.tv_info.releases_by_episode) == {"2-2"}
     finally:
         await engine.dispose()
 
 
 @pytest.mark.asyncio
-async def test_capped_georgie_fallback_preserves_sweep_episode_rows_in_db_and_details(
+async def test_georgie_sweep_episode_rows_persist_without_exact_fallbacks(
     monkeypatch,
 ) -> None:
     engine = create_async_engine("sqlite+aiosqlite:///:memory:")
@@ -417,15 +435,15 @@ async def test_capped_georgie_fallback_preserves_sweep_episode_rows_in_db_and_de
             result = await service.process_request(request.id)
 
             assert result["status"] == "staged"
-            assert prowlarr.swept_seasons == [1, 2]
-            assert (2, 1) in prowlarr.exact_episode_calls
-            assert all(
-                (2, episode) not in prowlarr.exact_episode_calls for episode in range(12, 19)
-            )
+            assert prowlarr.swept_seasons == []
+            assert prowlarr.exact_episode_calls == [
+                (1, 1),
+                *((2, episode) for episode in range(1, 23)),
+            ]
 
             stored = (await db.execute(select(Release))).scalars().all()
             stored_titles = {release.title for release in stored}
-            assert "Georgie.And.Mandys.First.Marriage.S02E01.1080p.WEB-DL" in stored_titles
+            assert "Georgie.And.Mandys.First.Marriage.S02E01.1080p.WEB-DL" not in stored_titles
             for episode in range(12, 19):
                 assert (
                     f"Georgie.and.Mandys.First.Marriage.S02E{episode:02d}.1080p.WEB-DL"
@@ -442,6 +460,6 @@ async def test_capped_georgie_fallback_preserves_sweep_episode_rows_in_db_and_de
             s2_episode_keys = {
                 key for key in details.tv_info.releases_by_episode if key.startswith("2-")
             }
-            assert {"2-1", *(f"2-{episode}" for episode in range(12, 19))} <= s2_episode_keys
+            assert {*(f"2-{episode}" for episode in range(12, 19))} <= s2_episode_keys
     finally:
         await engine.dispose()

@@ -3,7 +3,7 @@
 import asyncio
 import logging
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -32,12 +32,22 @@ async def _new_detached_session() -> AsyncSession:
 
 
 async def _run_request_search_detached(
-    request_id: int, fallback_db: AsyncSession | None = None
+    request_id: int,
+    fallback_db: AsyncSession | None = None,
+    progress_callback=None,
+    search_mode: str = "new",
 ) -> dict:
     if database.async_session_maker is None and fallback_db is not None:
         request = await load_request_or_404(fallback_db, request_id)
         service = SearchService(fallback_db)
-        result = await service.process_request_search(request)
+        if request.media_type == MediaType.TV:
+            result = await service.process_request_search(
+                request, progress_callback=progress_callback, search_mode=search_mode
+            )
+        else:
+            result = await service.process_request_search(
+                request, progress_callback=progress_callback
+            )
         return {
             "request_id": request_id,
             "title": request.title,
@@ -48,7 +58,14 @@ async def _run_request_search_detached(
     async with await _new_detached_session() as db:
         request = await load_request_or_404(db, request_id)
         service = SearchService(db)
-        result = await service.process_request_search(request)
+        if request.media_type == MediaType.TV:
+            result = await service.process_request_search(
+                request, progress_callback=progress_callback, search_mode=search_mode
+            )
+        else:
+            result = await service.process_request_search(
+                request, progress_callback=progress_callback
+            )
         await db.commit()
         return {
             "request_id": request_id,
@@ -122,47 +139,82 @@ async def _run_bulk_search_with_session(
     return results
 
 
-async def _search_request_generator(request_id: int, db: AsyncSession):
+def _tv_search_mode_label(search_mode: str) -> str:
+    return "Full search" if search_mode == "full" else "Search for new"
+
+
+async def _search_request_generator(request_id: int, db: AsyncSession, *, search_mode: str = "new"):
     try:
         request = await load_request_or_404(db, request_id)
-        search_task = asyncio.create_task(_run_request_search_detached(request_id, db))
+        progress_queue: asyncio.Queue[dict] = asyncio.Queue()
+
+        async def progress_callback(payload: dict) -> None:
+            await progress_queue.put(payload)
+
+        search_task = asyncio.create_task(
+            _run_request_search_detached(
+                request_id,
+                db,
+                progress_callback=progress_callback if request.media_type == MediaType.TV else None,
+                search_mode=search_mode,
+            )
+        )
         if request.media_type == MediaType.TV:
+            mode_label = _tv_search_mode_label(search_mode)
             logger.info(
-                "TV Search All stream started: request_id=%s title=%s source=prowlarr",
+                "TV %s stream started: request_id=%s title=%s source=prowlarr",
+                mode_label,
                 request_id,
                 request.title,
             )
-        yield serialize_sse(
-            build_sse_progress(
-                "starting",
-                percent=5,
-                message=f"Starting {'TV Search All' if request.media_type == MediaType.TV else 'search'} for {request.title}…",
+        if request.media_type != MediaType.TV:
+            yield serialize_sse(
+                build_sse_progress(
+                    "starting",
+                    percent=5,
+                    message=f"Starting search for {request.title}…",
+                )
             )
-        )
-        if request.year is None and (request.tmdb_id or request.tvdb_id):
+        if (
+            request.media_type != MediaType.TV
+            and request.year is None
+            and (request.tmdb_id or request.tvdb_id)
+        ):
             yield serialize_sse(
                 build_sse_progress(
                     "backfilling",
                     percent=15,
                 )
             )
-        yield serialize_sse(
-            build_sse_progress(
-                "searching",
-                percent=50,
-                message="Sweeping requested seasons across indexer pages…"
-                if request.media_type == MediaType.TV
-                else "Querying indexers and evaluating releases…",
+        if request.media_type != MediaType.TV:
+            yield serialize_sse(
+                build_sse_progress(
+                    "searching",
+                    percent=50,
+                    message="Querying indexers and evaluating releases…",
+                )
             )
-        )
+
+        if request.media_type == MediaType.TV:
+            while not search_task.done():
+                try:
+                    payload = await asyncio.wait_for(progress_queue.get(), timeout=0.1)
+                except TimeoutError:
+                    continue
+                yield serialize_sse(payload)
+            while not progress_queue.empty():
+                yield serialize_sse(progress_queue.get_nowait())
+
         result = await asyncio.shield(search_task)
         if request.media_type == MediaType.TV:
+            mode_label = _tv_search_mode_label(search_mode)
             complete_message = (
-                "TV Search All complete: evaluated releases, applied auto-stage/select rules, "
-                "and refreshed DB-backed buckets."
+                f"TV {mode_label} complete: evaluated releases, applied auto-stage/select rules "
+                "for actionable episodes, and refreshed DB-backed buckets."
             )
             logger.info(
-                "TV Search All stream done: request_id=%s title=%s status=%s source=prowlarr",
+                "TV %s stream done: request_id=%s title=%s status=%s source=prowlarr",
+                mode_label,
                 request_id,
                 request.title,
                 result.get("status"),
@@ -381,11 +433,14 @@ async def stream_bulk_search(
 @router.get("/{request_id}/search/stream")
 async def stream_search_request(
     request_id: int,
+    search_mode: str = "new",
     db: AsyncSession = Depends(get_db),
 ):
-    """Primary dashboard search stream; TV requests use this as Search All."""
+    """Primary dashboard search stream; TV uses Search for new by default."""
+    if search_mode not in {"new", "full"}:
+        raise HTTPException(status_code=422, detail="search_mode must be 'new' or 'full'")
     return StreamingResponse(
-        _search_request_generator(request_id, db),
+        _search_request_generator(request_id, db, search_mode=search_mode),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",

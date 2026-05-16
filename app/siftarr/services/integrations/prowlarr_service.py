@@ -5,6 +5,7 @@ import logging
 import re
 import time as time_module
 from collections import OrderedDict
+from collections.abc import Awaitable, Callable
 from datetime import datetime
 from typing import Any, cast
 
@@ -15,6 +16,7 @@ from app.siftarr.config import Settings, get_settings
 from app.siftarr.services.utils.http_client import get_shared_client
 
 logger = logging.getLogger(__name__)
+ProgressCallback = Callable[[dict[str, Any]], Awaitable[None]]
 
 # ── Search result cache ──────────────────────────────────────────────
 # LRU cache keyed by params hash, with TTL.  Only caches non-manual
@@ -63,6 +65,7 @@ class ProwlarrRelease(BaseModel):
     download_url: str
     magnet_url: str | None = None
     info_hash: str | None = None
+    guid: str | None = None
     indexer: str
     publish_date: datetime | None = None
     resolution: str | None = None
@@ -101,6 +104,30 @@ class ProwlarrService:
             api_key = ""
         return {"X-Api-Key": api_key}
 
+    @staticmethod
+    def _release_page_signature(
+        releases: list[ProwlarrRelease],
+    ) -> tuple[tuple[str, str, str, int], ...]:
+        """Return a stable signature for detecting repeated paginated pages."""
+        return tuple(
+            (
+                release.guid or release.info_hash or release.title,
+                release.title,
+                release.indexer,
+                release.size,
+            )
+            for release in releases
+        )
+
+    @staticmethod
+    def _release_key(release: ProwlarrRelease) -> str:
+        """Return a stable release key for sweep-level deduplication."""
+        if release.guid:
+            return f"guid:{release.guid.lower()}"
+        if release.info_hash:
+            return f"ih:{release.info_hash.lower()}"
+        return f"title:{release.indexer.lower()}:{release.title.lower()}:{release.size}"
+
     async def close(self) -> None:
         """Close the service (no-op since using shared client)."""
         pass
@@ -130,6 +157,7 @@ class ProwlarrService:
             download_url=release.get("downloadUrl", ""),
             magnet_url=release.get("magnetUrl"),
             info_hash=release.get("infoHash"),
+            guid=release.get("guid"),
             indexer=release.get("indexer", "unknown"),
             publish_date=self._parse_date(release.get("publishDate")),
             resolution=resolution,
@@ -491,27 +519,82 @@ class ProwlarrService:
         imdbid: str | int | None = None,
         tvdbid: int | None = None,
     ) -> list[tuple[str, str, str]]:
-        """Return enabled TV season query strategies as (name, type, query)."""
-        strategies: list[tuple[str, str, str]] = []
-        if self.settings.prowlarr_tv_strategy_title_sxx_enabled:
-            strategies.append(("title_sxx", "search", self._build_tv_title_query(title, season)))
-        if imdbid and self.settings.prowlarr_tv_strategy_imdb_enabled:
-            strategies.append(
-                ("imdb_season", "tvsearch", self._build_tv_imdb_season_query(title, imdbid, season))
+        """Return the canonical normalized TV season query as (name, type, query)."""
+        return [("title_sxx", "search", self._build_tv_title_query(title, season))]
+
+    async def search_tv_episode_exact(
+        self,
+        title: str,
+        season: int,
+        episode: int,
+        categories: list[int] | None = None,
+        cacheable: bool = True,
+        request_id: int | None = None,
+        progress_callback: ProgressCallback | None = None,
+    ) -> ProwlarrSearchResult:
+        """Search one exact normalized SxxEyy TV episode query."""
+        if categories is None:
+            categories = [5000]
+        params = {
+            "type": "search",
+            "query": self._build_tv_title_query(title, season, episode),
+            "categories": categories,
+        }
+        result = await self._search(params, cacheable=cacheable)
+        if progress_callback is not None:
+            await progress_callback(
+                {
+                    "phase": "exact_episode_search",
+                    "percent": 68,
+                    "message": f"Exact episode search S{season:02d}E{episode:02d} returned {len(result.releases)} release(s).",
+                    "detail": params["query"],
+                }
             )
-        if self.settings.prowlarr_tv_strategy_title_season_token_enabled:
-            strategies.append(
-                (
-                    "title_season_token",
-                    "tvsearch",
-                    self._build_tv_title_season_token_query(title, season),
-                )
+        logger.info(
+            "TV exact episode search loaded: request_id=%s title=%s season=%s episode=%s count=%s source=%s",
+            request_id,
+            title,
+            season,
+            episode,
+            len(result.releases),
+            result.source or "prowlarr",
+        )
+        return result
+
+    async def search_tv_packs_broad(
+        self,
+        title: str,
+        categories: list[int] | None = None,
+        cacheable: bool = True,
+        request_id: int | None = None,
+        progress_callback: ProgressCallback | None = None,
+    ) -> ProwlarrSearchResult:
+        """Search once for broad TV pack candidates by show title."""
+        if categories is None:
+            categories = [5000]
+        params = {
+            "type": "search",
+            "query": self._normalize_search_title(title),
+            "categories": categories,
+        }
+        result = await self._search(params, cacheable=cacheable)
+        if progress_callback is not None:
+            await progress_callback(
+                {
+                    "phase": "broad_tv_pack_search",
+                    "percent": 58,
+                    "message": f"Broad TV pack query returned {len(result.releases)} release(s).",
+                    "detail": params["query"],
+                }
             )
-        if tvdbid and self.settings.prowlarr_tv_strategy_tvdb_enabled:
-            strategies.append(
-                ("tvdb_season", "tvsearch", self._build_tv_query(title, tvdbid, season))
-            )
-        return strategies
+        logger.info(
+            "TV broad pack search loaded: request_id=%s title=%s count=%s source=%s",
+            request_id,
+            title,
+            len(result.releases),
+            result.source or "prowlarr",
+        )
+        return result
 
     async def search_tv_season_page(
         self,
@@ -588,35 +671,43 @@ class ProwlarrService:
         categories: list[int] | None = None,
         cacheable: bool = True,
         request_id: int | None = None,
+        progress_callback: ProgressCallback | None = None,
     ) -> ProwlarrSearchResult:
-        """Run bounded paginated TV season strategy searches."""
+        """Run paginated TV season strategy searches until Prowlarr is exhausted."""
         if categories is None:
             categories = [5000]
 
         page_size = self.settings.prowlarr_tv_page_size
-        max_pages = self.settings.prowlarr_tv_max_pages_per_query
-        max_results = self.settings.prowlarr_tv_max_results_per_season
+        max_pages = self.settings.prowlarr_tv_max_pages_per_strategy
         total_query_time_ms = 0
         all_releases: list[ProwlarrRelease] = []
+        pages_searched = 0
         hit_limit = False
+        seen_release_keys: set[str] = set()
 
         logger.info(
-            "TV season sweep started: request_id=%s title=%s season=%s source=prowlarr page_size=%s max_pages=%s max_results=%s",
+            "TV season sweep started: request_id=%s title=%s season=%s source=prowlarr page_size=%s",
             request_id,
             title,
             season,
             page_size,
-            max_pages,
-            max_results,
         )
+        if progress_callback is not None:
+            await progress_callback(
+                {
+                    "phase": "season_query",
+                    "percent": 20,
+                    "message": f"Searching season {season} with one normalized season query…",
+                    "subtitle": f"Page size {page_size}; stopping on duplicates or short pages.",
+                }
+            )
 
         for strategy, _, _ in self._tv_season_strategy_queries(
             title, season, imdbid=imdbid, tvdbid=tvdbid
         ):
-            for page in range(max_pages):
-                if len(all_releases) >= max_results:
-                    hit_limit = True
-                    break
+            page = 0
+            seen_page_signatures: set[tuple[tuple[str, str, str, int], ...]] = set()
+            while pages_searched < max_pages:
                 result = await self.search_tv_season_page(
                     title,
                     season,
@@ -628,25 +719,118 @@ class ProwlarrService:
                     cacheable=cacheable,
                     request_id=request_id,
                 )
+                pages_searched += 1
                 total_query_time_ms += result.query_time_ms
-                remaining = max_results - len(all_releases)
-                all_releases.extend(result.releases[:remaining])
-                if len(result.releases) > remaining or len(all_releases) >= max_results:
+                page_signature = self._release_page_signature(result.releases)
+                if result.releases and page_signature in seen_page_signatures:
                     hit_limit = True
-                if result.error or result.is_short_page:
+                    if progress_callback is not None:
+                        await progress_callback(
+                            {
+                                "phase": "season_stop",
+                                "percent": 45,
+                                "message": f"Stopped season {season}: repeated page at offset {result.offset}.",
+                                "detail": f"{len(all_releases)} unique release(s) kept.",
+                            }
+                        )
+                    logger.warning(
+                        "TV season sweep stopped on repeated page: request_id=%s title=%s season=%s strategy=%s offset=%s count=%s source=%s",
+                        request_id,
+                        title,
+                        season,
+                        strategy,
+                        result.offset,
+                        len(result.releases),
+                        result.source or "prowlarr",
+                    )
                     break
+                seen_page_signatures.add(page_signature)
+
+                new_releases: list[ProwlarrRelease] = []
+                for release in result.releases:
+                    release_key = self._release_key(release)
+                    if release_key in seen_release_keys:
+                        continue
+                    seen_release_keys.add(release_key)
+                    new_releases.append(release)
+
+                if result.releases and not new_releases:
+                    hit_limit = True
+                    if progress_callback is not None:
+                        await progress_callback(
+                            {
+                                "phase": "season_stop",
+                                "percent": 45,
+                                "message": f"Stopped season {season}: page had no new releases.",
+                                "detail": f"{len(all_releases)} unique release(s) kept.",
+                            }
+                        )
+                    logger.warning(
+                        "TV season sweep stopped on page with no new releases: request_id=%s title=%s season=%s strategy=%s offset=%s count=%s source=%s",
+                        request_id,
+                        title,
+                        season,
+                        strategy,
+                        result.offset,
+                        len(result.releases),
+                        result.source or "prowlarr",
+                    )
+                    break
+
+                all_releases.extend(new_releases)
+                if result.error or result.is_short_page:
+                    if progress_callback is not None:
+                        reason = "error" if result.error else "short page"
+                        await progress_callback(
+                            {
+                                "phase": "season_stop",
+                                "percent": 45,
+                                "message": f"Stopped season {season}: {reason} after {pages_searched} page(s).",
+                                "detail": f"{len(all_releases)} unique release(s) kept.",
+                            }
+                        )
+                    break
+                page += 1
             else:
                 hit_limit = True
+                if progress_callback is not None:
+                    await progress_callback(
+                        {
+                            "phase": "season_stop",
+                            "percent": 45,
+                            "message": f"Stopped season {season}: max page limit reached.",
+                            "detail": f"{len(all_releases)} unique release(s) kept.",
+                        }
+                    )
+                logger.warning(
+                    "TV season sweep stopped at max pages: request_id=%s title=%s season=%s strategy=%s max_pages=%s pages_searched=%s page_size=%s source=prowlarr",
+                    request_id,
+                    title,
+                    season,
+                    strategy,
+                    max_pages,
+                    pages_searched,
+                    page_size,
+                )
+            break
 
         logger.info(
-            "TV season sweep done: request_id=%s title=%s season=%s total_results=%s hit_limit=%s elapsed_ms=%s source=prowlarr",
+            "TV season sweep done: request_id=%s title=%s season=%s total_results=%s elapsed_ms=%s source=prowlarr",
             request_id,
             title,
             season,
             len(all_releases),
-            hit_limit,
             total_query_time_ms,
         )
+        if progress_callback is not None:
+            await progress_callback(
+                {
+                    "phase": "season_done",
+                    "percent": 55,
+                    "message": f"Season {season} sweep loaded {len(all_releases)} unique release(s).",
+                    "subtitle": f"{pages_searched} page(s) searched.",
+                }
+            )
         return ProwlarrSearchResult(
             releases=all_releases,
             query_time_ms=total_query_time_ms,
