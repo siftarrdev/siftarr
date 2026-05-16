@@ -32,12 +32,14 @@ async def _new_detached_session() -> AsyncSession:
 
 
 async def _run_request_search_detached(
-    request_id: int, fallback_db: AsyncSession | None = None
+    request_id: int,
+    fallback_db: AsyncSession | None = None,
+    progress_callback=None,
 ) -> dict:
     if database.async_session_maker is None and fallback_db is not None:
         request = await load_request_or_404(fallback_db, request_id)
         service = SearchService(fallback_db)
-        result = await service.process_request_search(request)
+        result = await service.process_request_search(request, progress_callback=progress_callback)
         return {
             "request_id": request_id,
             "title": request.title,
@@ -48,7 +50,7 @@ async def _run_request_search_detached(
     async with await _new_detached_session() as db:
         request = await load_request_or_404(db, request_id)
         service = SearchService(db)
-        result = await service.process_request_search(request)
+        result = await service.process_request_search(request, progress_callback=progress_callback)
         await db.commit()
         return {
             "request_id": request_id,
@@ -125,36 +127,62 @@ async def _run_bulk_search_with_session(
 async def _search_request_generator(request_id: int, db: AsyncSession):
     try:
         request = await load_request_or_404(db, request_id)
-        search_task = asyncio.create_task(_run_request_search_detached(request_id, db))
+        progress_queue: asyncio.Queue[dict] = asyncio.Queue()
+
+        async def progress_callback(payload: dict) -> None:
+            await progress_queue.put(payload)
+
+        search_task = asyncio.create_task(
+            _run_request_search_detached(
+                request_id,
+                db,
+                progress_callback=progress_callback if request.media_type == MediaType.TV else None,
+            )
+        )
         if request.media_type == MediaType.TV:
             logger.info(
                 "TV Search All stream started: request_id=%s title=%s source=prowlarr",
                 request_id,
                 request.title,
             )
-        yield serialize_sse(
-            build_sse_progress(
-                "starting",
-                percent=5,
-                message=f"Starting {'TV Search All' if request.media_type == MediaType.TV else 'search'} for {request.title}…",
+        if request.media_type != MediaType.TV:
+            yield serialize_sse(
+                build_sse_progress(
+                    "starting",
+                    percent=5,
+                    message=f"Starting search for {request.title}…",
+                )
             )
-        )
-        if request.year is None and (request.tmdb_id or request.tvdb_id):
+        if (
+            request.media_type != MediaType.TV
+            and request.year is None
+            and (request.tmdb_id or request.tvdb_id)
+        ):
             yield serialize_sse(
                 build_sse_progress(
                     "backfilling",
                     percent=15,
                 )
             )
-        yield serialize_sse(
-            build_sse_progress(
-                "searching",
-                percent=50,
-                message="Sweeping requested seasons across indexer pages…"
-                if request.media_type == MediaType.TV
-                else "Querying indexers and evaluating releases…",
+        if request.media_type != MediaType.TV:
+            yield serialize_sse(
+                build_sse_progress(
+                    "searching",
+                    percent=50,
+                    message="Querying indexers and evaluating releases…",
+                )
             )
-        )
+
+        if request.media_type == MediaType.TV:
+            while not search_task.done():
+                try:
+                    payload = await asyncio.wait_for(progress_queue.get(), timeout=0.1)
+                except TimeoutError:
+                    continue
+                yield serialize_sse(payload)
+            while not progress_queue.empty():
+                yield serialize_sse(progress_queue.get_nowait())
+
         result = await asyncio.shield(search_task)
         if request.media_type == MediaType.TV:
             complete_message = (

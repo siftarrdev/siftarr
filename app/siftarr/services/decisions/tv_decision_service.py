@@ -16,8 +16,9 @@ Workflow (Parallel Search):
 import asyncio
 import logging
 from collections import Counter
-from collections.abc import Sequence
+from collections.abc import Awaitable, Callable, Sequence
 from datetime import date
+from typing import Any
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -67,6 +68,8 @@ from app.siftarr.services.stats_metrics_service import record_rule_outcomes
 logger = logging.getLogger(__name__)
 
 MAX_CONCURRENT_SEARCHES = 5
+MAX_CONCURRENT_EXACT_EPISODE_SEARCHES = 3
+ProgressCallback = Callable[[dict[str, Any]], Awaitable[None]]
 ACTIONABLE_EXCLUDED_STATUSES = {
     RequestStatus.COMPLETED,
     RequestStatus.DOWNLOADING,
@@ -350,10 +353,11 @@ class TVDecisionService:
         request: Request,
         rule_engine: RuleEngine,
         seasons: Sequence[int],
-    ) -> tuple[list[ReleaseEvaluation], list[ReleaseEvaluation], list[str]]:
+        progress_callback: ProgressCallback | None = None,
+    ) -> tuple[list[ReleaseEvaluation], list[ReleaseEvaluation], list[str], set[str]]:
         """Run one logical paginated season sweep per requested season and dedupe results."""
         if not seasons:
-            return [], [], []
+            return [], [], [], set()
 
         imdb_id = await self._load_imdb_id(request)
         logger.info(
@@ -362,9 +366,41 @@ class TVDecisionService:
             request.title,
             list(seasons),
         )
+        if progress_callback is not None:
+            await progress_callback(
+                {
+                    "phase": "season_sweeps",
+                    "percent": 15,
+                    "message": f"Searching {len(seasons)} requested season(s)…",
+                    "subtitle": "One normalized season query per season.",
+                }
+            )
+
+        completed_seasons = 0
+
+        async def season_progress(payload: dict[str, Any]) -> None:
+            nonlocal completed_seasons
+            if progress_callback is None:
+                return
+            if payload.get("phase") == "season_done":
+                completed_seasons += 1
+                payload = dict(payload)
+                payload["percent"] = int(15 + (completed_seasons / max(1, len(seasons))) * 40)
+                payload["subtitle"] = f"{completed_seasons} of {len(seasons)} season(s) searched."
+            await progress_callback(payload)
+
         search_results = await asyncio.gather(
             *(
                 self.prowlarr.search_tv_season_sweep(
+                    title=request.title,
+                    season=season,
+                    imdbid=imdb_id,
+                    tvdbid=request.tvdb_id,
+                    request_id=request.id,
+                    progress_callback=season_progress,
+                )
+                if progress_callback
+                else self.prowlarr.search_tv_season_sweep(
                     title=request.title,
                     season=season,
                     imdbid=imdb_id,
@@ -425,7 +461,17 @@ class TVDecisionService:
                 if evaluation.passed:
                     passing_releases.append(evaluation)
 
-        return evaluated_releases, passing_releases, errors
+        if progress_callback is not None:
+            await progress_callback(
+                {
+                    "phase": "evaluating",
+                    "percent": 58,
+                    "message": f"Evaluated {len(evaluated_releases)} unique season-sweep release(s).",
+                    "subtitle": f"{len(passing_releases)} release(s) passed TV rules.",
+                }
+            )
+
+        return evaluated_releases, passing_releases, errors, seen_keys
 
     async def _search_exact_episode_fallbacks_and_evaluate(
         self,
@@ -433,19 +479,64 @@ class TVDecisionService:
         rule_engine: RuleEngine,
         targets: Sequence[tuple[int, int]],
         seen_keys: set[str],
+        progress_callback: ProgressCallback | None = None,
     ) -> tuple[list[ReleaseEvaluation], list[tuple[int, int, ReleaseEvaluation]], list[str]]:
         if not targets:
             return [], [], []
-        assert request.tvdb_id is not None
 
-        searches = [("episode", season, episode) for season, episode in targets]
-        search_results = await self._bounded_searches(searches, request)
+        semaphore = asyncio.Semaphore(MAX_CONCURRENT_EXACT_EPISODE_SEARCHES)
+        if progress_callback is not None:
+            await progress_callback(
+                {
+                    "phase": "exact_episode_searches",
+                    "percent": 62,
+                    "message": f"Searching {len(targets)} uncovered exact episode(s)…",
+                    "subtitle": f"Concurrency limited to {MAX_CONCURRENT_EXACT_EPISODE_SEARCHES}.",
+                }
+            )
+
+        completed_targets = 0
+
+        async def fallback_progress(payload: dict[str, Any]) -> None:
+            nonlocal completed_targets
+            if progress_callback is None:
+                return
+            if payload.get("phase") == "exact_episode_search":
+                completed_targets += 1
+                payload = dict(payload)
+                payload["percent"] = int(62 + (completed_targets / max(1, len(targets))) * 15)
+                payload["subtitle"] = (
+                    f"{completed_targets} of {len(targets)} exact episode search(es) complete."
+                )
+            await progress_callback(payload)
+
+        async def run_search(season: int, episode: int) -> ProwlarrSearchResult:
+            async with semaphore:
+                if progress_callback:
+                    return await self.prowlarr.search_tv_episode_exact(
+                        title=request.title,
+                        season=season,
+                        episode=episode,
+                        request_id=request.id,
+                        progress_callback=fallback_progress,
+                    )
+                return await self.prowlarr.search_tv_episode_exact(
+                    title=request.title,
+                    season=season,
+                    episode=episode,
+                    request_id=request.id,
+                )
+
+        search_results = await asyncio.gather(
+            *(run_search(season, episode) for season, episode in targets),
+            return_exceptions=True,
+        )
 
         evaluated_releases: list[ReleaseEvaluation] = []
         passing_releases: list[tuple[int, int, ReleaseEvaluation]] = []
         errors: list[str] = []
 
-        for (_, season, episode), search_result in zip(searches, search_results, strict=False):
+        for (season, episode), search_result in zip(targets, search_results, strict=False):
             if isinstance(search_result, Exception):
                 logger.warning(
                     "TV exact episode fallback failed: request_id=%s season=%s episode=%s error=%s",
@@ -474,6 +565,16 @@ class TVDecisionService:
                 if evaluation.passed and self._is_exact_episode_match(evaluation, season, episode):
                     passing_releases.append((season, episode, evaluation))
 
+        if progress_callback is not None:
+            await progress_callback(
+                {
+                    "phase": "evaluating",
+                    "percent": 78,
+                    "message": f"Evaluated {len(evaluated_releases)} exact-episode fallback release(s).",
+                    "subtitle": f"{len(passing_releases)} exact episode release(s) passed TV rules.",
+                }
+            )
+
         return evaluated_releases, passing_releases, errors
 
     async def _load_imdb_id(self, request: Request) -> str | None:
@@ -493,11 +594,11 @@ class TVDecisionService:
     @staticmethod
     def _release_dedup_key(release: ProwlarrRelease) -> str:
         """Compute a deduplication key for a Prowlarr release."""
+        if release.guid:
+            return f"guid:{release.guid.lower()}"
         if release.info_hash:
             return f"ih:{release.info_hash.lower()}"
-        if release.download_url:
-            return f"url:{release.download_url.lower()}"
-        return f"t:{release.title.lower()}|i:{release.indexer.lower()}"
+        return f"t:{release.title.lower()}|i:{release.indexer.lower()}|s:{release.size}"
 
     @staticmethod
     def _merge_evaluations_for_storage(
@@ -565,7 +666,12 @@ class TVDecisionService:
 
         request.status = derive_request_status_from_episodes(all_episodes)
 
-    async def process_request(self, request_id: int, search_episodes: bool = True) -> dict:
+    async def process_request(
+        self,
+        request_id: int,
+        search_episodes: bool = True,
+        progress_callback: ProgressCallback | None = None,
+    ) -> dict:
         """
         Process a TV request search.
 
@@ -595,6 +701,15 @@ class TVDecisionService:
             request.title,
             request.tvdb_id,
         )
+        if progress_callback is not None:
+            await progress_callback(
+                {
+                    "phase": "starting",
+                    "percent": 5,
+                    "message": f"Starting TV Search All for {request.title}…",
+                    "subtitle": "Preparing requested seasons and episodes.",
+                }
+            )
 
         all_requested_seasons = set(self._get_requested_seasons(request))
         requested_seasons, requested_episodes = self._get_actionable_targets(request)
@@ -606,6 +721,16 @@ class TVDecisionService:
             requested_seasons,
             requested_episodes,
         )
+        if progress_callback is not None:
+            episode_count = sum(len(episodes) for episodes in requested_episodes.values())
+            await progress_callback(
+                {
+                    "phase": "searching",
+                    "percent": 10,
+                    "message": f"Found {len(requested_seasons)} season(s) and {episode_count} actionable episode(s) to search.",
+                    "subtitle": "Season sweeps run first; exact episodes fill remaining gaps.",
+                }
+            )
 
         rule_engine = await self._get_rule_engine()
 
@@ -640,7 +765,13 @@ class TVDecisionService:
             sweep_evaluations,
             sweep_candidates,
             sweep_errors,
-        ) = await self._search_season_sweeps_and_evaluate(request, rule_engine, requested_seasons)
+            sweep_seen_keys,
+        ) = await self._search_season_sweeps_and_evaluate(
+            request,
+            rule_engine,
+            requested_seasons,
+            progress_callback=progress_callback,
+        )
         all_evaluated_releases.extend(sweep_evaluations)
         all_search_errors.extend(sweep_errors)
 
@@ -699,6 +830,32 @@ class TVDecisionService:
                         if existing is None or evaluation.total_score > existing.total_score:
                             best_episodes_by_key[key] = evaluation
 
+            missing_episode_targets = sorted(
+                uncovered_episode_target_keys - set(best_episodes_by_key)
+            )
+            if missing_episode_targets:
+                (
+                    fallback_evaluations,
+                    fallback_candidates,
+                    fallback_errors,
+                ) = await self._search_exact_episode_fallbacks_and_evaluate(
+                    request,
+                    rule_engine,
+                    missing_episode_targets,
+                    sweep_seen_keys,
+                    progress_callback=progress_callback,
+                )
+                fallback_target_count = len(missing_episode_targets)
+                fallback_release_count = len(fallback_evaluations)
+                all_evaluated_releases.extend(fallback_evaluations)
+                all_search_errors.extend(fallback_errors)
+                episode_evaluations.extend(fallback_candidates)
+                for season, episode, evaluation in fallback_candidates:
+                    key = (season, episode)
+                    existing = best_episodes_by_key.get(key)
+                    if existing is None or evaluation.total_score > existing.total_score:
+                        best_episodes_by_key[key] = evaluation
+
             all_selected_releases.extend(best_episodes_by_key.values())
 
         selected_episode_keys = set(best_episodes_by_key)
@@ -740,6 +897,16 @@ class TVDecisionService:
             search_errors=len(all_search_errors),
         )
 
+        if progress_callback is not None:
+            await progress_callback(
+                {
+                    "phase": "storing",
+                    "percent": 84,
+                    "message": f"Storing {len(all_evaluated_releases)} evaluated release(s)…",
+                    "subtitle": f"{passing_pack_count} pack(s), {len(episode_evaluations)} episode release(s) passed.",
+                }
+            )
+
         stored_releases_by_key = await store_search_results(
             self.db,
             request.id,
@@ -752,6 +919,16 @@ class TVDecisionService:
             stored_releases_by_key=stored_releases_by_key,
         )
         await self.db.commit()
+
+        if progress_callback is not None:
+            await progress_callback(
+                {
+                    "phase": "selecting",
+                    "percent": 90,
+                    "message": f"Selecting from {len(all_selected_releases)} passing release(s)…",
+                    "subtitle": "Applying auto-stage/select rules.",
+                }
+            )
 
         if all_selected_releases:
             stored_releases: list[Release] = []

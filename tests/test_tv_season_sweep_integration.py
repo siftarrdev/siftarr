@@ -41,6 +41,7 @@ class FakeIPTProwlarr(ProwlarrService):
         super().__init__(
             Settings(
                 prowlarr_tv_page_size=100,
+                prowlarr_tv_strategy_title_sxx_enabled=True,
                 prowlarr_tv_strategy_imdb_enabled=False,
                 prowlarr_tv_strategy_title_season_token_enabled=False,
                 prowlarr_tv_strategy_tvdb_enabled=False,
@@ -112,6 +113,7 @@ class FakeCappedEpisodeGapProwlarr(ProwlarrService):
         categories: list[int] | None = None,
         cacheable: bool = True,
         request_id: int | None = None,
+        progress_callback=None,
     ) -> ProwlarrSearchResult:
         self.swept_seasons.append(season)
         return ProwlarrSearchResult(
@@ -153,6 +155,7 @@ class FakeCappedGeorgieProwlarr(ProwlarrService):
         categories: list[int] | None = None,
         cacheable: bool = True,
         request_id: int | None = None,
+        progress_callback=None,
     ) -> ProwlarrSearchResult:
         self.swept_seasons.append(season)
         if season == 1:

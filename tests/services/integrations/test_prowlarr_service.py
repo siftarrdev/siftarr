@@ -246,8 +246,8 @@ class TestProwlarrService:
 
         assert query == "Example Show S08 2024"
 
-    def test_build_tv_season_strategy_queries_for_iptorrents(self) -> None:
-        """Season strategies should produce IPTorrents-compatible query params."""
+    def test_build_tv_season_strategy_queries_uses_one_canonical_title_query(self) -> None:
+        """Season sweep should use one normalized title Sxx query."""
         service = ProwlarrService(
             Settings(
                 prowlarr_tv_strategy_title_sxx_enabled=True,
@@ -261,13 +261,10 @@ class TestProwlarrService:
         )
 
         assert strategies == [
-            ("title_season_token", "tvsearch", "The Rookie {season:1}"),
             ("title_sxx", "search", "The Rookie S01"),
-            ("imdb_season", "tvsearch", "The Rookie {imdbid:7587890} {season:1}"),
-            ("tvdb_season", "tvsearch", "The Rookie {tvdbid:350665} {season:1}"),
         ]
 
-    def test_build_tv_season_strategy_queries_skip_unavailable_optional_metadata(self) -> None:
+    def test_build_tv_season_strategy_queries_ignores_optional_metadata(self) -> None:
         service = ProwlarrService(
             Settings(
                 prowlarr_tv_strategy_title_sxx_enabled=True, prowlarr_tv_strategy_tvdb_enabled=True
@@ -277,9 +274,23 @@ class TestProwlarrService:
         strategies = service._tv_season_strategy_queries("The Rookie", 1)
 
         assert [strategy[0] for strategy in strategies] == [
-            "title_season_token",
             "title_sxx",
         ]
+
+    @pytest.mark.asyncio
+    async def test_search_tv_episode_exact_uses_normalized_sxxeyy_query(self, monkeypatch) -> None:
+        service = ProwlarrService()
+        calls = []
+
+        async def fake_search(params, **kwargs):
+            calls.append(params)
+            return ProwlarrSearchResult(releases=[], query_time_ms=10)
+
+        monkeypatch.setattr(service, "_search", fake_search)
+
+        await service.search_tv_episode_exact("Margo's Show", 2, 3)
+
+        assert calls == [{"type": "search", "query": "Margos Show S02E03", "categories": [5000]}]
 
     @pytest.mark.asyncio
     async def test_search_by_tmdbid_falls_back_to_title_query(self, monkeypatch) -> None:
@@ -530,6 +541,40 @@ class TestProwlarrService:
         assert len(result.releases) == 150
 
     @pytest.mark.asyncio
+    async def test_search_tv_season_sweep_dedupes_volatile_download_urls(self, monkeypatch) -> None:
+        service = ProwlarrService(
+            Settings(
+                prowlarr_tv_page_size=100,
+                prowlarr_tv_strategy_title_sxx_enabled=True,
+                prowlarr_tv_strategy_title_season_token_enabled=False,
+            )
+        )
+        calls = []
+
+        async def fake_search(params, **kwargs):
+            calls.append(params)
+            releases = [
+                ProwlarrRelease(
+                    title=f"The Rookie S01E{i:02d}",
+                    size=1000,
+                    seeders=1,
+                    leechers=0,
+                    download_url=f"http://example.com/volatile/{params['offset']}/{i}",
+                    guid=f"https://iptorrents.example/t/{i}",
+                    indexer="IPTorrents",
+                )
+                for i in range(100)
+            ]
+            return ProwlarrSearchResult(releases=releases, query_time_ms=10)
+
+        monkeypatch.setattr(service, "_search", fake_search)
+
+        result = await service.search_tv_season_sweep("The Rookie", 1)
+
+        assert [call["offset"] for call in calls] == [0, 100]
+        assert len(result.releases) == 100
+
+    @pytest.mark.asyncio
     async def test_search_tv_season_sweep_continues_past_old_max_pages(self, monkeypatch) -> None:
         service = ProwlarrService(
             Settings(
@@ -586,10 +631,10 @@ class TestProwlarrService:
         assert len(result.releases) == 201
 
     @pytest.mark.asyncio
-    async def test_search_tv_season_sweep_keeps_title_and_imdb_when_tvdb_empty(
+    async def test_search_tv_season_sweep_uses_only_canonical_title_query(
         self, monkeypatch
     ) -> None:
-        """IPTorrents can return 0 for TVDB while title/IMDb strategies succeed."""
+        """The sweep no longer retries alternate season strategies."""
         service = ProwlarrService(
             Settings(
                 prowlarr_tv_page_size=100,
@@ -616,10 +661,8 @@ class TestProwlarrService:
 
         assert [call["query"] for call in calls] == [
             "The Rookie S01",
-            "The Rookie {imdbid:7587890} {season:1}",
-            "The Rookie {tvdbid:350665} {season:1}",
         ]
-        assert len(result.releases) == 2
+        assert len(result.releases) == 1
 
     @pytest.mark.asyncio
     async def test_search_tv_season_sweep_stops_on_repeated_full_page(self, monkeypatch) -> None:

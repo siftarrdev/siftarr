@@ -185,7 +185,7 @@ class TestSerializeEvaluatedRelease:
             "uploaded_by": None,
         }
         defaults.update(overrides)
-        return ProwlarrRelease(**defaults)  # type: ignore[arg-type]
+        return ProwlarrRelease.model_validate(defaults)
 
     def _make_evaluation(self, **overrides: object) -> ReleaseEvaluation:
         defaults: dict[str, object] = {

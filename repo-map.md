@@ -33,7 +33,7 @@ Primary flow:
 
 1. Overseerr webhook or manual action creates/syncs a request
 2. Browser access is gated by Plex SSO; the first Plex login claims the instance as the sole admin and must finish an initial full Plex sync before reaching protected pages, while API-key auth remains for webhooks/integrations
-3. Search and decision services query Prowlarr and evaluate releases (TV dashboard search uses one Search All stream that runs paginated season sweeps until Prowlarr is exhausted and classifies stored coverage)
+3. Search and decision services query Prowlarr and evaluate releases (TV dashboard Search All streams progress while running one normalized season query, stopping on repeated/no-new pages, then exact `SxxEyy` fallback searches for uncovered episodes)
 4. Winning releases are staged or sent to qBittorrent
 5. Background services track retries, lifecycle state, Plex polling, and completion
 6. Dashboard, Stats, and settings UI expose control and visibility; request details can filter/sort stored release results
@@ -162,11 +162,11 @@ Business logic and integrations, organized into thematic subpackages:
 - `rule_engine.py` — release filtering and scoring evaluation; module-level rule version cache (`_rule_version`)
 - `rule_service.py` — CRUD/order logic for rules, import/export validation, and empty-database default-rule seeding from configured `rules.json`
 - `decision_pipeline.py` — shared decision pipeline helpers (rule loading, activity logging, pending queue, best-release selection)
-- `tv_decision_service.py` — TV-specific decision logic (season sweeps, episode fallback)
+- `tv_decision_service.py` — TV-specific decision logic (season query evaluation, exact uncovered-episode fallback, staged selection)
 - `movie_decision_service.py` — movie-specific decision logic
 
 **`integrations/`** — External service adapters
-- `prowlarr_service.py` — Prowlarr indexer integration; LRU search cache (45s TTL, 50 entries), paginated TV sweeps
+- `prowlarr_service.py` — Prowlarr indexer integration; LRU search cache (45s TTL, 50 entries), TV season/exact-episode searches with duplicate/no-new page protection
 - `qbittorrent_service.py` — qBittorrent download client integration; includes serialized `save_path`/`seeding_time` access, listing completed torrents, `set_torrent_location()` with `move=True`, and batch delete with `delete_files=False`
 - `overseerr_service.py` — Overseerr request management integration
 - `connection_tester.py` — external connectivity test helpers
