@@ -538,7 +538,9 @@ class TestRuleService:
             }
         )
 
-        with patch.object(service, "get_all_rules", return_value=[unchanged, changed, existing_only]):
+        with patch.object(
+            service, "get_all_rules", return_value=[unchanged, changed, existing_only]
+        ):
             preview = await service.preview_import_rules_with_existing(payload)
 
         assert [row["status"] for row in preview.diff_rows] == [

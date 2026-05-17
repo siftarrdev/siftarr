@@ -100,7 +100,9 @@ async def test_export_settings_backup_returns_download(monkeypatch, mock_db):
 async def test_preview_settings_backup_renders_safe_validation_error(
     monkeypatch, mock_db, base_context
 ):
-    monkeypatch.setattr(settings, "_build_settings_page_context", AsyncMock(return_value=base_context()))
+    monkeypatch.setattr(
+        settings, "_build_settings_page_context", AsyncMock(return_value=base_context())
+    )
     store = MagicMock()
     store.preview_backup = AsyncMock(side_effect=settings.SettingsBackupError("bad <secret>"))
     monkeypatch.setattr(settings, "SettingsStore", lambda db: store)
@@ -116,7 +118,9 @@ async def test_preview_settings_backup_renders_safe_validation_error(
 
 @pytest.mark.asyncio
 async def test_restore_settings_backup_applies_replace_mode(monkeypatch, mock_db, base_context):
-    monkeypatch.setattr(settings, "_build_settings_page_context", AsyncMock(return_value=base_context()))
+    monkeypatch.setattr(
+        settings, "_build_settings_page_context", AsyncMock(return_value=base_context())
+    )
     store = MagicMock()
     store.restore_backup = AsyncMock(return_value={"mode": "replace", "restored": 2})
     monkeypatch.setattr(settings, "SettingsStore", lambda db: store)

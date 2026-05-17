@@ -224,7 +224,11 @@ class SettingsStore:
                     "key": key,
                     "value": value,
                     "current_value": current_value,
-                    "status": "new" if current_value is None else "changed" if current_value != value else "unchanged",
+                    "status": "new"
+                    if current_value is None
+                    else "changed"
+                    if current_value != value
+                    else "unchanged",
                 }
             )
         return {"version": SETTINGS_BACKUP_VERSION, "settings": backup_settings, "rows": rows}
@@ -505,7 +509,9 @@ def parse_settings_backup(payload: bytes | str) -> dict[str, str]:
 
     invalid = sorted(set(settings) - RESTORABLE_SETTING_KEYS)
     if invalid:
-        raise SettingsBackupError(f"Backup contains non-restorable setting(s): {', '.join(invalid)}")
+        raise SettingsBackupError(
+            f"Backup contains non-restorable setting(s): {', '.join(invalid)}"
+        )
 
     parsed: dict[str, str] = {}
     for key, value in settings.items():
@@ -656,7 +662,10 @@ async def build_scheduler_status() -> dict[str, Any]:
                 "last_success": serialize_datetime(state.get("last_success")),
                 "last_error": state.get("last_error"),
                 "locked": bool(state.get("locked"))
-                or (job.get("id") == "check_download_completion" and snapshot.get("download_completion_locked")),
+                or (
+                    job.get("id") == "check_download_completion"
+                    and snapshot.get("download_completion_locked")
+                ),
                 "lock_owner": state.get("lock_owner"),
                 "manual_action": {
                     "plex_recent_scan": "/settings/run-recent-plex-scan",

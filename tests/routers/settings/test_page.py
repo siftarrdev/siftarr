@@ -60,7 +60,9 @@ async def test_settings_page_layout_defaults_and_connections(monkeypatch, mock_d
 
 
 @pytest.mark.asyncio
-async def test_settings_page_renders_job_rows_without_secret_values(monkeypatch, mock_db, base_context):
+async def test_settings_page_renders_job_rows_without_secret_values(
+    monkeypatch, mock_db, base_context
+):
     context = base_context()
     context["scheduler_status"] = {
         "available": True,

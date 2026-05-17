@@ -404,7 +404,7 @@
                         {% if import_preview %}
                         <div class="rounded-xl border border-amber-700/50 bg-amber-900/20 p-4 space-y-4 lg:col-span-2">
                             <div class="text-sm font-semibold text-white">Import Preview</div>
-                            <div class="text-xs text-gray-400">Version {{ import_preview.version }} &middot; imported {{ import_preview.imported_rules|length }} rule(s) &middot; current {{ import_preview.existing_rules|length }} rule(s)</div>
+                            <div class="text-xs text-gray-400">Version {{ import_preview.version }} &middot; imported {{ import_preview.imported_rules|default([], true)|length }} rule(s) &middot; current {{ import_preview.existing_rules|default([], true)|length }} rule(s)</div>
                             <form action="/rules/import-apply" method="post" class="space-y-3">
                                 <input type="hidden" name="import_payload" value="{{ import_payload }}">
                                 <input type="hidden" name="confirm_replace" value="yes">
@@ -421,7 +421,7 @@
                                             </tr>
                                         </thead>
                                         <tbody class="divide-y divide-gray-800/80">
-                                            {% for row in import_preview.diff_rows %}
+                                            {% for row in import_preview.diff_rows|default([], true) %}
                                             <tr class="align-top">
                                                 <td class="px-3 py-3 whitespace-nowrap">
                                                     <span class="badge {% if row.status == 'unchanged' %}badge-gray{% elif row.status == 'changed' %}badge-yellow{% elif row.status == 'existing-only' %}badge-purple{% else %}badge-green{% endif %}">{{ row.status }}</span>

@@ -534,7 +534,9 @@ class TestRulesRouter:
         service.ensure_default_rules = AsyncMock()
         service.get_all_rules = AsyncMock(return_value=[])
         service.get_all_rules_by_type = AsyncMock(return_value=[])
-        service.preview_import_rules.side_effect = ValueError("Invalid JSON: bad payload")
+        service.preview_import_rules_with_existing = AsyncMock(
+            side_effect=ValueError("Invalid JSON: bad payload")
+        )
         monkeypatch.setattr(rules, "RuleService", lambda db: service)
 
         captured = {}
@@ -563,7 +565,7 @@ class TestRulesRouter:
         service.get_all_rules = AsyncMock(return_value=[])
         service.get_all_rules_by_type = AsyncMock(return_value=[])
         preview = RuleImportPreview(version=1, replace_count=1, rules=[])
-        service.preview_import_rules = MagicMock(return_value=preview)
+        service.preview_import_rules_with_existing = AsyncMock(return_value=preview)
         monkeypatch.setattr(rules, "RuleService", lambda db: service)
 
         captured = {}
@@ -586,7 +588,9 @@ class TestRulesRouter:
             db=AsyncMock(),
         )
 
-        service.preview_import_rules.assert_called_once_with('{"version":1,"rules":[{"name":"x"}]}')
+        service.preview_import_rules_with_existing.assert_awaited_once_with(
+            '{"version":1,"rules":[{"name":"x"}]}'
+        )
         context = cast(dict, captured["context"])
         assert context["import_preview"] == preview
 
@@ -621,18 +625,19 @@ class TestRulesRouter:
     @pytest.mark.asyncio
     async def test_import_apply_replaces_rules_after_preview_validation(self, monkeypatch):
         """Apply endpoint should validate then replace the current ruleset."""
-        preview = RuleImportPreview(version=1, replace_count=1, rules=[])
         service = MagicMock()
-        service.preview_import_rules = MagicMock(return_value=preview)
-        service.replace_rules_from_preview = AsyncMock()
+        service.replace_rules_from_payload_selection = AsyncMock()
         monkeypatch.setattr(rules, "RuleService", lambda db: service)
 
         response = await rules.import_rules_apply(
             import_payload='{"version":1,"rules":[{"name":"x"}]}',
             confirm_replace="yes",
+            keep_rule=["imported:0"],
             db=AsyncMock(),
         )
 
         assert response.status_code == 303
         assert response.headers["location"] == "/rules"
-        service.replace_rules_from_preview.assert_awaited_once_with(preview)
+        service.replace_rules_from_payload_selection.assert_awaited_once_with(
+            '{"version":1,"rules":[{"name":"x"}]}', ["imported:0"]
+        )

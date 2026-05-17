@@ -126,9 +126,9 @@ HTTP route layer.
 - `dashboard_api.py` — dashboard JSON endpoints for details/search data, including validated detail-release filter/sort query controls
 - `dashboard_actions.py` — dashboard-triggered actions and mutations
 - `search_sse.py` — SSE streaming endpoints for live search progress; `/requests/{id}/search/stream` supports TV `search_mode=new|full`, while TV scope-specific streams remain compatibility/debug inspect paths
-- `rules.py` — rule management UI/API, including unified rule listing, multi-title testing, modal import/export, and create/edit actions
-- `settings.py` — settings UI (connection test/save/reset, scheduler interval save/reset, staging toggle, Plex rescan, Overseerr sync, cache/reseed actions, SSE progress streams, API key management, Plex SSO status, qBit mover enable/paths/retention settings and manual trigger), uses SettingsStore for DB-backed persistence and keeps the SSO-managed Plex token out of connection saves/resets
-- `stats.py` — protected Stats page and JSON data endpoint for all-time, preset, and custom date ranges
+- `rules.py` — rule management UI/API, including unified rule listing, multi-title testing, modal create/edit actions, export, and import preview/apply flows that merge explicit keep selections from existing and imported rules
+- `settings.py` — settings UI (connection test/save/reset, scheduler interval save/reset, staging toggle, Plex rescan, Overseerr sync, cache/reseed actions, SSE progress streams, API key management, Plex SSO status, non-secret settings backup preview/restore, qBit mover enable/paths/retention settings and manual trigger, and Settings-hosted background job status/manual triggers), uses SettingsStore for DB-backed persistence and keeps the SSO-managed Plex token out of connection saves/resets/backups
+- `stats.py` — protected Stats page and JSON data endpoint for all-time, preset, and custom date ranges, including chart-ready time-series payloads
 - `staged.py` — staged torrent review/approval endpoints; download-status endpoint now returns move tracking fields (status, path, error) for dashboard visibility
 - `webhooks.py` — inbound webhook handling
 
@@ -140,15 +140,15 @@ Business logic and integrations, organized into thematic subpackages:
 - `auth_service.py` — authentication dependencies: `require_auth` (browser Plex SSO redirect with API-key fallback for programmatic requests), first-claim initial Plex sync session gate redirects, claimed-admin session validation/cleanup, request classification, `get_session_user` helper, `verify_api_key`
 - `metadata_service.py` — Overseerr metadata lookup for request details
 - `request_service.py` — request loading / validation
-- `stats_service.py` — read-side Stats aggregation and date-range validation for cards, splits, rule outcomes, and timing charts
+- `stats_service.py` — read-side Stats aggregation and date-range validation for cards, splits, rule outcomes, timing charts, and chart-ready time series (downloads, failures, rule rejections, indexer behavior)
 - `stats_metrics_service.py` — write-only instrumentation helpers for immutable stats metric facts/events consumed by the Stats service/API
 
 **`auth/`** — Plex SSO authentication
 - `plex_oauth_service.py` — `PlexOAuthService` wrapping plex.tv API calls (PIN flow, user identity, token validation)
 
 **`admin/`** — Config, scheduling, polling
-- `settings_service.py` — SettingsStore (DB-backed settings persistence, startup API key generation, runtime env loading, sync success timestamps, Plex SSO claim/token status without exposing token), SSE progress, scheduled job helpers, Plex rescan/Overseerr import orchestration
-- `scheduler_service.py` — recurring job scheduling via APScheduler using runtime-configurable sync/completion intervals, plus startup catch-up orchestration for stale Overseerr/Plex syncs and the guarded Plex sign-in full-sync trigger used after later admin sign-ins; `_check_download_completion()` now also runs the qBit move/retention service; `trigger_download_completion_now()` allows manual invocation from settings with structured result reporting
+- `settings_service.py` — SettingsStore (DB-backed settings persistence, startup API key generation, runtime env loading, sync success timestamps, Plex SSO claim/token status without exposing token, versioned non-secret settings backup/export/preview/restore), SSE progress, scheduled job helpers/status helpers, Plex rescan/Overseerr import orchestration
+- `scheduler_service.py` — recurring job scheduling via APScheduler using runtime-configurable sync/completion intervals, plus startup catch-up orchestration for stale Overseerr/Plex syncs and the guarded Plex sign-in full-sync trigger used after later admin sign-ins; exposes structured scheduler/job status and manual trigger helpers for Settings; `_check_download_completion()` now also runs the qBit move/retention service; `trigger_download_completion_now()` allows manual invocation from settings with structured result reporting
 - `plex_polling_service/` — Plex polling logic; prioritizes recent/downloading requests, supports explicit full reconcile, and provides targeted checks for qBit-finished downloads waiting on Plex availability
 
 **`dashboard/`** — Dashboard, search, detail views
@@ -160,7 +160,7 @@ Business logic and integrations, organized into thematic subpackages:
 
 **`decisions/`** — Rule engine and decision pipeline
 - `rule_engine.py` — release filtering and scoring evaluation; module-level rule version cache (`_rule_version`)
-- `rule_service.py` — CRUD/order logic for rules, import/export validation, and empty-database default-rule seeding from configured `rules.json`
+- `rule_service.py` — CRUD/order logic for rules, export/import validation, existing-vs-imported diff preview and selected merge/replace application, and empty-database default-rule seeding from configured `rules.json`
 - `decision_pipeline.py` — shared decision pipeline helpers (rule loading, activity logging, pending queue, best-release selection)
 - `tv_decision_service.py` — TV-specific decision logic (targeted exact episode search, Full-search broad pack evaluation, actionable staged selection)
 - `movie_decision_service.py` — movie-specific decision logic
@@ -204,10 +204,10 @@ Server-rendered HTML templates.
 - `dashboard.html` — main dashboard UI, including details-modal release result filters/sorting/count controls; move status badges and moved path shown in downloads table
 - `login.html` — Plex SSO login page with JS-driven OAuth PIN flow, denied-admin message, and safe next redirect handling
 - `initial_plex_sync.html` — first-claim setup gate that opens the full Plex sync SSE stream, shows progress/retry/logout, and unlocks protected navigation only after successful completion
-- `rules.html` — single-pane rules UI with unified rule table, multi-title tester, modal create/edit wizard, and modal import/export
+- `rules.html` — single-pane rules UI with unified rule table, multi-title tester, modal create/edit wizard, export, and import preview/merge UI with existing/imported keep selections
 - `rule_form.html` — fallback full-page create/edit rule form
-- `settings.html` — settings UI (manual actions, connection settings with Plex SSO status and API key reveal/copy/regenerate, scheduler interval controls/status, staging toggle, qBit mover settings with enable/path/retention toggles and manual trigger)
-- `stats.html` — Stats UI tab with cards, range selector, empty/error/loading states, and lightweight chart containers
+- `settings.html` — settings UI (manual actions, connection settings with Plex SSO status and API key reveal/copy/regenerate, non-secret backup export/preview/restore, scheduler interval controls/status, background job table/manual triggers, staging toggle, qBit mover settings with enable/path/retention toggles and manual trigger)
+- `stats.html` — Stats UI tab with cards, range selector, empty/error/loading states, and lightweight chart containers for summary splits and time-series trends
 
 ### `app/siftarr/static/`
 
@@ -217,7 +217,7 @@ Static assets.
 - `css/tailwind.css` — built Tailwind CSS output (generated, committed)
 - `css/tailwind-input.css` — Tailwind CSS v4 input with CSS-based theme configuration and custom component classes
 - `js/dashboard*.js` and `js/dashboard/` — dashboard client-side behavior, filters, details-modal release controls, staged actions, TV “Search for new”/“Full search” controls, movie release search UX, and SSE progress panel; polls move status fields in download-status endpoint and shows badges/paths
-- `js/stats.js` — Stats API fetch/range handling and lightweight bar chart rendering
+- `js/stats.js` — Stats API fetch/range handling and lightweight bar/time-series chart rendering
 - favicon assets
 
 ## Tests map
