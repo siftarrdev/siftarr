@@ -84,6 +84,61 @@ async def test_save_qbit_move_settings_persists_without_scheduler_restart(monkey
 
 
 @pytest.mark.asyncio
+async def test_export_settings_backup_returns_download(monkeypatch, mock_db):
+    store = MagicMock()
+    store.export_backup = AsyncMock(return_value={"version": 1, "settings": {"tz": "UTC"}})
+    monkeypatch.setattr(settings, "SettingsStore", lambda db: store)
+
+    response = await settings.export_settings_backup(db=mock_db)
+
+    assert response.media_type == "application/json"
+    assert "siftarr-settings-backup.json" in response.headers["content-disposition"]
+    assert b'"tz": "UTC"' in response.body
+
+
+@pytest.mark.asyncio
+async def test_preview_settings_backup_renders_safe_validation_error(
+    monkeypatch, mock_db, base_context
+):
+    monkeypatch.setattr(
+        settings, "_build_settings_page_context", AsyncMock(return_value=base_context())
+    )
+    store = MagicMock()
+    store.preview_backup = AsyncMock(side_effect=settings.SettingsBackupError("bad <secret>"))
+    monkeypatch.setattr(settings, "SettingsStore", lambda db: store)
+    upload = MagicMock()
+    upload.read = AsyncMock(return_value=b"not-json")
+
+    response = await settings.preview_settings_backup(MagicMock(), db=mock_db, backup_file=upload)
+    body = cast(bytes, response.body).decode()
+
+    assert "bad &lt;secret&gt;" in body
+    assert "bad <secret>" not in body
+
+
+@pytest.mark.asyncio
+async def test_restore_settings_backup_applies_replace_mode(monkeypatch, mock_db, base_context):
+    monkeypatch.setattr(
+        settings, "_build_settings_page_context", AsyncMock(return_value=base_context())
+    )
+    store = MagicMock()
+    store.restore_backup = AsyncMock(return_value={"mode": "replace", "restored": 2})
+    monkeypatch.setattr(settings, "SettingsStore", lambda db: store)
+    upload = MagicMock()
+    upload.read = AsyncMock(return_value=b"{}")
+
+    response = await settings.restore_settings_backup(
+        MagicMock(), db=mock_db, mode="replace", backup_file=upload
+    )
+    context = cast(dict, getattr(response, "context", None))
+
+    store.restore_backup.assert_awaited_once_with(b"{}", mode="replace")
+    mock_db.commit.assert_awaited_once()
+    assert context["message"] == "Restored 2 setting(s)."
+    assert context["message_type"] == "success"
+
+
+@pytest.mark.asyncio
 async def test_run_recent_plex_scan_reports_success(monkeypatch, mock_db, base_context):
     """Manual recent Plex scan should report scheduler success."""
 

@@ -473,6 +473,158 @@ class TestRuleService:
         assert preview.replace_count == 1
         assert preview.rules[0]["tv_target"] == TVTarget.EPISODE
 
+    @pytest.mark.asyncio
+    async def test_preview_import_rules_with_existing_builds_diff_rows(self, service):
+        """Preview should include existing/imported rows and status labels."""
+        unchanged = MagicMock(spec=Rule)
+        unchanged.name = "Keep same"
+        unchanged.rule_type = RuleType.EXCLUSION
+        unchanged.media_scope = "both"
+        unchanged.tv_target = None
+        unchanged.pattern = "CAM"
+        unchanged.score = 0
+        unchanged.min_size_gb = None
+        unchanged.max_size_gb = None
+        unchanged.priority = 0
+        unchanged.is_enabled = True
+        unchanged.description = None
+
+        changed = MagicMock(spec=Rule)
+        changed.name = "Prefer 1080p"
+        changed.rule_type = RuleType.SCORER
+        changed.media_scope = "movie"
+        changed.tv_target = None
+        changed.pattern = "1080p"
+        changed.score = 10
+        changed.min_size_gb = None
+        changed.max_size_gb = None
+        changed.priority = 1
+        changed.is_enabled = True
+        changed.description = None
+
+        existing_only = MagicMock(spec=Rule)
+        existing_only.name = "Local only"
+        existing_only.rule_type = RuleType.REQUIREMENT
+        existing_only.media_scope = "both"
+        existing_only.tv_target = None
+        existing_only.pattern = "WEB"
+        existing_only.score = 0
+        existing_only.min_size_gb = None
+        existing_only.max_size_gb = None
+        existing_only.priority = 2
+        existing_only.is_enabled = True
+        existing_only.description = None
+
+        payload = json.dumps(
+            {
+                "version": 1,
+                "rules": [
+                    RuleService.serialize_rule(unchanged),
+                    {**RuleService.serialize_rule(changed), "score": 25},
+                    {
+                        "name": "Imported only",
+                        "rule_type": "exclusion",
+                        "media_scope": "both",
+                        "tv_target": None,
+                        "pattern": "TS",
+                        "score": 0,
+                        "min_size_gb": None,
+                        "max_size_gb": None,
+                        "priority": 3,
+                        "is_enabled": True,
+                        "description": None,
+                    },
+                ],
+            }
+        )
+
+        with patch.object(
+            service, "get_all_rules", return_value=[unchanged, changed, existing_only]
+        ):
+            preview = await service.preview_import_rules_with_existing(payload)
+
+        assert [row["status"] for row in preview.diff_rows] == [
+            "unchanged",
+            "changed",
+            "new/imported-only",
+            "existing-only",
+        ]
+        changed_row = preview.diff_rows[1]
+        assert any(field["name"] == "score" and field["changed"] for field in changed_row["fields"])
+
+    def test_build_selected_import_preview_accepts_existing_and_imported_choices(self, service):
+        """Selections from both sides become the ordered replacement ruleset."""
+        existing_rules = [
+            {
+                "name": "Existing keep",
+                "rule_type": "requirement",
+                "media_scope": "both",
+                "tv_target": None,
+                "pattern": "WEB",
+                "score": 0,
+                "min_size_gb": None,
+                "max_size_gb": None,
+                "priority": 5,
+                "is_enabled": True,
+                "description": None,
+            }
+        ]
+        payload = json.dumps(
+            {
+                "version": 1,
+                "rules": [
+                    {
+                        "name": "Imported keep",
+                        "rule_type": "scorer",
+                        "media_scope": "movie",
+                        "tv_target": None,
+                        "pattern": "2160p",
+                        "score": 20,
+                        "min_size_gb": None,
+                        "max_size_gb": None,
+                        "priority": 9,
+                        "is_enabled": True,
+                        "description": None,
+                    }
+                ],
+            }
+        )
+        preview = service.preview_import_rules(payload)
+
+        selected = service.build_selected_import_preview(
+            preview, existing_rules, ["existing:0", "imported:0"]
+        )
+
+        assert [rule["name"] for rule in selected.rules] == ["Existing keep", "Imported keep"]
+        assert [rule["priority"] for rule in selected.rules] == [0, 1]
+        assert selected.rules[0]["rule_type"] == RuleType.REQUIREMENT
+
+    def test_build_selected_import_preview_rejects_invalid_choice(self, service):
+        payload = json.dumps(
+            {
+                "version": 1,
+                "rules": [
+                    {
+                        "name": "Imported keep",
+                        "rule_type": "scorer",
+                        "media_scope": "movie",
+                        "tv_target": None,
+                        "pattern": "2160p",
+                        "score": 20,
+                        "min_size_gb": None,
+                        "max_size_gb": None,
+                        "priority": 9,
+                        "is_enabled": True,
+                        "description": None,
+                    }
+                ],
+            }
+        )
+        preview = service.preview_import_rules(payload)
+
+        with pytest.raises(ValueError, match="Invalid rule selection index"):
+            service.build_selected_import_preview(preview, [], ["imported:9"])
+
     def test_preview_import_rules_rejects_stringified_numeric_fields(self, service):
         """Numeric fields must be real JSON numbers, not strings."""
         payload = json.dumps(

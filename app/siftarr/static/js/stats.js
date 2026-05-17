@@ -64,6 +64,60 @@ function renderBars(container, rows, valueKey = 'value', availability = 'stats')
     });
 }
 
+function allPoints(rows) {
+    if (!rows) return [];
+    if (rows.length > 0 && rows[0].points) return rows.flatMap((row) => row.points || []);
+    return rows;
+}
+
+function renderPointSeries(container, rows, availability = 'stats') {
+    container.innerHTML = '';
+    if (availability === 'unavailable') {
+        const message = document.createElement('p');
+        message.className = 'text-sm text-gray-500';
+        message.textContent = 'Unavailable for this range.';
+        container.appendChild(message);
+        return;
+    }
+    const points = allPoints(rows);
+    const hasValues = points.some((point) => (point.value || 0) > 0);
+    if (!rows || rows.length === 0 || !hasValues) {
+        const message = document.createElement('p');
+        message.className = 'text-sm text-gray-500';
+        message.textContent = 'No data for this range.';
+        container.appendChild(message);
+        return;
+    }
+    const seriesRows = rows[0]?.points ? rows : [{ label: 'Total', points: rows }];
+    const max = Math.max(...allPoints(seriesRows).map((point) => point.value || 0), 1);
+    const wrapper = document.createElement('div');
+    wrapper.className = 'space-y-4';
+    seriesRows.forEach((series) => {
+        const block = document.createElement('div');
+        const title = document.createElement('div');
+        title.className = 'mb-2 flex items-center justify-between text-xs text-gray-400';
+        const label = document.createElement('span');
+        label.textContent = series.label;
+        const total = document.createElement('span');
+        total.className = 'font-mono';
+        total.textContent = formatNumber((series.points || []).reduce((sum, point) => sum + (point.value || 0), 0));
+        title.append(label, total);
+        const bars = document.createElement('div');
+        bars.className = 'flex h-24 items-end gap-1 rounded-lg bg-surface-850 p-2';
+        (series.points || []).forEach((point) => {
+            const bar = document.createElement('div');
+            const height = Math.max(((point.value || 0) / max) * 100, point.value > 0 ? 5 : 1);
+            bar.className = 'min-w-1 flex-1 rounded-t bg-brand-500/80';
+            bar.style.height = `${height}%`;
+            bar.title = `${point.label}: ${formatNumber(point.value)}`;
+            bars.appendChild(bar);
+        });
+        block.append(title, bars);
+        wrapper.appendChild(block);
+    });
+    container.appendChild(wrapper);
+}
+
 function updateCards(cards, availability = {}) {
     document.querySelector('[data-card="total_requests"]').textContent = formatNumber(cards.total_requests);
     document.querySelector('[data-card="downloads_processed"]').textContent = availability.downloads_processed === 'unavailable' ? '--' : formatNumber(cards.downloads_processed);
@@ -79,6 +133,11 @@ function renderStats(data) {
     renderBars(document.querySelector('[data-chart="source_split"]'), data.charts.source_split, 'value', data.availability?.source_split);
     renderBars(document.querySelector('[data-chart="rule_outcomes"]'), data.charts.rule_outcomes, 'value', data.availability?.rule_outcomes);
     renderBars(document.querySelector('[data-chart="processing_times"]'), data.charts.processing_times, 'avg_ms', data.availability?.processing_times);
+    const series = data.charts.time_series || {};
+    renderPointSeries(document.querySelector('[data-series-chart="downloads"]'), series.downloads, data.availability?.downloads_series);
+    renderPointSeries(document.querySelector('[data-series-chart="failures"]'), series.failures, data.availability?.failures_series);
+    renderPointSeries(document.querySelector('[data-series-chart="rule_rejections"]'), series.rule_rejections, data.availability?.rule_rejections_series);
+    renderPointSeries(document.querySelector('[data-series-chart="indexer_behavior"]'), series.indexer_behavior, data.availability?.indexer_behavior_series);
     setHidden(emptyBox, !data.empty);
     setHidden(content, false);
 }

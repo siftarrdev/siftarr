@@ -171,6 +171,39 @@ class StatsService:
         if rule_outcomes_source != "stats":
             rule_outcomes = []
         processing_times = await self._processing_times(stats_range)
+        downloads_series = await self._daily_counts(
+            _apply_range(
+                select(func.date(StatsReleaseFact.approved_at), func.count(StatsReleaseFact.id))
+                .group_by(func.date(StatsReleaseFact.approved_at))
+                .order_by(func.date(StatsReleaseFact.approved_at)),
+                StatsReleaseFact.approved_at,
+                stats_range,
+            ),
+            stats_range,
+        )
+        downloads_series_source = "stats"
+        if release_fact_count == 0:
+            downloads_series = await self._historical_downloads_series(stats_range)
+            downloads_series_source = (
+                "historical" if self._point_series_has_data(downloads_series) else "unavailable"
+            )
+        failures_series = await self._daily_counts(
+            _apply_range(
+                select(func.date(StatsRuleOutcome.created_at), func.count(StatsRuleOutcome.id))
+                .where(StatsRuleOutcome.outcome == "failed")
+                .group_by(func.date(StatsRuleOutcome.created_at))
+                .order_by(func.date(StatsRuleOutcome.created_at)),
+                StatsRuleOutcome.created_at,
+                stats_range,
+            ),
+            stats_range,
+        )
+        rule_rejection_trends = await self._rule_rejection_trends(stats_range)
+        indexer_behavior = await self._indexer_behavior(stats_range)
+        indexer_behavior_source = "stats"
+        if release_fact_count == 0:
+            indexer_behavior = await self._historical_indexer_behavior(stats_range)
+            indexer_behavior_source = "historical" if indexer_behavior else "unavailable"
 
         has_activity = any(
             [
@@ -207,6 +240,12 @@ class StatsService:
                 "source_split": source_split,
                 "rule_outcomes": rule_outcomes,
                 "processing_times": processing_times,
+                "time_series": {
+                    "downloads": downloads_series,
+                    "failures": failures_series,
+                    "rule_rejections": rule_rejection_trends,
+                    "indexer_behavior": indexer_behavior,
+                },
             },
             "availability": {
                 "downloads_processed": downloads_source,
@@ -216,6 +255,12 @@ class StatsService:
                 "source_split": source_source,
                 "rule_outcomes": "stats" if rule_outcomes_source == "stats" else "unavailable",
                 "processing_times": "stats" if processing_times else "unavailable",
+                "downloads_series": downloads_series_source,
+                "failures_series": "stats" if rule_outcomes_source == "stats" else "unavailable",
+                "rule_rejections_series": "stats"
+                if rule_outcomes_source == "stats"
+                else "unavailable",
+                "indexer_behavior_series": indexer_behavior_source,
             },
             "empty": not has_activity,
         }
@@ -250,6 +295,82 @@ class StatsService:
             }
             for key, avg, count in result.all()
         ]
+
+    def _range_days(self, stats_range: StatsRange, labels: list[str]) -> list[str]:
+        if stats_range.start is None or stats_range.end is None:
+            return labels
+        days = []
+        current = stats_range.start.date()
+        end_date = stats_range.end.date()
+        while current < end_date:
+            days.append(current.isoformat())
+            current += timedelta(days=1)
+        return days
+
+    async def _daily_counts(self, stmt: Any, stats_range: StatsRange) -> list[dict[str, Any]]:
+        result = await self.db.execute(stmt)
+        counts = {str(day): int(count or 0) for day, count in result.all() if day is not None}
+        labels = self._range_days(stats_range, sorted(counts))
+        return [{"date": day, "label": day, "value": counts.get(day, 0)} for day in labels]
+
+    async def _rule_rejection_trends(self, stats_range: StatsRange) -> list[dict[str, Any]]:
+        stmt = (
+            select(
+                func.date(StatsRuleOutcome.created_at),
+                StatsRuleOutcome.rule_name,
+                func.count(StatsRuleOutcome.id),
+            )
+            .where(StatsRuleOutcome.outcome == "failed")
+            .group_by(func.date(StatsRuleOutcome.created_at), StatsRuleOutcome.rule_name)
+            .order_by(func.date(StatsRuleOutcome.created_at), StatsRuleOutcome.rule_name)
+        )
+        stmt = _apply_range(stmt, StatsRuleOutcome.created_at, stats_range)
+        result = await self.db.execute(stmt)
+        rows = [(str(day), rule or "Unknown", int(count or 0)) for day, rule, count in result.all()]
+        return self._multi_series(rows, stats_range)
+
+    async def _indexer_behavior(self, stats_range: StatsRange) -> list[dict[str, Any]]:
+        stmt = (
+            select(
+                func.date(StatsReleaseFact.approved_at),
+                StatsReleaseFact.indexer,
+                func.count(StatsReleaseFact.id),
+            )
+            .group_by(func.date(StatsReleaseFact.approved_at), StatsReleaseFact.indexer)
+            .order_by(func.date(StatsReleaseFact.approved_at), StatsReleaseFact.indexer)
+        )
+        stmt = _apply_range(stmt, StatsReleaseFact.approved_at, stats_range)
+        result = await self.db.execute(stmt)
+        rows = [
+            (str(day), indexer or "Unknown", int(count or 0))
+            for day, indexer, count in result.all()
+        ]
+        return self._multi_series(rows, stats_range)
+
+    def _multi_series(
+        self, rows: list[tuple[str, str, int]], stats_range: StatsRange
+    ) -> list[dict[str, Any]]:
+        labels = self._range_days(stats_range, sorted({day for day, _, _ in rows}))
+        totals: dict[str, int] = {}
+        values: dict[tuple[str, str], int] = {}
+        for day, name, count in rows:
+            totals[name] = totals.get(name, 0) + count
+            values[(name, day)] = count
+        names = sorted(totals, key=lambda name: (-totals[name], name))[:5]
+        return [
+            {
+                "label": name,
+                "points": [
+                    {"date": day, "label": day, "value": values.get((name, day), 0)}
+                    for day in labels
+                ],
+            }
+            for name in names
+        ]
+
+    @staticmethod
+    def _point_series_has_data(rows: list[dict[str, Any]]) -> bool:
+        return any((row.get("value") or 0) > 0 for row in rows)
 
     async def _historical_downloads_processed(self, stats_range: StatsRange) -> int:
         return await self._scalar_count(
@@ -299,6 +420,41 @@ class StatsService:
         )
         rows = await self._group_counts(_apply_range(stmt, StagedTorrent.updated_at, stats_range))
         return [row for row in rows if row["label"] != "Unknown"]
+
+    async def _historical_downloads_series(self, stats_range: StatsRange) -> list[dict[str, Any]]:
+        return await self._daily_counts(
+            _apply_range(
+                select(
+                    func.date(StagedTorrent.updated_at),
+                    func.count(distinct(StagedTorrent.request_id)),
+                )
+                .where(StagedTorrent.status == "approved", StagedTorrent.request_id.is_not(None))
+                .group_by(func.date(StagedTorrent.updated_at))
+                .order_by(func.date(StagedTorrent.updated_at)),
+                StagedTorrent.updated_at,
+                stats_range,
+            ),
+            stats_range,
+        )
+
+    async def _historical_indexer_behavior(self, stats_range: StatsRange) -> list[dict[str, Any]]:
+        stmt = (
+            select(
+                func.date(StagedTorrent.updated_at),
+                StagedTorrent.indexer,
+                func.count(StagedTorrent.id),
+            )
+            .where(StagedTorrent.status == "approved")
+            .group_by(func.date(StagedTorrent.updated_at), StagedTorrent.indexer)
+            .order_by(func.date(StagedTorrent.updated_at), StagedTorrent.indexer)
+        )
+        stmt = _apply_range(stmt, StagedTorrent.updated_at, stats_range)
+        result = await self.db.execute(stmt)
+        rows = [
+            (str(day), indexer or "Unknown", int(count or 0))
+            for day, indexer, count in result.all()
+        ]
+        return self._multi_series(rows, stats_range)
 
     @staticmethod
     def _timing_average(processing_times: list[dict[str, Any]], key: str) -> float | None:

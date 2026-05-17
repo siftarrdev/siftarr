@@ -11,7 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.siftarr.database import get_db
 from app.siftarr.models.rule import RuleType, TVTarget
 from app.siftarr.services.decisions.rule_engine import RuleEngine
-from app.siftarr.services.decisions.rule_service import RuleImportPreview, RuleService
+from app.siftarr.services.decisions.rule_service import RuleService
 from app.siftarr.services.integrations.prowlarr_service import ProwlarrRelease
 
 router = APIRouter(prefix="/rules", tags=["rules"])
@@ -305,7 +305,7 @@ async def import_rules_preview(
     )
 
     try:
-        preview = rule_service.preview_import_rules(resolved_payload)
+        preview = await rule_service.preview_import_rules_with_existing(resolved_payload)
         return templates.TemplateResponse(
             request,
             "rules.html",
@@ -329,15 +329,19 @@ async def import_rules_preview(
 async def import_rules_apply(
     import_payload: str = Form(...),
     confirm_replace: str = Form(...),
+    keep_rule: str | list[str] | None = Form(default=None),
     db: AsyncSession = Depends(get_db),
 ) -> RedirectResponse:
-    """Apply a previously previewed rule import by replacing the ruleset."""
+    """Apply a previously previewed rule import with explicit keep selections."""
     if confirm_replace != "yes":
         raise HTTPException(status_code=400, detail="Import confirmation is required.")
 
     rule_service = RuleService(db)
-    preview: RuleImportPreview = rule_service.preview_import_rules(import_payload)
-    await rule_service.replace_rules_from_preview(preview)
+    selections = _as_list(keep_rule)
+    try:
+        await rule_service.replace_rules_from_payload_selection(import_payload, selections)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     return RedirectResponse(url="/rules", status_code=303)
 
 

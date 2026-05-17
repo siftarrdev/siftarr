@@ -83,6 +83,84 @@ details[open] summary .accordion-chevron { transform: rotate(90deg); }
         </div>
     </details>
 
+    {# ── Settings Backup / Restore ── #}
+    <details class="card">
+        <summary class="card-header flex items-center gap-3 cursor-pointer select-none">
+            <svg class="accordion-chevron w-4 h-4 text-gray-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
+            <div>
+                <h2 class="section-title">Settings Backup / Restore</h2>
+                <p class="section-subtitle">Export or restore non-secret settings only. API keys, Plex tokens, generated secrets, and sync timestamps are excluded.</p>
+            </div>
+        </summary>
+        <div class="card-body space-y-5">
+            <a href="/settings/backup/export" class="btn-primary btn-sm inline-flex">Export Non-secret Settings</a>
+            <form action="/settings/backup/preview" method="post" enctype="multipart/form-data" class="space-y-3 rounded-xl border border-gray-700/60 bg-surface-850 p-4">
+                <label class="form-label" for="settings_backup_preview_file">Preview backup JSON</label>
+                <input id="settings_backup_preview_file" name="backup_file" type="file" accept="application/json,.json" class="form-input">
+                <button type="submit" class="btn-secondary btn-sm">Preview Import</button>
+            </form>
+            {% if settings_backup_preview %}
+            <div class="rounded-xl border border-gray-700/60 bg-surface-850 p-4">
+                <h3 class="text-sm font-semibold text-white mb-3">Import Preview</h3>
+                <div class="overflow-x-auto">
+                    <table class="min-w-full text-left text-xs">
+                        <thead class="text-gray-500 uppercase tracking-wide"><tr><th class="py-2 pr-4">Key</th><th class="py-2 pr-4">Imported</th><th class="py-2 pr-4">Current</th><th class="py-2">Status</th></tr></thead>
+                        <tbody class="divide-y divide-gray-700/40">
+                            {% for row in settings_backup_preview.rows %}
+                            <tr><td class="py-2 pr-4 text-gray-200">{{ row.key }}</td><td class="py-2 pr-4 text-gray-400">{{ row.value }}</td><td class="py-2 pr-4 text-gray-500">{{ row.current_value or '' }}</td><td class="py-2 text-gray-300">{{ row.status }}</td></tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+            {% endif %}
+            <form action="/settings/backup/restore" method="post" enctype="multipart/form-data" class="space-y-3 rounded-xl border border-gray-700/60 bg-surface-850 p-4">
+                <label class="form-label" for="settings_backup_restore_file">Restore backup JSON</label>
+                <input id="settings_backup_restore_file" name="backup_file" type="file" accept="application/json,.json" class="form-input">
+                <div class="flex flex-col gap-2 text-sm text-gray-300">
+                    <label><input type="radio" name="mode" value="update" checked class="mr-2">Update present keys only</label>
+                    <label><input type="radio" name="mode" value="replace" class="mr-2">Full replace non-secrets</label>
+                </div>
+                <button type="submit" class="btn-warning btn-sm">Restore Settings</button>
+            </form>
+        </div>
+    </details>
+
+    {# ── Background Jobs ── #}
+    <details class="card">
+        <summary class="card-header flex items-center gap-3 cursor-pointer select-none">
+            <svg class="accordion-chevron w-4 h-4 text-gray-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
+            <div>
+                <h2 class="section-title">Background Jobs</h2>
+                <p class="section-subtitle">Scheduler health, active locks, recent outcomes, and manual triggers</p>
+            </div>
+        </summary>
+        <div class="card-body space-y-4">
+            {% set sched = scheduler_status or {'available': false, 'running': false, 'jobs': [], 'active_jobs': []} %}
+            <div class="text-sm text-gray-300">Scheduler: <span class="font-semibold {% if sched.running %}text-emerald-300{% else %}text-red-300{% endif %}">{% if sched.running %}running{% elif sched.available %}stopped{% else %}unavailable{% endif %}</span></div>
+            {% if sched.active_jobs %}<div class="text-xs text-amber-300">Active/locked jobs: {% for job in sched.active_jobs %}{{ job.id }}{% if not loop.last %}, {% endif %}{% endfor %}</div>{% endif %}
+            <div class="overflow-x-auto">
+                <table class="min-w-full text-left text-xs">
+                    <thead class="text-gray-500 uppercase tracking-wide"><tr><th class="py-2 pr-4">Job</th><th class="py-2 pr-4">Next run</th><th class="py-2 pr-4">Last run</th><th class="py-2 pr-4">Last success</th><th class="py-2 pr-4">Last error</th><th class="py-2">Action</th></tr></thead>
+                    <tbody class="divide-y divide-gray-700/40">
+                        {% for job in sched.jobs %}
+                        <tr>
+                            <td class="py-2 pr-4 text-gray-200">{{ job.label }}{% if job.locked %}<span class="ml-2 text-amber-300">locked</span>{% endif %}</td>
+                            <td class="py-2 pr-4 text-gray-400">{{ job.next_run or '—' }}</td>
+                            <td class="py-2 pr-4 text-gray-400">{{ job.last_run or '—' }}</td>
+                            <td class="py-2 pr-4 text-gray-400">{{ job.last_success or '—' }}</td>
+                            <td class="py-2 pr-4 text-red-300">{{ job.last_error or '—' }}</td>
+                            <td class="py-2">{% if job.manual_action %}<form action="{{ job.manual_action }}" method="post"><button type="submit" class="btn-primary btn-sm">Run</button></form>{% else %}<span class="text-gray-600">—</span>{% endif %}</td>
+                        </tr>
+                        {% else %}
+                        <tr><td colspan="6" class="py-3 text-gray-500">No scheduled jobs are registered.</td></tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </details>
+
     {# ── qBittorrent Move / Retention ── #}
     <details class="card">
         <summary class="card-header flex items-center gap-3 cursor-pointer select-none">

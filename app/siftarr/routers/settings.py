@@ -1,13 +1,20 @@
 """Consolidated settings router."""
 
+import json
 import logging
 import os
 import secrets
 from collections.abc import AsyncGenerator
 from typing import Any
 
-from fastapi import APIRouter, Depends, Form, Query, Request
-from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, StreamingResponse
+from fastapi import APIRouter, Depends, File, Form, Query, Request, UploadFile
+from fastapi.responses import (
+    HTMLResponse,
+    JSONResponse,
+    RedirectResponse,
+    Response,
+    StreamingResponse,
+)
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -22,6 +29,7 @@ from app.siftarr.services.admin.scheduler_service import (
 )
 from app.siftarr.services.admin.settings_service import (
     ENV_KEY_MAP,
+    SettingsBackupError,
     SettingsStore,
     build_effective_settings,
     build_manual_plex_job_message,
@@ -456,6 +464,60 @@ async def save_qbit_move_settings(
     )
     await db.commit()
     return RedirectResponse(url="/settings?qbit_move_saved=true", status_code=303)
+
+
+# ── Settings backup / restore ──────────────────────────────────────────────
+
+
+@router.get("/backup/export")
+async def export_settings_backup(db: AsyncSession = Depends(get_db)) -> Response:
+    """Download a non-secret settings backup."""
+    backup = await SettingsStore(db).export_backup()
+    return Response(
+        content=json.dumps(backup, indent=2),
+        media_type="application/json",
+        headers={"Content-Disposition": "attachment; filename=siftarr-settings-backup.json"},
+    )
+
+
+@router.post("/backup/preview")
+async def preview_settings_backup(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    backup_file: UploadFile = File(...),
+) -> HTMLResponse:
+    """Preview a settings backup without applying it."""
+    context = await _build_settings_page_context(request, db)
+    try:
+        payload = await backup_file.read()
+        context["settings_backup_preview"] = await SettingsStore(db).preview_backup(payload)
+        context["message"] = "Settings backup preview loaded. Review before restoring."
+        context["message_type"] = "success"
+    except SettingsBackupError as exc:
+        context["message"] = str(exc)
+        context["message_type"] = "error"
+    return templates.TemplateResponse(request, "settings.html", context)
+
+
+@router.post("/backup/restore")
+async def restore_settings_backup(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    mode: str = Form("update"),
+    backup_file: UploadFile = File(...),
+) -> HTMLResponse:
+    """Apply a settings backup using update or replace mode."""
+    context = await _build_settings_page_context(request, db)
+    try:
+        result = await SettingsStore(db).restore_backup(await backup_file.read(), mode=mode)
+        await db.commit()
+        context = await _build_settings_page_context(request, db)
+        context["message"] = f"Restored {result['restored']} setting(s)."
+        context["message_type"] = "success"
+    except SettingsBackupError as exc:
+        context["message"] = str(exc)
+        context["message_type"] = "error"
+    return templates.TemplateResponse(request, "settings.html", context)
 
 
 # ── Connection testing API routes ─────────────────────────────────────────

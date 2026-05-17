@@ -389,12 +389,12 @@
                     <div class="space-y-4">
                         <form action="/rules/import-preview" method="post" enctype="multipart/form-data" class="space-y-3">
                             <label class="form-label">Import JSON</label>
-                            <textarea name="import_payload" rows="10" class="form-input font-mono" placeholder='{"version":1,"rules":[...]}'>{{ import_payload or '' }}</textarea>
+                            <textarea id="rules-import-payload" name="import_payload" rows="10" class="form-input font-mono" placeholder='{"version":1,"rules":[...]}'>{{ import_payload or '' }}</textarea>
                             <div>
                                 <label class="form-label">Or upload JSON file</label>
-                                <input type="file" name="import_file" accept="application/json,.json" class="form-input file:mr-3 file:rounded-md file:border-0 file:bg-surface-800 file:px-3 file:py-1.5 file:text-sm file:text-gray-200">
+                                <input id="rules-import-file" type="file" name="import_file" accept="application/json,.json" class="form-input file:mr-3 file:rounded-md file:border-0 file:bg-surface-800 file:px-3 file:py-1.5 file:text-sm file:text-gray-200">
                             </div>
-                            <button type="submit" class="btn-warning">Preview Import</button>
+                            <button id="rules-import-preview-btn" type="submit" class="btn-warning disabled:cursor-not-allowed disabled:opacity-50">Preview Import</button>
                         </form>
 
                         {% if import_error %}
@@ -402,20 +402,75 @@
                         {% endif %}
 
                         {% if import_preview %}
-                        <div class="rounded-xl border border-amber-700/50 bg-amber-900/20 p-4 space-y-3">
+                        <div class="rounded-xl border border-amber-700/50 bg-amber-900/20 p-4 space-y-4 lg:col-span-2">
                             <div class="text-sm font-semibold text-white">Import Preview</div>
-                            <div class="text-xs text-gray-400">Version {{ import_preview.version }} &middot; replacing {{ import_preview.replace_count }} rule(s)</div>
-                            <ul class="text-sm text-gray-300 space-y-1 max-h-56 overflow-auto">
-                                {% for rule in import_preview.rules %}
-                                <li>
-                                    {{ rule.name }} &middot; {{ rule.rule_type.value.replace('_', ' ') }} &middot; {{ rule.media_scope }}{% if rule.tv_target %} / {{ rule.tv_target.value }}{% endif %}
-                                </li>
-                                {% endfor %}
-                            </ul>
+                            <div class="text-xs text-gray-400">Version {{ import_preview.version }} &middot; imported {{ import_preview.imported_rules|default([], true)|length }} rule(s) &middot; current {{ import_preview.existing_rules|default([], true)|length }} rule(s)</div>
                             <form action="/rules/import-apply" method="post" class="space-y-3">
                                 <input type="hidden" name="import_payload" value="{{ import_payload }}">
                                 <input type="hidden" name="confirm_replace" value="yes">
-                                <button type="submit" class="btn-danger" onclick="return confirm('Replace the current ruleset with this imported preview?')">Confirm Replace Rules</button>
+                                <div class="overflow-x-auto rounded-xl border border-gray-700/50 bg-surface-950/40">
+                                    <table class="min-w-full divide-y divide-gray-800 text-left text-xs">
+                                        <thead class="bg-surface-850 text-gray-400">
+                                            <tr>
+                                                <th class="px-3 py-2 font-medium">Status</th>
+                                                <th class="px-3 py-2 font-medium">Keep existing</th>
+                                                <th class="px-3 py-2 font-medium">Existing rule</th>
+                                                <th class="px-3 py-2 font-medium">Keep imported</th>
+                                                <th class="px-3 py-2 font-medium">Imported rule</th>
+                                                <th class="px-3 py-2 font-medium">Differences</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody class="divide-y divide-gray-800/80">
+                                            {% for row in import_preview.diff_rows|default([], true) %}
+                                            <tr class="align-top">
+                                                <td class="px-3 py-3 whitespace-nowrap">
+                                                    <span class="badge {% if row.status == 'unchanged' %}badge-gray{% elif row.status == 'changed' %}badge-yellow{% elif row.status == 'existing-only' %}badge-purple{% else %}badge-green{% endif %}">{{ row.status }}</span>
+                                                </td>
+                                                <td class="px-3 py-3 text-center">
+                                                    {% if row.existing %}
+                                                    <input type="checkbox" name="keep_rule" value="existing:{{ row.existing_index }}" {% if row.status == 'existing-only' %}checked{% endif %} class="h-4 w-4 rounded border-gray-600 bg-surface-900 text-brand-600 focus:ring-brand-500" aria-label="Keep existing {{ row.existing.name }}">
+                                                    {% else %}<span class="text-gray-600">—</span>{% endif %}
+                                                </td>
+                                                <td class="px-3 py-3 min-w-56">
+                                                    {% if row.existing %}
+                                                    <div class="font-medium text-white">{{ row.existing.name }}</div>
+                                                    <div class="mt-1 text-gray-400">{{ row.existing.rule_type.replace('_', ' ') }} &middot; {{ row.existing.media_scope }}{% if row.existing.tv_target %} / {{ row.existing.tv_target }}{% endif %}</div>
+                                                    <code class="mt-1 block max-w-xs truncate font-mono text-gray-500">{{ row.existing.pattern }}</code>
+                                                    {% else %}<span class="text-gray-600">Not present</span>{% endif %}
+                                                </td>
+                                                <td class="px-3 py-3 text-center">
+                                                    {% if row.imported %}
+                                                    <input type="checkbox" name="keep_rule" value="imported:{{ row.imported_index }}" {% if row.status != 'existing-only' %}checked{% endif %} class="h-4 w-4 rounded border-gray-600 bg-surface-900 text-brand-600 focus:ring-brand-500" aria-label="Keep imported {{ row.imported.name }}">
+                                                    {% else %}<span class="text-gray-600">—</span>{% endif %}
+                                                </td>
+                                                <td class="px-3 py-3 min-w-56">
+                                                    {% if row.imported %}
+                                                    <div class="font-medium text-white">{{ row.imported.name }}</div>
+                                                    <div class="mt-1 text-gray-400">{{ row.imported.rule_type.replace('_', ' ') }} &middot; {{ row.imported.media_scope }}{% if row.imported.tv_target %} / {{ row.imported.tv_target }}{% endif %}</div>
+                                                    <code class="mt-1 block max-w-xs truncate font-mono text-gray-500">{{ row.imported.pattern }}</code>
+                                                    {% else %}<span class="text-gray-600">Not present in import</span>{% endif %}
+                                                </td>
+                                                <td class="px-3 py-3 min-w-64">
+                                                    {% set changes = row.fields | selectattr('changed') | list %}
+                                                    {% if row.status == 'unchanged' %}
+                                                    <span class="text-gray-500">No field changes.</span>
+                                                    {% else %}
+                                                    <ul class="space-y-1 text-gray-300">
+                                                        {% for field in changes %}
+                                                        <li><span class="font-medium text-gray-200">{{ field.name }}</span>: <span class="text-red-300">{{ field.existing if field.existing is not none else '—' }}</span> → <span class="text-emerald-300">{{ field.imported if field.imported is not none else '—' }}</span></li>
+                                                        {% endfor %}
+                                                    </ul>
+                                                    {% endif %}
+                                                </td>
+                                            </tr>
+                                            {% endfor %}
+                                        </tbody>
+                                    </table>
+                                </div>
+                                <div class="rounded-lg border border-red-800/50 bg-red-950/30 p-3 text-sm text-red-100">
+                                    Applying replaces the entire ruleset with the checked rows, in the order shown. Unchecked rows from either side will be removed.
+                                </div>
+                                <button type="submit" class="btn-danger" onclick="return confirm('Replace the current ruleset with the checked existing/imported rows? Unchecked rows will be removed.')">Apply Selected Rules</button>
                             </form>
                         </div>
                         {% endif %}
@@ -435,6 +490,29 @@
 {% endfor %}
 
 <script>
+function syncRulesImportPreviewButton() {
+    const payload = document.getElementById('rules-import-payload');
+    const file = document.getElementById('rules-import-file');
+    const button = document.getElementById('rules-import-preview-btn');
+
+    if (!payload || !file || !button) return;
+
+    const hasText = payload.value.trim().length > 0;
+    const hasFile = file.files && file.files.length > 0;
+    button.disabled = hasText || !hasFile;
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+    const payload = document.getElementById('rules-import-payload');
+    const file = document.getElementById('rules-import-file');
+
+    if (!payload || !file) return;
+
+    payload.addEventListener('input', syncRulesImportPreviewButton);
+    file.addEventListener('change', syncRulesImportPreviewButton);
+    syncRulesImportPreviewButton();
+});
+
 function addRuleTestRow() {
     const tbody = document.getElementById('rule-test-rows');
     const rowNumber = tbody.children.length + 1;

@@ -80,6 +80,26 @@ ENV_KEY_MAP: dict[str, str] = {
 # Keys that are persisted and used as runtime connection/scheduling settings.
 SETTINGS_KEYS = frozenset(ENV_KEY_MAP)
 SSO_CLAIM_KEYS = frozenset({"plex_claimed_id", "plex_username", "plex_thumb", "plex_token"})
+SECRET_SETTING_KEYS = frozenset(
+    {
+        "overseerr_api_key",
+        "prowlarr_api_key",
+        "qbittorrent_api_key",
+        "plex_token",
+        "api_key",
+        "plex_claimed_id",
+        "plex_username",
+        "plex_thumb",
+        OVERSEERR_LAST_SYNC_SUCCESS_KEY,
+        PLEX_LAST_SYNC_SUCCESS_KEY,
+    }
+)
+RESTORABLE_SETTING_KEYS = SETTINGS_KEYS - SECRET_SETTING_KEYS
+SETTINGS_BACKUP_VERSION = 1
+
+
+class SettingsBackupError(ValueError):
+    """Raised when a settings backup cannot be parsed or restored."""
 
 
 class SettingsStore:
@@ -160,6 +180,7 @@ class SettingsStore:
             "plex_token": mask_secret(env_settings.plex_token) or "",
             "api_key": mask_secret(env_settings.api_key) or "",
             "tz": env_settings.tz,
+            "staging_mode_enabled": env_settings.staging_mode_enabled,
             "overseerr_poll_interval_minutes": env_settings.overseerr_poll_interval_minutes,
             "qbittorrent_completion_poll_interval_seconds": env_settings.qbittorrent_completion_poll_interval_seconds,
             "plex_fast_sync_interval_minutes": env_settings.plex_fast_sync_interval_minutes,
@@ -176,6 +197,55 @@ class SettingsStore:
                 )
         base.update(await self.get_plex_sso_status(db_overrides))
         return base
+
+    async def export_backup(self) -> dict[str, Any]:
+        """Return a versioned JSON-serializable backup of restorable non-secrets."""
+        values = await self.get_all()
+        settings = {
+            key: value
+            for key, value in sorted(values.items())
+            if key in RESTORABLE_SETTING_KEYS and key not in SECRET_SETTING_KEYS
+        }
+        return {
+            "version": SETTINGS_BACKUP_VERSION,
+            "exported_at": datetime.now(UTC).isoformat(),
+            "settings": settings,
+        }
+
+    async def preview_backup(self, payload: bytes | str) -> dict[str, Any]:
+        """Validate a backup and return safe preview metadata."""
+        backup_settings = parse_settings_backup(payload)
+        current = await self.get_all()
+        rows = []
+        for key, value in sorted(backup_settings.items()):
+            current_value = current.get(key)
+            rows.append(
+                {
+                    "key": key,
+                    "value": value,
+                    "current_value": current_value,
+                    "status": "new"
+                    if current_value is None
+                    else "changed"
+                    if current_value != value
+                    else "unchanged",
+                }
+            )
+        return {"version": SETTINGS_BACKUP_VERSION, "settings": backup_settings, "rows": rows}
+
+    async def restore_backup(self, payload: bytes | str, *, mode: str) -> dict[str, Any]:
+        """Restore a validated backup in update or full-replace mode."""
+        if mode not in {"update", "replace"}:
+            raise SettingsBackupError("Choose a valid restore mode.")
+        backup_settings = parse_settings_backup(payload)
+        if mode == "replace":
+            await self.delete(*RESTORABLE_SETTING_KEYS)
+            for key in RESTORABLE_SETTING_KEYS:
+                os.environ.pop(ENV_KEY_MAP[key], None)
+        for key, value in backup_settings.items():
+            await self.set(key, str(value))
+        await self.load_into_environ(clear_existing=False)
+        return {"mode": mode, "restored": len(backup_settings)}
 
     async def get_plex_sso_status(self, db_values: dict[str, str] | None = None) -> dict[str, Any]:
         """Return Plex SSO claim metadata without exposing the stored token."""
@@ -347,6 +417,7 @@ async def build_effective_settings(db: AsyncSession | None = None) -> dict[str, 
         "plex_token_present": bool(effective.plex_token),
         "api_key": mask_secret(effective.api_key) or "",
         "tz": effective.tz,
+        "staging_mode_enabled": effective.staging_mode_enabled,
         "overseerr_poll_interval_minutes": effective.overseerr_poll_interval_minutes,
         "qbittorrent_completion_poll_interval_seconds": effective.qbittorrent_completion_poll_interval_seconds,
         "plex_fast_sync_interval_minutes": effective.plex_fast_sync_interval_minutes,
@@ -391,6 +462,7 @@ async def build_settings_page_context(
         "staging_enabled": staging_enabled,
         "pending_count": pending_count,
         "plex_jobs": await build_plex_job_statuses_func(db),
+        "scheduler_status": await build_scheduler_status(),
         "env": effective_settings,
     }
 
@@ -422,6 +494,38 @@ def build_compact_metrics_snapshot(metrics_payload: dict[str, Any] | None) -> st
 
 def _coerce_int(value: Any) -> int:
     return value if isinstance(value, int) else 0
+
+
+def parse_settings_backup(payload: bytes | str) -> dict[str, str]:
+    """Parse and validate a settings backup, rejecting secrets and unknown keys."""
+    try:
+        raw = payload.decode("utf-8") if isinstance(payload, bytes) else payload
+        data = json.loads(raw)
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise SettingsBackupError("Upload a valid JSON settings backup.") from exc
+    if not isinstance(data, dict) or data.get("version") != SETTINGS_BACKUP_VERSION:
+        raise SettingsBackupError("Unsupported settings backup version.")
+    settings = data.get("settings")
+    if not isinstance(settings, dict):
+        raise SettingsBackupError("Settings backup is missing a settings object.")
+
+    invalid = sorted(set(settings) - RESTORABLE_SETTING_KEYS)
+    if invalid:
+        raise SettingsBackupError(
+            f"Backup contains non-restorable setting(s): {', '.join(invalid)}"
+        )
+
+    parsed: dict[str, str] = {}
+    for key, value in settings.items():
+        if isinstance(value, bool):
+            parsed[key] = "true" if value else "false"
+        elif isinstance(value, (int, float, str)):
+            parsed[key] = str(value)
+        elif value is None:
+            parsed[key] = ""
+        else:
+            raise SettingsBackupError(f"Setting {key} must be a scalar value.")
+    return parsed
 
 
 def build_plex_run_outcome_summary(
@@ -532,6 +636,53 @@ async def build_plex_job_statuses(
             }
         )
     return statuses
+
+
+async def build_scheduler_status() -> dict[str, Any]:
+    """Build scheduler health and scheduled job rows for Settings."""
+    from app.siftarr.main import scheduler_service
+
+    if scheduler_service is None:
+        return {"available": False, "running": False, "jobs": [], "active_jobs": []}
+    snapshot = await scheduler_service.get_status_snapshot()
+    plex_state = snapshot.get("plex_state", {}) if isinstance(snapshot, dict) else {}
+    plex_labels = {
+        "plex_recent_scan": "Recent Plex Scan",
+        "plex_poll": "Plex Poll",
+    }
+    job_rows = []
+    for job in snapshot.get("jobs", []):
+        state = plex_state.get(job.get("id"), {})
+        job_rows.append(
+            {
+                "id": job.get("id"),
+                "name": job.get("name") or job.get("id"),
+                "label": plex_labels.get(job.get("id"), job.get("name") or job.get("id")),
+                "trigger": job.get("trigger"),
+                "next_run": serialize_datetime(job.get("next_run")),
+                "last_run": serialize_datetime(state.get("last_run")),
+                "last_success": serialize_datetime(state.get("last_success")),
+                "last_error": state.get("last_error"),
+                "locked": bool(state.get("locked"))
+                or (
+                    job.get("id") == "check_download_completion"
+                    and snapshot.get("download_completion_locked")
+                ),
+                "lock_owner": state.get("lock_owner"),
+                "manual_action": {
+                    "plex_recent_scan": "/settings/run-recent-plex-scan",
+                    "plex_poll": "/settings/run-plex-poll",
+                    "check_download_completion": "/settings/run-qbit-move",
+                    "retry_pending": "/settings/retry-pending",
+                }.get(job.get("id")),
+            }
+        )
+    return {
+        "available": bool(snapshot.get("available")),
+        "running": bool(snapshot.get("running")),
+        "jobs": job_rows,
+        "active_jobs": snapshot.get("active_jobs", []),
+    }
 
 
 def build_sse_progress(

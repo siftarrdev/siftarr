@@ -50,10 +50,46 @@ async def test_settings_page_layout_defaults_and_connections(monkeypatch, mock_d
     assert 'name="qbittorrent_move_completed_dir" value="/downloads"' in body
     assert 'name="qbittorrent_move_retention_weeks" value="6"' in body
     assert "Scheduler Settings" in body
+    assert "Settings Backup / Restore" in body
+    assert "Background Jobs" in body
+    assert "API keys, Plex tokens, generated secrets" in body
     assert 'name="overseerr_poll_interval_minutes" value="60"' in body
     assert 'name="qbittorrent_completion_poll_interval_seconds" value="30"' in body
     assert 'name="plex_fast_sync_interval_minutes" value="5"' in body
     assert 'name="plex_full_sync_time" value="03:00"' in body
+
+
+@pytest.mark.asyncio
+async def test_settings_page_renders_job_rows_without_secret_values(
+    monkeypatch, mock_db, base_context
+):
+    context = base_context()
+    context["scheduler_status"] = {
+        "available": True,
+        "running": True,
+        "active_jobs": [{"id": "plex_poll", "lock_owner": "worker"}],
+        "jobs": [
+            {
+                "id": "plex_poll",
+                "label": "Plex Poll",
+                "next_run": "2026-01-02 03:00:00+00:00",
+                "last_run": "2026-01-01 03:00:00+00:00",
+                "last_success": "2026-01-01 03:00:00+00:00",
+                "last_error": None,
+                "locked": True,
+                "manual_action": "/settings/run-plex-poll",
+            }
+        ],
+    }
+    context["env"]["overseerr_api_key"] = "********cret"
+
+    body = await _render_settings_page(monkeypatch, mock_db, context)
+
+    assert "Scheduler: <span" in body
+    assert "Plex Poll" in body
+    assert "2026-01-02 03:00:00+00:00" in body
+    assert "/settings/run-plex-poll" in body
+    assert "real-secret" not in body
 
 
 @pytest.mark.asyncio

@@ -185,6 +185,39 @@ class SchedulerService:
         async with self._plex_job_state_guard:
             return {job_name: asdict(state) for job_name, state in self._plex_job_state.items()}
 
+    async def get_status_snapshot(self) -> dict[str, Any]:
+        """Return scheduler health, job schedule rows, and in-memory lock state."""
+        scheduler = self.scheduler
+        jobs = []
+        if scheduler is not None:
+            for job in scheduler.get_jobs():
+                jobs.append(
+                    {
+                        "id": job.id,
+                        "name": job.name,
+                        "trigger": str(job.trigger),
+                        "next_run": job.next_run_time,
+                    }
+                )
+        plex_state = await self.get_plex_job_state_snapshot()
+        return {
+            "available": scheduler is not None,
+            "running": bool(scheduler and scheduler.running),
+            "jobs": jobs,
+            "active_jobs": [
+                {"id": name, "lock_owner": state.get("lock_owner")}
+                for name, state in plex_state.items()
+                if state.get("locked")
+            ]
+            + (
+                [{"id": "check_download_completion", "lock_owner": None}]
+                if self._download_completion_lock.locked()
+                else []
+            ),
+            "plex_state": plex_state,
+            "download_completion_locked": self._download_completion_lock.locked(),
+        }
+
     async def _run_guarded_plex_scan_job(
         self,
         *,
