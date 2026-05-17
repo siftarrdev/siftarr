@@ -65,7 +65,11 @@ class TestStagedRouter:
 
         assert response.status_code == 303
         assert torrent.status == "approved"
-        lifecycle_service.transition.assert_awaited_once_with(request.id, RequestStatus.DOWNLOADING)
+        lifecycle_service.transition.assert_awaited_once_with(
+            request.id,
+            RequestStatus.DOWNLOADING,
+            commit=False,
+        )
         log_decision.assert_called_once_with(
             request=request,
             approved_torrent=torrent,
@@ -212,7 +216,11 @@ class TestStagedRouter:
 
         assert response.status_code == 303
         assert torrent.status == "approved"
-        lifecycle_service.transition.assert_awaited_once_with(request.id, RequestStatus.DOWNLOADING)
+        lifecycle_service.transition.assert_awaited_once_with(
+            request.id,
+            RequestStatus.DOWNLOADING,
+            commit=False,
+        )
         sync.assert_awaited_once_with(mock_db, request, reason="staged_approval_qbit_sent")
 
     @pytest.mark.asyncio
@@ -396,6 +404,111 @@ class TestStagedRouter:
         assert response.status_code == 303
         assert torrent.status == "approved"
         assert torrent.info_hash == "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+
+    @pytest.mark.asyncio
+    async def test_approve_returns_json_success_for_application_json(self, mock_db, monkeypatch):
+        """Single approve should return a JSON payload for fetch clients."""
+        torrent = MagicMock(id=14, request_id=15, magnet_url="magnet:?xt=urn:btih:abc")
+        torrent.status = "staged"
+        torrent.selection_source = "rule"
+        torrent.torrent_path = "/tmp/json.torrent"
+        torrent.json_path = "/tmp/json.json"
+        torrent.title = "JSON Release"
+        request = MagicMock(id=15, media_type=MediaType.MOVIE, status=RequestStatus.STAGED)
+        torrent_result = MagicMock()
+        torrent_result.scalar_one_or_none.return_value = torrent
+        request_result = MagicMock()
+        request_result.scalar_one_or_none.return_value = request
+        rule_result = MagicMock()
+        rule_result.scalars.return_value.first.return_value = torrent
+        mock_db.execute.side_effect = [torrent_result, request_result, rule_result]
+
+        qbit = AsyncMock()
+        qbit.add_torrent.return_value = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        lifecycle_service = AsyncMock()
+        monkeypatch.setattr(staged, "get_settings", lambda: MagicMock())
+        monkeypatch.setattr(staged, "QbittorrentService", MagicMock(return_value=qbit))
+        monkeypatch.setattr(staged, "LifecycleService", MagicMock(return_value=lifecycle_service))
+        monkeypatch.setattr(staged, "log_staging_decision", MagicMock())
+        monkeypatch.setattr(staged.os.path, "exists", MagicMock(return_value=False))
+
+        response = await staged.approve_staged_torrent(
+            14,
+            http_request=MagicMock(headers={"accept": "application/json"}),
+            db=mock_db,
+        )
+
+        assert response.status_code == 200
+        body = json.loads(bytes(response.body))  # type: ignore[arg-type]
+        assert body == {
+            "status": "ok",
+            "message": "Torrent approved successfully",
+            "torrent_id": 14,
+            "torrent_status": "approved",
+            "request_status": RequestStatus.DOWNLOADING.value,
+            "refresh": ["staged", "downloading"],
+        }
+        lifecycle_service.transition.assert_awaited_once_with(
+            request.id,
+            RequestStatus.DOWNLOADING,
+            commit=False,
+        )
+        mock_db.commit.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_approve_qbit_failure_does_not_commit_local_transition(self, monkeypatch):
+        """A true qBit add failure should not persist approved/downloading state."""
+        engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+        session_maker = async_sessionmaker(engine, expire_on_commit=False)
+        async with session_maker() as db:
+            request = Request(
+                external_id="qbit-failure",
+                media_type=MediaType.MOVIE,
+                title="Failure Movie",
+                status=RequestStatus.STAGED,
+            )
+            db.add(request)
+            await db.flush()
+            torrent = StagedTorrent(
+                request_id=request.id,
+                torrent_path="/tmp/failure.torrent",
+                json_path="/tmp/failure.json",
+                original_filename="failure.torrent",
+                title="Failure Movie 2026",
+                size=100,
+                indexer="test",
+                score=90,
+                magnet_url="magnet:?xt=urn:btih:4444444444444444444444444444444444444444",
+                selection_source="rule",
+            )
+            db.add(torrent)
+            await db.commit()
+
+            qbit = AsyncMock()
+            qbit.add_torrent.return_value = None
+            qbit.get_torrent_info.return_value = None
+            qbit.get_torrent_info_by_name.return_value = None
+            monkeypatch.setattr(staged, "get_settings", lambda: MagicMock())
+            monkeypatch.setattr(staged, "QbittorrentService", MagicMock(return_value=qbit))
+            monkeypatch.setattr(staged, "log_staging_decision", MagicMock())
+            monkeypatch.setattr(staged.os.path, "exists", MagicMock(return_value=False))
+
+            with pytest.raises(HTTPException) as exc_info:
+                await staged.approve_staged_torrent(
+                    torrent.id,
+                    http_request=MagicMock(headers={"accept": "application/json"}),
+                    db=db,
+                )
+
+            assert exc_info.value.status_code == 500
+            await db.refresh(request)
+            await db.refresh(torrent)
+            assert request.status == RequestStatus.STAGED
+            assert torrent.status == "staged"
+
+        await engine.dispose()
 
     @pytest.mark.asyncio
     async def test_bulk_staged_action_persists_downloading_and_download_status(self, monkeypatch):

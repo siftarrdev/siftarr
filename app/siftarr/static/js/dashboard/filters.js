@@ -73,7 +73,7 @@ function filterStagedTable() {
     const filterEl = document.getElementById('staged-filter-input');
     if (!filterEl) return;
     const filter = filterEl.value.toLowerCase();
-    document.querySelectorAll('#staged-torrents-body tr').forEach(row => {
+    document.querySelectorAll('#staged-torrents-body tr, #staged-torrent-cards [data-torrent-id]').forEach(row => {
         const textContent = `${row.dataset.title} ${row.dataset.indexer} ${row.dataset.requeststate}`;
         row.style.display = textContent.includes(filter) ? '' : 'none';
     });
@@ -84,7 +84,7 @@ function filterDownloadingTable() {
     const filterEl = document.getElementById('downloading-filter-input');
     if (!filterEl) return;
     const filter = filterEl.value.toLowerCase();
-    document.querySelectorAll('#downloading-torrents-body tr').forEach(row => {
+    document.querySelectorAll('#downloading-torrents-body tr, #downloading-torrent-cards [data-torrent-id]').forEach(row => {
         const textContent = `${row.dataset.title} ${row.dataset.indexer} ${row.dataset.state} ${row.dataset.requeststate}`;
         row.style.display = textContent.includes(filter) ? '' : 'none';
     });
@@ -202,6 +202,17 @@ function sortTable(tableName, sortKey, preserveDirection = false) {
         return 0;
     });
     rows.forEach(row => tbody.appendChild(row));
+    const cardContainerIdMap = {
+        staged: 'staged-torrent-cards',
+        downloading: 'downloading-torrent-cards',
+    };
+    const cardContainer = document.getElementById(cardContainerIdMap[tableName]);
+    if (cardContainer) {
+        rows.forEach(row => {
+            const card = cardContainer.querySelector(`[data-torrent-id="${row.dataset.torrentId}"]`);
+            if (card) cardContainer.appendChild(card);
+        });
+    }
     window.refreshDetailsNavigationContext();
 }
 

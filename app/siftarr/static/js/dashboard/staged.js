@@ -29,7 +29,7 @@ async function _patchStagedDownloadStatus() {
         }
         const activeTorrentIds = new Set((data.torrents || []).map((torrent) => String(torrent.id)));
         const staleApprovedRows = Array.from(
-            document.querySelectorAll('#downloading-torrents-body tr')
+            document.querySelectorAll('#downloading-torrents-body tr, #downloading-torrent-cards [data-torrent-id]')
         ).filter((row) => !activeTorrentIds.has(row.dataset.torrentId || ''));
         if (staleApprovedRows.length > 0) {
             await refreshDownloadingTabData();
@@ -37,62 +37,64 @@ async function _patchStagedDownloadStatus() {
         }
 
         for (const torrent of (data.torrents || [])) {
-            const row = document.querySelector(`#downloading-torrents-body tr[data-torrent-id="${torrent.id}"]`);
-            if (!row) continue;
+            const rows = document.querySelectorAll(`#downloading-torrents-body tr[data-torrent-id="${torrent.id}"], #downloading-torrent-cards [data-torrent-id="${torrent.id}"]`);
+            if (rows.length === 0) continue;
 
-            const progress = torrent.qbit_progress_percent;
-            const progressEl = row.querySelector('[data-download-progress]');
-            if (progressEl) {
-                progressEl.textContent = progress === null || progress === undefined ? '—' : `${progress.toFixed(1)}%`;
-            }
-            row.dataset.progress = progress === null || progress === undefined ? '-1' : String(progress);
-
-            const etaSeconds = torrent.qbit_eta_seconds;
-            const etaEl = row.querySelector('[data-download-eta]');
-            if (etaEl) etaEl.textContent = formatEta(etaSeconds);
-            row.dataset.eta = etaSeconds === null || etaSeconds === undefined || etaSeconds < 0 ? '999999999' : String(etaSeconds);
-
-            const stateSpan = row.querySelector('[data-download-state]');
-            if (stateSpan) {
-                const waitingForPlex = !!torrent.waiting_for_plex;
-                const stateLabel = waitingForPlex
-                    ? 'qBittorrent finished; waiting for Plex'
-                    : (torrent.qbit_state || 'sent to qBittorrent');
-                const done = torrent.qbit_complete || (torrent.qbit_progress !== null && torrent.qbit_progress !== undefined && torrent.qbit_progress >= 1.0);
-                stateSpan.className = `badge ${waitingForPlex ? 'badge-yellow' : (done ? 'badge-green' : 'badge-blue')}`;
-                stateSpan.textContent = stateLabel;
-                row.dataset.state = waitingForPlex ? 'qbit_finished_waiting_plex' : stateLabel.toLowerCase();
-                row.dataset.qbitFinishedWaitingPlex = waitingForPlex ? 'true' : 'false';
-            }
-
-            const reqStateTd = row.querySelector('[data-request-state-cell]');
-            if (reqStateTd && torrent.request_status) {
-                const span = reqStateTd.querySelector('.badge');
-                if (span) {
-                    const rs = torrent.request_status;
-                    const cls = rs === 'downloading' ? 'badge-blue' : rs === 'staged' ? 'badge-yellow' : 'badge-gray';
-                    span.className = `badge ${cls}`;
-                    span.textContent = rs;
-                    row.dataset.requeststate = rs;
+            for (const row of rows) {
+                const progress = torrent.qbit_progress_percent;
+                const progressEl = row.querySelector('[data-download-progress]');
+                if (progressEl) {
+                    progressEl.textContent = progress === null || progress === undefined ? '—' : `${progress.toFixed(1)}%`;
                 }
-            }
+                row.dataset.progress = progress === null || progress === undefined ? '-1' : String(progress);
 
-            const moveCell = row.querySelector('[data-move-cell]');
-            if (moveCell) {
-                const status = torrent.move_status || 'pending';
-                const badge = moveCell.querySelector('[data-move-status]');
-                if (badge) {
-                    const cls = status === 'moved' ? 'badge-green' : status === 'error' ? 'badge-red' : 'badge-gray';
-                    badge.className = `badge ${cls}`;
-                    badge.textContent = status;
+                const etaSeconds = torrent.qbit_eta_seconds;
+                const etaEl = row.querySelector('[data-download-eta]');
+                if (etaEl) etaEl.textContent = formatEta(etaSeconds);
+                row.dataset.eta = etaSeconds === null || etaSeconds === undefined || etaSeconds < 0 ? '999999999' : String(etaSeconds);
+
+                const stateSpan = row.querySelector('[data-download-state]');
+                if (stateSpan) {
+                    const waitingForPlex = !!torrent.waiting_for_plex;
+                    const stateLabel = waitingForPlex
+                        ? 'qBittorrent finished; waiting for Plex'
+                        : (torrent.qbit_state || 'sent to qBittorrent');
+                    const done = torrent.qbit_complete || (torrent.qbit_progress !== null && torrent.qbit_progress !== undefined && torrent.qbit_progress >= 1.0);
+                    stateSpan.className = `badge ${waitingForPlex ? 'badge-yellow' : (done ? 'badge-green' : 'badge-blue')}`;
+                    stateSpan.textContent = stateLabel;
+                    row.dataset.state = waitingForPlex ? 'qbit_finished_waiting_plex' : stateLabel.toLowerCase();
+                    row.dataset.qbitFinishedWaitingPlex = waitingForPlex ? 'true' : 'false';
                 }
-                const movedPath = moveCell.querySelector('[data-moved-path]');
-                if (movedPath) {
-                    movedPath.textContent = torrent.moved_path || '';
-                    movedPath.title = torrent.moved_path || '';
-                    movedPath.classList.toggle('hidden', !torrent.moved_path);
+
+                const reqStateTd = row.querySelector('[data-request-state-cell]');
+                if (reqStateTd && torrent.request_status) {
+                    const span = reqStateTd.querySelector('.badge');
+                    if (span) {
+                        const rs = torrent.request_status;
+                        const cls = rs === 'downloading' ? 'badge-blue' : rs === 'staged' ? 'badge-yellow' : 'badge-gray';
+                        span.className = `badge ${cls}`;
+                        span.textContent = rs;
+                        row.dataset.requeststate = rs;
+                    }
                 }
-                row.dataset.movestatus = status;
+
+                const moveCell = row.querySelector('[data-move-cell]');
+                if (moveCell) {
+                    const status = torrent.move_status || 'pending';
+                    const badge = moveCell.querySelector('[data-move-status]');
+                    if (badge) {
+                        const cls = status === 'moved' ? 'badge-green' : status === 'error' ? 'badge-red' : 'badge-gray';
+                        badge.className = `badge ${cls}`;
+                        badge.textContent = status;
+                    }
+                    const movedPath = moveCell.querySelector('[data-moved-path]');
+                    if (movedPath) {
+                        movedPath.textContent = torrent.moved_path || '';
+                        movedPath.title = torrent.moved_path || '';
+                        movedPath.classList.toggle('hidden', !torrent.moved_path);
+                    }
+                    row.dataset.movestatus = status;
+                }
             }
         }
     } catch (_err) {
@@ -136,12 +138,7 @@ async function refreshStagedTabData() {
         }
         restore();
 
-        // Update stat cards
-        const statsContainer = document.querySelector('.grid.grid-cols-2.md\\:grid-cols-7');
-        const newStatsContainer = doc.querySelector('.grid.grid-cols-2.md\\:grid-cols-7');
-        if (statsContainer && newStatsContainer) {
-            statsContainer.innerHTML = newStatsContainer.innerHTML;
-        }
+        refreshDashboardStatCards(doc);
     } catch (err) {
         console.error('Failed to refresh staged tab:', err);
     } finally {
@@ -169,16 +166,23 @@ async function refreshDownloadingTabData() {
         await _patchStagedDownloadStatus();
         restore();
 
-        // Update stat cards
-        const statsContainer = document.querySelector('.grid.grid-cols-2.md\\:grid-cols-7');
-        const newStatsContainer = doc.querySelector('.grid.grid-cols-2.md\\:grid-cols-7');
-        if (statsContainer && newStatsContainer) {
-            statsContainer.innerHTML = newStatsContainer.innerHTML;
-        }
+        refreshDashboardStatCards(doc);
     } catch (err) {
         console.error('Failed to refresh downloading tab:', err);
     } finally {
         downloadingTabRefreshInFlight = false;
+    }
+}
+
+function getDashboardStatCardsContainer(root = document) {
+    return root.querySelector('[data-dashboard-stat-cards]');
+}
+
+function refreshDashboardStatCards(doc) {
+    const statsContainer = getDashboardStatCardsContainer(document);
+    const newStatsContainer = getDashboardStatCardsContainer(doc);
+    if (statsContainer && newStatsContainer) {
+        statsContainer.innerHTML = newStatsContainer.innerHTML;
     }
 }
 
@@ -220,17 +224,21 @@ async function postStagedAction(actionUrl, redirectTo = '/?tab=staged') {
             const errorData = await response.json().catch(() => null);
             throw new Error(errorData?.detail || errorData?.message || `Server error: ${response.status}`);
         }
+        const data = await response.json().catch(() => ({}));
         await refreshStagedTabData();
-        window.showToast('Staged torrent updated');
+        if ((data.refresh || []).includes('downloading')) {
+            await refreshDownloadingTabData();
+        }
+        window.showToast(data.message || 'Staged torrent updated');
     } catch (err) {
         window.showToast('Error: ' + err.message);
     }
 }
 
 function getSelectedStagedTorrentIds() {
-    return Array.from(document.querySelectorAll('.staged-torrent-checkbox:checked')).map(
+    return Array.from(new Set(Array.from(document.querySelectorAll('.staged-torrent-checkbox:checked')).map(
         (checkbox) => checkbox.value,
-    );
+    )));
 }
 
 async function bulkStagedAction(action) {
@@ -258,8 +266,12 @@ async function bulkStagedAction(action) {
         document.querySelectorAll('.staged-torrent-checkbox').forEach((checkbox) => {
             checkbox.checked = false;
         });
+        const data = await response.json().catch(() => ({}));
         await refreshStagedTabData();
-        window.showToast(action === 'approve' ? 'Selected torrents approved' : 'Selected torrents discarded');
+        if ((data.refresh || []).includes('downloading')) {
+            await refreshDownloadingTabData();
+        }
+        window.showToast(data.message || (action === 'approve' ? 'Selected torrents approved' : 'Selected torrents discarded'));
     } catch (err) {
         window.showToast('Error: ' + err.message);
     }
