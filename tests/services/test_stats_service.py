@@ -123,6 +123,26 @@ async def test_stats_aggregate_cards_splits_outcomes_and_timings(session_maker):
         "failed": 1,
         "passed": 1,
     }
+    assert payload["charts"]["time_series"]["downloads"] == [
+        {"date": "2026-05-01", "label": "2026-05-01", "value": 1}
+    ]
+    assert payload["charts"]["time_series"]["failures"] == [
+        {"date": "2026-05-01", "label": "2026-05-01", "value": 1}
+    ]
+    assert payload["charts"]["time_series"]["rule_rejections"] == [
+        {
+            "label": "Rule",
+            "points": [{"date": "2026-05-01", "label": "2026-05-01", "value": 1}],
+        }
+    ]
+    assert payload["charts"]["time_series"]["indexer_behavior"] == [
+        {
+            "label": "IndexerA",
+            "points": [{"date": "2026-05-01", "label": "2026-05-01", "value": 1}],
+        }
+    ]
+    assert payload["availability"]["downloads_series"] == "stats"
+    assert payload["availability"]["rule_rejections_series"] == "stats"
 
 
 @pytest.mark.asyncio
@@ -198,6 +218,17 @@ async def test_historical_stats_derive_supported_metrics_and_mark_unavailable(se
     assert payload["charts"]["source_split"] == [{"label": "IndexerOld", "value": 1}]
     assert payload["charts"]["resolution_split"] == [{"label": "1080p", "value": 1}]
     assert payload["charts"]["rule_outcomes"] == []
+    assert payload["charts"]["time_series"]["downloads"] == [
+        {"date": "2026-05-01", "label": "2026-05-01", "value": 1}
+    ]
+    assert payload["charts"]["time_series"]["indexer_behavior"] == [
+        {
+            "label": "IndexerOld",
+            "points": [{"date": "2026-05-01", "label": "2026-05-01", "value": 1}],
+        }
+    ]
     assert payload["availability"]["downloads_processed"] == "historical"
+    assert payload["availability"]["downloads_series"] == "historical"
     assert payload["availability"]["rule_outcomes"] == "unavailable"
+    assert payload["availability"]["rule_rejections_series"] == "unavailable"
     assert payload["availability"]["processing_times"] == "unavailable"

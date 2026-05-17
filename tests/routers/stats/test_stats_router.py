@@ -105,6 +105,10 @@ async def test_stats_json_endpoint_returns_payload(seeded_session_maker, monkeyp
     payload = response.json()
     assert payload["cards"]["total_requests"] == 1
     assert payload["charts"]["source_split"] == [{"label": "IndexerA", "value": 1}]
+    assert payload["charts"]["time_series"]["downloads"] == [
+        {"date": "2026-05-01", "label": "2026-05-01", "value": 1}
+    ]
+    assert payload["availability"]["downloads_series"] == "stats"
 
 
 @pytest.mark.asyncio
