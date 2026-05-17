@@ -240,6 +240,8 @@ class SettingsStore:
         backup_settings = parse_settings_backup(payload)
         if mode == "replace":
             await self.delete(*RESTORABLE_SETTING_KEYS)
+            for key in RESTORABLE_SETTING_KEYS:
+                os.environ.pop(ENV_KEY_MAP[key], None)
         for key, value in backup_settings.items():
             await self.set(key, str(value))
         await self.load_into_environ(clear_existing=False)

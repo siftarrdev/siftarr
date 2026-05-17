@@ -267,6 +267,33 @@ async def test_settings_backup_restore_update_and_replace_non_secrets(session_ma
 
 
 @pytest.mark.asyncio
+async def test_settings_backup_replace_clears_omitted_restorable_env_and_preserves_secret_env(
+    monkeypatch,
+    session_maker,
+):
+    payload = '{"version":1,"settings":{"overseerr_url":"https://new"}}'
+    monkeypatch.setenv("OVERSEERR_API_KEY", "compose-secret")
+
+    async with session_maker() as session:
+        async with session.begin():
+            store = SettingsStore(session)
+            await store.set("prowlarr_url", "https://old-prowlarr")
+            await store.load_into_environ()
+
+        assert os.environ["PROWLARR_URL"] == "https://old-prowlarr"
+        assert get_settings().prowlarr_url == "https://old-prowlarr"
+
+        async with session.begin():
+            await SettingsStore(session).restore_backup(payload, mode="replace")
+
+    assert os.environ["OVERSEERR_URL"] == "https://new"
+    assert "PROWLARR_URL" not in os.environ
+    assert os.environ["OVERSEERR_API_KEY"] == "compose-secret"
+    assert get_settings().prowlarr_url is None
+    assert get_settings().overseerr_api_key == "compose-secret"
+
+
+@pytest.mark.asyncio
 async def test_settings_backup_rejects_secret_keys(session_maker):
     async with session_maker() as session, session.begin():
         with pytest.raises(SettingsBackupError, match="non-restorable"):
