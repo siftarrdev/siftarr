@@ -92,10 +92,7 @@ This file captures the biggest opportunities identified during a repo-wide revie
 4. **Request search history**  
    Show past searches, counts, winners, and failures for each request.
 
-5. **Settings export/import**  
-   Add portable config backup and restore for non-secret settings.
-
-6. **Per-request profile overrides**  
+5. **Per-request profile overrides**  
    Override global quality/rule behavior for specific requests when needed.
 
 7. **Manual lifecycle recovery actions**  
@@ -110,18 +107,12 @@ This file captures the biggest opportunities identified during a repo-wide revie
 10. **Path/category templates**  
     Support templated save paths and qBit categories based on media metadata.
 
-11. **Background task queue page**  
-    Show active jobs, last errors, and scheduler health in the UI.
-
-12. **Release blacklist/whitelist**  
+11. **Release blacklist/whitelist**  
     Allow blocking or preferring release groups, uploaders, indexers, or keywords.
 
 ## Existing feature expansion ideas
 
-1. **Expand Stats charts**  
-   Add richer time-series views for downloads, failures, rule rejection trends, and indexer behavior.
-
-2. **Improve TV full-search UX**  
+1. **Improve TV full-search UX**  
    Surface exact episode and season-pack progress in live search streaming views.
 
 3. **Add more release filters**  
@@ -139,10 +130,7 @@ This file captures the biggest opportunities identified during a repo-wide revie
 7. **qBit move/retention UI**  
    Expose move history, failed move retries, and retention controls in a readable dashboard view.
 
-8. **Rule import/export improvements**  
-   Add preview, diff, and merge behavior before importing rules.
-
-9. **Better staging review tools**  
+8. **Better staging review tools**  
    Compare staged alternatives and expose rule pass/fail details before approval.
 
 10. **Overseerr sync diagnostics**  
