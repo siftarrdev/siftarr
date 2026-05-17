@@ -21,6 +21,24 @@ class RuleImportPreview:
     version: int
     rules: list[dict[str, Any]]
     replace_count: int
+    existing_rules: list[dict[str, Any]] | None = None
+    imported_rules: list[dict[str, Any]] | None = None
+    diff_rows: list[dict[str, Any]] | None = None
+
+
+COMPARABLE_RULE_FIELDS = (
+    "name",
+    "rule_type",
+    "media_scope",
+    "tv_target",
+    "pattern",
+    "score",
+    "min_size_gb",
+    "max_size_gb",
+    "priority",
+    "is_enabled",
+    "description",
+)
 
 
 SIZE_LIMIT_RULE_NAME = "Size Limits"
@@ -265,6 +283,93 @@ class RuleService:
             "description": rule.description,
         }
 
+    @staticmethod
+    def _serialize_rule_data(rule_data: dict[str, Any]) -> dict[str, Any]:
+        serialized = dict(rule_data)
+        if isinstance(serialized.get("rule_type"), RuleType):
+            serialized["rule_type"] = serialized["rule_type"].value
+        if isinstance(serialized.get("tv_target"), TVTarget):
+            serialized["tv_target"] = serialized["tv_target"].value
+        return {field: serialized.get(field) for field in COMPARABLE_RULE_FIELDS}
+
+    @staticmethod
+    def _deserialize_rule_data(rule_data: dict[str, Any]) -> dict[str, Any]:
+        deserialized = dict(rule_data)
+        deserialized["rule_type"] = RuleType(deserialized["rule_type"])
+        if deserialized.get("tv_target") is not None:
+            deserialized["tv_target"] = TVTarget(deserialized["tv_target"])
+        return deserialized
+
+    @staticmethod
+    def _rule_diff_fields(
+        existing_rule: dict[str, Any] | None, imported_rule: dict[str, Any] | None
+    ) -> list[dict[str, Any]]:
+        return [
+            {
+                "name": field,
+                "existing": existing_rule.get(field) if existing_rule else None,
+                "imported": imported_rule.get(field) if imported_rule else None,
+                "changed": existing_rule is None
+                or imported_rule is None
+                or existing_rule.get(field) != imported_rule.get(field),
+            }
+            for field in COMPARABLE_RULE_FIELDS
+        ]
+
+    @staticmethod
+    def _rule_identity(rule_data: dict[str, Any]) -> str:
+        return str(rule_data.get("name", "")).casefold()
+
+    @classmethod
+    def _build_diff_rows(
+        cls, existing_rules: list[dict[str, Any]], imported_rules: list[dict[str, Any]]
+    ) -> list[dict[str, Any]]:
+        unmatched_existing = list(enumerate(existing_rules))
+        rows: list[dict[str, Any]] = []
+
+        for imported_index, imported_rule in enumerate(imported_rules):
+            imported_key = cls._rule_identity(imported_rule)
+            match_position = next(
+                (
+                    position
+                    for position, (_, existing_rule) in enumerate(unmatched_existing)
+                    if cls._rule_identity(existing_rule) == imported_key
+                ),
+                None,
+            )
+            if match_position is None:
+                existing_index = None
+                existing_rule = None
+                status = "new/imported-only"
+            else:
+                existing_index, existing_rule = unmatched_existing.pop(match_position)
+                status = "unchanged" if existing_rule == imported_rule else "changed"
+
+            rows.append(
+                {
+                    "status": status,
+                    "existing_index": existing_index,
+                    "imported_index": imported_index,
+                    "existing": existing_rule,
+                    "imported": imported_rule,
+                    "fields": cls._rule_diff_fields(existing_rule, imported_rule),
+                }
+            )
+
+        for existing_index, existing_rule in unmatched_existing:
+            rows.append(
+                {
+                    "status": "existing-only",
+                    "existing_index": existing_index,
+                    "imported_index": None,
+                    "existing": existing_rule,
+                    "imported": None,
+                    "fields": cls._rule_diff_fields(existing_rule, None),
+                }
+            )
+
+        return rows
+
     async def export_rules_json(self) -> str:
         rules = await self.get_all_rules()
         payload = {"version": 1, "rules": [self.serialize_rule(rule) for rule in rules]}
@@ -462,7 +567,73 @@ class RuleService:
                 }
             )
 
-        return RuleImportPreview(version=1, rules=preview_rules, replace_count=len(preview_rules))
+        imported_rules = [self._serialize_rule_data(rule) for rule in preview_rules]
+        return RuleImportPreview(
+            version=1,
+            rules=preview_rules,
+            replace_count=len(preview_rules),
+            imported_rules=imported_rules,
+        )
+
+    async def preview_import_rules_with_existing(self, payload: str) -> RuleImportPreview:
+        preview = self.preview_import_rules(payload)
+        existing_rules = [self.serialize_rule(rule) for rule in await self.get_all_rules()]
+        imported_rules = preview.imported_rules or [
+            self._serialize_rule_data(rule) for rule in preview.rules
+        ]
+        preview.existing_rules = existing_rules
+        preview.imported_rules = imported_rules
+        preview.diff_rows = self._build_diff_rows(existing_rules, imported_rules)
+        return preview
+
+    def build_selected_import_preview(
+        self,
+        preview: RuleImportPreview,
+        existing_rules: list[dict[str, Any]],
+        selections: list[str],
+    ) -> RuleImportPreview:
+        if not selections:
+            raise ValueError("Select at least one rule to keep before applying the import.")
+
+        imported_rules = preview.imported_rules or [
+            self._serialize_rule_data(rule) for rule in preview.rules
+        ]
+        selected_rules: list[dict[str, Any]] = []
+        seen: set[str] = set()
+
+        for position, selection in enumerate(selections):
+            if selection in seen:
+                raise ValueError("Each rule row can only be selected once.")
+            seen.add(selection)
+
+            try:
+                source, raw_index = selection.split(":", 1)
+                index = int(raw_index)
+            except ValueError as exc:
+                raise ValueError("Invalid rule selection submitted.") from exc
+
+            if source == "existing":
+                source_rules = existing_rules
+            elif source == "imported":
+                source_rules = imported_rules
+            else:
+                raise ValueError("Invalid rule selection source submitted.")
+            if index < 0 or index >= len(source_rules):
+                raise ValueError("Invalid rule selection index submitted.")
+
+            selected_rule = dict(source_rules[index])
+            selected_rule["priority"] = position
+            selected_rules.append(self._deserialize_rule_data(selected_rule))
+
+        return RuleImportPreview(version=1, rules=selected_rules, replace_count=len(selected_rules))
+
+    async def replace_rules_from_payload_selection(
+        self, payload: str, selections: list[str]
+    ) -> list[Rule]:
+        preview = self.preview_import_rules(payload)
+        existing_rules = [self.serialize_rule(rule) for rule in await self.get_all_rules()]
+        selected_preview = self.build_selected_import_preview(preview, existing_rules, selections)
+        return await self.replace_rules_from_preview(selected_preview)
 
     def _load_default_rules_file(self, path: Path) -> RuleImportPreview:
         try:
