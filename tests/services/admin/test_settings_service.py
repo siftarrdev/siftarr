@@ -11,6 +11,9 @@ from app.siftarr.models import Base
 from app.siftarr.models.app_setting import AppSetting
 from app.siftarr.services.admin.settings_service import (
     PLEX_LAST_SYNC_SUCCESS_KEY,
+    RESTORABLE_SETTING_KEYS,
+    SECRET_SETTING_KEYS,
+    SettingsBackupError,
     SettingsStore,
     is_sync_timestamp_stale,
     parse_sync_timestamp,
@@ -217,6 +220,59 @@ async def test_get_effective_dict_includes_sso_metadata_without_exposing_token(s
     assert effective["plex_token_present"] is True
     assert effective["plex_token"] == "********oken"
     assert "secret-token" not in effective.values()
+
+
+@pytest.mark.asyncio
+async def test_settings_backup_exports_only_restorable_non_secrets(session_maker):
+    async with session_maker() as session, session.begin():
+        store = SettingsStore(session)
+        await store.set("overseerr_url", "https://overseerr")
+        await store.set("overseerr_api_key", "secret")
+        await store.set("plex_token", "token")
+        await store.set("api_key", "generated")
+        await store.set(PLEX_LAST_SYNC_SUCCESS_KEY, "2026-01-01T00:00:00+00:00")
+
+        backup = await store.export_backup()
+
+    assert backup["version"] == 1
+    assert backup["settings"] == {"overseerr_url": "https://overseerr"}
+    assert not (set(backup["settings"]) & SECRET_SETTING_KEYS)
+    assert set(backup["settings"]) <= RESTORABLE_SETTING_KEYS
+
+
+@pytest.mark.asyncio
+async def test_settings_backup_restore_update_and_replace_non_secrets(session_maker):
+    payload = '{"version":1,"settings":{"overseerr_url":"https://new","tz":"UTC"}}'
+    async with session_maker() as session:
+        async with session.begin():
+            store = SettingsStore(session)
+            await store.set("overseerr_url", "https://old")
+            await store.set("prowlarr_url", "https://prowlarr")
+            await store.set("overseerr_api_key", "keep-secret")
+            result = await store.restore_backup(payload, mode="update")
+        values = await SettingsStore(session).get_all()
+        assert result == {"mode": "update", "restored": 2}
+        assert values["overseerr_url"] == "https://new"
+        assert values["prowlarr_url"] == "https://prowlarr"
+        assert values["overseerr_api_key"] == "keep-secret"
+        await session.rollback()
+
+        async with session.begin():
+            await SettingsStore(session).restore_backup(payload, mode="replace")
+        values = await SettingsStore(session).get_all()
+
+    assert values["overseerr_url"] == "https://new"
+    assert "prowlarr_url" not in values
+    assert values["overseerr_api_key"] == "keep-secret"
+
+
+@pytest.mark.asyncio
+async def test_settings_backup_rejects_secret_keys(session_maker):
+    async with session_maker() as session, session.begin():
+        with pytest.raises(SettingsBackupError, match="non-restorable"):
+            await SettingsStore(session).preview_backup(
+                '{"version":1,"settings":{"overseerr_api_key":"secret"}}'
+            )
 
 
 @pytest.mark.asyncio
