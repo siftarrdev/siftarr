@@ -10,43 +10,43 @@
     </div>
 
     {# ── Stat cards ── #}
-    <div class="grid grid-cols-2 {{ 'md:grid-cols-6' if staging_mode_enabled else 'md:grid-cols-5' }} gap-3">
+    <div data-dashboard-stat-cards class="grid grid-cols-2 {{ 'md:grid-cols-6' if staging_mode_enabled else 'md:grid-cols-5' }} gap-2 sm:gap-3">
         <button onclick="showTab('unreleased')" class="card group text-left hover:border-gray-600 transition-colors">
-            <div class="px-4 py-3.5">
-                <div class="text-xs font-medium uppercase tracking-wider text-gray-500 group-hover:text-gray-400">Unreleased</div>
-                <div class="mt-1 text-2xl font-bold text-gray-400 tabular-nums">{{ stats.unreleased }}</div>
+            <div class="px-3 py-2 sm:px-4 sm:py-3">
+                <div class="text-xs font-medium uppercase tracking-wide text-gray-500 group-hover:text-gray-400">Unreleased</div>
+                <div class="mt-0.5 text-lg font-bold text-gray-400 tabular-nums sm:mt-1 sm:text-2xl">{{ stats.unreleased }}</div>
             </div>
         </button>
         <button onclick="showTab('pending')" class="card group text-left hover:border-gray-600 transition-colors">
-            <div class="px-4 py-3.5">
-                <div class="text-xs font-medium uppercase tracking-wider text-gray-500 group-hover:text-gray-400">Pending</div>
-                <div class="mt-1 text-2xl font-bold text-amber-400 tabular-nums">{{ stats.pending }}</div>
+            <div class="px-3 py-2 sm:px-4 sm:py-3">
+                <div class="text-xs font-medium uppercase tracking-wide text-gray-500 group-hover:text-gray-400">Pending</div>
+                <div class="mt-0.5 text-lg font-bold text-amber-400 tabular-nums sm:mt-1 sm:text-2xl">{{ stats.pending }}</div>
             </div>
         </button>
 {% if staging_mode_enabled %}
         <button onclick="showTab('staged')" class="card group text-left hover:border-gray-600 transition-colors">
-            <div class="px-4 py-3.5">
-                <div class="text-xs font-medium uppercase tracking-wider text-gray-500 group-hover:text-gray-400">Staged</div>
-                <div class="mt-1 text-2xl font-bold text-blue-400 tabular-nums">{{ stats.staged }}</div>
+            <div class="px-3 py-2 sm:px-4 sm:py-3">
+                <div class="text-xs font-medium uppercase tracking-wide text-gray-500 group-hover:text-gray-400">Staged</div>
+                <div class="mt-0.5 text-lg font-bold text-blue-400 tabular-nums sm:mt-1 sm:text-2xl">{{ stats.staged }}</div>
             </div>
         </button>
 {% endif %}
         <button onclick="showTab('downloading')" class="card group text-left hover:border-gray-600 transition-colors">
-            <div class="px-4 py-3.5">
-                <div class="text-xs font-medium uppercase tracking-wider text-gray-500 group-hover:text-gray-400">Downloading</div>
-                <div class="mt-1 text-2xl font-bold text-cyan-400 tabular-nums">{{ stats.downloading }}</div>
+            <div class="px-3 py-2 sm:px-4 sm:py-3">
+                <div class="text-xs font-medium uppercase tracking-wide text-gray-500 group-hover:text-gray-400">Downloading</div>
+                <div class="mt-0.5 text-lg font-bold text-cyan-400 tabular-nums sm:mt-1 sm:text-2xl">{{ stats.downloading }}</div>
             </div>
         </button>
         <button onclick="showTab('finished')" class="card group text-left hover:border-gray-600 transition-colors">
-            <div class="px-4 py-3.5">
-                <div class="text-xs font-medium uppercase tracking-wider text-gray-500 group-hover:text-gray-400">Completed</div>
-                <div class="mt-1 text-2xl font-bold text-emerald-400 tabular-nums">{{ stats.completed }}</div>
+            <div class="px-3 py-2 sm:px-4 sm:py-3">
+                <div class="text-xs font-medium uppercase tracking-wide text-gray-500 group-hover:text-gray-400">Completed</div>
+                <div class="mt-0.5 text-lg font-bold text-emerald-400 tabular-nums sm:mt-1 sm:text-2xl">{{ stats.completed }}</div>
             </div>
         </button>
         <button onclick="showTab('rejected')" class="card group text-left hover:border-gray-600 transition-colors">
-            <div class="px-4 py-3.5">
-                <div class="text-xs font-medium uppercase tracking-wider text-gray-500 group-hover:text-gray-400">Denied</div>
-                <div class="mt-1 text-2xl font-bold text-red-400 tabular-nums">{{ stats.denied }}</div>
+            <div class="px-3 py-2 sm:px-4 sm:py-3">
+                <div class="text-xs font-medium uppercase tracking-wide text-gray-500 group-hover:text-gray-400">Denied</div>
+                <div class="mt-0.5 text-lg font-bold text-red-400 tabular-nums sm:mt-1 sm:text-2xl">{{ stats.denied }}</div>
             </div>
         </button>
     </div>
@@ -222,11 +222,32 @@
             <div class="card-header flex flex-col gap-3 md:flex-row md:items-center">
                 <input type="text" id="staged-filter-input" placeholder="Filter staged torrents..." class="form-input md:flex-1">
                 <div class="flex flex-wrap items-center gap-2">
-                    <button type="button" onclick="bulkStagedAction('approve')" class="btn-primary btn-sm">Approve Selected</button>
-                    <button type="button" onclick="bulkStagedAction('discard')" class="btn-danger btn-sm">Discard Selected</button>
+                    <button type="button" onclick="bulkStagedAction('approve')" class="btn-primary btn-sm w-full sm:w-auto">Approve Selected</button>
+                    <button type="button" onclick="bulkStagedAction('discard')" class="btn-danger btn-sm w-full sm:w-auto">Discard Selected</button>
                 </div>
             </div>
-            <div class="{% if staged_torrents %}overflow-x-auto{% endif %}">
+            <div id="staged-torrent-cards" class="space-y-3 p-3 md:hidden">
+                {% for torrent in staged_torrents %}
+                {% set request_state = staged_request_statuses.get(torrent.request_id, 'unknown') %}
+                {% set identity_warning = movie_identity_mismatch_warnings.get(torrent.id) %}
+                <div class="rounded-xl border border-gray-700/60 bg-surface-850 p-3" onclick="{% if torrent.request_id %}openRequestDetails({{ torrent.request_id }}){% endif %}" data-torrent-id="{{ torrent.id }}" data-request-id="{{ torrent.request_id }}" data-title="{{ torrent.title|lower }}" data-state="{{ torrent.status|lower }}" data-requeststate="{{ request_state|lower }}" data-size="{{ torrent.size }}" data-indexer="{{ torrent.indexer|lower }}" data-score="{{ torrent.score }}">
+                    <div class="flex items-start gap-3">
+                        <input type="checkbox" class="staged-torrent-checkbox mt-1 rounded-sm border-gray-600 bg-surface-900 text-brand-500 focus:ring-brand-500" value="{{ torrent.id }}" onclick="event.stopPropagation()">
+                        <div class="min-w-0 flex-1">
+                            <div class="overflow-wrap-anywhere text-sm font-semibold text-white">{{ torrent.title }}</div>
+                            {% if identity_warning %}<div class="mt-1 text-xs text-amber-300">Possible wrong movie: {{ identity_warning }}</div>{% endif %}
+                            <div class="mt-2 flex flex-wrap gap-2 text-xs text-gray-400"><span class="badge {% if request_state == 'staged' %}badge-yellow{% else %}badge-gray{% endif %}">{{ request_state }}</span><span>{{ (torrent.size / 1024 / 1024 / 1024)|round(2) }} GB</span><span>{{ torrent.indexer }}</span><span class="text-emerald-400">Score {{ torrent.score }}</span></div>
+                        </div>
+                    </div>
+                    <div class="mt-3 grid grid-cols-2 gap-2" onclick="event.stopPropagation()">
+                        {% if torrent.request_id %}<button type="button" onclick="openRequestDetails({{ torrent.request_id }})" class="btn-ghost btn-sm w-full">Details</button>{% endif %}
+                        {% if torrent.id in replace_staged_torrent_ids %}<button type="button" onclick="openReplaceModal({{ torrent.id }}, {{ torrent.request_id }}, '{{ torrent.title|replace("'", "\'") }}', '/?tab=downloading')" class="btn-warning btn-sm w-full">Replace</button>{% else %}<button type="button" onclick="postStagedAction('/staged/{{ torrent.id }}/approve', '/?tab=staged')" class="btn-success btn-sm w-full">Approve</button>{% endif %}
+                        <button type="button" onclick="postStagedAction('/staged/{{ torrent.id }}/discard', '/?tab=staged')" class="btn-danger btn-sm w-full col-span-2">Discard</button>
+                    </div>
+                </div>
+                {% else %}<p class="text-sm text-gray-500">No staged torrents.</p>{% endfor %}
+            </div>
+            <div class="hidden md:block {% if staged_torrents %}overflow-x-auto{% endif %}">
                 <table class="min-w-full divide-y divide-gray-700/60 data-resizable" id="staged-torrents-table">
                     <colgroup>
                         <col data-col-key="selectbox" style="width: 48px;">
@@ -287,7 +308,30 @@
                 <input type="text" id="downloading-filter-input" placeholder="Filter downloading torrents..." class="form-input md:flex-1">
                 <div class="flex flex-wrap items-center gap-2">{% if qbittorrent_url %}<a href="{{ qbittorrent_url }}" target="_blank" rel="noopener noreferrer" class="btn-ghost btn-sm">Open qBittorrent ↗</a>{% endif %}</div>
             </div>
-            <div class="{% if downloading_torrents %}overflow-x-auto{% endif %}">
+            <div id="downloading-torrent-cards" class="space-y-3 p-3 md:hidden">
+                {% for torrent in downloading_torrents %}
+                {% set request_state = downloading_request_statuses.get(torrent.request_id, 'unknown') %}
+                {% set waiting_for_plex = torrent.id in downloading_waiting_plex_torrent_ids or torrent.request_id in downloading_waiting_plex_request_ids %}
+                {% set identity_warning = movie_identity_mismatch_warnings.get(torrent.id) %}
+                {% set move_status = torrent.move_status if torrent.move_status in ['pending', 'moved', 'error'] else 'pending' %}
+                {% set moved_path = torrent.moved_path if torrent.moved_path is string else none %}
+                <div class="rounded-xl border border-gray-700/60 bg-surface-850 p-3" onclick="{% if torrent.request_id %}openRequestDetails({{ torrent.request_id }}){% endif %}" data-torrent-id="{{ torrent.id }}" data-request-id="{{ torrent.request_id }}" data-title="{{ torrent.title|lower }}" data-state="{{ 'qbit_finished_waiting_plex' if waiting_for_plex else torrent.status|lower }}" data-requeststate="{{ request_state|lower }}" data-movestatus="{{ move_status }}" data-progress="-1" data-eta="999999999" data-size="{{ torrent.size }}" data-indexer="{{ torrent.indexer|lower }}" data-score="{{ torrent.score }}" data-qbit-finished-waiting-plex="{{ 'true' if waiting_for_plex else 'false' }}">
+                    <div class="overflow-wrap-anywhere text-sm font-semibold text-white">{{ torrent.title }}</div>
+                    {% if identity_warning %}<div class="mt-1 text-xs text-amber-300">Possible wrong movie: {{ identity_warning }}</div>{% endif %}
+                    {% if waiting_for_plex %}<div class="mt-1 text-xs text-amber-300">qBittorrent finished; waiting for Plex. If this does not import, the release may be RAR-packed or otherwise unimportable.</div>{% endif %}
+                    <div class="mt-3 grid grid-cols-2 gap-2 text-xs text-gray-400">
+                        <div><div class="text-gray-500">Progress</div><div class="tabular-nums" data-download-progress>—</div></div>
+                        <div><div class="text-gray-500">ETA</div><div class="tabular-nums" data-download-eta>—</div></div>
+                        <div class="col-span-2"><span class="badge {{ 'badge-yellow' if waiting_for_plex else 'badge-blue' }}" data-download-state>{{ 'qBittorrent finished; waiting for Plex' if waiting_for_plex else 'sent to qBittorrent' }}</span></div>
+                        <div data-request-state-cell><span class="badge {% if request_state == 'downloading' %}badge-blue{% elif request_state == 'staged' %}badge-yellow{% else %}badge-gray{% endif %}">{{ request_state }}</span></div>
+                        <div data-move-cell><span class="badge {% if move_status == 'moved' %}badge-green{% elif move_status == 'error' %}badge-red{% else %}badge-gray{% endif %}" data-move-status>{{ move_status }}</span>{% if moved_path %}<div class="mt-1 truncate text-xs text-gray-500" title="{{ moved_path }}" data-moved-path>{{ moved_path }}</div>{% else %}<div class="mt-1 truncate text-xs text-gray-500 hidden" data-moved-path></div>{% endif %}</div>
+                        <div>{{ (torrent.size / 1024 / 1024 / 1024)|round(2) }} GB</div><div>{{ torrent.indexer }}</div><div class="text-emerald-400">Score {{ torrent.score }}</div>
+                    </div>
+                    <div class="mt-3 grid grid-cols-2 gap-2" onclick="event.stopPropagation()">{% if torrent.request_id %}<button type="button" onclick="openRequestDetails({{ torrent.request_id }})" class="btn-ghost btn-sm w-full">Details</button>{% endif %}<button type="button" onclick="checkNow({{ torrent.id }})" class="btn-primary btn-sm w-full">Check Now</button></div>
+                </div>
+                {% else %}<p class="text-sm text-gray-500">No downloading torrents.</p>{% endfor %}
+            </div>
+            <div class="hidden md:block {% if downloading_torrents %}overflow-x-auto{% endif %}">
                 <table class="min-w-full divide-y divide-gray-700/60 data-resizable" id="downloading-torrents-table">
                     <colgroup>
                         <col data-col-key="title" style="width: 220px;">

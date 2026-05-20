@@ -391,7 +391,29 @@ def test_dashboard_js_refreshes_full_staged_content():
     assert "const downloadingContent = document.getElementById('content-downloading');" in js
     assert "const newContent = doc.getElementById('content-downloading');" in js
     assert "downloadingContent.innerHTML = newContent.innerHTML;" in js
-    assert "document.querySelectorAll('#downloading-torrents-body tr')" in js
+    assert "#downloading-torrents-body tr, #downloading-torrent-cards [data-torrent-id]" in js
+    assert "[data-dashboard-stat-cards]" in js
+
+
+def test_dashboard_template_has_mobile_staged_downloading_cards(dashboard_template_path):
+    with open(dashboard_template_path, encoding="utf-8") as handle:
+        template = handle.read()
+    js = _read_dashboard_js()
+
+    assert "data-dashboard-stat-cards" in template
+    assert "gap-2 sm:gap-3" in template
+    assert "px-3 py-2 sm:px-4 sm:py-3" in template
+    assert 'id="staged-torrent-cards" class="space-y-3 p-3 md:hidden"' in template
+    assert 'id="downloading-torrent-cards" class="space-y-3 p-3 md:hidden"' in template
+    assert 'class="hidden md:block {% if staged_torrents %}overflow-x-auto{% endif %}"' in template
+    assert (
+        'class="hidden md:block {% if downloading_torrents %}overflow-x-auto{% endif %}"'
+        in template
+    )
+    assert "btn-success btn-sm w-full" in template
+    assert "btn-danger btn-sm w-full" in template
+    assert "btn-primary btn-sm w-full" in template
+    assert "#staged-torrents-body tr, #staged-torrent-cards [data-torrent-id]" in js
 
 
 def test_dashboard_template_splits_staged_and_downloading_tabs(dashboard_template_path):
@@ -483,7 +505,5 @@ def test_dashboard_active_unreleased_toggle_removed_and_filters_refresh_navigati
     assert "unreleasedMatch" not in js
     assert "row.style.display = (textMatch && mediaMatch) ? '' : 'none';" in js
     assert "window.refreshDetailsNavigationContext();" in js
-    assert (
-        "rows.forEach(row => tbody.appendChild(row));\n    window.refreshDetailsNavigationContext();"
-        in js
-    )
+    assert "rows.forEach(row => tbody.appendChild(row));" in js
+    assert "if (card) cardContainer.appendChild(card);" in js

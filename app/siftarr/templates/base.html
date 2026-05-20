@@ -15,7 +15,7 @@
 <body class="bg-surface-900 text-gray-200 min-h-screen flex flex-col">
     <nav class="sticky top-0 z-40 bg-surface-800/80 border-b border-gray-700/60 backdrop-blur-lg">
         <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-            <div class="flex items-center justify-between h-14">
+            <div class="flex flex-wrap items-center justify-between gap-2 py-2 md:h-14 md:flex-nowrap md:gap-4 md:py-0">
                 <div class="flex items-center gap-8">
                     <a href="/" class="flex items-center gap-2.5 group">
                         <img src="/static/favicon-32.png" alt="" class="h-7 w-7 rounded-lg transition-transform group-hover:scale-105">
@@ -41,21 +41,21 @@
                         </a>
                     </div>
                 </div>
-                <div class="flex md:hidden items-center gap-1 overflow-x-auto">
+                <div class="grid w-full grid-cols-4 gap-1 md:hidden" aria-label="Primary mobile navigation">
                     <a href="/"
-                       class="px-2.5 py-1.5 rounded-lg text-xs font-medium whitespace-nowrap transition-colors {{ 'bg-gray-700/60 text-white' if current_path == '/' else 'text-gray-400 hover:text-white hover:bg-gray-700/40' }}">
+                       class="px-2 py-2 rounded-lg text-center text-xs font-medium transition-colors {{ 'bg-gray-700/60 text-white' if current_path == '/' else 'text-gray-400 hover:text-white hover:bg-gray-700/40' }}">
                         Dashboard
                     </a>
                     <a href="/rules"
-                       class="px-2.5 py-1.5 rounded-lg text-xs font-medium whitespace-nowrap transition-colors {{ 'bg-gray-700/60 text-white' if current_path.startswith('/rules') else 'text-gray-400 hover:text-white hover:bg-gray-700/40' }}">
+                       class="px-2 py-2 rounded-lg text-center text-xs font-medium transition-colors {{ 'bg-gray-700/60 text-white' if current_path.startswith('/rules') else 'text-gray-400 hover:text-white hover:bg-gray-700/40' }}">
                         Rules
                     </a>
                     <a href="/stats"
-                       class="px-2.5 py-1.5 rounded-lg text-xs font-medium whitespace-nowrap transition-colors {{ 'bg-gray-700/60 text-white' if current_path.startswith('/stats') else 'text-gray-400 hover:text-white hover:bg-gray-700/40' }}">
+                       class="px-2 py-2 rounded-lg text-center text-xs font-medium transition-colors {{ 'bg-gray-700/60 text-white' if current_path.startswith('/stats') else 'text-gray-400 hover:text-white hover:bg-gray-700/40' }}">
                         Stats
                     </a>
                     <a href="/settings"
-                       class="px-2.5 py-1.5 rounded-lg text-xs font-medium whitespace-nowrap transition-colors {{ 'bg-gray-700/60 text-white' if current_path.startswith('/settings') else 'text-gray-400 hover:text-white hover:bg-gray-700/40' }}">
+                       class="px-2 py-2 rounded-lg text-center text-xs font-medium transition-colors {{ 'bg-gray-700/60 text-white' if current_path.startswith('/settings') else 'text-gray-400 hover:text-white hover:bg-gray-700/40' }}">
                         Settings
                     </a>
                 </div>

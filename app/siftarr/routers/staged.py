@@ -233,9 +233,10 @@ async def _finalize_action_response(
     message: str,
     *,
     redirect_url: str = "/?tab=staged",
+    payload: dict[str, Any] | None = None,
 ):
     if _wants_json(http_request):
-        return JSONResponse({"status": "ok", "message": message})
+        return JSONResponse({"status": "ok", "message": message, **(payload or {})})
     return RedirectResponse(url=redirect_url, status_code=303)
 
 
@@ -454,17 +455,30 @@ async def approve_staged_torrent(
         raise HTTPException(status_code=404, detail="Staged torrent not found")
 
     cleanup_paths: list[tuple[str, str]] = []
-    success = await _approve_torrent(torrent, db, cleanup_paths=cleanup_paths)
+    success = await _approve_torrent(
+        torrent,
+        db,
+        commit_transition=False,
+        cleanup_paths=cleanup_paths,
+    )
+    if not success:
+        await db.rollback()
+        raise HTTPException(status_code=500, detail="Failed to approve staged torrent")
+
     await db.commit()
     if success:
         _delete_staging_files(cleanup_paths)
 
-    if not success:
-        raise HTTPException(status_code=500, detail="Failed to approve staged torrent")
     return await _finalize_action_response(
         http_request,
         "Torrent approved successfully",
         redirect_url="/?tab=staged",
+        payload={
+            "torrent_id": torrent.id,
+            "torrent_status": "approved",
+            "request_status": RequestStatus.DOWNLOADING.value,
+            "refresh": ["staged", "downloading"],
+        },
     )
 
 
@@ -546,6 +560,7 @@ async def bulk_staged_action(
                 "message": message,
                 "processed": processed,
                 "failed": failed,
+                "refresh": ["staged", "downloading"] if action == "approve" else ["staged"],
             }
         )
     return await _finalize_action_response(

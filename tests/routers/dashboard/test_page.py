@@ -20,6 +20,17 @@ def test_dashboard_details_modal_includes_release_controls(dashboard_template_pa
     assert 'id="release-results-count"' in body
 
 
+def test_staged_js_refreshes_approval_targets_and_current_stat_cards(dashboard_template_path):
+    js_path = dashboard_template_path.parents[1] / "static/js/dashboard/staged.js"
+    js = js_path.read_text()
+
+    assert "await refreshStagedTabData();" in js
+    assert "await refreshDownloadingTabData();" in js
+    assert "data.message || 'Staged torrent updated'" in js
+    assert ".md\\\\:grid-cols-7" not in js
+    assert "[data-dashboard-stat-cards]" in js
+
+
 @pytest.mark.asyncio
 async def test_pending_requests_include_searching_requests(mock_db, monkeypatch):
     """Pending tab should keep in-flight searches visible."""
@@ -207,8 +218,8 @@ async def test_dashboard_marks_only_completed_episode_waiting_for_plex(mock_db, 
     assert response.context["downloading_waiting_plex_torrent_ids"] == {2}
     assert 'data-torrent-id="2"' in rendered
     assert 'data-torrent-id="3"' in rendered
-    assert rendered.count('data-qbit-finished-waiting-plex="true"') == 1
-    assert rendered.count('data-qbit-finished-waiting-plex="false"') == 1
+    assert rendered.count('data-qbit-finished-waiting-plex="true"') == 2
+    assert rendered.count('data-qbit-finished-waiting-plex="false"') == 2
 
 
 @pytest.mark.asyncio
