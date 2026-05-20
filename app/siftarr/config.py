@@ -134,7 +134,7 @@ class Settings(BaseSettings):
     staging_mode_enabled: bool = True
     retry_interval_hours: int = 24
     max_retry_duration_days: int = 7
-    overseerr_poll_interval_minutes: int = Field(default=60, ge=1)
+    overseerr_poll_interval_minutes: int = Field(default=5, ge=1)
     qbittorrent_completion_poll_interval_seconds: int = Field(default=30, ge=5)
     plex_fast_sync_interval_minutes: int = Field(default=5, ge=1)
     plex_full_sync_frequency: str = "daily"

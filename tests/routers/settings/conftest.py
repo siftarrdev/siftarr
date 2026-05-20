@@ -50,7 +50,7 @@ def base_context() -> Callable[[], dict[str, Any]]:
                 "plex_url": "",
                 "plex_token": "",
                 "tz": "UTC",
-                "overseerr_poll_interval_minutes": 60,
+                "overseerr_poll_interval_minutes": 5,
                 "qbittorrent_completion_poll_interval_seconds": 30,
                 "plex_fast_sync_interval_minutes": 5,
                 "plex_full_sync_frequency": "daily",
