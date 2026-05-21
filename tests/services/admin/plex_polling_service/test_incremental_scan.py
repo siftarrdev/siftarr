@@ -434,3 +434,80 @@ async def test_scan_recent_reports_non_authoritative_tv_fallback(service, mock_d
     mock_plex.get_episode_availability_result.assert_awaited_once_with("show-222")
     mock_plex.get_episode_availability.assert_not_called()
     mock_transition.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_scan_recent_targeted_check_completes_active_download_absent_from_recent(
+    service, mock_db, mock_plex
+):
+    req = make_request(
+        id=50,
+        media_type=MediaType.MOVIE,
+        status=RequestStatus.DOWNLOADING,
+        tmdb_id=5050,
+        title="Downloaded Movie",
+    )
+    active_result = MagicMock()
+    active_result.scalars.return_value.all.return_value = [req]
+    approved_result = MagicMock()
+    approved_result.scalars.return_value.all.return_value = [req.id]
+    mock_db.execute.side_effect = [active_result, approved_result]
+
+    async def iter_recently_added_items(media_type: str):
+        if False:
+            yield {"type": media_type}
+
+    mock_plex.iter_recently_added_items = iter_recently_added_items
+    mock_plex.check_movie_available = AsyncMock(return_value=True)
+
+    async def transition(request_id, status, reason=None):
+        assert request_id == req.id
+        assert status == RequestStatus.COMPLETED
+        assert reason == "Found on Plex"
+        req.status = status
+
+    with patch.object(service.lifecycle, "transition", AsyncMock(side_effect=transition)):
+        result = await service.scan_recent()
+
+    assert result.completed_requests == 1
+    assert result.metrics.scanned_items == 0
+    assert result.metrics.recent_item_matches == 0
+    assert result.metrics.targeted_checks == 1
+    assert result.metrics.targeted_matches == 1
+    assert req.status == RequestStatus.COMPLETED
+
+
+@pytest.mark.asyncio
+async def test_scan_recent_reports_targeted_probe_error(service, mock_db, mock_plex):
+    req = make_request(
+        id=51,
+        media_type=MediaType.MOVIE,
+        status=RequestStatus.DOWNLOADING,
+        tmdb_id=5151,
+        title="Errored Download",
+    )
+    active_result = MagicMock()
+    active_result.scalars.return_value.all.return_value = [req]
+    approved_result = MagicMock()
+    approved_result.scalars.return_value.all.return_value = [req.id]
+    mock_db.execute.side_effect = [active_result, approved_result]
+
+    async def iter_recently_added_items(media_type: str):
+        if False:
+            yield {"type": media_type}
+
+    mock_plex.iter_recently_added_items = iter_recently_added_items
+    mock_plex.check_movie_available = AsyncMock(side_effect=RuntimeError("plex down"))
+
+    result = await service.scan_recent()
+
+    assert result.completed_requests == 0
+    assert result.metrics.scanned_items == 0
+    assert result.metrics.recent_item_matches == 0
+    assert result.metrics.targeted_checks == 1
+    assert result.metrics.targeted_matches == 0
+    assert result.metrics.targeted_probe_errors == 1
+    assert result.metrics.skipped_on_error_items == 1
+    assert result.metrics.as_dict()["targeted_probe_errors"] == 1
+    assert result.clean_run is False
+    assert result.last_error == "Targeted Plex availability checks had probe errors"

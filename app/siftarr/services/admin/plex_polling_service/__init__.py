@@ -17,6 +17,7 @@ from sqlalchemy.orm import selectinload
 from app.siftarr.config import get_settings
 from app.siftarr.models.request import MediaType, Request, RequestStatus
 from app.siftarr.models.season import Season
+from app.siftarr.models.staged_torrent import StagedTorrent
 from app.siftarr.services.integrations.plex_service import PlexService, PlexTransientScanError
 from app.siftarr.services.lifecycle.episode_sync_service import persist_episode_availability
 from app.siftarr.services.lifecycle.lifecycle_service import LifecycleService
@@ -55,12 +56,20 @@ class ScanMetrics:
     scanned_items: int = 0
     matched_requests: int = 0
     skipped_on_error_items: int = 0
+    recent_item_matches: int = 0
+    targeted_checks: int = 0
+    targeted_matches: int = 0
+    targeted_probe_errors: int = 0
 
     def as_dict(self) -> dict[str, int]:
         return {
             "scanned_items": self.scanned_items,
             "matched_requests": self.matched_requests,
             "skipped_on_error_items": self.skipped_on_error_items,
+            "recent_item_matches": self.recent_item_matches,
+            "targeted_checks": self.targeted_checks,
+            "targeted_matches": self.targeted_matches,
+            "targeted_probe_errors": self.targeted_probe_errors,
         }
 
 
@@ -254,18 +263,64 @@ class PlexPollingService:
                 recent_items,
                 on_progress=on_progress,
             )
+            recent_decision_ids = {decision.request_id for decision in decisions}
+            targeted_requests = await self._get_targeted_recent_scan_requests(
+                requests,
+                exclude_request_ids=recent_decision_ids,
+            )
+            targeted_decisions, targeted_skipped = await self._probe_targeted_recent_requests(
+                targeted_requests,
+                on_progress=on_progress,
+            )
 
+        decisions.extend(targeted_decisions)
+        metrics.recent_item_matches = len(recent_decision_ids)
+        metrics.targeted_checks = len(targeted_requests)
+        metrics.targeted_matches = len(targeted_decisions)
+        metrics.targeted_probe_errors = targeted_skipped
         metrics.matched_requests = len(decisions)
-        metrics.skipped_on_error_items = len(errors) + skipped
+        metrics.skipped_on_error_items = len(errors) + skipped + targeted_skipped
         completed = await self._apply_decisions(requests, decisions)
-        last_error = "; ".join(errors) if errors else None
-        if last_error is None and skipped:
-            last_error = "Recent Plex scan had request probe errors"
+        last_errors = list(errors)
+        if skipped:
+            last_errors.append("Recent Plex scan had request probe errors")
+        if targeted_skipped:
+            last_errors.append("Targeted Plex availability checks had probe errors")
+        last_error = "; ".join(last_errors) if last_errors else None
         return ScanRecentResult(
             completed_requests=completed,
             metrics=metrics,
             last_error=last_error,
         )
+
+    async def _get_targeted_recent_scan_requests(
+        self,
+        requests: list[Request],
+        *,
+        exclude_request_ids: set[int],
+    ) -> list[Request]:
+        active_by_id = {
+            req.id: req
+            for req in requests
+            if req.status in {RequestStatus.STAGED, RequestStatus.DOWNLOADING}
+            and req.id not in exclude_request_ids
+        }
+        if not active_by_id:
+            return []
+        result = await self.db.execute(
+            select(StagedTorrent.request_id)
+            .where(
+                StagedTorrent.request_id.in_(active_by_id),
+                StagedTorrent.status == "approved",
+            )
+            .distinct()
+            .limit(50)
+        )
+        return [
+            active_by_id[request_id]
+            for request_id in result.scalars().all()
+            if request_id is not None and request_id in active_by_id
+        ]
 
     async def _load_request(self, request_id: int) -> Request | None:
         result = await self.db.execute(
@@ -508,6 +563,51 @@ class PlexPollingService:
             if decision is not None:
                 decisions.append(decision)
 
+        return decisions, skipped_on_error
+
+    async def _probe_targeted_recent_requests(
+        self,
+        requests: list[Request],
+        *,
+        on_progress: ProgressCallback | None,
+    ) -> tuple[list[_PollDecision], int]:
+        async def emit(payload: dict[str, object]) -> None:
+            if on_progress is None:
+                return
+            result = on_progress(payload)
+            if asyncio.iscoroutine(result):
+                await result
+
+        decisions: list[_PollDecision] = []
+        skipped_on_error = 0
+        concurrency_limit = self._get_concurrency_limit()
+
+        async def run(req: Request) -> _PollDecision | None:
+            nonlocal skipped_on_error
+            await emit(
+                {
+                    "phase": "scan_recent_targeted",
+                    "total": len(requests),
+                    "title": req.title or f"Request #{req.id}",
+                    "request_id": req.id,
+                    "media_type": req.media_type.value,
+                    "active": [],
+                    "concurrency_limit": concurrency_limit,
+                }
+            )
+            try:
+                return await self._probe_single_request(req, partial_tv_match=True)
+            except Exception:
+                logger.exception(
+                    "PlexPollingService: targeted recent-scan check failed request_id=%s title=%s",
+                    req.id,
+                    req.title,
+                )
+                skipped_on_error += 1
+                return None
+
+        results = await gather_limited(requests, concurrency_limit, run)
+        decisions.extend(decision for decision in results if decision is not None)
         return decisions, skipped_on_error
 
     async def _probe_request_from_recent_item(

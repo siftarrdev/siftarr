@@ -101,11 +101,29 @@ function setPoster(posterUrl, titleText) {
 function getVisibleRequests() {
     const activeTabContent = document.querySelector('.tab-content:not(.hidden)');
     if (!activeTabContent) return [];
-    const rows = activeTabContent.querySelectorAll('tbody tr[data-request-id]');
-    return Array.from(rows).filter(row => row.style.display !== 'none').map(row => ({
-        id: parseInt(row.getAttribute('data-request-id')),
-        title: row.querySelector('td:nth-child(2)')?.textContent?.trim() || 'Unknown'
-    })).filter(r => r.id);
+    const isDisplayed = (element) => {
+        if (element.style.display === 'none') return false;
+        if (window.getComputedStyle) {
+            let current = element;
+            while (current && current !== activeTabContent.parentElement) {
+                if (window.getComputedStyle(current).display === 'none') return false;
+                current = current.parentElement;
+            }
+        }
+        return true;
+    };
+    const seen = new Set();
+    return Array.from(activeTabContent.querySelectorAll('[data-request-id]'))
+        .filter(item => isDisplayed(item))
+        .map(item => ({
+            id: parseInt(item.getAttribute('data-request-id')),
+            title: item.querySelector('[data-card-title]')?.textContent?.trim() || item.querySelector('td:nth-child(2), td:first-child')?.textContent?.trim() || item.dataset.title || 'Unknown'
+        }))
+        .filter(item => {
+            if (!item.id || seen.has(item.id)) return false;
+            seen.add(item.id);
+            return true;
+        });
 }
 
 function refreshDetailsNavigationContext() {
@@ -165,8 +183,15 @@ function closeRequestDetails() {
 }
 
 function isRangeSelectableCheckboxVisible(checkbox) {
-    const row = checkbox.closest('tr');
-    return !row || row.style.display !== 'none';
+    const item = checkbox.closest('tr, [data-request-id], [data-torrent-id]');
+    if (!item || item.style.display === 'none') return !item;
+    if (!window.getComputedStyle) return true;
+    let current = item;
+    while (current && current !== document.body.parentElement) {
+        if (window.getComputedStyle(current).display === 'none') return false;
+        current = current.parentElement;
+    }
+    return true;
 }
 
 function getCheckboxRangeKey(checkbox, selector) {

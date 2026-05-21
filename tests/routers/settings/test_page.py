@@ -53,7 +53,7 @@ async def test_settings_page_layout_defaults_and_connections(monkeypatch, mock_d
     assert "Settings Backup / Restore" in body
     assert "Background Jobs" in body
     assert "API keys, Plex tokens, generated secrets" in body
-    assert 'name="overseerr_poll_interval_minutes" value="60"' in body
+    assert 'name="overseerr_poll_interval_minutes" value="5"' in body
     assert 'name="qbittorrent_completion_poll_interval_seconds" value="30"' in body
     assert 'name="plex_fast_sync_interval_minutes" value="5"' in body
     assert 'name="plex_full_sync_time" value="03:00"' in body

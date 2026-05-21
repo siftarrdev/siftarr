@@ -213,6 +213,10 @@ def test_dashboard_template_search_actions_use_progress_helpers(dashboard_templa
     assert 'name="action" value="search_all_pending" data-search-submit-control="true"' in template
     assert "Search All" in template
     assert "postToAction('/requests/{{ req.id }}/search', '/?tab=pending', this)" in template
+    assert (
+        "postToAction('/requests/{{ req.id }}/search', '/?tab=pending', this, this.closest('[data-request-id]'))"
+        in template
+    )
     assert 'data-search-action="true"' in template
     assert "openDenyModal({{ req.id }}, '/?tab=pending')" in template
     assert "handleBulkRequestActionSubmit(event, form)" in js
@@ -230,6 +234,11 @@ def test_dashboard_template_search_actions_use_progress_helpers(dashboard_templa
     assert "actionInput.value = submitter.value;" in js
     assert "setSearchActionLoading(trigger" in js
     assert "disableSearchControls(form);" in js
+    assert "function getDedupedCheckedBulkCheckboxes" in js
+    assert "formData.delete('request_ids');" in js
+    assert "ids.forEach(id => formData.append('request_ids', id));" in js
+    assert "getDedupedCheckedBulkCheckboxes(form);" in js
+    assert "disableSearchControls(row);" in js
 
 
 def test_dashboard_template_removes_all_requests_and_conditionally_shows_staging(
@@ -351,18 +360,37 @@ def test_dashboard_js_uses_cyan_staged_release_indicators():
     assert "border-cyan-500/70 bg-cyan-950/20" in js
 
 
-def test_dashboard_js_collapses_staged_tv_scope_after_reload():
-    """TV scoped staging should remember and collapse the matching accordion."""
+def test_dashboard_js_focuses_staged_tv_episode_after_reload():
+    """TV scoped staging should reopen details focused to one episode."""
     js = _read_dashboard_js()
 
     assert "data-stage-scope" in js
-    assert "{ preserveUiState: true }" in js
+    assert "focusTvScope: stagedScope" in js
     assert "function captureDetailsAccordionState()" in js
     assert "function restoreDetailsAccordionState(state)" in js
-    assert "function collapseStagedTvScope(requestId, scope)" in js
-    assert "episode-details-' + requestId + '-' + scope.season_number" in js
-    assert "season-details-' + requestId + '-' + seasons[0]" in js
-    assert "collapseStagedTvScope(window.currentRequestId, stagedScope);" in js
+    assert "function focusTvEpisode(requestId, seasonNumber, episodeNumber)" in js
+    assert "function focusStagedTvScope(requestId, scope)" in js
+    assert "details.open = details === targetDetails;" in js
+    assert "seasonDetails.open = true;" in js
+    assert "targetDetails.open = true;" in js
+    assert "window.focusStagedTvScope(requestId, focusTvScope);" in js
+    assert "collapseStagedTvScope" not in js
+
+
+def test_dashboard_template_staged_details_uses_row_card_clicks(dashboard_template_path):
+    with open(dashboard_template_path, encoding="utf-8") as handle:
+        template = handle.read()
+
+    staged_section = template[
+        template.index('id="content-staged"') : template.index("{# ═══════════════ DOWNLOADING TAB")
+    ]
+    assert "openStagedRequestDetailsFromElement(this)" in staged_section
+    assert "openRequestDetails({{ torrent.request_id }})" not in staged_section
+    assert ">Details</button>" not in staged_section
+    assert "event.stopPropagation()" in staged_section
+    assert "postStagedAction('/staged/{{ torrent.id }}/approve'" in staged_section
+    assert "postStagedAction('/staged/{{ torrent.id }}/discard'" in staged_section
+    assert "openReplaceModal({{ torrent.id }}" in staged_section
 
 
 def test_dashboard_js_removes_scope_menu_helpers():
@@ -414,6 +442,67 @@ def test_dashboard_template_has_mobile_staged_downloading_cards(dashboard_templa
     assert "btn-danger btn-sm w-full" in template
     assert "btn-primary btn-sm w-full" in template
     assert "#staged-torrents-body tr, #staged-torrent-cards [data-torrent-id]" in js
+
+
+def test_dashboard_template_has_mobile_request_cards_for_list_tabs(dashboard_template_path):
+    with open(dashboard_template_path, encoding="utf-8") as handle:
+        template = handle.read()
+    js = _read_dashboard_js()
+
+    for container_id in (
+        "pending-request-cards",
+        "unreleased-request-cards",
+        "finished-request-cards",
+        "rejected-request-cards",
+    ):
+        assert f'id="{container_id}" class="space-y-3 p-3 md:hidden"' in template
+
+    assert template.count('class="hidden md:block overflow-x-auto"') >= 4
+    assert "#pending-requests-body tr, #pending-request-cards [data-request-id]" in js
+    assert "#unreleased-requests-body tr, #unreleased-request-cards [data-request-id]" in js
+    assert "#finished-requests-body tr, #finished-request-cards [data-request-id]" in js
+    assert "#rejected-requests-body tr, #rejected-request-cards [data-request-id]" in js
+    assert "pending: 'pending-request-cards'" in js
+    assert "unreleased: 'unreleased-request-cards'" in js
+    assert "finished: 'finished-request-cards'" in js
+    assert "rejected: 'rejected-request-cards'" in js
+    assert "activeTabContent.querySelectorAll('[data-request-id]')" in js
+    assert "window.getComputedStyle(current).display === 'none'" in js
+    assert "seen.has(item.id)" in js
+
+
+def test_dashboard_mobile_card_sort_controls(dashboard_template_path):
+    with open(dashboard_template_path, encoding="utf-8") as handle:
+        template = handle.read()
+    js = _read_dashboard_js()
+
+    for select_id, tab_name in (
+        ("pending-mobile-sort", "pending"),
+        ("unreleased-mobile-sort", "unreleased"),
+        ("staged-mobile-sort", "staged"),
+        ("downloading-mobile-sort", "downloading"),
+        ("finished-mobile-sort", "finished"),
+        ("rejected-mobile-sort", "rejected"),
+    ):
+        assert f'id="{select_id}"' in template
+        assert f"onchange=\"sortDashboardCards('{tab_name}', this.value)\"" in template
+
+    for option in (
+        'value="requested:desc"',
+        'value="releasedate:asc"',
+        'value="score:desc"',
+        'value="progress:desc"',
+        'value="completed:desc"',
+        'value="rejectedat:desc"',
+        'value="size:desc"',
+    ):
+        assert option in template
+
+    assert "function sortDashboardCards(tableName, encodedSort)" in js
+    assert "sortTable(tableName, sortKey, true, direction === 'desc' ? 'desc' : 'asc');" in js
+    assert "forcedDirection = null" in js
+    assert "rows.forEach(row => tbody.appendChild(row));" in js
+    assert "if (card) cardContainer.appendChild(card);" in js
 
 
 def test_dashboard_template_splits_staged_and_downloading_tabs(dashboard_template_path):
@@ -483,7 +572,7 @@ def test_dashboard_details_navigation_uses_visible_filtered_rows():
     js = _read_dashboard_js()
 
     assert "document.querySelector('.tab-content:not(.hidden)')" in js
-    assert "row.style.display !== 'none'" in js
+    assert "element.style.display === 'none'" in js
     assert "function refreshDetailsNavigationContext()" in js
     assert "window.visibleRequests = window.getVisibleRequests();" in js
     assert "findIndex(r => r.id === window.currentRequestId)" in js

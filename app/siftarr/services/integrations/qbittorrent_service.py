@@ -4,6 +4,7 @@ import asyncio
 import hashlib
 import logging
 import re
+from dataclasses import dataclass
 from enum import StrEnum
 from typing import Any
 
@@ -19,6 +20,31 @@ class MediaCategory(StrEnum):
 
     MOVIES = "radarr"
     TV = "sonarr"
+
+
+@dataclass(slots=True)
+class BulkTorrentPayload:
+    """Torrent payload for qBittorrent bulk add."""
+
+    key: int | str
+    title: str
+    torrent_path: str | None = None
+    magnet_uri: str | None = None
+    category: MediaCategory = MediaCategory.MOVIES
+    download_path: str | None = None
+    is_paused: bool = False
+    ratio_limit: float | None = None
+    seeding_time_limit: int | None = None
+
+
+@dataclass(slots=True)
+class BulkAddResult:
+    """Per-torrent result from qBittorrent bulk add."""
+
+    key: int | str
+    success: bool
+    torrent_hash: str | None = None
+    error: str | None = None
 
 
 _MAGNET_HASH_RE = re.compile(r"xt=urn:btih:([a-fA-F0-9]{40})")
@@ -297,6 +323,138 @@ class QbittorrentService:
         except Exception as e:
             logger.error("Error adding torrent: %s", e)
             return None
+
+    async def add_torrents_bulk(
+        self,
+        payloads: list[BulkTorrentPayload],
+    ) -> list[BulkAddResult]:
+        """Add multiple torrents using grouped qBittorrent bulk calls.
+
+        Results are per payload. Known existing torrents are treated as success.
+        For qBit's coarse ``Ok.`` batch response, success is mapped from a
+        precomputed hash or post-add lookup by hash/name.
+        """
+        if not payloads:
+            return []
+
+        results: dict[int | str, BulkAddResult] = {}
+        pending: list[tuple[BulkTorrentPayload, str | None]] = []
+        for payload in payloads:
+            info_hash = None
+            if payload.magnet_uri:
+                info_hash = _parse_magnet_info_hash(payload.magnet_uri)
+            elif payload.torrent_path:
+                info_hash = _torrent_file_info_hash(payload.torrent_path)
+
+            if info_hash:
+                existing = await self.get_torrent_info(info_hash)
+                if existing:
+                    results[payload.key] = BulkAddResult(
+                        key=payload.key,
+                        success=True,
+                        torrent_hash=info_hash,
+                    )
+                    continue
+            pending.append((payload, info_hash))
+
+        groups: dict[
+            tuple[str, str | None, bool, float | None, int | None, bool],
+            list[tuple[BulkTorrentPayload, str | None]],
+        ] = {}
+        for payload, info_hash in pending:
+            key = (
+                payload.category.value,
+                payload.download_path,
+                payload.is_paused,
+                payload.ratio_limit,
+                payload.seeding_time_limit,
+                bool(payload.magnet_uri),
+            )
+            groups.setdefault(key, []).append((payload, info_hash))
+
+        for (
+            category,
+            download_path,
+            is_paused,
+            ratio_limit,
+            seeding_time_limit,
+            is_magnet_group,
+        ), items in groups.items():
+            try:
+                await self.ensure_category_exists(category)
+                if is_magnet_group:
+                    urls = "\n".join(p.magnet_uri or "" for p, _ in items)
+                    result = await asyncio.to_thread(
+                        self.client.torrents_add,
+                        urls=urls,
+                        category=category,
+                        is_paused=is_paused,
+                        download_path=download_path,
+                        ratio_limit=ratio_limit,
+                        seeding_time_limit=seeding_time_limit,
+                    )
+                else:
+                    torrent_files = []
+                    for p, _ in items:
+                        if not p.torrent_path:
+                            raise ValueError("Missing torrent_path for file bulk add")
+                        with open(p.torrent_path, "rb") as file_handle:
+                            torrent_files.append(file_handle.read())
+                    result = await asyncio.to_thread(
+                        self.client.torrents_add,
+                        torrent_files=torrent_files,
+                        category=category,
+                        is_paused=is_paused,
+                        download_path=download_path,
+                        ratio_limit=ratio_limit,
+                        seeding_time_limit=seeding_time_limit,
+                    )
+            except Exception as exc:
+                logger.error("Error bulk adding torrents: %s", exc)
+                for payload, _ in items:
+                    results[payload.key] = BulkAddResult(
+                        key=payload.key,
+                        success=False,
+                        error=str(exc),
+                    )
+                continue
+
+            if result != "Ok.":
+                for payload, info_hash in items:
+                    existing = await self.get_torrent_info(info_hash) if info_hash else None
+                    results[payload.key] = BulkAddResult(
+                        key=payload.key,
+                        success=bool(existing),
+                        torrent_hash=info_hash if existing else None,
+                        error=None if existing else str(result),
+                    )
+                continue
+
+            for payload, info_hash in items:
+                torrent_hash = info_hash
+                if info_hash:
+                    existing = await self.get_torrent_info(info_hash)
+                    if existing:
+                        found_hash = existing.get("hash")
+                        torrent_hash = str(found_hash).lower() if found_hash else info_hash
+                else:
+                    existing = await self.get_torrent_info_by_name(payload.title)
+                    found_hash = existing.get("hash") if existing else None
+                    torrent_hash = str(found_hash).lower() if found_hash else None
+                results[payload.key] = BulkAddResult(
+                    key=payload.key,
+                    success=torrent_hash is not None,
+                    torrent_hash=torrent_hash,
+                    error=None if torrent_hash else "Unable to confirm qBittorrent add",
+                )
+
+        return [
+            results.get(
+                payload.key,
+                BulkAddResult(payload.key, False, error="Torrent was not submitted"),
+            )
+            for payload in payloads
+        ]
 
     async def get_torrent_info(self, torrent_hash: str) -> dict | None:
         """Get information about a torrent.

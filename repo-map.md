@@ -149,7 +149,7 @@ Business logic and integrations, organized into thematic subpackages:
 **`admin/`** — Config, scheduling, polling
 - `settings_service.py` — SettingsStore (DB-backed settings persistence, startup API key generation, runtime env loading, sync success timestamps, Plex SSO claim/token status without exposing token, versioned non-secret settings backup/export/preview/restore), SSE progress, scheduled job helpers/status helpers, Plex rescan/Overseerr import orchestration
 - `scheduler_service.py` — recurring job scheduling via APScheduler using runtime-configurable sync/completion intervals, plus startup catch-up orchestration for stale Overseerr/Plex syncs and the guarded Plex sign-in full-sync trigger used after later admin sign-ins; exposes structured scheduler/job status and manual trigger helpers for Settings; `_check_download_completion()` now also runs the qBit move/retention service; `trigger_download_completion_now()` allows manual invocation from settings with structured result reporting
-- `plex_polling_service/` — Plex polling logic; prioritizes recent/downloading requests, supports explicit full reconcile, and provides targeted checks for qBit-finished downloads waiting on Plex availability
+- `plex_polling_service/` — Plex polling logic; prioritizes recent/downloading requests, supports explicit full reconcile, and provides targeted checks for qBit-finished plus active approved staged/downloading requests waiting on Plex availability
 
 **`dashboard/`** — Dashboard, search, detail views
 - `dashboard_service.py` — dashboard DTOs and response serializers only (load/assembly logic in sub-services)
@@ -167,7 +167,7 @@ Business logic and integrations, organized into thematic subpackages:
 
 **`integrations/`** — External service adapters
 - `prowlarr_service.py` — Prowlarr indexer integration; LRU search cache (45s TTL, 50 entries), TV exact-episode, broad-pack, and guarded season-search helpers
-- `qbittorrent_service.py` — qBittorrent download client integration; includes serialized `save_path`/`seeding_time` access, listing completed torrents, `set_torrent_location()` with `move=True`, and batch delete with `delete_files=False`
+- `qbittorrent_service.py` — qBittorrent download client integration; includes idempotent single/bulk torrent add, serialized `save_path`/`seeding_time` access, listing completed torrents, `set_torrent_location()` with `move=True`, and batch delete with `delete_files=False`
 - `overseerr_service.py` — Overseerr request management integration
 - `connection_tester.py` — external connectivity test helpers
 - `plex_service/` — Plex media server integration (lookup, scan, episode availability)

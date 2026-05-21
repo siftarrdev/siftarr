@@ -27,7 +27,12 @@ from app.siftarr.models.request import (
 from app.siftarr.models.staged_torrent import StagedTorrent
 from app.siftarr.services.admin.plex_polling_service import CheckRequestResult, PlexPollingService
 from app.siftarr.services.integrations.plex_service import PlexService
-from app.siftarr.services.integrations.qbittorrent_service import MediaCategory, QbittorrentService
+from app.siftarr.services.integrations.qbittorrent_service import (
+    BulkAddResult,
+    BulkTorrentPayload,
+    MediaCategory,
+    QbittorrentService,
+)
 from app.siftarr.services.lifecycle.activity_log_service import ActivityLogService
 from app.siftarr.services.lifecycle.lifecycle_service import LifecycleService
 from app.siftarr.services.lifecycle.overseerr_sync_service import (
@@ -325,7 +330,7 @@ async def _approve_torrent(
     json_path = torrent.json_path
 
     torrent.status = "approved"
-    if _is_hash_like(torrent_hash):
+    if isinstance(torrent_hash, str) and _is_hash_like(torrent_hash):
         torrent.info_hash = torrent_hash.lower()
     if request:
         lifecycle_service = LifecycleService(db)
@@ -347,6 +352,110 @@ async def _approve_torrent(
         cleanup_paths.append((torrent_path, json_path))
 
     return True
+
+
+async def _load_approval_context(
+    torrent: StagedTorrent,
+    db: AsyncSession,
+) -> tuple[Request | None, StagedTorrent | None, MediaCategory]:
+    request = None
+    if torrent.request_id:
+        result = await db.execute(select(Request).where(Request.id == torrent.request_id))
+        request = result.scalar_one_or_none()
+
+    category = (
+        MediaCategory.MOVIES
+        if request and request.media_type == MediaType.MOVIE
+        else MediaCategory.TV
+    )
+    rules_selected_torrent = None
+    if request is not None:
+        rules_selected_result = await db.execute(
+            select(StagedTorrent)
+            .where(
+                StagedTorrent.request_id == request.id,
+                StagedTorrent.selection_source == "rule",
+                StagedTorrent.status.in_(["staged", "approved"]),
+            )
+            .order_by(StagedTorrent.score.desc(), StagedTorrent.created_at.asc())
+        )
+        rules_selected_torrent = rules_selected_result.scalars().first()
+    return request, rules_selected_torrent, category
+
+
+def _bulk_payload_for_torrent(
+    torrent: StagedTorrent,
+    category: MediaCategory,
+) -> BulkTorrentPayload:
+    download_url = _staged_download_url(torrent)
+    if torrent.magnet_url:
+        return BulkTorrentPayload(
+            key=torrent.id,
+            title=torrent.title,
+            magnet_uri=torrent.magnet_url,
+            category=category,
+        )
+    if download_url and not os.path.exists(torrent.torrent_path):
+        return BulkTorrentPayload(
+            key=torrent.id,
+            title=torrent.title,
+            magnet_uri=download_url,
+            category=category,
+        )
+    return BulkTorrentPayload(
+        key=torrent.id,
+        title=torrent.title,
+        torrent_path=torrent.torrent_path,
+        category=category,
+    )
+
+
+async def _mark_torrent_approved_after_qbit(
+    torrent: StagedTorrent,
+    db: AsyncSession,
+    *,
+    request: Request | None,
+    rules_selected_torrent: StagedTorrent | None,
+    torrent_hash: str | None,
+    cleanup_paths: list[tuple[str, str]],
+) -> None:
+    try:
+        await approve_overseerr_request_best_effort(db, request, reason="staged_approval_qbit_sent")
+    except Exception:
+        logger.exception(
+            "Best-effort Overseerr approval failed for request_id=%s", torrent.request_id
+        )
+
+    activity_log = ActivityLogService(db)
+    await activity_log.log(
+        EventType.RELEASE_APPROVED,
+        request_id=torrent.request_id,
+        details={"torrent_id": torrent.id, "title": torrent.title},
+    )
+    await record_staged_release_fact(db, torrent)
+    await activity_log.log(
+        EventType.DOWNLOAD_STARTED,
+        request_id=torrent.request_id,
+        details={"torrent_id": torrent.id, "title": torrent.title},
+    )
+
+    log_staging_decision(
+        request=request,
+        approved_torrent=torrent,
+        rules_selected_torrent=rules_selected_torrent,
+    )
+
+    cleanup_paths.append((torrent.torrent_path, torrent.json_path))
+    torrent.status = "approved"
+    if isinstance(torrent_hash, str) and _is_hash_like(torrent_hash):
+        torrent.info_hash = torrent_hash.lower()
+    if request and request.status not in (
+        RequestStatus.COMPLETED,
+        RequestStatus.FAILED,
+        RequestStatus.DENIED,
+    ):
+        lifecycle_service = LifecycleService(db)
+        await lifecycle_service.transition(request.id, RequestStatus.DOWNLOADING, commit=False)
 
 
 async def _discard_torrent(torrent: StagedTorrent, db: AsyncSession) -> bool:
@@ -529,20 +638,58 @@ async def bulk_staged_action(
     processed = 0
     failed: list[dict[str, Any]] = []
     cleanup_paths: list[tuple[str, str]] = []
-    for torrent in torrents:
-        if action == "approve":
-            success = await _approve_torrent(
+    if action == "approve":
+        runtime_settings = get_settings()
+        qbittorrent = QbittorrentService(settings=runtime_settings)
+        contexts: dict[int, tuple[Request | None, StagedTorrent | None]] = {}
+        payloads: list[BulkTorrentPayload] = []
+        for torrent in torrents:
+            request, rules_selected_torrent, category = await _load_approval_context(torrent, db)
+            contexts[torrent.id] = (request, rules_selected_torrent)
+            payloads.append(_bulk_payload_for_torrent(torrent, category))
+
+        bulk_results = await qbittorrent.add_torrents_bulk(payloads)
+        if not isinstance(bulk_results, list):
+            # Compatibility for older unit mocks; production service always returns a list.
+            bulk_results = []
+            for payload in payloads:
+                torrent = next(item for item in torrents if item.id == payload.key)
+                torrent_hash = await qbittorrent.add_torrent(
+                    torrent_path=payload.torrent_path,
+                    magnet_uri=payload.magnet_uri,
+                    category=payload.category,
+                )
+                bulk_results.append(
+                    BulkAddResult(
+                        key=payload.key,
+                        success=torrent_hash is not None,
+                        torrent_hash=torrent_hash,
+                    )
+                )
+
+        results_by_id = {result.key: result for result in bulk_results}
+        for torrent in torrents:
+            result = results_by_id.get(torrent.id)
+            if result is None or not result.success:
+                failed.append({"id": torrent.id, "title": torrent.title})
+                continue
+            request, rules_selected_torrent = contexts[torrent.id]
+            await _mark_torrent_approved_after_qbit(
                 torrent,
                 db,
-                commit_transition=False,
+                request=request,
+                rules_selected_torrent=rules_selected_torrent,
+                torrent_hash=result.torrent_hash,
                 cleanup_paths=cleanup_paths,
             )
-        else:
-            success = await _discard_torrent(torrent, db)
-        if success:
             processed += 1
-        else:
-            failed.append({"id": torrent.id, "title": torrent.title})
+    else:
+        for torrent in torrents:
+            success = await _discard_torrent(torrent, db)
+            if success:
+                processed += 1
+            else:
+                failed.append({"id": torrent.id, "title": torrent.title})
 
     await db.commit()
     if action == "approve":
