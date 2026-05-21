@@ -471,6 +471,40 @@ def test_dashboard_template_has_mobile_request_cards_for_list_tabs(dashboard_tem
     assert "seen.has(item.id)" in js
 
 
+def test_dashboard_mobile_card_sort_controls(dashboard_template_path):
+    with open(dashboard_template_path, encoding="utf-8") as handle:
+        template = handle.read()
+    js = _read_dashboard_js()
+
+    for select_id, tab_name in (
+        ("pending-mobile-sort", "pending"),
+        ("unreleased-mobile-sort", "unreleased"),
+        ("staged-mobile-sort", "staged"),
+        ("downloading-mobile-sort", "downloading"),
+        ("finished-mobile-sort", "finished"),
+        ("rejected-mobile-sort", "rejected"),
+    ):
+        assert f'id="{select_id}"' in template
+        assert f"onchange=\"sortDashboardCards('{tab_name}', this.value)\"" in template
+
+    for option in (
+        'value="requested:desc"',
+        'value="releasedate:asc"',
+        'value="score:desc"',
+        'value="progress:desc"',
+        'value="completed:desc"',
+        'value="rejectedat:desc"',
+        'value="size:desc"',
+    ):
+        assert option in template
+
+    assert "function sortDashboardCards(tableName, encodedSort)" in js
+    assert "sortTable(tableName, sortKey, true, direction === 'desc' ? 'desc' : 'asc');" in js
+    assert "forcedDirection = null" in js
+    assert "rows.forEach(row => tbody.appendChild(row));" in js
+    assert "if (card) cardContainer.appendChild(card);" in js
+
+
 def test_dashboard_template_splits_staged_and_downloading_tabs(dashboard_template_path):
     """Staged review controls and downloading qBittorrent controls live separately."""
     with open(dashboard_template_path, encoding="utf-8") as handle:

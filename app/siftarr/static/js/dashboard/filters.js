@@ -144,7 +144,7 @@ function filterReleaseCards() {
         .join('');
 }
 
-function sortTable(tableName, sortKey, preserveDirection = false) {
+function sortTable(tableName, sortKey, preserveDirection = false, forcedDirection = null) {
     const tableIdMap = {
         active: 'active-requests-table',
         pending: 'pending-requests-table',
@@ -169,7 +169,10 @@ function sortTable(tableName, sortKey, preserveDirection = false) {
     const table = document.getElementById(tableIdMap[tableName]);
     if (!tbody || !table || !state) return;
 
-    if (state.column === sortKey) {
+    if (forcedDirection) {
+        state.column = sortKey;
+        state.direction = forcedDirection;
+    } else if (state.column === sortKey) {
         // preserveDirection is used by restoreTabState to re-sort rows
         // without flipping the sort direction on every tab refresh.
         if (!preserveDirection) {
@@ -220,6 +223,12 @@ function sortTable(tableName, sortKey, preserveDirection = false) {
         });
     }
     window.refreshDetailsNavigationContext();
+}
+
+function sortDashboardCards(tableName, encodedSort) {
+    const [sortKey, direction] = String(encodedSort || '').split(':');
+    if (!sortKey) return;
+    sortTable(tableName, sortKey, true, direction === 'desc' ? 'desc' : 'asc');
 }
 
 /**
@@ -333,5 +342,6 @@ window.filterRejectedTable = filterRejectedTable;
 window.filterUnreleasedTable = filterUnreleasedTable;
 window.filterReleaseCards = filterReleaseCards;
 window.sortTable = sortTable;
+window.sortDashboardCards = sortDashboardCards;
 window.restoreTabState = restoreTabState;
 window.saveTabState = saveTabState;

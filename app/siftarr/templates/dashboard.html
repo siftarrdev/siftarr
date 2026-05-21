@@ -98,6 +98,17 @@
                                     class="media-toggle-btn px-2.5 py-1 text-xs font-medium rounded-lg border border-gray-700/60 text-gray-500 hover:text-gray-300 transition-colors">Movies</button>
                         </div>
                     </div>
+                    <div class="mt-3 md:hidden">
+                        <label for="pending-mobile-sort" class="form-label">Sort cards</label>
+                        <select id="pending-mobile-sort" class="form-input mt-1 w-full" onchange="sortDashboardCards('pending', this.value)">
+                            <option value="">Sort by...</option>
+                            <option value="requested:desc">Requested (newest)</option>
+                            <option value="requested:asc">Requested (oldest)</option>
+                            <option value="title:asc">Title (A-Z)</option>
+                            <option value="year:desc">Year (newest)</option>
+                            <option value="status:asc">Status</option>
+                        </select>
+                    </div>
                 </div>
                 <div id="pending-request-cards" class="space-y-3 p-3 md:hidden">
                     {% for req in pending_requests %}
@@ -188,6 +199,17 @@
                                 class="media-toggle-btn px-2.5 py-1 text-xs font-medium rounded-lg border border-gray-700/60 text-gray-500 hover:text-gray-300 transition-colors">Movies</button>
                     </div>
                 </div>
+                <div class="mt-3 md:hidden">
+                    <label for="unreleased-mobile-sort" class="form-label">Sort cards</label>
+                    <select id="unreleased-mobile-sort" class="form-input mt-1 w-full" onchange="sortDashboardCards('unreleased', this.value)">
+                        <option value="">Sort by...</option>
+                        <option value="releasedate:asc">Release date (soonest)</option>
+                        <option value="releasedate:desc">Release date (latest)</option>
+                        <option value="requested:desc">Requested (newest)</option>
+                        <option value="title:asc">Title (A-Z)</option>
+                        <option value="year:desc">Year (newest)</option>
+                    </select>
+                </div>
             </div>
             <div id="unreleased-request-cards" class="space-y-3 p-3 md:hidden">
                 {% for req in unreleased_requests %}
@@ -256,6 +278,17 @@
                 <div class="flex flex-wrap items-center gap-2">
                     <button type="button" onclick="bulkStagedAction('approve')" class="btn-primary btn-sm w-full sm:w-auto">Approve Selected</button>
                     <button type="button" onclick="bulkStagedAction('discard')" class="btn-danger btn-sm w-full sm:w-auto">Discard Selected</button>
+                </div>
+                <div class="md:hidden">
+                    <label for="staged-mobile-sort" class="form-label">Sort cards</label>
+                    <select id="staged-mobile-sort" class="form-input mt-1 w-full" onchange="sortDashboardCards('staged', this.value)">
+                        <option value="">Sort by...</option>
+                        <option value="score:desc">Score (highest)</option>
+                        <option value="size:desc">Size (largest)</option>
+                        <option value="size:asc">Size (smallest)</option>
+                        <option value="title:asc">Title (A-Z)</option>
+                        <option value="indexer:asc">Indexer</option>
+                    </select>
                 </div>
             </div>
             <div id="staged-torrent-cards" class="space-y-3 p-3 md:hidden">
@@ -338,6 +371,17 @@
             <div class="card-header flex flex-col gap-3 md:flex-row md:items-center">
                 <input type="text" id="downloading-filter-input" placeholder="Filter downloading torrents..." class="form-input md:flex-1">
                 <div class="flex flex-wrap items-center gap-2">{% if qbittorrent_url %}<a href="{{ qbittorrent_url }}" target="_blank" rel="noopener noreferrer" class="btn-ghost btn-sm">Open qBittorrent ↗</a>{% endif %}</div>
+                <div class="md:hidden">
+                    <label for="downloading-mobile-sort" class="form-label">Sort cards</label>
+                    <select id="downloading-mobile-sort" class="form-input mt-1 w-full" onchange="sortDashboardCards('downloading', this.value)">
+                        <option value="">Sort by...</option>
+                        <option value="progress:desc">Progress (highest)</option>
+                        <option value="eta:asc">ETA (soonest)</option>
+                        <option value="size:desc">Size (largest)</option>
+                        <option value="score:desc">Score (highest)</option>
+                        <option value="title:asc">Title (A-Z)</option>
+                    </select>
+                </div>
             </div>
             <div id="downloading-torrent-cards" class="space-y-3 p-3 md:hidden">
                 {% for torrent in downloading_torrents %}
@@ -445,6 +489,17 @@
                                 class="media-toggle-btn px-2.5 py-1 text-xs font-medium rounded-lg border border-gray-700/60 text-gray-500 hover:text-gray-300 transition-colors">Movies</button>
                     </div>
                 </div>
+                <div class="mt-3 md:hidden">
+                    <label for="finished-mobile-sort" class="form-label">Sort cards</label>
+                    <select id="finished-mobile-sort" class="form-input mt-1 w-full" onchange="sortDashboardCards('finished', this.value)">
+                        <option value="">Sort by...</option>
+                        <option value="completed:desc">Completed (newest)</option>
+                        <option value="completed:asc">Completed (oldest)</option>
+                        <option value="requested:desc">Requested (newest)</option>
+                        <option value="title:asc">Title (A-Z)</option>
+                        <option value="year:desc">Year (newest)</option>
+                    </select>
+                </div>
             </div>
                 <div id="finished-request-cards" class="space-y-3 p-3 md:hidden">
                     {% for req in completed_requests %}
@@ -518,6 +573,17 @@
                         <button type="button" onclick="toggleMediaFilter('rejected', 'movie')" id="media-filter-rejected-movie"
                                 class="media-toggle-btn px-2.5 py-1 text-xs font-medium rounded-lg border border-gray-700/60 text-gray-500 hover:text-gray-300 transition-colors">Movies</button>
                     </div>
+                </div>
+                <div class="mt-3 md:hidden">
+                    <label for="rejected-mobile-sort" class="form-label">Sort cards</label>
+                    <select id="rejected-mobile-sort" class="form-input mt-1 w-full" onchange="sortDashboardCards('rejected', this.value)">
+                        <option value="">Sort by...</option>
+                        <option value="rejectedat:desc">Denied (newest)</option>
+                        <option value="rejectedat:asc">Denied (oldest)</option>
+                        <option value="title:asc">Title (A-Z)</option>
+                        <option value="year:desc">Year (newest)</option>
+                        <option value="reason:asc">Reason</option>
+                    </select>
                 </div>
             </div>
             <div id="rejected-request-cards" class="space-y-3 p-3 md:hidden">
