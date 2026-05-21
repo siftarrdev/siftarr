@@ -99,7 +99,24 @@
                         </div>
                     </div>
                 </div>
-                <div class="overflow-x-auto">
+                <div id="pending-request-cards" class="space-y-3 p-3 md:hidden">
+                    {% for req in pending_requests %}
+                    <div class="rounded-xl border border-gray-700/60 bg-surface-850 p-3" onclick="openRequestDetails({{ req.id }})" data-request-id="{{ req.id }}" data-title="{{ req.title|lower }}" data-type="{{ req.media_type.value|lower }}" data-requestedby="{{ req.requester_username|default('Unknown')|lower }}" data-requested="{{ req.created_at.strftime('%Y-%m-%d %H:%M') }}" data-status="{{ req.display_label|lower }}" data-year="{{ req.year or 0 }}">
+                        <div class="flex items-start gap-3">
+                            <input name="request_ids" value="{{ req.id }}" type="checkbox" class="pending-request-checkbox mt-1 rounded-sm border-gray-600 bg-surface-900 text-brand-500 focus:ring-brand-500" onclick="event.stopPropagation()">
+                            <div class="min-w-0 flex-1">
+                                <div data-card-title class="overflow-wrap-anywhere text-sm font-semibold text-white">{{ req.title }}</div>
+                                <div class="mt-2 flex flex-wrap gap-2 text-xs text-gray-400"><span>{{ req.year or '-' }}</span><span class="capitalize">{{ req.media_type.value }}</span><span>{{ req.requester_username or 'Unknown' }}</span><span>{{ req.created_at.strftime('%Y-%m-%d %H:%M') }}</span><span class="badge {% if req.display_label == 'searching' %}badge-blue{% elif req.display_label in ('pending', 'partial') %}badge-yellow{% elif req.display_label == 'staged' %}badge-cyan{% else %}badge-gray{% endif %}">{{ req.display_label }}</span></div>
+                            </div>
+                        </div>
+                        <div class="mt-3 grid grid-cols-2 gap-2" onclick="event.stopPropagation()">
+                            <button type="button" onclick="postToAction('/requests/{{ req.id }}/search', '/?tab=pending', this, this.closest('[data-request-id]'))" data-search-action="true" class="btn-primary btn-sm w-full">Search</button>
+                            <button type="button" onclick="openDenyModal({{ req.id }}, '/?tab=pending')" class="btn-danger btn-sm w-full">Deny</button>
+                        </div>
+                    </div>
+                    {% endfor %}
+                </div>
+                <div class="hidden md:block overflow-x-auto">
                     <table class="min-w-full divide-y divide-gray-700/60 data-resizable" id="pending-requests-table">
                         <colgroup>
                             <col data-col-key="selectbox" style="width: 48px;">
@@ -172,7 +189,22 @@
                     </div>
                 </div>
             </div>
-            <div class="overflow-x-auto">
+            <div id="unreleased-request-cards" class="space-y-3 p-3 md:hidden">
+                {% for req in unreleased_requests %}
+                {% set expected_date = unreleased_release_dates.get(req.id) %}
+                <div class="rounded-xl border border-gray-700/60 bg-surface-850 p-3" onclick="openRequestDetails({{ req.id }})" data-request-id="{{ req.id }}" data-title="{{ req.title|lower }}" data-type="{{ req.media_type.value|lower }}" data-requestedby="{{ req.requester_username|default('Unknown')|lower }}" data-requested="{{ req.created_at.strftime('%Y-%m-%d %H:%M') }}" data-releasedate="{{ expected_date or '9999-12-31' }}" data-year="{{ req.year or 0 }}">
+                    <div data-card-title class="overflow-wrap-anywhere text-sm font-semibold text-white">{{ req.title }}</div>
+                    <div class="mt-2 grid grid-cols-2 gap-2 text-xs text-gray-400">
+                        <div><div class="text-gray-500">Year</div><div>{{ req.year or '-' }}</div></div>
+                        <div><div class="text-gray-500">Type</div><div class="capitalize">{{ req.media_type.value }}</div></div>
+                        <div><div class="text-gray-500">Requested</div><div class="tabular-nums">{{ req.created_at.strftime('%Y-%m-%d %H:%M') }}</div></div>
+                        <div><div class="text-gray-500">By</div><div>{{ req.requester_username or 'Unknown' }}</div></div>
+                        <div class="col-span-2"><div class="text-gray-500">Release Date</div><div class="text-purple-300 tabular-nums">{{ expected_date or '-' }}</div></div>
+                    </div>
+                </div>
+                {% endfor %}
+            </div>
+            <div class="hidden md:block overflow-x-auto">
                 <table class="min-w-full divide-y divide-gray-700/60 data-resizable" id="unreleased-requests-table">
                     <colgroup>
                         <col data-col-key="title" style="width: 200px;">
@@ -230,7 +262,7 @@
                 {% for torrent in staged_torrents %}
                 {% set request_state = staged_request_statuses.get(torrent.request_id, 'unknown') %}
                 {% set identity_warning = movie_identity_mismatch_warnings.get(torrent.id) %}
-                <div class="rounded-xl border border-gray-700/60 bg-surface-850 p-3" onclick="{% if torrent.request_id %}openRequestDetails({{ torrent.request_id }}){% endif %}" data-torrent-id="{{ torrent.id }}" data-request-id="{{ torrent.request_id }}" data-title="{{ torrent.title|lower }}" data-state="{{ torrent.status|lower }}" data-requeststate="{{ request_state|lower }}" data-size="{{ torrent.size }}" data-indexer="{{ torrent.indexer|lower }}" data-score="{{ torrent.score }}">
+                <div class="rounded-xl border border-gray-700/60 bg-surface-850 p-3" onclick="{% if torrent.request_id %}openStagedRequestDetailsFromElement(this){% endif %}" data-torrent-id="{{ torrent.id }}" data-request-id="{{ torrent.request_id }}" data-title="{{ torrent.title|lower }}" data-state="{{ torrent.status|lower }}" data-requeststate="{{ request_state|lower }}" data-size="{{ torrent.size }}" data-indexer="{{ torrent.indexer|lower }}" data-score="{{ torrent.score }}">
                     <div class="flex items-start gap-3">
                         <input type="checkbox" class="staged-torrent-checkbox mt-1 rounded-sm border-gray-600 bg-surface-900 text-brand-500 focus:ring-brand-500" value="{{ torrent.id }}" onclick="event.stopPropagation()">
                         <div class="min-w-0 flex-1">
@@ -240,9 +272,8 @@
                         </div>
                     </div>
                     <div class="mt-3 grid grid-cols-2 gap-2" onclick="event.stopPropagation()">
-                        {% if torrent.request_id %}<button type="button" onclick="openRequestDetails({{ torrent.request_id }})" class="btn-ghost btn-sm w-full">Details</button>{% endif %}
                         {% if torrent.id in replace_staged_torrent_ids %}<button type="button" onclick="openReplaceModal({{ torrent.id }}, {{ torrent.request_id }}, '{{ torrent.title|replace("'", "\'") }}', '/?tab=downloading')" class="btn-warning btn-sm w-full">Replace</button>{% else %}<button type="button" onclick="postStagedAction('/staged/{{ torrent.id }}/approve', '/?tab=staged')" class="btn-success btn-sm w-full">Approve</button>{% endif %}
-                        <button type="button" onclick="postStagedAction('/staged/{{ torrent.id }}/discard', '/?tab=staged')" class="btn-danger btn-sm w-full col-span-2">Discard</button>
+                        <button type="button" onclick="postStagedAction('/staged/{{ torrent.id }}/discard', '/?tab=staged')" class="btn-danger btn-sm w-full">Discard</button>
                     </div>
                 </div>
                 {% else %}<p class="text-sm text-gray-500">No staged torrents.</p>{% endfor %}
@@ -277,7 +308,7 @@
                         {% for torrent in staged_torrents %}
                         {% set request_state = staged_request_statuses.get(torrent.request_id, 'unknown') %}
                         {% set identity_warning = movie_identity_mismatch_warnings.get(torrent.id) %}
-                        <tr class="hover:bg-surface-850/80 cursor-pointer transition-colors" onclick="{% if torrent.request_id %}openRequestDetails({{ torrent.request_id }}){% endif %}" data-torrent-id="{{ torrent.id }}" data-request-id="{{ torrent.request_id }}" data-title="{{ torrent.title|lower }}" data-state="{{ torrent.status|lower }}" data-requeststate="{{ request_state|lower }}" data-size="{{ torrent.size }}" data-indexer="{{ torrent.indexer|lower }}" data-score="{{ torrent.score }}">
+                        <tr class="hover:bg-surface-850/80 cursor-pointer transition-colors" onclick="{% if torrent.request_id %}openStagedRequestDetailsFromElement(this){% endif %}" data-torrent-id="{{ torrent.id }}" data-request-id="{{ torrent.request_id }}" data-title="{{ torrent.title|lower }}" data-state="{{ torrent.status|lower }}" data-requeststate="{{ request_state|lower }}" data-size="{{ torrent.size }}" data-indexer="{{ torrent.indexer|lower }}" data-score="{{ torrent.score }}">
                             <td class="px-5 py-3.5 text-sm" onclick="event.stopPropagation()">
                                 <input type="checkbox" class="staged-torrent-checkbox rounded-sm border-gray-600 bg-surface-900 text-brand-500 focus:ring-brand-500" value="{{ torrent.id }}">
                             </td>
@@ -291,7 +322,7 @@
                             <td class="px-5 py-3.5  text-sm text-gray-400 tabular-nums">{{ (torrent.size / 1024 / 1024 / 1024)|round(2) }} GB</td>
                             <td class="px-5 py-3.5  text-sm text-gray-400">{{ torrent.indexer }}</td>
                             <td class="px-5 py-3.5  text-sm text-emerald-400 font-medium tabular-nums">{{ torrent.score }}</td>
-                            <td class="px-5 py-3.5  text-sm" onclick="event.stopPropagation()"><div class="flex items-center gap-3">{% if torrent.request_id %}<button type="button" onclick="openRequestDetails({{ torrent.request_id }})" class="text-brand-400 hover:text-brand-300 font-medium">Details</button>{% endif %}{% if torrent.id in replace_staged_torrent_ids %}<button type="button" onclick="openReplaceModal({{ torrent.id }}, {{ torrent.request_id }}, '{{ torrent.title|replace("'", "\'") }}', '/?tab=downloading')" class="text-amber-400 hover:text-amber-300 font-medium">Replace</button>{% else %}<button type="button" onclick="postStagedAction('/staged/{{ torrent.id }}/approve', '/?tab=staged')" class="text-emerald-400 hover:text-emerald-300 font-medium">Approve</button>{% endif %}<button type="button" onclick="postStagedAction('/staged/{{ torrent.id }}/discard', '/?tab=staged')" class="text-red-400 hover:text-red-300 font-medium">Discard</button></div></td>
+                            <td class="px-5 py-3.5  text-sm" onclick="event.stopPropagation()"><div class="flex items-center gap-3">{% if torrent.id in replace_staged_torrent_ids %}<button type="button" onclick="openReplaceModal({{ torrent.id }}, {{ torrent.request_id }}, '{{ torrent.title|replace("'", "\'") }}', '/?tab=downloading')" class="text-amber-400 hover:text-amber-300 font-medium">Replace</button>{% else %}<button type="button" onclick="postStagedAction('/staged/{{ torrent.id }}/approve', '/?tab=staged')" class="text-emerald-400 hover:text-emerald-300 font-medium">Approve</button>{% endif %}<button type="button" onclick="postStagedAction('/staged/{{ torrent.id }}/discard', '/?tab=staged')" class="text-red-400 hover:text-red-300 font-medium">Discard</button></div></td>
                         </tr>
                         {% endfor %}
                         {% endif %}
@@ -415,7 +446,21 @@
                     </div>
                 </div>
             </div>
-            <div class="overflow-x-auto">
+                <div id="finished-request-cards" class="space-y-3 p-3 md:hidden">
+                    {% for req in completed_requests %}
+                    <div class="rounded-xl border border-gray-700/60 bg-surface-850 p-3" onclick="openRequestDetails({{ req.id }})" data-request-id="{{ req.id }}" data-title="{{ req.title|lower }}" data-type="{{ req.media_type.value|lower }}" data-requestedby="{{ req.requester_username|default('Unknown')|lower }}" data-requested="{{ req.created_at.strftime('%Y-%m-%d %H:%M') }}" data-completed="{{ req.updated_at.strftime('%Y-%m-%d %H:%M') }}" data-year="{{ req.year or 0 }}">
+                        <div data-card-title class="overflow-wrap-anywhere text-sm font-semibold text-white">{{ req.title }}</div>
+                        <div class="mt-2 grid grid-cols-2 gap-2 text-xs text-gray-400">
+                            <div><div class="text-gray-500">Year</div><div>{{ req.year or '-' }}</div></div>
+                            <div><div class="text-gray-500">Type</div><div class="capitalize">{{ req.media_type.value }}</div></div>
+                            <div><div class="text-gray-500">Requested By</div><div>{{ req.requester_username or 'Unknown' }}</div></div>
+                            <div><div class="text-gray-500">Requested</div><div class="tabular-nums">{{ req.created_at.strftime('%Y-%m-%d %H:%M') }}</div></div>
+                            <div class="col-span-2"><div class="text-gray-500">Completed</div><div class="text-emerald-400 tabular-nums">{{ req.updated_at.strftime('%Y-%m-%d %H:%M') }}</div></div>
+                        </div>
+                    </div>
+                    {% endfor %}
+                </div>
+                <div class="hidden md:block overflow-x-auto">
                 <table class="min-w-full divide-y divide-gray-700/60 data-resizable" id="finished-requests-table">
                     <colgroup>
                         <col data-col-key="title" style="width: 200px;">
@@ -475,7 +520,21 @@
                     </div>
                 </div>
             </div>
-            <div class="overflow-x-auto">
+            <div id="rejected-request-cards" class="space-y-3 p-3 md:hidden">
+                {% for req in denied_requests %}
+                <div class="rounded-xl border border-gray-700/60 bg-surface-850 p-3" onclick="openRequestDetails({{ req.id }})" data-request-id="{{ req.id }}" data-title="{{ req.title|lower }}" data-type="{{ req.media_type.value|lower }}" data-requestedby="{{ req.requester_username|default('Unknown')|lower }}" data-reason="{{ (req.rejection_reason or '')|lower }}" data-rejectedat="{{ req.updated_at.strftime('%Y-%m-%d %H:%M') }}" data-year="{{ req.year or 0 }}">
+                    <div data-card-title class="overflow-wrap-anywhere text-sm font-semibold text-white">{{ req.title }}</div>
+                    <div class="mt-2 grid grid-cols-2 gap-2 text-xs text-gray-400">
+                        <div><div class="text-gray-500">Year</div><div>{{ req.year or '-' }}</div></div>
+                        <div><div class="text-gray-500">Type</div><div class="capitalize">{{ req.media_type.value }}</div></div>
+                        <div><div class="text-gray-500">Requested By</div><div>{{ req.requester_username or 'Unknown' }}</div></div>
+                        <div><div class="text-gray-500">Denied</div><div class="tabular-nums">{{ req.updated_at.strftime('%Y-%m-%d %H:%M') }}</div></div>
+                        <div class="col-span-2"><div class="text-gray-500">Reason</div><div class="text-red-400">{{ req.rejection_reason or '-' }}</div></div>
+                    </div>
+                </div>
+                {% endfor %}
+            </div>
+            <div class="hidden md:block overflow-x-auto">
                 <table class="min-w-full divide-y divide-gray-700/60 data-resizable" id="rejected-requests-table">
                     <colgroup>
                         <col data-col-key="title" style="width: 200px;">

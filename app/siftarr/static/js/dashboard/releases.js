@@ -406,8 +406,10 @@ async function stageRelease(btn) {
         window.showToast(payload.message || (window.siftarrStagingModeEnabled ? 'Active staged selection updated' : 'Torrent sent successfully'));
         window.refreshStagedTabData();
         if (window.siftarrStagingModeEnabled && window.currentRequestId) {
-            await window.openRequestDetails(window.currentRequestId, window.currentDetailsIndex, { preserveUiState: true });
-            collapseStagedTvScope(window.currentRequestId, stagedScope);
+            await window.openRequestDetails(window.currentRequestId, window.currentDetailsIndex, {
+                preserveUiState: true,
+                focusTvScope: stagedScope,
+            });
         }
     } catch (err) {
         btn.disabled = false;
@@ -459,6 +461,44 @@ function toggleTvSeasonDetails(requestId, seasonNumber) {
     setTvAccordionNodesOpen(nodes, shouldOpen);
 }
 
+function focusTvEpisode(requestId, seasonNumber, episodeNumber) {
+    if (!requestId || !seasonNumber || !episodeNumber) return;
+    const seasonDetails = document.getElementById('season-details-' + requestId + '-' + seasonNumber);
+    const targetDetails = document.getElementById('episode-details-' + requestId + '-' + seasonNumber + '-' + episodeNumber);
+    if (!seasonDetails || !targetDetails) return;
+    document.querySelectorAll('#request-details-releases details[id^="episode-details-' + requestId + '-"]').forEach(function(details) {
+        details.open = details === targetDetails;
+    });
+    seasonDetails.open = true;
+    targetDetails.open = true;
+    if (targetDetails.scrollIntoView) {
+        targetDetails.scrollIntoView({ block: 'nearest' });
+    }
+    updateTvAccordionControls();
+}
+
+function focusStagedTvScope(requestId, scope) {
+    if (!scope || scope.type !== 'single_episode') return;
+    focusTvEpisode(requestId, scope.season_number, scope.episode_number);
+}
+
+function parseSingleEpisodeScopeFromTitle(title) {
+    const match = String(title || '').match(/S(\d{1,2})E(\d{1,2})/i);
+    if (!match) return null;
+    return {
+        type: 'single_episode',
+        season_number: Number(match[1]),
+        episode_number: Number(match[2]),
+    };
+}
+
+function openStagedRequestDetailsFromElement(element) {
+    const requestId = Number(element?.dataset?.requestId || 0);
+    if (!requestId) return;
+    const focusTvScope = parseSingleEpisodeScopeFromTitle(element.dataset.title || element.textContent || '');
+    window.openRequestDetails(requestId, null, { focusTvScope });
+}
+
 function updateTvAccordionControls() {
     document.querySelectorAll('[data-tv-accordion-toggle]').forEach(function(button) {
         var requestId = button.dataset.requestId;
@@ -469,20 +509,6 @@ function updateTvAccordionControls() {
         button.textContent = allOpen ? 'Collapse all' : 'Expand all';
         button.setAttribute('aria-expanded', allOpen ? 'true' : 'false');
     });
-}
-
-function collapseStagedTvScope(requestId, scope) {
-    if (!scope || !scope.type) return;
-    if (scope.type === 'single_episode') {
-        const details = document.getElementById('episode-details-' + requestId + '-' + scope.season_number + '-' + scope.episode_number);
-        if (details) details.open = false;
-        return;
-    }
-    const seasons = Array.isArray(scope.season_numbers) ? scope.season_numbers : [];
-    if (scope.type === 'season_pack' && seasons.length === 1) {
-        const details = document.getElementById('season-details-' + requestId + '-' + seasons[0]);
-        if (details) details.open = false;
-    }
 }
 
 function updateActiveStageBanner(data) {
@@ -525,7 +551,9 @@ window.searchSeasonPacks = searchSeasonPacks;
 window.searchMultiSeasonPacks = searchMultiSeasonPacks;
 window.searchEpisode = searchEpisode;
 window.stageRelease = stageRelease;
-window.collapseStagedTvScope = collapseStagedTvScope;
+window.focusTvEpisode = focusTvEpisode;
+window.focusStagedTvScope = focusStagedTvScope;
+window.openStagedRequestDetailsFromElement = openStagedRequestDetailsFromElement;
 window.captureDetailsAccordionState = captureDetailsAccordionState;
 window.restoreDetailsAccordionState = restoreDetailsAccordionState;
 window.toggleTvDetailsAll = toggleTvDetailsAll;

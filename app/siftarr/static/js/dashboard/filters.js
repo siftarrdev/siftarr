@@ -60,7 +60,7 @@ function filterPendingTable() {
     if (!filterEl) return;
     const filter = filterEl.value.toLowerCase();
     const mediaType = window.mediaFilterState['pending'] || null;
-    document.querySelectorAll('#pending-requests-body tr').forEach(row => {
+    document.querySelectorAll('#pending-requests-body tr, #pending-request-cards [data-request-id]').forEach(row => {
         const textContent = `${row.dataset.title} ${row.dataset.type} ${row.dataset.requestedby} ${row.dataset.status}`;
         const textMatch = !filter || textContent.includes(filter);
         const mediaMatch = !mediaType || row.dataset.type === mediaType;
@@ -96,7 +96,7 @@ function filterFinishedTable() {
     if (!filterEl) return;
     const filter = filterEl.value.toLowerCase();
     const mediaType = window.mediaFilterState['finished'] || null;
-    document.querySelectorAll('#finished-requests-body tr').forEach(row => {
+    document.querySelectorAll('#finished-requests-body tr, #finished-request-cards [data-request-id]').forEach(row => {
         const textContent = `${row.dataset.title} ${row.dataset.type} ${row.dataset.requestedby}`;
         const textMatch = !filter || textContent.includes(filter);
         const mediaMatch = !mediaType || row.dataset.type === mediaType;
@@ -110,7 +110,7 @@ function filterRejectedTable() {
     if (!filterEl) return;
     const filter = filterEl.value.toLowerCase();
     const mediaType = window.mediaFilterState['rejected'] || null;
-    document.querySelectorAll('#rejected-requests-body tr').forEach(row => {
+    document.querySelectorAll('#rejected-requests-body tr, #rejected-request-cards [data-request-id]').forEach(row => {
         const textContent = `${row.dataset.title} ${row.dataset.type} ${row.dataset.requestedby} ${row.dataset.reason}`;
         const textMatch = !filter || textContent.includes(filter);
         const mediaMatch = !mediaType || row.dataset.type === mediaType;
@@ -124,7 +124,7 @@ function filterUnreleasedTable() {
     if (!filterEl) return;
     const filter = filterEl.value.toLowerCase();
     const mediaType = window.mediaFilterState['unreleased'] || null;
-    document.querySelectorAll('#unreleased-requests-body tr').forEach(row => {
+    document.querySelectorAll('#unreleased-requests-body tr, #unreleased-request-cards [data-request-id]').forEach(row => {
         const textContent = `${row.dataset.title} ${row.dataset.type} ${row.dataset.requestedby} ${row.dataset.releasedate}`.toLowerCase();
         const textMatch = !filter || textContent.includes(filter);
         const mediaMatch = !mediaType || row.dataset.type === mediaType;
@@ -203,13 +203,19 @@ function sortTable(tableName, sortKey, preserveDirection = false) {
     });
     rows.forEach(row => tbody.appendChild(row));
     const cardContainerIdMap = {
+        pending: 'pending-request-cards',
+        unreleased: 'unreleased-request-cards',
         staged: 'staged-torrent-cards',
         downloading: 'downloading-torrent-cards',
+        finished: 'finished-request-cards',
+        rejected: 'rejected-request-cards',
     };
     const cardContainer = document.getElementById(cardContainerIdMap[tableName]);
     if (cardContainer) {
         rows.forEach(row => {
-            const card = cardContainer.querySelector(`[data-torrent-id="${row.dataset.torrentId}"]`);
+            const card = row.dataset.torrentId
+                ? cardContainer.querySelector(`[data-torrent-id="${row.dataset.torrentId}"]`)
+                : cardContainer.querySelector(`[data-request-id="${row.dataset.requestId}"]`);
             if (card) cardContainer.appendChild(card);
         });
     }

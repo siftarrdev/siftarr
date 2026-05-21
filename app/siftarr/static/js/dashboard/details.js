@@ -166,6 +166,7 @@ function ensureDetailsControlHandlers() {
 
 async function openRequestDetails(requestId, explicitIndex = null, options = {}) {
     const preserveUiState = !!options.preserveUiState;
+    const focusTvScope = options.focusTvScope || null;
     const modal = document.getElementById('request-details-modal');
     const title = document.getElementById('request-details-title');
     const meta = document.getElementById('request-details-meta');
@@ -298,6 +299,9 @@ async function openRequestDetails(requestId, explicitIndex = null, options = {})
             releases.innerHTML = window.renderSeasonAccordion(data);
             if (preservedDetailsState && window.restoreDetailsAccordionState) {
                 window.restoreDetailsAccordionState(preservedDetailsState);
+            }
+            if (focusTvScope && window.focusStagedTvScope) {
+                window.focusStagedTvScope(requestId, focusTvScope);
             }
             if (window.updateTvAccordionControls) window.updateTvAccordionControls();
         } else {

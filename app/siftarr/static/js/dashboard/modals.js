@@ -113,10 +113,26 @@ function disableSearchControls(scope) {
     });
 }
 
+function isVisibleBulkCheckbox(checkbox) {
+    return !!(checkbox && (checkbox.offsetParent || checkbox.getClientRects().length));
+}
+
+function getDedupedCheckedBulkCheckboxes(form, selector = 'input[name="request_ids"]:checked') {
+    if (!form) return [];
+    const source = Array.from(form.querySelectorAll(selector)).filter(isVisibleBulkCheckbox);
+    const seen = new Set();
+    return source.filter(checkbox => {
+        if (!checkbox.value || seen.has(checkbox.value)) return false;
+        seen.add(checkbox.value);
+        return true;
+    });
+}
+
 function getRequestTitleFromRow(row) {
     if (!row) return null;
     const titleCell = row.querySelector('td:nth-child(2)');
-    const title = titleCell ? titleCell.textContent.trim() : '';
+    const cardTitle = row.querySelector('[data-card-title]');
+    const title = titleCell ? titleCell.textContent.trim() : (cardTitle ? cardTitle.textContent.trim() : '');
     return title || row.dataset.title || null;
 }
 
@@ -125,9 +141,11 @@ function collectBulkSearchTitles(form, searchAll = false) {
     const selector = searchAll
         ? 'tbody tr'
         : 'input[name="request_ids"]:checked, input[name="torrent_ids"]:checked';
-    const nodes = Array.from(form.querySelectorAll(selector));
+    const nodes = searchAll
+        ? Array.from(form.querySelectorAll(selector)).filter(node => node.offsetParent || node.getClientRects().length)
+        : getDedupedCheckedBulkCheckboxes(form, selector);
     return nodes
-        .map(node => getRequestTitleFromRow(searchAll ? node : node.closest('tr')))
+        .map(node => getRequestTitleFromRow(searchAll ? node : node.closest('tr') || node.closest('[data-request-id]')))
         .filter(Boolean);
 }
 
@@ -145,7 +163,7 @@ function showBulkSearchStatus(form, searchAll = false) {
     if (!form) return;
     const panel = form.querySelector('[data-bulk-search-status="true"]');
     if (!panel) return;
-    const selectedCount = form.querySelectorAll('input[name="request_ids"]:checked, input[name="torrent_ids"]:checked').length;
+    const selectedCount = getDedupedCheckedBulkCheckboxes(form, 'input[name="request_ids"]:checked, input[name="torrent_ids"]:checked').length;
     const title = panel.querySelector('[data-bulk-search-status-title="true"]');
     const message = panel.querySelector('[data-bulk-search-status-message="true"]');
     if (title) title.textContent = searchAll ? 'Searching all pending requests' : 'Searching selected requests/torrents';
@@ -159,12 +177,12 @@ function showBulkSearchStatus(form, searchAll = false) {
     panel.classList.remove('hidden');
 }
 
-function postToAction(action, redirectTo, trigger = null) {
-    const row = trigger ? trigger.closest('tr') : null;
+function postToAction(action, redirectTo, trigger = null, scope = null) {
+    const row = scope || (trigger ? trigger.closest('tr') || trigger.closest('[data-request-id]') : null);
     const title = getRequestTitleFromRow(row);
     if (trigger && trigger.dataset.searchAction === 'true') {
         setSearchActionLoading(trigger);
-        disableSearchControls(trigger.closest('tr'));
+        disableSearchControls(row);
         const match = action.match(/\/requests\/(\d+)\/search/);
         const requestId = match ? parseInt(match[1], 10) : null;
         if (requestId) {
@@ -202,12 +220,14 @@ async function handleBulkDenyAction(event, form) {
     }
 
     // Collect selected request IDs from checkboxes
-    const checkboxes = form.querySelectorAll('input[name="request_ids"]:checked');
-    const ids = Array.from(checkboxes).map(cb => cb.value).filter(Boolean);
+    const checkboxes = getDedupedCheckedBulkCheckboxes(form);
+    const ids = checkboxes.map(cb => cb.value).filter(Boolean);
     if (ids.length === 0) {
         window.showToast('No requests selected.');
         return false;
     }
+    formData.delete('request_ids');
+    ids.forEach(id => formData.append('request_ids', id));
 
     if (submitter) submitter.disabled = true;
     try {
@@ -258,8 +278,8 @@ function handleBulkRequestActionSubmit(event, form) {
 
     var ids = [];
     if (!searchAll) {
-        var checkboxes = form.querySelectorAll('input[name="request_ids"]:checked');
-        ids = Array.from(checkboxes).map(function(cb) { return parseInt(cb.value, 10); }).filter(Boolean);
+        var checkboxes = getDedupedCheckedBulkCheckboxes(form);
+        ids = checkboxes.map(function(cb) { return parseInt(cb.value, 10); }).filter(Boolean);
     }
 
     function resetSubmitter() {
@@ -372,6 +392,7 @@ function bindSelectAll(toggle, checkboxSelector) {
     toggle.dataset.selectAllBound = 'true';
     toggle.addEventListener('change', event => {
         document.querySelectorAll(checkboxSelector).forEach(checkbox => {
+            if (!isVisibleBulkCheckbox(checkbox)) return;
             checkbox.checked = event.target.checked;
         });
     });
