@@ -141,3 +141,9 @@ This file captures the biggest opportunities identified during a repo-wide revie
 
 12. **Movie matching controls**  
     Add configurable tolerance and clearer mismatch explanations for movie lookup/parsing.
+
+
+
+# Bugs
+1. Season pack sizes are always highlighted green even if they dont match the size requirements
+2. when searching for and staging torrents for a tv request. first search for the season pack, if the season pack is not

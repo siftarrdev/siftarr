@@ -83,6 +83,46 @@ def _normalize_name(name: str) -> str:
     return _NON_ALNUM_RE.sub(" ", name).strip().lower()
 
 
+def _qbit_response_value(response: Any, name: str) -> Any:
+    if isinstance(response, dict):
+        return response.get(name)
+    get = getattr(response, "get", None)
+    if callable(get):
+        try:
+            return get(name)
+        except Exception:
+            pass
+    return getattr(response, name, None)
+
+
+def _qbit_add_response_accepted(response: Any) -> bool:
+    """Return True when qBit/qbittorrentapi accepted an add request."""
+    if response == "Ok.":
+        return True
+    failure_count = _qbit_response_value(response, "failure_count")
+    if failure_count is None:
+        return False
+    try:
+        if int(failure_count) > 0:
+            return False
+    except TypeError, ValueError:
+        return False
+    return any(
+        _qbit_response_value(response, name) is not None
+        for name in ("pending_count", "success_count", "added_torrent_ids")
+    )
+
+
+def _qbit_add_response_failed(response: Any) -> bool:
+    failure_count = _qbit_response_value(response, "failure_count")
+    if failure_count is None:
+        return False
+    try:
+        return int(failure_count) > 0
+    except TypeError, ValueError:
+        return False
+
+
 def _bencode_extract_info_value(data: bytes) -> bytes | None:
     """Given a bencoded torrent file, return the raw bytes of the ``info`` key's value."""
     if not data or data[0:1] != b"d":
@@ -301,7 +341,7 @@ class QbittorrentService:
             else:
                 raise ValueError("Either torrent_path or magnet_uri must be provided")
 
-            if result == "Ok.":
+            if _qbit_add_response_accepted(result):
                 # qBit accepts add requests before metadata is always queryable.
                 # Return a known hash when available, otherwise return an
                 # accepted sentinel so callers do not treat delayed visibility
@@ -422,22 +462,23 @@ class QbittorrentService:
                             ratio_limit=ratio_limit,
                             seeding_time_limit=seeding_time_limit,
                         )
-                    if chunk_result != "Ok.":
-                        result = chunk_result
-                        for payload, info_hash in chunk:
-                            existing = await self.get_torrent_info(info_hash) if info_hash else None
-                            results[payload.key] = BulkAddResult(
-                                key=payload.key,
-                                success=bool(existing),
-                                torrent_hash=info_hash if existing else None,
-                                error=None if existing else str(chunk_result),
-                            )
-                    else:
+                    if _qbit_add_response_accepted(chunk_result):
                         for payload, info_hash in chunk:
                             results[payload.key] = BulkAddResult(
                                 key=payload.key,
                                 success=True,
                                 torrent_hash=info_hash,
+                            )
+                    else:
+                        result = chunk_result
+                        error = str(chunk_result)
+                        if _qbit_add_response_failed(chunk_result):
+                            error = f"qBittorrent reported add failures: {chunk_result}"
+                        for payload, _ in chunk:
+                            results[payload.key] = BulkAddResult(
+                                key=payload.key,
+                                success=False,
+                                error=error,
                             )
             except Exception as exc:
                 logger.error("Error bulk adding torrents: %s", exc)

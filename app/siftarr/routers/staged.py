@@ -57,6 +57,39 @@ def _staged_download_url(torrent: StagedTorrent) -> str | None:
     return download_url if isinstance(download_url, str) and download_url else None
 
 
+def _staged_sidecar_magnet_url(torrent: StagedTorrent) -> str | None:
+    """Return stored release magnet URL from staging sidecar metadata."""
+    try:
+        with open(torrent.json_path) as f:
+            metadata = json.load(f)
+    except OSError, json.JSONDecodeError, TypeError:
+        return None
+    release = metadata.get("release") if isinstance(metadata, dict) else None
+    magnet_url = release.get("magnet_url") if isinstance(release, dict) else None
+    return magnet_url if isinstance(magnet_url, str) and magnet_url else None
+
+
+def _torrent_submission_source(torrent: StagedTorrent) -> tuple[str | None, str | None, str | None]:
+    """Return (source_type, value, error) for qBit submission."""
+    torrent_path = getattr(torrent, "torrent_path", None)
+    if isinstance(torrent_path, str) and torrent_path and os.path.exists(torrent_path):
+        return "torrent_path", torrent_path, None
+
+    magnet_url = getattr(torrent, "magnet_url", None)
+    if isinstance(magnet_url, str) and magnet_url:
+        return "magnet_uri", magnet_url, None
+
+    sidecar_magnet_url = _staged_sidecar_magnet_url(torrent)
+    if sidecar_magnet_url:
+        return "magnet_uri", sidecar_magnet_url, None
+
+    download_url = _staged_download_url(torrent)
+    if download_url:
+        return "magnet_uri", download_url, None
+
+    return None, None, "No local torrent file, magnet URL, or sidecar download URL available"
+
+
 def _torrent_known_hash(torrent: StagedTorrent) -> str | None:
     info_hash = getattr(torrent, "info_hash", None)
     if isinstance(info_hash, str) and info_hash:
@@ -281,18 +314,25 @@ async def _approve_torrent(
 
     # Add to qBittorrent (idempotent — if already present by info hash it
     # returns the existing hash and skips the add).
-    torrent_hash: str | None = None
-    download_url = _staged_download_url(torrent)
-    if torrent.magnet_url:
-        torrent_hash = await qbittorrent.add_torrent(
-            magnet_uri=torrent.magnet_url, category=category
+    source_type, source_value, source_error = _torrent_submission_source(torrent)
+    if source_error or source_value is None:
+        logger.warning(
+            "Cannot approve staged torrent_id=%s title=%r: %s",
+            torrent.id,
+            torrent.title,
+            source_error,
         )
-    elif download_url and not os.path.exists(torrent.torrent_path):
-        torrent_hash = await qbittorrent.add_torrent(magnet_uri=download_url, category=category)
+        torrent_hash = await _confirm_existing_torrent(qbittorrent, torrent)
+        if torrent_hash is None:
+            return False
     else:
-        torrent_hash = await qbittorrent.add_torrent(
-            torrent_path=torrent.torrent_path, category=category
-        )
+        torrent_hash: str | None = None
+        if source_type == "magnet_uri":
+            torrent_hash = await qbittorrent.add_torrent(magnet_uri=source_value, category=category)
+        else:
+            torrent_hash = await qbittorrent.add_torrent(
+                torrent_path=source_value, category=category
+            )
 
     if torrent_hash is None:
         torrent_hash = await _confirm_existing_torrent(qbittorrent, torrent)
@@ -386,28 +426,23 @@ async def _load_approval_context(
 def _bulk_payload_for_torrent(
     torrent: StagedTorrent,
     category: MediaCategory,
-) -> BulkTorrentPayload:
-    download_url = _staged_download_url(torrent)
-    if torrent.magnet_url:
+) -> tuple[BulkTorrentPayload | None, str | None]:
+    source_type, source_value, source_error = _torrent_submission_source(torrent)
+    if source_error or source_value is None:
+        return None, source_error
+    if source_type == "magnet_uri":
         return BulkTorrentPayload(
             key=torrent.id,
             title=torrent.title,
-            magnet_uri=torrent.magnet_url,
+            magnet_uri=source_value,
             category=category,
-        )
-    if download_url and not os.path.exists(torrent.torrent_path):
-        return BulkTorrentPayload(
-            key=torrent.id,
-            title=torrent.title,
-            magnet_uri=download_url,
-            category=category,
-        )
+        ), None
     return BulkTorrentPayload(
         key=torrent.id,
         title=torrent.title,
-        torrent_path=torrent.torrent_path,
+        torrent_path=source_value,
         category=category,
-    )
+    ), None
 
 
 async def _mark_torrent_approved_after_qbit(
@@ -646,9 +681,22 @@ async def bulk_staged_action(
         for torrent in torrents:
             request, rules_selected_torrent, category = await _load_approval_context(torrent, db)
             contexts[torrent.id] = (request, rules_selected_torrent)
-            payloads.append(_bulk_payload_for_torrent(torrent, category))
+            payload, source_error = _bulk_payload_for_torrent(torrent, category)
+            if payload is None:
+                logger.warning(
+                    "Skipping staged bulk approve torrent_id=%s title=%r: %s",
+                    torrent.id,
+                    torrent.title,
+                    source_error,
+                )
+                failed_item = {"id": torrent.id, "title": torrent.title}
+                if source_error:
+                    failed_item["error"] = source_error
+                failed.append(failed_item)
+                continue
+            payloads.append(payload)
 
-        bulk_results = await qbittorrent.add_torrents_bulk(payloads)
+        bulk_results = await qbittorrent.add_torrents_bulk(payloads) if payloads else []
         if not isinstance(bulk_results, list):
             # Compatibility for older unit mocks; production service always returns a list.
             bulk_results = []
@@ -671,7 +719,19 @@ async def bulk_staged_action(
         for torrent in torrents:
             result = results_by_id.get(torrent.id)
             if result is None or not result.success:
-                failed.append({"id": torrent.id, "title": torrent.title})
+                if any(item["id"] == torrent.id for item in failed):
+                    continue
+                error = result.error if result else "Torrent was not submitted"
+                logger.warning(
+                    "Staged bulk approve failed torrent_id=%s title=%r: %s",
+                    torrent.id,
+                    torrent.title,
+                    error,
+                )
+                failed_item = {"id": torrent.id, "title": torrent.title}
+                if error:
+                    failed_item["error"] = error
+                failed.append(failed_item)
                 continue
             request, rules_selected_torrent = contexts[torrent.id]
             await _mark_torrent_approved_after_qbit(
