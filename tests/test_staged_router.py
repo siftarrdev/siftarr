@@ -364,6 +364,65 @@ class TestStagedRouter:
         assert all(torrent.status == "approved" for torrent in torrents)
 
     @pytest.mark.asyncio
+    async def test_bulk_approve_treats_qbit_submission_as_success_before_visibility(
+        self, mock_db, monkeypatch
+    ):
+        """Bulk approve should not fail only because qBit has not exposed metadata yet."""
+        torrents = []
+        execute_results = []
+        for index in range(2):
+            torrent = MagicMock()
+            torrent.id = index + 1
+            torrent.request_id = 200 + index
+            torrent.magnet_url = None
+            torrent.info_hash = None
+            torrent.status = "staged"
+            torrent.selection_source = "rule"
+            torrent.torrent_path = f"/tmp/pending-{index}.torrent"
+            torrent.json_path = f"/tmp/pending-{index}.json"
+            torrent.title = f"Pending Visibility {index}"
+            torrents.append(torrent)
+
+            request = MagicMock(
+                id=200 + index,
+                media_type=MediaType.MOVIE,
+                status=RequestStatus.STAGED,
+            )
+            request_result = MagicMock()
+            request_result.scalar_one_or_none.return_value = request
+            rule_result = MagicMock()
+            rule_result.scalars.return_value.first.return_value = torrent
+            execute_results.extend([request_result, rule_result])
+
+        torrent_result = MagicMock()
+        torrent_result.scalars.return_value.all.return_value = torrents
+        mock_db.execute.side_effect = [torrent_result, *execute_results]
+
+        qbit = AsyncMock()
+        qbit.add_torrents_bulk.return_value = [
+            staged.BulkAddResult(key=torrent.id, success=True, torrent_hash=None)
+            for torrent in torrents
+        ]
+        monkeypatch.setattr(staged, "get_settings", lambda: MagicMock())
+        monkeypatch.setattr(staged, "QbittorrentService", MagicMock(return_value=qbit))
+        monkeypatch.setattr(staged, "LifecycleService", MagicMock(return_value=AsyncMock()))
+        monkeypatch.setattr(staged, "log_staging_decision", MagicMock())
+        monkeypatch.setattr(staged.os.path, "exists", MagicMock(return_value=False))
+
+        response = await staged.bulk_staged_action(
+            action="approve",
+            torrent_ids=[torrent.id for torrent in torrents],
+            http_request=MagicMock(headers={"accept": "application/json"}),
+            db=mock_db,
+        )
+
+        body = json.loads(bytes(response.body))  # type: ignore[arg-type]
+        assert body["status"] == "ok"
+        assert body["processed"] == 2
+        assert body["failed"] == []
+        assert all(torrent.status == "approved" for torrent in torrents)
+
+    @pytest.mark.asyncio
     async def test_bulk_approve_reports_partial_qbit_failure(self, mock_db, monkeypatch):
         """Bulk approve should explicitly report failed rows and only approve successes."""
         torrent_one = MagicMock(id=1, request_id=10, magnet_url="magnet:?xt=urn:btih:abc")
@@ -511,6 +570,51 @@ class TestStagedRouter:
             commit=False,
         )
         mock_db.commit.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_approve_accepts_qbit_ok_before_visibility(self, mock_db, monkeypatch):
+        """Single approve should succeed when qBit accepted but metadata is delayed."""
+        torrent = MagicMock(id=16, request_id=17, magnet_url="magnet:?xt=urn:btih:abc")
+        torrent.info_hash = None
+        torrent.status = "staged"
+        torrent.selection_source = "rule"
+        torrent.torrent_path = "/tmp/delayed.torrent"
+        torrent.json_path = "/tmp/delayed.json"
+        torrent.title = "Delayed Visibility Release"
+        request = MagicMock(id=17, media_type=MediaType.MOVIE, status=RequestStatus.STAGED)
+        torrent_result = MagicMock()
+        torrent_result.scalar_one_or_none.return_value = torrent
+        request_result = MagicMock()
+        request_result.scalar_one_or_none.return_value = request
+        rule_result = MagicMock()
+        rule_result.scalars.return_value.first.return_value = torrent
+        mock_db.execute.side_effect = [torrent_result, request_result, rule_result]
+
+        qbit = AsyncMock()
+        qbit.add_torrent.return_value = "Ok."
+        lifecycle_service = AsyncMock()
+        monkeypatch.setattr(staged, "get_settings", lambda: MagicMock())
+        monkeypatch.setattr(staged, "QbittorrentService", MagicMock(return_value=qbit))
+        monkeypatch.setattr(staged, "LifecycleService", MagicMock(return_value=lifecycle_service))
+        monkeypatch.setattr(staged, "log_staging_decision", MagicMock())
+        monkeypatch.setattr(staged.os.path, "exists", MagicMock(return_value=False))
+
+        response = await staged.approve_staged_torrent(
+            16,
+            http_request=MagicMock(headers={"accept": "application/json"}),
+            db=mock_db,
+        )
+
+        assert response.status_code == 200
+        body = json.loads(bytes(response.body))  # type: ignore[arg-type]
+        assert body["status"] == "ok"
+        assert torrent.status == "approved"
+        assert torrent.info_hash is None
+        lifecycle_service.transition.assert_awaited_once_with(
+            request.id,
+            RequestStatus.DOWNLOADING,
+            commit=False,
+        )
 
     @pytest.mark.asyncio
     async def test_approve_qbit_failure_does_not_commit_local_transition(self, monkeypatch):

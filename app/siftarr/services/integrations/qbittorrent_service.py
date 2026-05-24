@@ -49,6 +49,7 @@ class BulkAddResult:
 
 _MAGNET_HASH_RE = re.compile(r"xt=urn:btih:([a-fA-F0-9]{40})")
 _NON_ALNUM_RE = re.compile(r"[^a-zA-Z0-9]+")
+_BULK_ADD_CHUNK_SIZE = 10
 
 
 def _parse_magnet_info_hash(magnet_uri: str) -> str | None:
@@ -301,14 +302,22 @@ class QbittorrentService:
                 raise ValueError("Either torrent_path or magnet_uri must be provided")
 
             if result == "Ok.":
-                # Return the pre-computed hash, or fall back to looking it up
+                # qBit accepts add requests before metadata is always queryable.
+                # Return a known hash when available, otherwise return an
+                # accepted sentinel so callers do not treat delayed visibility
+                # as a failed submission.
                 if info_hash:
                     return info_hash
                 if magnet_uri:
-                    torrents = await asyncio.to_thread(self.client.torrents_info)
-                    for t in sorted(torrents, key=lambda t: t.added_on, reverse=True):
-                        if magnet_uri in (t.magnet_uri or ""):
-                            return str(t.hash)
+                    try:
+                        torrents = await asyncio.to_thread(self.client.torrents_info)
+                        for t in sorted(torrents, key=lambda t: t.added_on, reverse=True):
+                            if magnet_uri in (t.magnet_uri or ""):
+                                return str(t.hash)
+                    except Exception:
+                        logger.debug(
+                            "qBit add accepted before torrent list confirmed", exc_info=True
+                        )
                 return "Ok."
             if info_hash:
                 existing = await self.get_torrent_info(info_hash)
@@ -331,8 +340,9 @@ class QbittorrentService:
         """Add multiple torrents using grouped qBittorrent bulk calls.
 
         Results are per payload. Known existing torrents are treated as success.
-        For qBit's coarse ``Ok.`` batch response, success is mapped from a
-        precomputed hash or post-add lookup by hash/name.
+        For qBit's coarse ``Ok.`` batch response, success means qBit accepted
+        the submission; metadata may not be queryable until qBit finishes
+        processing the batch.
         """
         if not payloads:
             return []
@@ -382,71 +392,68 @@ class QbittorrentService:
         ), items in groups.items():
             try:
                 await self.ensure_category_exists(category)
-                if is_magnet_group:
-                    urls = "\n".join(p.magnet_uri or "" for p, _ in items)
-                    result = await asyncio.to_thread(
-                        self.client.torrents_add,
-                        urls=urls,
-                        category=category,
-                        is_paused=is_paused,
-                        download_path=download_path,
-                        ratio_limit=ratio_limit,
-                        seeding_time_limit=seeding_time_limit,
-                    )
-                else:
-                    torrent_files = []
-                    for p, _ in items:
-                        if not p.torrent_path:
-                            raise ValueError("Missing torrent_path for file bulk add")
-                        with open(p.torrent_path, "rb") as file_handle:
-                            torrent_files.append(file_handle.read())
-                    result = await asyncio.to_thread(
-                        self.client.torrents_add,
-                        torrent_files=torrent_files,
-                        category=category,
-                        is_paused=is_paused,
-                        download_path=download_path,
-                        ratio_limit=ratio_limit,
-                        seeding_time_limit=seeding_time_limit,
-                    )
+                result = "Ok."
+                for chunk_start in range(0, len(items), _BULK_ADD_CHUNK_SIZE):
+                    chunk = items[chunk_start : chunk_start + _BULK_ADD_CHUNK_SIZE]
+                    if is_magnet_group:
+                        urls = "\n".join(p.magnet_uri or "" for p, _ in chunk)
+                        chunk_result = await asyncio.to_thread(
+                            self.client.torrents_add,
+                            urls=urls,
+                            category=category,
+                            is_paused=is_paused,
+                            download_path=download_path,
+                            ratio_limit=ratio_limit,
+                            seeding_time_limit=seeding_time_limit,
+                        )
+                    else:
+                        torrent_files = []
+                        for p, _ in chunk:
+                            if not p.torrent_path:
+                                raise ValueError("Missing torrent_path for file bulk add")
+                            with open(p.torrent_path, "rb") as file_handle:
+                                torrent_files.append(file_handle.read())
+                        chunk_result = await asyncio.to_thread(
+                            self.client.torrents_add,
+                            torrent_files=torrent_files,
+                            category=category,
+                            is_paused=is_paused,
+                            download_path=download_path,
+                            ratio_limit=ratio_limit,
+                            seeding_time_limit=seeding_time_limit,
+                        )
+                    if chunk_result != "Ok.":
+                        result = chunk_result
+                        for payload, info_hash in chunk:
+                            existing = await self.get_torrent_info(info_hash) if info_hash else None
+                            results[payload.key] = BulkAddResult(
+                                key=payload.key,
+                                success=bool(existing),
+                                torrent_hash=info_hash if existing else None,
+                                error=None if existing else str(chunk_result),
+                            )
+                    else:
+                        for payload, info_hash in chunk:
+                            results[payload.key] = BulkAddResult(
+                                key=payload.key,
+                                success=True,
+                                torrent_hash=info_hash,
+                            )
             except Exception as exc:
                 logger.error("Error bulk adding torrents: %s", exc)
                 for payload, _ in items:
-                    results[payload.key] = BulkAddResult(
-                        key=payload.key,
-                        success=False,
-                        error=str(exc),
+                    results.setdefault(
+                        payload.key,
+                        BulkAddResult(
+                            key=payload.key,
+                            success=False,
+                            error=str(exc),
+                        ),
                     )
                 continue
 
             if result != "Ok.":
-                for payload, info_hash in items:
-                    existing = await self.get_torrent_info(info_hash) if info_hash else None
-                    results[payload.key] = BulkAddResult(
-                        key=payload.key,
-                        success=bool(existing),
-                        torrent_hash=info_hash if existing else None,
-                        error=None if existing else str(result),
-                    )
                 continue
-
-            for payload, info_hash in items:
-                torrent_hash = info_hash
-                if info_hash:
-                    existing = await self.get_torrent_info(info_hash)
-                    if existing:
-                        found_hash = existing.get("hash")
-                        torrent_hash = str(found_hash).lower() if found_hash else info_hash
-                else:
-                    existing = await self.get_torrent_info_by_name(payload.title)
-                    found_hash = existing.get("hash") if existing else None
-                    torrent_hash = str(found_hash).lower() if found_hash else None
-                results[payload.key] = BulkAddResult(
-                    key=payload.key,
-                    success=torrent_hash is not None,
-                    torrent_hash=torrent_hash,
-                    error=None if torrent_hash else "Unable to confirm qBittorrent add",
-                )
 
         return [
             results.get(

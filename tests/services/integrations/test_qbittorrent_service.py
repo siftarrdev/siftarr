@@ -462,8 +462,33 @@ class TestQbittorrentServiceUnit:
             assert get_info.await_count == 2
 
     @pytest.mark.asyncio
-    async def test_add_torrents_bulk_sends_more_than_seventeen_magnets_in_one_call(self):
-        """Bulk add should pass all compatible magnets in one qBit API call."""
+    async def test_add_torrent_ok_is_success_when_visibility_lookup_times_out(self):
+        """Single add should succeed when qBit accepts before metadata is visible."""
+        with patch("app.siftarr.config.get_settings") as mock_get_settings:
+            mock_get_settings.return_value = MagicMock()
+            service = QbittorrentService()
+            service._client = MagicMock()
+            magnet = "magnet:?xt=urn:btih:ABCDEFGHIJKLMNOPQRSTUVWXYZ234567"
+
+            with (
+                patch.object(service, "ensure_category_exists", AsyncMock(return_value=True)),
+                patch.object(service, "get_torrent_info", AsyncMock()) as get_info,
+                patch(
+                    "asyncio.to_thread",
+                    AsyncMock(side_effect=["Ok.", TimeoutError("delayed")]),
+                ),
+            ):
+                result = await service.add_torrent(
+                    magnet_uri=magnet,
+                    category=MediaCategory.MOVIES,
+                )
+
+            assert result == "Ok."
+            get_info.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_add_torrents_bulk_sends_more_than_seventeen_magnets_in_chunks(self):
+        """Bulk add should submit every compatible magnet in conservative chunks."""
         with patch("app.siftarr.config.get_settings") as mock_get_settings:
             mock_get_settings.return_value = MagicMock()
             service = QbittorrentService()
@@ -484,10 +509,7 @@ class TestQbittorrentServiceUnit:
                 patch.object(
                     service,
                     "get_torrent_info",
-                    AsyncMock(
-                        side_effect=[None] * 18
-                        + [{"hash": torrent_hash} for torrent_hash in hashes]
-                    ),
+                    AsyncMock(side_effect=[None] * 18),
                 ),
                 patch("asyncio.to_thread", AsyncMock(return_value="Ok.")) as to_thread,
             ):
@@ -497,7 +519,48 @@ class TestQbittorrentServiceUnit:
             assert all(result.success for result in results)
             add_call = to_thread.await_args_list[0]
             assert add_call.args[0] == service.client.torrents_add
-            assert add_call.kwargs["urls"].count("\n") == 17
+            assert add_call.kwargs["urls"].count("\n") == 9
+            second_add_call = to_thread.await_args_list[1]
+            assert second_add_call.kwargs["urls"].count("\n") == 7
+
+    @pytest.mark.asyncio
+    async def test_add_torrents_bulk_ok_is_success_before_qbit_visibility(self, tmp_path):
+        """qBit may return Ok before torrent metadata is queryable."""
+        with patch("app.siftarr.config.get_settings") as mock_get_settings:
+            mock_get_settings.return_value = MagicMock()
+            service = QbittorrentService()
+            service._client = MagicMock()
+            payloads = []
+            for i in range(18):
+                torrent_path = tmp_path / f"release-{i}.torrent"
+                torrent_path.write_bytes(b"not-bencoded-in-test")
+                payloads.append(
+                    BulkTorrentPayload(
+                        key=i,
+                        title=f"Release {i}",
+                        torrent_path=str(torrent_path),
+                        category=MediaCategory.MOVIES,
+                    )
+                )
+
+            with (
+                patch.object(service, "ensure_category_exists", AsyncMock(return_value=True)),
+                patch.object(service, "get_torrent_info", AsyncMock(return_value=None)) as get_info,
+                patch.object(
+                    service, "get_torrent_info_by_name", AsyncMock(return_value=None)
+                ) as get_by_name,
+                patch("asyncio.to_thread", AsyncMock(return_value="Ok.")) as to_thread,
+            ):
+                results = await service.add_torrents_bulk(payloads)
+
+            assert len(results) == 18
+            assert all(result.success for result in results)
+            assert all(result.torrent_hash is None for result in results)
+            assert to_thread.await_count == 2
+            assert len(to_thread.await_args_list[0].kwargs["torrent_files"]) == 10
+            assert len(to_thread.await_args_list[1].kwargs["torrent_files"]) == 8
+            get_info.assert_not_awaited()
+            get_by_name.assert_not_awaited()
 
     @pytest.mark.asyncio
     async def test_add_torrents_bulk_partial_group_failure_leaves_other_group_success(self):
