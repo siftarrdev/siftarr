@@ -785,6 +785,11 @@ class TestRuleEngine:
             "Movie Size",
             "Reject CAM",
         ]
+        assert [(match.rule_name, match.rule_type, match.effect) for match in good.matches] == [
+            ("Movie Size", "size_limit", "size_limit"),
+            ("Reject CAM", "exclusion", "disallow"),
+            ("x265 bonus", "scorer", "allow"),
+        ]
 
     def test_evaluate_batch(self):
         """Test batch evaluation."""

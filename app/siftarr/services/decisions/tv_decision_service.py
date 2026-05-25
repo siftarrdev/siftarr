@@ -805,7 +805,7 @@ class TVDecisionService:
                     "phase": "searching",
                     "percent": 10,
                     "message": f"{mode_label}: found exactly {episode_count} aired episode(s) across {len(requested_seasons)} season(s) to search.",
-                    "subtitle": "Running targeted exact SxxEyy episode searches first.",
+                    "subtitle": "Checking season-pack candidates before exact episode fallback.",
                 }
             )
 
@@ -858,6 +858,48 @@ class TVDecisionService:
         )
         best_episodes_by_key: dict[tuple[int, int], ReleaseEvaluation] = {}
         uncovered_episode_target_keys: set[tuple[int, int]] = set(exact_targets)
+
+        pack_candidates: list[tuple[ReleaseEvaluation, set[int]]] = []
+        actionable_season_set = set(actionable_seasons)
+        if not full_search:
+            (
+                pack_evaluations,
+                pack_passing,
+                pack_errors,
+                seen_keys,
+            ) = await self._search_season_sweeps_and_evaluate(
+                request,
+                rule_engine,
+                requested_seasons,
+                progress_callback=progress_callback,
+            )
+            all_evaluated_releases.extend(pack_evaluations)
+            all_search_errors.extend(pack_errors)
+            for evaluation in pack_passing:
+                coverage = self._get_actionable_pack_coverage(
+                    evaluation,
+                    actionable_season_set,
+                    all_requested_seasons,
+                )
+                if not coverage:
+                    continue
+                passing_pack_count += 1
+                pack_candidates.append((evaluation, coverage))
+
+        for evaluation, coverage in sorted(
+            pack_candidates, key=lambda item: (len(item[1]), item[0].total_score), reverse=True
+        ):
+            uncovered_coverage = coverage - covered_seasons
+            if not uncovered_coverage:
+                continue
+            selected_pack_releases.append((evaluation, uncovered_coverage))
+            covered_seasons.update(uncovered_coverage)
+            all_selected_releases.append(evaluation)
+            if covered_seasons >= actionable_season_set:
+                break
+
+        exact_targets = [target for target in exact_targets if target[0] not in covered_seasons]
+        uncovered_episode_target_keys = set(exact_targets)
         if exact_targets:
             (
                 exact_evaluations,
@@ -881,7 +923,6 @@ class TVDecisionService:
                 if existing is None or evaluation.total_score > existing.total_score:
                     best_episodes_by_key[key] = evaluation
 
-        pack_candidates: list[tuple[ReleaseEvaluation, set[int]]] = []
         if full_search:
             if progress_callback is not None:
                 await progress_callback(
@@ -904,7 +945,6 @@ class TVDecisionService:
             )
             all_evaluated_releases.extend(pack_evaluations)
             all_search_errors.extend(pack_errors)
-            actionable_season_set = set(actionable_seasons)
             for evaluation in pack_passing:
                 coverage = self._get_actionable_pack_coverage(
                     evaluation,
@@ -916,18 +956,17 @@ class TVDecisionService:
                 passing_pack_count += 1
                 pack_candidates.append((evaluation, coverage))
 
-        actionable_season_set = set(actionable_seasons)
-        for evaluation, coverage in sorted(
-            pack_candidates, key=lambda item: (len(item[1]), item[0].total_score), reverse=True
-        ):
-            uncovered_coverage = coverage - covered_seasons
-            if not uncovered_coverage:
-                continue
-            selected_pack_releases.append((evaluation, uncovered_coverage))
-            covered_seasons.update(uncovered_coverage)
-            all_selected_releases.append(evaluation)
-            if covered_seasons >= actionable_season_set:
-                break
+            for evaluation, coverage in sorted(
+                pack_candidates, key=lambda item: (len(item[1]), item[0].total_score), reverse=True
+            ):
+                uncovered_coverage = coverage - covered_seasons
+                if not uncovered_coverage:
+                    continue
+                selected_pack_releases.append((evaluation, uncovered_coverage))
+                covered_seasons.update(uncovered_coverage)
+                all_selected_releases.append(evaluation)
+                if covered_seasons >= actionable_season_set:
+                    break
 
         for key, evaluation in best_episodes_by_key.items():
             if key[0] not in covered_seasons:

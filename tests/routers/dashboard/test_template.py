@@ -1,6 +1,8 @@
 """Template assertions for dashboard UI."""
 
 import os
+import subprocess
+import textwrap
 
 
 def _read_dashboard_js():
@@ -326,6 +328,36 @@ def test_dashboard_js_supports_annotation_highlighting():
 
     assert "function renderAnnotation(" in js
     assert "function releaseAnnotationTone(" in js
+    assert "match.effect" in js
+    assert "release.size_per_season_passed === true" in js
+
+
+def test_release_annotation_tone_uses_rule_metadata_before_fallbacks():
+    """Rule-highlighted annotations should be green/red/default from relevant matches."""
+    js_path = os.path.join(
+        os.path.dirname(__file__), "../../../app/siftarr/static/js/dashboard/releases.js"
+    )
+    script = textwrap.dedent(
+        f"""
+        const fs = require('fs');
+        global.window = {{}};
+        global.document = {{}};
+        eval(fs.readFileSync({js_path!r}, 'utf8'));
+        const cases = [
+          [releaseAnnotationTone({{resolution: '2160p', matches: [{{rule_name: 'Resolution 2160p', matched: true, effect: 'allow'}}]}}, 'resolution'), 'text-emerald-400'],
+          [releaseAnnotationTone({{codec: 'x265', matches: [{{rule_name: 'Codec x265', matched: true, effect: 'disallow'}}]}}, 'codec'), 'text-red-400'],
+          [releaseAnnotationTone({{resolution: '2160p', codec: 'x265', matches: [{{rule_name: 'Indexer trusted', matched: true, effect: 'allow'}}]}}, 'resolution'), 'text-gray-400'],
+          [releaseAnnotationTone({{codec: 'x265', matches: []}}, 'codec'), 'text-emerald-400'],
+        ];
+        for (const [actual, expected] of cases) {{
+          if (actual !== expected) {{
+            throw new Error(`expected ${{expected}}, got ${{actual}}`);
+          }}
+        }}
+        """
+    )
+
+    subprocess.run(["node", "-e", script], check=True)
 
 
 def test_dashboard_js_includes_active_stage_replacement_copy():

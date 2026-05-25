@@ -41,6 +41,49 @@ def release_failed_size_limit(release: dict[str, object]) -> bool:
     return isinstance(rejection_reason, str) and rejection_reason.startswith("Size ")
 
 
+def _match_effect(match: object) -> str | None:
+    effect = getattr(match, "effect", None)
+    if isinstance(effect, str):
+        return effect
+    if isinstance(match, Mapping):
+        match_mapping = cast(Mapping[object, object], match)
+        value = match_mapping.get("effect")
+        return value if isinstance(value, str) else None
+    return None
+
+
+def _match_rule_type(match: object) -> str | None:
+    rule_type = getattr(match, "rule_type", None)
+    if isinstance(rule_type, str):
+        return rule_type
+    if isinstance(match, Mapping):
+        match_mapping = cast(Mapping[object, object], match)
+        value = match_mapping.get("rule_type")
+        return value if isinstance(value, str) else None
+    return None
+
+
+def _match_matched(match: object) -> bool | None:
+    value = getattr(match, "matched", None)
+    if isinstance(match, Mapping):
+        match_mapping = cast(Mapping[object, object], match)
+        value = match_mapping.get("matched")
+    return value if isinstance(value, bool) else None
+
+
+def _derive_size_passed_from_matches(matches: object) -> bool | None:
+    if not isinstance(matches, list):
+        return None
+    saw_size_rule = False
+    for match in matches:
+        if _match_rule_type(match) != "size_limit" and _match_effect(match) != "size_limit":
+            continue
+        saw_size_rule = True
+        if _match_matched(match) is False:
+            return False
+    return True if saw_size_rule else None
+
+
 def apply_release_size_per_season_metadata(
     release: dict[str, object],
 ) -> dict[str, object]:
@@ -49,7 +92,10 @@ def apply_release_size_per_season_metadata(
     covered_seasons = coerce_int_list(release.get("covered_seasons"))
     known_total_seasons = normalize_int(release.get("known_total_seasons"))
     covered_season_count = normalize_int(release.get("covered_season_count"))
-    size_limit_passed = release.get("passed")
+    size_limit_passed = _derive_size_passed_from_matches(release.get("matches"))
+    if size_limit_passed is None:
+        legacy_size_passed = release.get("size_passed")
+        size_limit_passed = legacy_size_passed if isinstance(legacy_size_passed, bool) else None
 
     if covered_season_count <= 0:
         if covered_seasons:
@@ -66,9 +112,7 @@ def apply_release_size_per_season_metadata(
     size_per_season_bytes = int(round(size_bytes / covered_season_count))
     release["size_per_season"] = format_release_size(size_per_season_bytes)
     release["size_per_season_bytes"] = size_per_season_bytes
-    release["size_per_season_passed"] = (
-        None if size_limit_passed is None else not release_failed_size_limit(release)
-    )
+    release["size_per_season_passed"] = size_limit_passed
     return release
 
 
@@ -79,10 +123,23 @@ def _derive_size_passed(evaluation: ReleaseEvaluation | Any) -> bool | None:
     evaluation passed and there is no size rejection, or None if the evaluation
     did not pass and no size-limit information is available.
     """
+    match_size_passed = _derive_size_passed_from_matches(getattr(evaluation, "matches", None))
+    if match_size_passed is not None:
+        return match_size_passed
     rejection_reason = getattr(evaluation, "rejection_reason", None)
     if isinstance(rejection_reason, str) and rejection_reason.startswith("Size "):
         return False
-    return True if evaluation.passed else None
+    return None
+
+
+def serialize_rule_match(match: object) -> dict[str, object]:
+    return {
+        "rule_name": getattr(match, "rule_name", ""),
+        "matched": getattr(match, "matched", False),
+        "score_delta": getattr(match, "score_delta", 0),
+        "rule_type": getattr(match, "rule_type", None),
+        "effect": getattr(match, "effect", None),
+    }
 
 
 def serialize_evaluated_release(
@@ -117,6 +174,7 @@ def serialize_evaluated_release(
         "publish_date": release.publish_date.isoformat() if release.publish_date else None,
         "stored_release_id": None,
         "size_passed": _derive_size_passed(evaluation),
+        "matches": [serialize_rule_match(match) for match in getattr(evaluation, "matches", [])],
         "files": getattr(release, "files", None),
     }
 
@@ -163,12 +221,7 @@ def serialize_stored_evaluated_release(
             "season_number": release.season_number,
             "episode_number": release.episode_number,
             "matches": [
-                {
-                    "rule_name": match.rule_name,
-                    "matched": match.matched,
-                    "score_delta": match.score_delta,
-                }
-                for match in getattr(evaluation, "matches", [])
+                serialize_rule_match(match) for match in getattr(evaluation, "matches", [])
             ],
             "target_scope": serialize_target_scope(
                 media_type=media_type,

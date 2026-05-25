@@ -11,6 +11,7 @@ from app.siftarr.models.release import Release
 from app.siftarr.models.request import MediaType, RequestStatus
 from app.siftarr.routers import dashboard_api
 from app.siftarr.services.dashboard import detail_service
+from app.siftarr.services.decisions.rule_engine import RuleMatch
 
 
 @pytest.mark.asyncio
@@ -87,7 +88,18 @@ async def test_request_details_reuses_persisted_multi_season_coverage(
             return None
 
     fake_engine = MagicMock()
-    fake_engine.evaluate.return_value = MagicMock(rejection_reason=None, matches=[])
+    fake_engine.evaluate.return_value = MagicMock(
+        rejection_reason=None,
+        matches=[
+            RuleMatch(
+                rule_id=1,
+                rule_name="2160p allow",
+                matched=True,
+                rule_type="requirement",
+                effect="allow",
+            )
+        ],
+    )
 
     monkeypatch.setattr(
         "app.siftarr.services.metadata_service.OverseerrService", FakeOverseerrService
@@ -107,6 +119,7 @@ async def test_request_details_reuses_persisted_multi_season_coverage(
     assert body["releases"][0]["covered_season_count"] == 2
     assert body["releases"][0]["covers_all_known_seasons"] is True
     assert body["releases"][0]["size_per_season"] == "15.00 GB"
+    assert body["releases"][0]["matches"][0]["effect"] == "allow"
     assert [release["title"] for release in body["tv_info"]["releases_by_season"]["1"]] == [
         "Foundation.S01-S02.2160p.WEB-DL"
     ]

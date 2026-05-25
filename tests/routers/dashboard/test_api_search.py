@@ -164,17 +164,17 @@ async def test_search_multi_season_packs_returns_coverage_metadata(mock_db, monk
     assert body["releases"][0]["is_complete_series"] is False
     assert body["releases"][0]["size_per_season"] == "9.33 GB"
     assert body["releases"][0]["size_per_season_bytes"] == round((28 * 1024 * 1024 * 1024) / 3)
-    assert body["releases"][0]["size_per_season_passed"] is True
+    assert body["releases"][0]["size_per_season_passed"] is None
     assert body["releases"][1]["covered_seasons"] == [1, 2, 3]
     assert body["releases"][1]["covered_season_count"] == 3
     assert body["releases"][1]["covers_all_known_seasons"] is True
     assert body["releases"][1]["is_complete_series"] is False
     assert body["releases"][1]["size_per_season"] == "10.00 GB"
-    assert body["releases"][1]["size_per_season_passed"] is True
+    assert body["releases"][1]["size_per_season_passed"] is None
     assert body["releases"][2]["covered_seasons"] == []
     assert body["releases"][2]["is_complete_series"] is True
     assert body["releases"][2]["size_per_season"] == "14.00 GB"
-    assert body["releases"][2]["size_per_season_passed"] is True
+    assert body["releases"][2]["size_per_season_passed"] is None
     assert "Foundation.Complete.S01.1080p.BluRay" not in [
         release["title"] for release in body["releases"]
     ]
@@ -425,7 +425,7 @@ async def test_search_season_packs_prioritizes_size_limit_passes(mock_db, monkey
         "Foundation.S01.2160p.REMUX",
     ]
     assert body["releases"][0]["passed"] is False
-    assert body["releases"][0]["size_per_season_passed"] is True
+    assert body["releases"][0]["size_per_season_passed"] is None
     assert body["releases"][1]["size_per_season_passed"] is False
 
 
