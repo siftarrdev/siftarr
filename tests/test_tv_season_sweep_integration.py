@@ -363,7 +363,7 @@ async def test_limited_season_sweep_does_not_trigger_exact_fallback(
             result = await service.process_request(request.id)
 
             assert result["status"] == "staged"
-            assert prowlarr.swept_seasons == []
+            assert prowlarr.swept_seasons == [2]
             assert prowlarr.exact_episode_calls == [(2, 1), (2, 2)]
 
             stored = (await db.execute(select(Release))).scalars().all()
@@ -435,7 +435,7 @@ async def test_georgie_sweep_episode_rows_persist_without_exact_fallbacks(
             result = await service.process_request(request.id)
 
             assert result["status"] == "staged"
-            assert prowlarr.swept_seasons == []
+            assert prowlarr.swept_seasons == [1, 2]
             assert prowlarr.exact_episode_calls == [
                 (1, 1),
                 *((2, episode) for episode in range(1, 23)),

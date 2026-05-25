@@ -33,7 +33,7 @@ Primary flow:
 
 1. Overseerr webhook or manual action creates/syncs a request
 2. Browser access is gated by Plex SSO; the first Plex login claims the instance as the sole admin and must finish an initial full Plex sync before reaching protected pages, while API-key auth remains for webhooks/integrations
-3. Search and decision services query Prowlarr and evaluate releases (TV dashboard “Search for new” uses targeted exact `SxxEyy` searches for missing/actionable aired episodes; “Full search” refreshes all aired episode results and runs one broad TV pack query)
+3. Search and decision services query Prowlarr and evaluate releases (TV dashboard “Search for new” checks actionable season-pack candidates before targeted exact `SxxEyy` fallback; “Full search” refreshes all aired episode results and runs one broad TV pack query)
 4. Winning releases are staged or sent to qBittorrent
 5. Background services track retries, lifecycle state, Plex polling, and completion
 6. Dashboard, Stats, and settings UI expose control and visibility; request details can filter/sort stored release results
@@ -162,7 +162,7 @@ Business logic and integrations, organized into thematic subpackages:
 - `rule_engine.py` — release filtering and scoring evaluation; module-level rule version cache (`_rule_version`)
 - `rule_service.py` — CRUD/order logic for rules, export/import validation, existing-vs-imported diff preview and selected merge/replace application, and empty-database default-rule seeding from configured `rules.json`
 - `decision_pipeline.py` — shared decision pipeline helpers (rule loading, activity logging, pending queue, best-release selection)
-- `tv_decision_service.py` — TV-specific decision logic (targeted exact episode search, Full-search broad pack evaluation, actionable staged selection)
+- `tv_decision_service.py` — TV-specific decision logic (Search-for-new season-pack-first selection with exact episode fallback, Full-search broad pack evaluation, actionable staged selection)
 - `movie_decision_service.py` — movie-specific decision logic
 
 **`integrations/`** — External service adapters

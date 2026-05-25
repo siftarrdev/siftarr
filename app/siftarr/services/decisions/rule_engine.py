@@ -69,6 +69,8 @@ class RuleMatch:
     rule_name: str
     matched: bool
     score_delta: int = 0
+    rule_type: str | None = None
+    effect: str | None = None
 
 
 @dataclass
@@ -354,6 +356,8 @@ class RuleEngine:
                         rule_id=rule.rule_id,
                         rule_name=rule.rule_name,
                         matched=False,
+                        rule_type="size_limit",
+                        effect="size_limit",
                     )
                 )
                 break
@@ -368,6 +372,8 @@ class RuleEngine:
                         rule_id=rule.rule_id,
                         rule_name=rule.rule_name,
                         matched=False,
+                        rule_type="size_limit",
+                        effect="size_limit",
                     )
                 )
                 break
@@ -376,6 +382,8 @@ class RuleEngine:
                     rule_id=rule.rule_id,
                     rule_name=rule.rule_name,
                     matched=True,
+                    rule_type="size_limit",
+                    effect="size_limit",
                 )
             )
 
@@ -389,6 +397,8 @@ class RuleEngine:
                         rule_id=rule_id,
                         rule_name=rule_name,
                         matched=True,
+                        rule_type="exclusion",
+                        effect="disallow",
                     )
                 )
                 break
@@ -398,6 +408,8 @@ class RuleEngine:
                         rule_id=rule_id,
                         rule_name=rule_name,
                         matched=False,
+                        rule_type="exclusion",
+                        effect="disallow",
                     )
                 )
 
@@ -412,6 +424,8 @@ class RuleEngine:
                             rule_id=rule_id,
                             rule_name=rule_name,
                             matched=True,
+                            rule_type="requirement",
+                            effect="allow",
                         )
                     )
                 else:
@@ -420,6 +434,8 @@ class RuleEngine:
                             rule_id=rule_id,
                             rule_name=rule_name,
                             matched=False,
+                            rule_type="requirement",
+                            effect="allow",
                         )
                     )
 
@@ -437,6 +453,8 @@ class RuleEngine:
                         rule_name=rule_name,
                         matched=True,
                         score_delta=score,
+                        rule_type="scorer",
+                        effect="allow",
                     )
                 )
             else:
@@ -445,6 +463,8 @@ class RuleEngine:
                         rule_id=rule_id,
                         rule_name=rule_name,
                         matched=False,
+                        rule_type="scorer",
+                        effect="allow",
                     )
                 )
 

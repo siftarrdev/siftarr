@@ -2,7 +2,7 @@
 
 from datetime import UTC, datetime
 
-from app.siftarr.services.decisions.rule_engine import ReleaseEvaluation
+from app.siftarr.services.decisions.rule_engine import ReleaseEvaluation, RuleMatch
 from app.siftarr.services.integrations.prowlarr_service import ProwlarrRelease
 from app.siftarr.services.releases.release_parser import ParsedReleaseCoverage
 from app.siftarr.services.releases.release_serializers import (
@@ -141,12 +141,22 @@ class TestApplyReleaseSizePerSeasonMetadata:
         result = apply_release_size_per_season_metadata(release)
         assert result["size_per_season_passed"] is None
 
-    def test_passed_true_size_limit_not_failed(self) -> None:
+    def test_no_size_rule_leaves_size_per_season_passed_none(self) -> None:
         release: dict[str, object] = {
             "size_bytes": 2 * 1024 * 1024 * 1024,
             "covered_season_count": 2,
             "passed": True,
             "rejection_reason": None,
+        }
+        result = apply_release_size_per_season_metadata(release)
+        assert result["size_per_season_passed"] is None
+
+    def test_matching_size_rule_marks_size_per_season_passed(self) -> None:
+        release: dict[str, object] = {
+            "size_bytes": 2 * 1024 * 1024 * 1024,
+            "covered_season_count": 2,
+            "passed": True,
+            "matches": [{"rule_type": "size_limit", "effect": "size_limit", "matched": True}],
         }
         result = apply_release_size_per_season_metadata(release)
         assert result["size_per_season_passed"] is True
@@ -156,10 +166,9 @@ class TestApplyReleaseSizePerSeasonMetadata:
             "size_bytes": 2 * 1024 * 1024 * 1024,
             "covered_season_count": 2,
             "passed": True,
-            "rejection_reason": "Size 40.00 GB above limit",
+            "matches": [{"rule_type": "size_limit", "effect": "size_limit", "matched": False}],
         }
         result = apply_release_size_per_season_metadata(release)
-        # passed=True but size limit failed => size_per_season_passed=False
         assert result["size_per_season_passed"] is False
 
 
@@ -204,7 +213,7 @@ class TestSerializeEvaluatedRelease:
             release=release,
             passed=defaults["passed"],
             total_score=defaults["total_score"],
-            matches=[],
+            matches=defaults["matches"],
             rejection_reason=rejection_reason,
         )
 
@@ -222,6 +231,31 @@ class TestSerializeEvaluatedRelease:
         assert result["_size_bytes"] == release.size
         assert result["seeders"] == 10
         assert result["rejection_reason"] is None
+
+    def test_serializes_rule_match_metadata_and_size_passed(self) -> None:
+        release = self._make_release()
+        evaluation = self._make_evaluation(
+            matches=[
+                RuleMatch(
+                    rule_id=1,
+                    rule_name="Season pack size",
+                    matched=True,
+                    rule_type="size_limit",
+                    effect="size_limit",
+                )
+            ]
+        )
+        result = serialize_evaluated_release(release, evaluation)
+        assert result["size_passed"] is True
+        assert result["matches"] == [
+            {
+                "rule_name": "Season pack size",
+                "matched": True,
+                "score_delta": 0,
+                "rule_type": "size_limit",
+                "effect": "size_limit",
+            }
+        ]
 
     def test_rejected_release(self) -> None:
         release = self._make_release()

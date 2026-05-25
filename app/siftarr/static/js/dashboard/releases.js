@@ -26,6 +26,34 @@ function renderMovieSearchLoadingState() {
 }
 
 function releaseAnnotationTone(release, field) {
+    const matches = Array.isArray(release.matches) ? release.matches : [];
+    const fieldValue = String(release[field] || (field === 'group' ? release.release_group : '') || '').toLowerCase();
+    const fieldTokens = {
+        size: ['size'],
+        resolution: ['resolution', 'quality', fieldValue].filter(Boolean),
+        codec: ['codec', fieldValue].filter(Boolean),
+        group: ['group', 'release group', fieldValue].filter(Boolean),
+        indexer: ['indexer', 'uploader', fieldValue].filter(Boolean),
+    }[field] || [field, fieldValue].filter(Boolean);
+    const relevantMatches = matches.filter((match) => {
+        const ruleType = String(match.rule_type || '').toLowerCase();
+        const effect = String(match.effect || '').toLowerCase();
+        if (field === 'size' && (ruleType === 'size_limit' || effect === 'size_limit')) return true;
+        const ruleName = String(match.rule_name || '').toLowerCase();
+        return fieldTokens.some((token) => token && ruleName.includes(token));
+    });
+    if (relevantMatches.some((match) => match.matched === true && String(match.effect || '').toLowerCase() === 'disallow')) {
+        return 'text-red-400';
+    }
+    if (field === 'size' && relevantMatches.some((match) => match.matched === false && String(match.effect || '').toLowerCase() === 'size_limit')) {
+        return 'text-red-400';
+    }
+    if (relevantMatches.some((match) => match.matched === true && ['allow', 'size_limit'].includes(String(match.effect || '').toLowerCase()))) {
+        return 'text-emerald-400';
+    }
+    if (matches.length > 0) {
+        return 'text-gray-400';
+    }
     const isSizeFailure = !release.passed && typeof release.rejection_reason === 'string' && release.rejection_reason.toLowerCase().startsWith('size ');
     if (field === 'size') {
         if (isSizeFailure) return 'text-red-400';
@@ -171,7 +199,7 @@ function renderCoverageBadge(release) {
         ? '<span class="badge badge-green">Complete series</span>'
         : '';
     const sizePerSeason = release.size_per_season
-        ? '<span data-release-size-per-season="true" class="' + (release.size_per_season_passed === false ? 'text-red-400' : 'text-emerald-400') + '">' + window.escapeHtml(release.size_per_season) + '/season</span>'
+        ? '<span data-release-size-per-season="true" class="' + (release.size_per_season_passed === true ? 'text-emerald-400' : release.size_per_season_passed === false ? 'text-red-400' : 'text-gray-400') + '">' + window.escapeHtml(release.size_per_season) + '/season</span>'
         : '';
 
     return '<div class="mt-1 flex flex-wrap items-center gap-2 text-xs text-gray-400">' +
