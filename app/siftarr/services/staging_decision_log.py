@@ -6,7 +6,7 @@ import json
 from collections.abc import Iterable, Mapping
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from app.siftarr.models.request import MediaType, Request
 from app.siftarr.models.staged_torrent import StagedTorrent
@@ -48,7 +48,9 @@ def _is_retained(entry: Mapping[str, Any], cutoff: datetime | None = None) -> bo
 def _request_payload(request: Request | None) -> dict[str, Any] | None:
     if request is None:
         return None
-    media_type = request.media_type.value if hasattr(request.media_type, "value") else request.media_type
+    media_type = (
+        request.media_type.value if hasattr(request.media_type, "value") else request.media_type
+    )
     return {
         "id": request.id,
         "title": request.title,
@@ -96,19 +98,31 @@ def _candidate_from_evaluation(
     payload = serialize_evaluated_release(evaluation.release, evaluation)
     payload["category"] = category
     payload["outcome"] = "passed" if evaluation.passed else "rejected"
-    payload["score_deltas"] = [
-        {"rule_name": m.get("rule_name"), "delta": m.get("score_delta")}
-        for m in payload.get("matches", [])
-        if isinstance(m, Mapping) and m.get("score_delta")
-    ]
-    payload["rule_matches"] = payload.get("matches", [])
+    raw_matches = payload.get("matches")
+    matches: list[Any] = raw_matches if isinstance(raw_matches, list) else []
+    score_deltas = []
+    for match in matches:
+        if not isinstance(match, dict):
+            continue
+        match_payload = cast(dict[str, Any], match)
+        if match_payload.get("score_delta"):
+            score_deltas.append(
+                {
+                    "rule_name": match_payload.get("rule_name"),
+                    "delta": match_payload.get("score_delta"),
+                }
+            )
+    payload["score_deltas"] = score_deltas
+    payload["rule_matches"] = matches
     payload["size_checks"] = {"passed": payload.get("size_passed")}
     payload["quality_parse"] = {
         "resolution": payload.get("resolution"),
         "codec": payload.get("codec"),
         "release_group": payload.get("release_group"),
     }
-    payload["target_scope"] = serialize_target_scope(media_type=media_type, title=evaluation.release.title)
+    payload["target_scope"] = serialize_target_scope(
+        media_type=media_type, title=evaluation.release.title
+    )
     return payload
 
 
@@ -160,7 +174,10 @@ def append_entry(entry: Mapping[str, Any], path: Path | None = None) -> None:
 
 
 def log_staging_decision(
-    *, request: Request | None, approved_torrent: StagedTorrent, rules_selected_torrent: StagedTorrent | None
+    *,
+    request: Request | None,
+    approved_torrent: StagedTorrent,
+    rules_selected_torrent: StagedTorrent | None,
 ) -> None:
     approved = staged_torrent_payload(approved_torrent)
     rules = staged_torrent_payload(rules_selected_torrent)
@@ -174,7 +191,10 @@ def log_staging_decision(
             event_type=event_type,
             outcome="approved",
             request=request,
-            selection={"source": approved_torrent.selection_source, "selection_source": approved_torrent.selection_source},
+            selection={
+                "source": approved_torrent.selection_source,
+                "selection_source": approved_torrent.selection_source,
+            },
             selected_release=approved,
             rules_selected_release=rules,
             top_candidates=[c for c in (approved, rules) if c],
@@ -183,7 +203,11 @@ def log_staging_decision(
 
 
 def log_replacement_decision(
-    *, request: Request | None, new_torrent: StagedTorrent, replaced_torrent: StagedTorrent, reason: str | None = None
+    *,
+    request: Request | None,
+    new_torrent: StagedTorrent,
+    replaced_torrent: StagedTorrent,
+    reason: str | None = None,
 ) -> None:
     new_payload = staged_torrent_payload(new_torrent)
     replaced = staged_torrent_payload(replaced_torrent)
@@ -194,7 +218,11 @@ def log_replacement_decision(
             event_type="replacement",
             outcome="replaced",
             request=request,
-            selection={"source": new_torrent.selection_source, "selection_source": new_torrent.selection_source, "reason": reason},
+            selection={
+                "source": new_torrent.selection_source,
+                "selection_source": new_torrent.selection_source,
+                "reason": reason,
+            },
             selected_release=new_payload,
             top_candidates=[c for c in (new_payload, replaced) if c],
             failures=[{"reason": reason, "replaced_release": replaced}] if reason else [],
@@ -214,22 +242,33 @@ def log_evaluations(
     indexer_stats: Mapping[str, Any] | None = None,
     search_context: Mapping[str, Any] | None = None,
 ) -> None:
-    media_type = request.media_type if isinstance(request.media_type, MediaType) else MediaType(request.media_type)
+    media_type = (
+        request.media_type
+        if isinstance(request.media_type, MediaType)
+        else MediaType(request.media_type)
+    )
     selected_set = {id(e) for e in (selected or [])}
     candidates = [
-        _candidate_from_evaluation(e, category="selected" if id(e) in selected_set else ("top" if e.passed else "rejected"), media_type=media_type)
+        _candidate_from_evaluation(
+            e,
+            category="selected" if id(e) in selected_set else ("top" if e.passed else "rejected"),
+            media_type=media_type,
+        )
         for e in evaluations
     ]
     top = sorted(candidates, key=lambda c: float(c.get("score") or 0), reverse=True)[:25]
     selected_payloads = [
-        _candidate_from_evaluation(e, category="selected", media_type=media_type) for e in (selected or [])
+        _candidate_from_evaluation(e, category="selected", media_type=media_type)
+        for e in (selected or [])
     ]
     append_entry(
         build_decision_entry(
             event_type=event_type,
             outcome=outcome,
             request=request,
-            selection={"source": "rule", "selection_source": "rule"} if selected_payloads else {"source": "none"},
+            selection={"source": "rule", "selection_source": "rule"}
+            if selected_payloads
+            else {"source": "none"},
             selected_release=selected_payloads[0] if len(selected_payloads) == 1 else None,
             rules_selected_release=selected_payloads[0] if selected_payloads else None,
             top_candidates=top,
@@ -248,7 +287,11 @@ def _normalize_legacy(entry: Mapping[str, Any]) -> dict[str, Any]:
     rules = _candidate_from_mapping(entry.get("rules_selected_torrent"), category="top")
     new_torrent = _candidate_from_mapping(entry.get("new_torrent"), category="selected")
     replaced = _candidate_from_mapping(entry.get("replaced_torrent"), category="replaced")
-    selected = approved or new_torrent or _candidate_from_mapping(entry.get("selected_release"), category="selected")
+    selected = (
+        approved
+        or new_torrent
+        or _candidate_from_mapping(entry.get("selected_release"), category="selected")
+    )
     event_type = str(entry.get("event_type") or "decision")
     return {
         "schema_version": SCHEMA_VERSION,
@@ -265,7 +308,9 @@ def _normalize_legacy(entry: Mapping[str, Any]) -> dict[str, Any]:
         "rules_selected_release": rules,
         "top_candidates": [c for c in (selected, rules, replaced) if c],
         "all_candidates": [c for c in (selected, rules, replaced) if c],
-        "failures": [{"reason": entry.get("reason"), "replaced_release": replaced}] if replaced else [],
+        "failures": [{"reason": entry.get("reason"), "replaced_release": replaced}]
+        if replaced
+        else [],
         "counts": {},
         "indexer_stats": {},
         "search_context": {},
@@ -278,14 +323,21 @@ def normalize_entry(entry: Mapping[str, Any]) -> dict[str, Any]:
     else:
         normalized = _normalize_legacy(entry)
     for key, default in {
-        "selection": {}, "top_candidates": [], "all_candidates": [], "failures": [],
-        "counts": {}, "indexer_stats": {}, "search_context": {},
+        "selection": {},
+        "top_candidates": [],
+        "all_candidates": [],
+        "failures": [],
+        "counts": {},
+        "indexer_stats": {},
+        "search_context": {},
     }.items():
         normalized.setdefault(key, default)
     return normalized
 
 
-def read_entries(path: Path | None = None, *, include_expired: bool = False) -> list[dict[str, Any]]:
+def read_entries(
+    path: Path | None = None, *, include_expired: bool = False
+) -> list[dict[str, Any]]:
     log_path = path or STAGING_DECISION_LOG_PATH
     if not log_path.exists():
         return []

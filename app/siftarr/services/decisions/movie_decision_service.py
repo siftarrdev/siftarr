@@ -257,7 +257,11 @@ class MovieDecisionService:
                     "passed": len([e for e in all_evaluated if e.passed]),
                 },
                 indexer_stats=dict(Counter(r.indexer for r in search_result.releases)),
-                search_context={"media_type": "movie", "tmdb_id": request.tmdb_id, "year": request.year},
+                search_context={
+                    "media_type": "movie",
+                    "tmdb_id": request.tmdb_id,
+                    "year": request.year,
+                },
             )
 
             return {
@@ -290,14 +294,21 @@ class MovieDecisionService:
             event_type="all_rejected",
             outcome="pending",
             evaluations=all_evaluated,
-            failures=[{"reason": reason, "category": "failure"} for reason in sorted(set(rejection_reasons))],
+            failures=[
+                {"reason": reason, "category": "failure"}
+                for reason in sorted(set(rejection_reasons))
+            ],
             counts={
                 "search_results": len(search_result.releases),
                 "evaluated": len(all_evaluated),
                 "passed": 0,
             },
             indexer_stats=dict(Counter(r.indexer for r in search_result.releases)),
-            search_context={"media_type": "movie", "tmdb_id": request.tmdb_id, "year": request.year},
+            search_context={
+                "media_type": "movie",
+                "tmdb_id": request.tmdb_id,
+                "year": request.year,
+            },
         )
 
         logger.info(

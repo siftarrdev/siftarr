@@ -18,7 +18,9 @@ from app.siftarr.services.integrations.prowlarr_service import ProwlarrRelease, 
 
 @pytest.mark.asyncio
 async def test_movie_identity_mismatch_is_persisted_and_not_selected(monkeypatch, tmp_path):
-    monkeypatch.setattr(staging_decision_log, "STAGING_DECISION_LOG_PATH", tmp_path / "decision-log.jsonl")
+    monkeypatch.setattr(
+        staging_decision_log, "STAGING_DECISION_LOG_PATH", tmp_path / "decision-log.jsonl"
+    )
     engine = create_async_engine("sqlite+aiosqlite:///:memory:")
     session_maker = async_sessionmaker(engine, expire_on_commit=False)
 
@@ -85,7 +87,9 @@ async def test_movie_identity_mismatch_is_persisted_and_not_selected(monkeypatch
         assert refreshed_request.status == RequestStatus.PENDING
         assert refreshed_request.rejection_reason is not None
         assert "Movie identity mismatch" in refreshed_request.rejection_reason
-        entry = json.loads(staging_decision_log.STAGING_DECISION_LOG_PATH.read_text().splitlines()[0])
+        entry = json.loads(
+            staging_decision_log.STAGING_DECISION_LOG_PATH.read_text().splitlines()[0]
+        )
         assert entry["event_type"] == "all_rejected"
         assert entry["all_candidates"][0]["download_url"] == "https://example.test/bad.torrent"
         assert entry["all_candidates"][0]["rule_matches"] == entry["all_candidates"][0]["matches"]
@@ -95,7 +99,9 @@ async def test_movie_identity_mismatch_is_persisted_and_not_selected(monkeypatch
 
 @pytest.mark.asyncio
 async def test_movie_identity_filter_allows_exact_title_missing_release_year(monkeypatch, tmp_path):
-    monkeypatch.setattr(staging_decision_log, "STAGING_DECISION_LOG_PATH", tmp_path / "decision-log.jsonl")
+    monkeypatch.setattr(
+        staging_decision_log, "STAGING_DECISION_LOG_PATH", tmp_path / "decision-log.jsonl"
+    )
     engine = create_async_engine("sqlite+aiosqlite:///:memory:")
     session_maker = async_sessionmaker(engine, expire_on_commit=False)
 
@@ -149,7 +155,9 @@ async def test_movie_identity_filter_allows_exact_title_missing_release_year(mon
         )
 
         assert result["status"] == "staged"
-        entry = json.loads(staging_decision_log.STAGING_DECISION_LOG_PATH.read_text().splitlines()[0])
+        entry = json.loads(
+            staging_decision_log.STAGING_DECISION_LOG_PATH.read_text().splitlines()[0]
+        )
         assert entry["selected_release"]["title"] == "The.Cheetah.Girls.1080p.WEB-DL"
         assert entry["top_candidates"]
         stored = (await session.execute(select(Release))).scalar_one()

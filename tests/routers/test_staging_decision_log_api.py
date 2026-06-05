@@ -125,11 +125,19 @@ def test_pagination_filters_legacy_links_corrupt_and_retention(client):
     assert page["has_next"] is True
 
     assert client.get("/staged/decision-log?media_type=tv", headers=headers).json()["total"] == 1
-    assert client.get("/staged/decision-log?event_type=replacement", headers=headers).json()["total"] == 1
-    assert client.get("/staged/decision-log?selection_source=manual", headers=headers).json()["total"] == 1
+    assert (
+        client.get("/staged/decision-log?event_type=replacement", headers=headers).json()["total"]
+        == 1
+    )
+    assert (
+        client.get("/staged/decision-log?selection_source=manual", headers=headers).json()["total"]
+        == 1
+    )
     assert client.get("/staged/decision-log?request_id=3", headers=headers).json()["total"] == 1
     assert client.get("/staged/decision-log?title=great", headers=headers).json()["total"] == 1
-    assert client.get("/staged/decision-log?rule_name=preferred", headers=headers).json()["total"] == 2
+    assert (
+        client.get("/staged/decision-log?rule_name=preferred", headers=headers).json()["total"] == 2
+    )
     assert client.get("/staged/decision-log?outcome=approved", headers=headers).json()["total"] == 1
 
     item = client.get("/staged/decision-log?request_id=0", headers=headers).json()["items"][0]

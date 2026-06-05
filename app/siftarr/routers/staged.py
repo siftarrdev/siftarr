@@ -206,8 +206,10 @@ async def get_decision_log(
     entries = staging_decision_log.read_entries(STAGING_DECISION_LOG_PATH)
     filtered: list[dict[str, Any]] = []
     for entry in entries:
-        request_payload = entry.get("request") if isinstance(entry.get("request"), dict) else {}
-        selection = entry.get("selection") if isinstance(entry.get("selection"), dict) else {}
+        raw_request = entry.get("request")
+        request_payload: dict[str, Any] = raw_request if isinstance(raw_request, dict) else {}
+        raw_selection = entry.get("selection")
+        selection: dict[str, Any] = raw_selection if isinstance(raw_selection, dict) else {}
         logged_at = staging_decision_log._parse_dt(entry.get("logged_at"))  # noqa: SLF001
         if request_id is not None and request_payload.get("id") != request_id:
             continue
@@ -217,7 +219,11 @@ async def get_decision_log(
             continue
         if outcome and entry.get("outcome") != outcome:
             continue
-        if selection_source and selection.get("selection_source") != selection_source and selection.get("source") != selection_source:
+        if (
+            selection_source
+            and selection.get("selection_source") != selection_source
+            and selection.get("source") != selection_source
+        ):
             continue
         if start_date and (logged_at is None or logged_at < start_date):
             continue

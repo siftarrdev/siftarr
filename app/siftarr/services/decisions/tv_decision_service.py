@@ -1225,7 +1225,10 @@ class TVDecisionService:
             event_type="all_rejected",
             outcome="pending",
             evaluations=all_evaluated_releases,
-            failures=[{"reason": reason, "category": "failure"} for reason in sorted(set(rejection_reasons))]
+            failures=[
+                {"reason": reason, "category": "failure"}
+                for reason in sorted(set(rejection_reasons))
+            ]
             + [{"reason": error, "category": "failure"} for error in all_errors],
             counts={
                 "evaluated": len(all_evaluated_releases),
