@@ -1,4 +1,5 @@
 import logging
+from collections import Counter
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -25,6 +26,7 @@ from app.siftarr.services.releases.release_storage import (
     store_search_results,
 )
 from app.siftarr.services.releases.staging_service import StagingService
+from app.siftarr.services.staging_decision_log import log_evaluations
 from app.siftarr.services.stats_metrics_service import record_rule_outcomes
 
 logger = logging.getLogger(__name__)
@@ -124,6 +126,16 @@ class MovieDecisionService:
                 request.id,
                 error_message=f"Prowlarr search failed: {search_result.error}",
             )
+            log_evaluations(
+                request=request,
+                event_type="search_failed",
+                outcome="pending",
+                evaluations=[],
+                failures=[{"reason": search_result.error, "category": "failure"}],
+                counts={"search_results": 0, "evaluated": 0, "passed": 0},
+                indexer_stats={},
+                search_context={"media_type": "movie", "tmdb_id": request.tmdb_id},
+            )
             return {
                 "status": "pending",
                 "message": f"Search failed: {search_result.error}, added to pending queue",
@@ -144,6 +156,16 @@ class MovieDecisionService:
             await self.db.commit()
 
             await add_to_pending_queue(self.db, request.id)
+            log_evaluations(
+                request=request,
+                event_type="no_results",
+                outcome="pending",
+                evaluations=[],
+                failures=[{"reason": "No releases found", "category": "failure"}],
+                counts={"search_results": 0, "evaluated": 0, "passed": 0},
+                indexer_stats={},
+                search_context={"media_type": "movie", "tmdb_id": request.tmdb_id},
+            )
 
             logger.info(
                 "Movie search found no releases: request_id=%s added_to_pending_queue",
@@ -223,6 +245,20 @@ class MovieDecisionService:
                 size=best.release.size,
                 action=action_result.get("status"),
             )
+            log_evaluations(
+                request=request,
+                event_type="rule_accept",
+                outcome=str(action_result.get("status") or "selected"),
+                evaluations=all_evaluated,
+                selected=[best],
+                counts={
+                    "search_results": len(search_result.releases),
+                    "evaluated": len(all_evaluated),
+                    "passed": len([e for e in all_evaluated if e.passed]),
+                },
+                indexer_stats=dict(Counter(r.indexer for r in search_result.releases)),
+                search_context={"media_type": "movie", "tmdb_id": request.tmdb_id, "year": request.year},
+            )
 
             return {
                 "status": action_result["status"],
@@ -248,6 +284,20 @@ class MovieDecisionService:
             error_message="; ".join(set(rejection_reasons))[:500]
             if rejection_reasons
             else "All releases rejected by rules",
+        )
+        log_evaluations(
+            request=request,
+            event_type="all_rejected",
+            outcome="pending",
+            evaluations=all_evaluated,
+            failures=[{"reason": reason, "category": "failure"} for reason in sorted(set(rejection_reasons))],
+            counts={
+                "search_results": len(search_result.releases),
+                "evaluated": len(all_evaluated),
+                "passed": 0,
+            },
+            indexer_stats=dict(Counter(r.indexer for r in search_result.releases)),
+            search_context={"media_type": "movie", "tmdb_id": request.tmdb_id, "year": request.year},
         )
 
         logger.info(

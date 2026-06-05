@@ -64,6 +64,7 @@ from app.siftarr.services.releases.release_storage import (
     store_search_results,
 )
 from app.siftarr.services.releases.staging_service import StagingService
+from app.siftarr.services.staging_decision_log import log_evaluations
 from app.siftarr.services.stats_metrics_service import record_rule_outcomes
 
 logger = logging.getLogger(__name__)
@@ -1096,6 +1097,31 @@ class TVDecisionService:
                 titles=[e.release.title for e in all_selected_releases[:5]],
                 action=action_result.get("status"),
             )
+            log_evaluations(
+                request=request,
+                event_type="rule_accept",
+                outcome=str(action_result.get("status") or "selected"),
+                evaluations=all_evaluated_releases,
+                selected=all_selected_releases,
+                failures=[{"reason": error, "category": "failure"} for error in all_search_errors],
+                counts={
+                    "evaluated": len(all_evaluated_releases),
+                    "selected": len(all_selected_releases),
+                    "passed_packs": passing_pack_count,
+                    "passed_episodes": len(episode_evaluations),
+                    "search_errors": len(all_search_errors),
+                },
+                indexer_stats=dict(Counter(e.release.indexer for e in all_evaluated_releases)),
+                search_context={
+                    "media_type": "tv",
+                    "tvdb_id": request.tvdb_id,
+                    "search_mode": search_mode,
+                    "search_episodes": search_episodes,
+                    "requested_seasons": requested_seasons,
+                    "requested_episodes": requested_episodes,
+                    "covered_seasons": sorted(covered_seasons),
+                },
+            )
 
             # ── Episode status updates ────────────────────────────────
             # Episode status is the ground truth.  Set each episode covered
@@ -1193,6 +1219,31 @@ class TVDecisionService:
             self.db,
             request.id,
             error_message=error_msg,
+        )
+        log_evaluations(
+            request=request,
+            event_type="all_rejected",
+            outcome="pending",
+            evaluations=all_evaluated_releases,
+            failures=[{"reason": reason, "category": "failure"} for reason in sorted(set(rejection_reasons))]
+            + [{"reason": error, "category": "failure"} for error in all_errors],
+            counts={
+                "evaluated": len(all_evaluated_releases),
+                "selected": 0,
+                "passed_packs": passing_pack_count,
+                "passed_episodes": len(episode_evaluations),
+                "search_errors": len(all_search_errors),
+            },
+            indexer_stats=dict(Counter(e.release.indexer for e in all_evaluated_releases)),
+            search_context={
+                "media_type": "tv",
+                "tvdb_id": request.tvdb_id,
+                "search_mode": search_mode,
+                "search_episodes": search_episodes,
+                "requested_seasons": requested_seasons,
+                "requested_episodes": requested_episodes,
+                "covered_seasons": sorted(covered_seasons),
+            },
         )
 
         return {
