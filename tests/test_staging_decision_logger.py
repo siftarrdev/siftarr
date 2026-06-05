@@ -12,6 +12,16 @@ from app.siftarr.services import staging_decision_log
 def test_log_staging_decision_records_rule_accept(tmp_path):
     """Approving the rule-selected torrent should log a rule_accept event."""
     log_path = tmp_path / "decision-log.jsonl"
+    sidecar_path = tmp_path / "example.json"
+    sidecar_path.write_text(
+        json.dumps(
+            {
+                "download_url": "https://indexer/download/full",
+                "info_hash": "abc123",
+            }
+        ),
+        encoding="utf-8",
+    )
     request = Request(
         title="Example Movie",
         media_type=MediaType.MOVIE,
@@ -23,7 +33,7 @@ def test_log_staging_decision_records_rule_accept(tmp_path):
     torrent = StagedTorrent(
         request_id=5,
         torrent_path="/tmp/example.torrent",
-        json_path="/tmp/example.json",
+        json_path=str(sidecar_path),
         original_filename="example",
         title="Example.Movie.2024.1080p",
         size=1_000,
@@ -49,6 +59,8 @@ def test_log_staging_decision_records_rule_accept(tmp_path):
     assert payload["schema_version"] == 1
     assert payload["event_type"] == "rule_accept"
     assert payload["selected_release"]["selection_source"] == "rule"
+    assert payload["selected_release"]["download_url"] == "https://indexer/download/full"
+    assert payload["selected_release"]["info_hash"] == "abc123"
     assert payload["selection"]["selection_source"] == "rule"
 
 

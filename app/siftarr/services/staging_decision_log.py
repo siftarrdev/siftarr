@@ -64,6 +64,15 @@ def _request_payload(request: Request | None) -> dict[str, Any] | None:
 def staged_torrent_payload(torrent: StagedTorrent | None) -> dict[str, Any] | None:
     if torrent is None:
         return None
+    sidecar_payload: dict[str, Any] = {}
+    json_path = getattr(torrent, "json_path", None)
+    if json_path:
+        try:
+            loaded = json.loads(Path(json_path).read_text(encoding="utf-8"))
+        except OSError, json.JSONDecodeError, TypeError:
+            loaded = None
+        if isinstance(loaded, dict):
+            sidecar_payload = loaded
     return {
         "id": torrent.id,
         "title": torrent.title,
@@ -73,7 +82,9 @@ def staged_torrent_payload(torrent: StagedTorrent | None) -> dict[str, Any] | No
         "indexer": torrent.indexer,
         "status": torrent.status,
         "selection_source": torrent.selection_source,
+        "download_url": sidecar_payload.get("download_url"),
         "magnet_url": getattr(torrent, "magnet_url", None),
+        "info_hash": getattr(torrent, "info_hash", None) or sidecar_payload.get("info_hash"),
         "category": "selected",
     }
 

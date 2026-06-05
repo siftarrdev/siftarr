@@ -101,6 +101,18 @@ def test_api_key_required_and_empty_log(client):
     assert response.json()["total"] == 0
 
 
+def test_api_key_required_when_auth_disabled(client, monkeypatch):
+    monkeypatch.setenv("AUTH_ENABLED", "false")
+    reload_settings()
+
+    assert client.get("/staged/decision-log").status_code == 401
+    assert client.get("/staged/decision-log", headers={"X-API-Key": "wrong"}).status_code == 401
+    assert (
+        client.get("/staged/decision-log", headers={"X-API-Key": "valid-api-key"}).status_code
+        == 200
+    )
+
+
 def test_pagination_filters_legacy_links_corrupt_and_retention(client):
     old = _entry(121, request={"id": 99, "title": "Old", "media_type": "movie"})
     tv = _entry(
