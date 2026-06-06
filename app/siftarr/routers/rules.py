@@ -8,6 +8,7 @@ from fastapi.responses import HTMLResponse, PlainTextResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.siftarr.config import get_static_version
 from app.siftarr.database import get_db
 from app.siftarr.models.rule import RuleType, TVTarget
 from app.siftarr.services.decisions.rule_engine import RuleEngine
@@ -117,6 +118,16 @@ async def list_rules(
         request,
         "rules.html",
         await _rules_page_context(request, rule_service),
+    )
+
+
+@router.get("/decision-log")
+async def decision_log_page(request: Request) -> HTMLResponse:
+    """Show the staging decision log under Rules for rule tuning."""
+    return templates.TemplateResponse(
+        request,
+        "rules_decision_log.html",
+        {"request": request, "static_version": get_static_version()},
     )
 
 

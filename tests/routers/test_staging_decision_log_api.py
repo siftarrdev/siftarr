@@ -87,12 +87,14 @@ def _entry(idx: int, **overrides) -> dict:
     return payload
 
 
-def test_api_key_required_and_empty_log(client):
+def test_session_or_api_key_allowed_and_empty_log(client):
     assert client.get("/staged/decision-log").status_code == 401
 
     session_data = b64encode(json.dumps({"plex_user_id": "admin-id"}).encode("utf-8"))
     client.cookies.set("session", TimestampSigner("test-secret").sign(session_data).decode("utf-8"))
-    assert client.get("/staged/decision-log").status_code == 401
+    session_response = client.get("/staged/decision-log")
+    assert session_response.status_code == 200
+    assert session_response.json()["items"] == []
 
     response = client.get("/staged/decision-log", headers={"X-API-Key": "valid-api-key"})
 
@@ -111,6 +113,10 @@ def test_api_key_required_when_auth_disabled(client, monkeypatch):
         client.get("/staged/decision-log", headers={"X-API-Key": "valid-api-key"}).status_code
         == 200
     )
+
+    session_data = b64encode(json.dumps({"plex_user_id": "admin-id"}).encode("utf-8"))
+    client.cookies.set("session", TimestampSigner("test-secret").sign(session_data).decode("utf-8"))
+    assert client.get("/staged/decision-log").status_code == 200
 
 
 def test_pagination_filters_legacy_links_corrupt_and_retention(client):

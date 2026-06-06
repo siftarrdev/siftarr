@@ -150,6 +150,27 @@ async def require_api_key(request: Request) -> None:
     )
 
 
+async def require_session_or_api_key(request: Request) -> None:
+    """Require a valid browser session or API key regardless of auth toggle."""
+    if get_session_user(request) is not None:
+        if request.session.get("initial_plex_sync_required") and not _allows_initial_plex_sync_gate(
+            request
+        ):
+            raise InitialPlexSyncRequired()
+        return
+
+    settings = get_settings()
+    key = _extract_api_key(request)
+    if _api_key_matches(key, settings.api_key):
+        return
+
+    raise HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Authentication required. Provide a valid session cookie or API key.",
+        headers={"WWW-Authenticate": "Bearer"},
+    )
+
+
 async def require_auth(request: Request) -> None:
     """FastAPI dependency that requires authentication.
 
