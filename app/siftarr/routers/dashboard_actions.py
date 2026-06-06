@@ -93,7 +93,24 @@ async def _deny_request_record(
     queue_service = PendingQueueService(db)
 
     if request.overseerr_request_id:
-        await overseerr_service.decline_request(request.overseerr_request_id, reason=reason)
+        try:
+            declined = await overseerr_service.decline_request(
+                request.overseerr_request_id,
+                reason=reason,
+            )
+            if not declined:
+                logger.warning(
+                    "Overseerr decline returned false for request_id=%s overseerr_request_id=%s; continuing local deny cleanup",
+                    request.id,
+                    request.overseerr_request_id,
+                )
+        except Exception:
+            logger.warning(
+                "Overseerr decline failed for request_id=%s overseerr_request_id=%s; continuing local deny cleanup",
+                request.id,
+                request.overseerr_request_id,
+                exc_info=True,
+            )
 
     await queue_service.remove_from_queue(request.id)
     await lifecycle_service.transition(request.id, RequestStatus.DENIED, reason=reason)

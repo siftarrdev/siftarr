@@ -22,12 +22,17 @@ from app.siftarr.config import (
 from app.siftarr.models.app_setting import AppSetting
 from app.siftarr.models.request import MediaType, RequestStatus
 from app.siftarr.models.request import Request as RequestModel
+from app.siftarr.services.lifecycle.lifecycle_service import LifecycleService
 from app.siftarr.services.lifecycle.pending_queue_service import PendingQueueService
 from app.siftarr.version import __version__
 
 OVERSEERR_LAST_SYNC_SUCCESS_KEY = "overseerr_last_sync_success_at"
 PLEX_LAST_SYNC_SUCCESS_KEY = "plex_last_sync_success_at"
 SYNC_STALE_AFTER = 24 * 60 * 60
+STALE_OVERSEERR_CLEANUP_STATUSES: tuple[RequestStatus, ...] = (
+    RequestStatus.PENDING,
+    RequestStatus.SEARCHING,
+)
 
 _FULL_PLEX_SYNC_LOCK = asyncio.Lock()
 _INITIAL_PLEX_SYNC_COMPLETIONS: set[tuple[str, str]] = set()
@@ -1244,6 +1249,41 @@ async def import_overseerr_requests(
     """Fetch, filter, and import new Overseerr requests into the local DB."""
     overseerr_service = overseerr_service_cls(settings=runtime_settings)
 
+    async def cleanup_stale_overseerr_requests(upstream_request_ids: set[int]) -> int:
+        """Mark locally-linked requests missing upstream as denied/non-actionable."""
+        result = await db.execute(
+            select(RequestModel.id, RequestModel.overseerr_request_id)
+            .where(RequestModel.overseerr_request_id.is_not(None))
+            .where(
+                RequestModel.status.in_(STALE_OVERSEERR_CLEANUP_STATUSES),
+            )
+        )
+        stale_request_ids = [
+            row[0]
+            for row in result.fetchall()
+            if row[1] is not None and row[1] not in upstream_request_ids
+        ]
+        if not stale_request_ids:
+            return 0
+
+        queue_service = PendingQueueService(db)
+        lifecycle_service = LifecycleService(db)
+        for request_id in stale_request_ids:
+            await queue_service.remove_from_queue(request_id, commit=False)
+            cleaned_request = await lifecycle_service.transition(
+                request_id,
+                RequestStatus.DENIED,
+                reason="Removed from Overseerr",
+                commit=False,
+            )
+            if cleaned_request is not None:
+                cleaned_request.overseerr_request_id = None
+        logger.info(
+            "Cleaned up %d stale Overseerr-linked request(s)",
+            len(stale_request_ids),
+        )
+        return len(stale_request_ids)
+
     async def emit(payload: dict[str, Any]) -> None:
         if on_event is None:
             return
@@ -1267,6 +1307,14 @@ async def import_overseerr_requests(
             )
         )
         overseerr_requests = await overseerr_service.get_all_requests(status=None)
+        upstream_request_ids = set()
+        for ov_req in overseerr_requests:
+            request_id = ov_req.get("id")
+            if request_id is not None:
+                with contextlib.suppress(TypeError, ValueError):
+                    upstream_request_ids.add(int(request_id))
+        await cleanup_stale_overseerr_requests(upstream_request_ids)
+
         if not overseerr_requests:
             await SettingsStore(db).record_sync_success("overseerr")
             await db.commit()

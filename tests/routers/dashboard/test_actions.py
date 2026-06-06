@@ -244,6 +244,95 @@ async def test_deny_request_record_declines_overseerr_removes_queue_and_transiti
 
 
 @pytest.mark.asyncio
+async def test_deny_request_record_cleans_up_locally_when_overseerr_decline_returns_false(
+    mock_db, monkeypatch
+):
+    """Missing/stale Overseerr links should not block local deny cleanup."""
+    request_record = MagicMock(id=44, overseerr_request_id=1235)
+    overseerr_instance = MagicMock()
+    overseerr_instance.decline_request = AsyncMock(return_value=False)
+    queue_instance = MagicMock()
+    queue_instance.remove_from_queue = AsyncMock()
+    lifecycle_instance = MagicMock()
+    lifecycle_instance.transition = AsyncMock()
+
+    monkeypatch.setattr(dashboard_actions, "OverseerrService", lambda settings: overseerr_instance)
+    monkeypatch.setattr(dashboard_actions, "PendingQueueService", lambda db: queue_instance)
+    monkeypatch.setattr(dashboard_actions, "LifecycleService", lambda db: lifecycle_instance)
+
+    await dashboard_actions._deny_request_record(request_record, mock_db, reason="Gone upstream")
+
+    overseerr_instance.decline_request.assert_awaited_once_with(1235, reason="Gone upstream")
+    queue_instance.remove_from_queue.assert_awaited_once_with(44)
+    lifecycle_instance.transition.assert_awaited_once_with(
+        44, RequestStatus.DENIED, reason="Gone upstream"
+    )
+
+
+@pytest.mark.asyncio
+async def test_deny_request_record_cleans_up_locally_when_overseerr_decline_raises(
+    mock_db, monkeypatch
+):
+    """Handled integration exceptions should not produce dashboard 500s."""
+    request_record = MagicMock(id=45, overseerr_request_id=1236)
+    overseerr_instance = MagicMock()
+    overseerr_instance.decline_request = AsyncMock(side_effect=RuntimeError("not found"))
+    queue_instance = MagicMock()
+    queue_instance.remove_from_queue = AsyncMock()
+    lifecycle_instance = MagicMock()
+    lifecycle_instance.transition = AsyncMock()
+
+    monkeypatch.setattr(dashboard_actions, "OverseerrService", lambda settings: overseerr_instance)
+    monkeypatch.setattr(dashboard_actions, "PendingQueueService", lambda db: queue_instance)
+    monkeypatch.setattr(dashboard_actions, "LifecycleService", lambda db: lifecycle_instance)
+
+    await dashboard_actions._deny_request_record(request_record, mock_db, reason="Gone upstream")
+
+    overseerr_instance.decline_request.assert_awaited_once_with(1236, reason="Gone upstream")
+    queue_instance.remove_from_queue.assert_awaited_once_with(45)
+    lifecycle_instance.transition.assert_awaited_once_with(
+        45, RequestStatus.DENIED, reason="Gone upstream"
+    )
+
+
+@pytest.mark.asyncio
+async def test_deny_request_json_returns_normal_response_for_stale_overseerr_link(
+    mock_db, monkeypatch
+):
+    request_record = MagicMock(id=46, overseerr_request_id=1237)
+    monkeypatch.setattr(
+        dashboard_actions, "load_request_or_404", AsyncMock(return_value=request_record)
+    )
+    overseerr_instance = MagicMock()
+    overseerr_instance.decline_request = AsyncMock(side_effect=RuntimeError("not found"))
+    queue_instance = MagicMock()
+    queue_instance.remove_from_queue = AsyncMock()
+    lifecycle_instance = MagicMock()
+    lifecycle_instance.transition = AsyncMock()
+    monkeypatch.setattr(dashboard_actions, "OverseerrService", lambda settings: overseerr_instance)
+    monkeypatch.setattr(dashboard_actions, "PendingQueueService", lambda db: queue_instance)
+    monkeypatch.setattr(dashboard_actions, "LifecycleService", lambda db: lifecycle_instance)
+
+    response = await dashboard_actions.deny_request(
+        request_id=46,
+        http_request=MagicMock(headers={"accept": "application/json"}),
+        redirect_to="/?tab=pending",
+        reason="Gone upstream",
+        db=mock_db,
+    )
+
+    assert json.loads(cast(bytes, response.body)) == {
+        "status": "ok",
+        "message": "Request denied",
+        "redirect_to": "/?tab=pending",
+    }
+    queue_instance.remove_from_queue.assert_awaited_once_with(46)
+    lifecycle_instance.transition.assert_awaited_once_with(
+        46, RequestStatus.DENIED, reason="Gone upstream"
+    )
+
+
+@pytest.mark.asyncio
 async def test_deny_request_record_skips_overseerr_when_not_linked(mock_db, monkeypatch):
     """Local-only denied transitions should still clear queue and transition state."""
     request_record = MagicMock(id=43, overseerr_request_id=None)

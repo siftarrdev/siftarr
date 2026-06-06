@@ -9,7 +9,11 @@ from unittest.mock import AsyncMock, MagicMock
 
 import httpx
 import pytest
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
+from app.siftarr.models._base import Base
+from app.siftarr.models.activity_log import ActivityLog
 from app.siftarr.models.episode import Episode
 from app.siftarr.models.request import MediaType, RequestStatus
 from app.siftarr.models.request import Request as RequestModel
@@ -39,6 +43,225 @@ def _parse_sse_events(chunks: list[str]) -> list[dict[str, Any]]:
             if line.startswith("data: "):
                 events.append(json.loads(line.removeprefix("data: ")))
     return events
+
+
+class _NoopPlexService:
+    def __init__(self, settings=None):
+        self.settings = settings
+
+
+async def _noop_evaluate_imported_request(*_args, **_kwargs):
+    return None
+
+
+async def _noop_prepare_overseerr_import(*_args, **_kwargs):
+    return None
+
+
+async def _run_import_with_requests(session, overseerr_requests: list[dict[str, Any]]):
+    class FakeOverseerrService:
+        def __init__(self, settings=None):
+            self.settings = settings
+
+        async def get_all_requests(self, status=None):
+            assert status is None
+            return overseerr_requests
+
+        def normalize_request_status(self, status):
+            return str(status).lower()
+
+        def normalize_media_status(self, status):
+            return str(status).lower() if status is not None else "unknown"
+
+    return await settings_service.import_overseerr_requests(
+        session,
+        MagicMock(overseerr_sync_concurrency=1),
+        overseerr_service_cls=FakeOverseerrService,
+        plex_service_cls=_NoopPlexService,
+        evaluate_imported_request_func=_noop_evaluate_imported_request,
+        prepare_overseerr_import_func=_noop_prepare_overseerr_import,
+        logger=MagicMock(),
+    )
+
+
+@pytest.mark.asyncio
+async def test_overseerr_import_marks_missing_upstream_linked_requests_denied():
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+    session_maker = async_sessionmaker(engine, expire_on_commit=False)
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+
+    async with session_maker() as session:
+        stale = RequestModel(
+            external_id="10",
+            media_type=MediaType.MOVIE,
+            title="Stale",
+            status=RequestStatus.PENDING,
+            overseerr_request_id=10,
+            next_retry_at=datetime.now(UTC),
+            retry_count=2,
+        )
+        active = RequestModel(
+            external_id="20",
+            media_type=MediaType.MOVIE,
+            title="Active",
+            status=RequestStatus.PENDING,
+            overseerr_request_id=20,
+            next_retry_at=datetime.now(UTC),
+            retry_count=1,
+        )
+        local_only = RequestModel(
+            external_id="30",
+            media_type=MediaType.MOVIE,
+            title="Local",
+            status=RequestStatus.PENDING,
+            overseerr_request_id=None,
+            next_retry_at=datetime.now(UTC),
+            retry_count=3,
+        )
+        session.add_all([stale, active, local_only])
+        await session.commit()
+
+        await _run_import_with_requests(
+            session,
+            [{"id": 20, "status": "approved", "media": {"tmdbId": 20, "mediaType": "movie"}}],
+        )
+
+        rows = (await session.execute(select(RequestModel))).scalars().all()
+        by_external_id = {row.external_id: row for row in rows}
+        assert by_external_id["10"].status == RequestStatus.DENIED
+        assert by_external_id["10"].overseerr_request_id is None
+        assert by_external_id["10"].next_retry_at is None
+        assert by_external_id["10"].retry_count == 0
+        assert by_external_id["20"].status == RequestStatus.PENDING
+        assert by_external_id["20"].overseerr_request_id == 20
+        assert by_external_id["20"].next_retry_at is not None
+        assert by_external_id["30"].status == RequestStatus.PENDING
+        assert by_external_id["30"].overseerr_request_id is None
+        assert by_external_id["30"].next_retry_at is not None
+
+    await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_overseerr_import_empty_upstream_response_cleans_linked_only():
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+    session_maker = async_sessionmaker(engine, expire_on_commit=False)
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+
+    async with session_maker() as session:
+        linked = RequestModel(
+            external_id="11",
+            media_type=MediaType.MOVIE,
+            title="Linked",
+            status=RequestStatus.PENDING,
+            overseerr_request_id=11,
+            next_retry_at=datetime.now(UTC),
+        )
+        local_only = RequestModel(
+            external_id="12",
+            media_type=MediaType.MOVIE,
+            title="Local",
+            status=RequestStatus.PENDING,
+            overseerr_request_id=None,
+            next_retry_at=datetime.now(UTC),
+        )
+        session.add_all([linked, local_only])
+        await session.commit()
+
+        assert await _run_import_with_requests(session, []) == (0, 0)
+
+        rows = (await session.execute(select(RequestModel))).scalars().all()
+        by_external_id = {row.external_id: row for row in rows}
+        assert by_external_id["11"].status == RequestStatus.DENIED
+        assert by_external_id["11"].overseerr_request_id is None
+        assert by_external_id["11"].next_retry_at is None
+        assert by_external_id["12"].status == RequestStatus.PENDING
+        assert by_external_id["12"].next_retry_at is not None
+
+    await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_overseerr_import_skips_terminal_and_current_workflow_stale_links():
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+    session_maker = async_sessionmaker(engine, expire_on_commit=False)
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+
+    async with session_maker() as session:
+        terminal_and_workflow = [
+            RequestModel(
+                external_id=status.value,
+                media_type=MediaType.MOVIE,
+                title=status.value,
+                status=status,
+                overseerr_request_id=index,
+                next_retry_at=datetime.now(UTC),
+                retry_count=2,
+            )
+            for index, status in enumerate(
+                (
+                    RequestStatus.COMPLETED,
+                    RequestStatus.FAILED,
+                    RequestStatus.DENIED,
+                    RequestStatus.STAGED,
+                    RequestStatus.DOWNLOADING,
+                    RequestStatus.UNRELEASED,
+                ),
+                start=100,
+            )
+        ]
+        session.add_all(terminal_and_workflow)
+        await session.commit()
+
+        assert await _run_import_with_requests(session, []) == (0, 0)
+
+        rows = (await session.execute(select(RequestModel))).scalars().all()
+        for row in rows:
+            assert row.status == RequestStatus(row.external_id)
+            assert row.overseerr_request_id is not None
+            assert row.next_retry_at is not None
+            assert row.retry_count == 2
+        activity = (await session.execute(select(ActivityLog))).scalars().all()
+        assert activity == []
+
+    await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_overseerr_import_stale_cleanup_is_idempotent_on_repeated_syncs():
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+    session_maker = async_sessionmaker(engine, expire_on_commit=False)
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+
+    async with session_maker() as session:
+        stale = RequestModel(
+            external_id="13",
+            media_type=MediaType.MOVIE,
+            title="Stale Once",
+            status=RequestStatus.PENDING,
+            overseerr_request_id=13,
+            next_retry_at=datetime.now(UTC),
+            retry_count=1,
+        )
+        session.add(stale)
+        await session.commit()
+
+        assert await _run_import_with_requests(session, []) == (0, 0)
+        assert await _run_import_with_requests(session, []) == (0, 0)
+
+        row = (await session.execute(select(RequestModel))).scalar_one()
+        assert row.status == RequestStatus.DENIED
+        assert row.overseerr_request_id is None
+        assert row.next_retry_at is None
+        assert row.retry_count == 0
+        activity = (await session.execute(select(ActivityLog))).scalars().all()
+        assert len(activity) == 1
+
+    await engine.dispose()
 
 
 @pytest.mark.asyncio
