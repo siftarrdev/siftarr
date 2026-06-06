@@ -137,6 +137,19 @@ async def verify_api_key(request: Request) -> None:
         )
 
 
+async def require_api_key(request: Request) -> None:
+    """Require a valid non-placeholder API key regardless of browser session/auth toggle."""
+    settings = get_settings()
+    key = _extract_api_key(request)
+    if _api_key_matches(key, settings.api_key):
+        return
+    raise HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Invalid or missing API key",
+        headers={"WWW-Authenticate": "Bearer"},
+    )
+
+
 async def require_auth(request: Request) -> None:
     """FastAPI dependency that requires authentication.
 

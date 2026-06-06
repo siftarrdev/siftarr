@@ -5,11 +5,10 @@ import logging
 import os
 import re
 from datetime import UTC, datetime
-from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
 
-from fastapi import APIRouter, Depends, Form, HTTPException
+from fastapi import APIRouter, Depends, Form, HTTPException, Query
 from fastapi import Request as FastAPIRequest
 from fastapi.responses import JSONResponse, RedirectResponse
 from sqlalchemy import select
@@ -25,7 +24,9 @@ from app.siftarr.models.request import (
     is_active_staging_workflow_status,
 )
 from app.siftarr.models.staged_torrent import StagedTorrent
+from app.siftarr.services import staging_decision_log
 from app.siftarr.services.admin.plex_polling_service import CheckRequestResult, PlexPollingService
+from app.siftarr.services.auth_service import require_api_key
 from app.siftarr.services.integrations.plex_service import PlexService
 from app.siftarr.services.integrations.qbittorrent_service import (
     BulkAddResult,
@@ -137,9 +138,114 @@ def _delete_staging_files(paths: list[tuple[str, str]]) -> None:
             pass
 
 
-STAGING_DECISION_LOG_PATH = Path("/data/staging/decision-log.jsonl")
+STAGING_DECISION_LOG_PATH = staging_decision_log.STAGING_DECISION_LOG_PATH
 
 router = APIRouter(prefix="/staged", tags=["staged"])
+
+
+def _parse_filter_date(value: str | None) -> datetime | None:
+    if not value:
+        return None
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=f"Invalid ISO datetime: {value}") from exc
+    return parsed if parsed.tzinfo else parsed.replace(tzinfo=datetime.now().astimezone().tzinfo)
+
+
+def _entry_text_contains(entry: dict[str, Any], needle: str) -> bool:
+    haystacks = [entry.get("request", {}) if isinstance(entry.get("request"), dict) else {}]
+    haystacks.extend(c for c in entry.get("all_candidates", []) if isinstance(c, dict))
+    haystacks.extend(c for c in entry.get("top_candidates", []) if isinstance(c, dict))
+    selected = entry.get("selected_release")
+    if isinstance(selected, dict):
+        haystacks.append(selected)
+    return any(needle in str(h.get("title") or "").casefold() for h in haystacks)
+
+
+def _entry_has_rule(entry: dict[str, Any], rule_name: str) -> bool:
+    target = rule_name.casefold()
+    candidates = list(entry.get("all_candidates", [])) + list(entry.get("top_candidates", []))
+    for candidate in candidates:
+        if not isinstance(candidate, dict):
+            continue
+        for match in candidate.get("matches", []) or candidate.get("rule_matches", []) or []:
+            if isinstance(match, dict) and target in str(match.get("rule_name") or "").casefold():
+                return True
+    return False
+
+
+@router.get("/decision-log", dependencies=[Depends(require_api_key)])
+async def get_decision_log(
+    page: int = Query(1, ge=1),
+    page_size: int = Query(50, ge=1, le=200),
+    request_id: int | None = None,
+    media_type: str | None = None,
+    event_type: str | None = None,
+    selection_source: str | None = None,
+    date_from: str | None = None,
+    date_to: str | None = None,
+    title: str | None = None,
+    rule_name: str | None = None,
+    outcome: str | None = None,
+) -> dict[str, Any]:
+    """Return normalized staging decision log entries. API key required."""
+    start_date = _parse_filter_date(date_from)
+    end_date = _parse_filter_date(date_to)
+    filters = {
+        "request_id": request_id,
+        "media_type": media_type,
+        "event_type": event_type,
+        "selection_source": selection_source,
+        "date_from": date_from,
+        "date_to": date_to,
+        "title": title,
+        "rule_name": rule_name,
+        "outcome": outcome,
+    }
+    entries = staging_decision_log.read_entries(STAGING_DECISION_LOG_PATH)
+    filtered: list[dict[str, Any]] = []
+    for entry in entries:
+        raw_request = entry.get("request")
+        request_payload: dict[str, Any] = raw_request if isinstance(raw_request, dict) else {}
+        raw_selection = entry.get("selection")
+        selection: dict[str, Any] = raw_selection if isinstance(raw_selection, dict) else {}
+        logged_at = staging_decision_log._parse_dt(entry.get("logged_at"))  # noqa: SLF001
+        if request_id is not None and request_payload.get("id") != request_id:
+            continue
+        if media_type and request_payload.get("media_type") != media_type:
+            continue
+        if event_type and entry.get("event_type") != event_type:
+            continue
+        if outcome and entry.get("outcome") != outcome:
+            continue
+        if (
+            selection_source
+            and selection.get("selection_source") != selection_source
+            and selection.get("source") != selection_source
+        ):
+            continue
+        if start_date and (logged_at is None or logged_at < start_date):
+            continue
+        if end_date and (logged_at is None or logged_at > end_date):
+            continue
+        if title and not _entry_text_contains(entry, title.casefold()):
+            continue
+        if rule_name and not _entry_has_rule(entry, rule_name):
+            continue
+        filtered.append(entry)
+    filtered.sort(key=staging_decision_log.entry_sort_key, reverse=True)
+    total = len(filtered)
+    start = (page - 1) * page_size
+    items = filtered[start : start + page_size]
+    return {
+        "items": items,
+        "page": page,
+        "page_size": page_size,
+        "total": total,
+        "has_next": start + page_size < total,
+        "filters": {k: v for k, v in filters.items() if v is not None},
+    }
 
 
 def _safe_local_redirect_url(redirect_to: str | None, default: str) -> str:
@@ -178,31 +284,16 @@ def log_staging_decision(
     rules_selected_torrent: StagedTorrent | None,
 ) -> None:
     """Append a final staging approval decision for later rule tuning."""
-    STAGING_DECISION_LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
-    event_type = (
-        "manual_override"
-        if rules_selected_torrent is not None and approved_torrent.id != rules_selected_torrent.id
-        else "rule_accept"
-    )
-    payload = {
-        "logged_at": datetime.now(UTC).isoformat(),
-        "event_type": event_type,
-        "request": {
-            "id": request.id,
-            "title": request.title,
-            "media_type": request.media_type.value,
-            "tmdb_id": request.tmdb_id,
-            "tvdb_id": request.tvdb_id,
-            "year": request.year,
-        }
-        if request is not None
-        else None,
-        "approved_torrent": _build_torrent_payload(approved_torrent),
-        "rules_selected_torrent": _build_torrent_payload(rules_selected_torrent),
-    }
-    with STAGING_DECISION_LOG_PATH.open("a", encoding="utf-8") as file_handle:
-        file_handle.write(json.dumps(payload, sort_keys=True))
-        file_handle.write("\n")
+    original_path = staging_decision_log.STAGING_DECISION_LOG_PATH
+    staging_decision_log.STAGING_DECISION_LOG_PATH = STAGING_DECISION_LOG_PATH
+    try:
+        staging_decision_log.log_staging_decision(
+            request=request,
+            approved_torrent=approved_torrent,
+            rules_selected_torrent=rules_selected_torrent,
+        )
+    finally:
+        staging_decision_log.STAGING_DECISION_LOG_PATH = original_path
 
 
 def log_replacement_decision(
@@ -213,27 +304,17 @@ def log_replacement_decision(
     reason: str | None = None,
 ) -> None:
     """Append a replacement decision when an approved torrent is replaced."""
-    STAGING_DECISION_LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
-    payload = {
-        "logged_at": datetime.now(UTC).isoformat(),
-        "event_type": "replacement",
-        "request": {
-            "id": request.id,
-            "title": request.title,
-            "media_type": request.media_type.value,
-            "tmdb_id": request.tmdb_id,
-            "tvdb_id": request.tvdb_id,
-            "year": request.year,
-        }
-        if request is not None
-        else None,
-        "new_torrent": _build_torrent_payload(new_torrent),
-        "replaced_torrent": _build_torrent_payload(replaced_torrent),
-        "reason": reason,
-    }
-    with STAGING_DECISION_LOG_PATH.open("a", encoding="utf-8") as file_handle:
-        file_handle.write(json.dumps(payload, sort_keys=True))
-        file_handle.write("\n")
+    original_path = staging_decision_log.STAGING_DECISION_LOG_PATH
+    staging_decision_log.STAGING_DECISION_LOG_PATH = STAGING_DECISION_LOG_PATH
+    try:
+        staging_decision_log.log_replacement_decision(
+            request=request,
+            new_torrent=new_torrent,
+            replaced_torrent=replaced_torrent,
+            reason=reason,
+        )
+    finally:
+        staging_decision_log.STAGING_DECISION_LOG_PATH = original_path
 
 
 def _wants_json(http_request: FastAPIRequest) -> bool:

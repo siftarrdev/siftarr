@@ -129,7 +129,7 @@ HTTP route layer.
 - `rules.py` — rule management UI/API, including unified rule listing, multi-title testing, modal create/edit actions, export, and import preview/apply flows that merge explicit keep selections from existing and imported rules
 - `settings.py` — settings UI (connection test/save/reset, scheduler interval save/reset, staging toggle, Plex rescan, Overseerr sync, cache/reseed actions, SSE progress streams, API key management, Plex SSO status, non-secret settings backup preview/restore, qBit mover enable/paths/retention settings and manual trigger, and Settings-hosted background job status/manual triggers), uses SettingsStore for DB-backed persistence and keeps the SSO-managed Plex token out of connection saves/resets/backups
 - `stats.py` — protected Stats page and JSON data endpoint for all-time, preset, and custom date ranges, including chart-ready time-series payloads
-- `staged.py` — staged torrent review/approval endpoints; download-status endpoint now returns move tracking fields (status, path, error) for dashboard visibility
+- `staged.py` — staged torrent review/approval endpoints, API-key-only staging decision-log API, and download-status endpoint returning move tracking fields (status, path, error) for dashboard visibility
 - `webhooks.py` — inbound webhook handling
 
 ### `app/siftarr/services/`
@@ -142,6 +142,7 @@ Business logic and integrations, organized into thematic subpackages:
 - `request_service.py` — request loading / validation
 - `stats_service.py` — read-side Stats aggregation and date-range validation for cards, splits, rule outcomes, timing charts, and chart-ready time series (downloads, failures, rule rejections, indexer behavior)
 - `stats_metrics_service.py` — write-only instrumentation helpers for immutable stats metric facts/events consumed by the Stats service/API
+- `staging_decision_log.py` — append/read/normalize the JSONL staging decision log used for rule-tuning diagnostics, including retention and legacy entry compatibility
 
 **`auth/`** — Plex SSO authentication
 - `plex_oauth_service.py` — `PlexOAuthService` wrapping plex.tv API calls (PIN flow, user identity, token validation)
