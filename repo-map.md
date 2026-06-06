@@ -126,10 +126,10 @@ HTTP route layer.
 - `dashboard_api.py` — dashboard JSON endpoints for details/search data, including validated detail-release filter/sort query controls
 - `dashboard_actions.py` — dashboard-triggered actions and mutations
 - `search_sse.py` — SSE streaming endpoints for live search progress; `/requests/{id}/search/stream` supports TV `search_mode=new|full`, while TV scope-specific streams remain compatibility/debug inspect paths
-- `rules.py` — rule management UI/API, including unified rule listing, multi-title testing, modal create/edit actions, export, and import preview/apply flows that merge explicit keep selections from existing and imported rules
+- `rules.py` — rule management UI/API, including unified rule listing, multi-title testing, modal create/edit actions, export, import preview/apply flows that merge explicit keep selections from existing and imported rules, and the Rules-area staging decision-log page for rule tuning
 - `settings.py` — settings UI (connection test/save/reset, scheduler interval save/reset, staging toggle, Plex rescan, Overseerr sync, cache/reseed actions, SSE progress streams, API key management, Plex SSO status, non-secret settings backup preview/restore, qBit mover enable/paths/retention settings and manual trigger, and Settings-hosted background job status/manual triggers), uses SettingsStore for DB-backed persistence and keeps the SSO-managed Plex token out of connection saves/resets/backups
 - `stats.py` — protected Stats page and JSON data endpoint for all-time, preset, and custom date ranges, including chart-ready time-series payloads
-- `staged.py` — staged torrent review/approval endpoints, API-key-only staging decision-log API, and download-status endpoint returning move tracking fields (status, path, error) for dashboard visibility
+- `staged.py` — staged torrent review/approval endpoints, session/API-key staging decision-log API, and download-status endpoint returning move tracking fields (status, path, error) for dashboard visibility
 - `webhooks.py` — inbound webhook handling
 
 ### `app/siftarr/services/`
@@ -202,10 +202,11 @@ Business logic and integrations, organized into thematic subpackages:
 Server-rendered HTML templates.
 
 - `base.html` — shared layout (nav bar shows user avatar/name + logout when logged in)
-- `dashboard.html` — main dashboard UI, including details-modal release result filters/sorting/count controls; move status badges and moved path shown in downloads table
+- `dashboard.html` — main dashboard UI, including details-modal release result filters/sorting/count controls in a compact scrollable release list; move status badges and moved path shown in downloads table
 - `login.html` — Plex SSO login page with JS-driven OAuth PIN flow, denied-admin message, and safe next redirect handling
 - `initial_plex_sync.html` — first-claim setup gate that opens the full Plex sync SSE stream, shows progress/retry/logout, and unlocks protected navigation only after successful completion
 - `rules.html` — single-pane rules UI with unified rule table, multi-title tester, modal create/edit wizard, export, and import preview/merge UI with existing/imported keep selections
+- `rules_decision_log.html` — Rules-area staging decision-log browser with filters, pagination, compact summaries, and expandable raw JSON
 - `rule_form.html` — fallback full-page create/edit rule form
 - `settings.html` — settings UI (manual actions, connection settings with Plex SSO status and API key reveal/copy/regenerate, non-secret backup export/preview/restore, scheduler interval controls/status, background job table/manual triggers, staging toggle, qBit mover settings with enable/path/retention toggles and manual trigger)
 - `stats.html` — Stats UI tab with cards, range selector, empty/error/loading states, and lightweight chart containers for summary splits and time-series trends
@@ -218,6 +219,7 @@ Static assets.
 - `css/tailwind.css` — built Tailwind CSS output (generated, committed)
 - `css/tailwind-input.css` — Tailwind CSS v4 input with CSS-based theme configuration and custom component classes
 - `js/dashboard*.js` and `js/dashboard/` — dashboard client-side behavior, filters, details-modal release controls, staged actions, TV “Search for new”/“Full search” controls, movie release search UX, and SSE progress panel; polls move status fields in download-status endpoint and shows badges/paths
+- `js/staging_decision_log.js` — client-side fetching, URL-backed filters, pagination, and raw JSON expansion for the Rules decision-log page
 - `js/stats.js` — Stats API fetch/range handling and lightweight bar/time-series chart rendering
 - favicon assets
 

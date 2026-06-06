@@ -26,7 +26,7 @@ from app.siftarr.models.request import (
 from app.siftarr.models.staged_torrent import StagedTorrent
 from app.siftarr.services import staging_decision_log
 from app.siftarr.services.admin.plex_polling_service import CheckRequestResult, PlexPollingService
-from app.siftarr.services.auth_service import require_api_key
+from app.siftarr.services.auth_service import require_session_or_api_key
 from app.siftarr.services.integrations.plex_service import PlexService
 from app.siftarr.services.integrations.qbittorrent_service import (
     BulkAddResult,
@@ -175,7 +175,7 @@ def _entry_has_rule(entry: dict[str, Any], rule_name: str) -> bool:
     return False
 
 
-@router.get("/decision-log", dependencies=[Depends(require_api_key)])
+@router.get("/decision-log", dependencies=[Depends(require_session_or_api_key)])
 async def get_decision_log(
     page: int = Query(1, ge=1),
     page_size: int = Query(50, ge=1, le=200),
@@ -189,7 +189,7 @@ async def get_decision_log(
     rule_name: str | None = None,
     outcome: str | None = None,
 ) -> dict[str, Any]:
-    """Return normalized staging decision log entries. API key required."""
+    """Return normalized staging decision log entries for authenticated sessions or API keys."""
     start_date = _parse_filter_date(date_from)
     end_date = _parse_filter_date(date_to)
     filters = {
@@ -311,6 +311,25 @@ def log_replacement_decision(
             request=request,
             new_torrent=new_torrent,
             replaced_torrent=replaced_torrent,
+            reason=reason,
+        )
+    finally:
+        staging_decision_log.STAGING_DECISION_LOG_PATH = original_path
+
+
+def log_manual_discard_decision(
+    *,
+    request: Request | None,
+    rejected_torrent: StagedTorrent,
+    reason: str = "Manually discarded",
+) -> None:
+    """Append a manual discard/rejection decision for later rule tuning."""
+    original_path = staging_decision_log.STAGING_DECISION_LOG_PATH
+    staging_decision_log.STAGING_DECISION_LOG_PATH = STAGING_DECISION_LOG_PATH
+    try:
+        staging_decision_log.log_manual_discard_decision(
+            request=request,
+            rejected_torrent=rejected_torrent,
             reason=reason,
         )
     finally:
@@ -578,6 +597,7 @@ async def _discard_torrent(torrent: StagedTorrent, db: AsyncSession) -> bool:
     # Snapshot paths before any commit that might expire the torrent object
     torrent_path = torrent.torrent_path
     json_path = torrent.json_path
+    request: Request | None = None
 
     if torrent.request_id:
         result = await db.execute(select(Request).where(Request.id == torrent.request_id))
@@ -595,6 +615,7 @@ async def _discard_torrent(torrent: StagedTorrent, db: AsyncSession) -> bool:
                 await lifecycle_service.transition(torrent.request_id, RequestStatus.PENDING)
 
     torrent.status = "discarded"
+    log_manual_discard_decision(request=request, rejected_torrent=torrent)
 
     try:
         if os.path.exists(torrent_path):

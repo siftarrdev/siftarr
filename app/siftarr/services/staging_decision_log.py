@@ -241,6 +241,33 @@ def log_replacement_decision(
     )
 
 
+def log_manual_discard_decision(
+    *,
+    request: Request | None,
+    rejected_torrent: StagedTorrent,
+    reason: str = "Manually discarded",
+) -> None:
+    rejected = staged_torrent_payload(rejected_torrent)
+    if rejected:
+        rejected["category"] = "rejected"
+    append_entry(
+        build_decision_entry(
+            event_type="manual_reject",
+            outcome="rejected",
+            request=request,
+            selection={
+                "source": rejected_torrent.selection_source,
+                "selection_source": rejected_torrent.selection_source,
+                "reason": reason,
+            },
+            selected_release=rejected,
+            top_candidates=[rejected] if rejected else [],
+            all_candidates=[rejected] if rejected else [],
+            failures=[{"reason": reason, "rejected_release": rejected}],
+        )
+    )
+
+
 def log_evaluations(
     *,
     request: Request,
