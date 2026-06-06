@@ -571,6 +571,7 @@ class TVDecisionService:
         evaluated_releases: list[ReleaseEvaluation] = []
         passing_releases: list[tuple[int, int, ReleaseEvaluation]] = []
         errors: list[str] = []
+        seen_exact_target_keys: set[tuple[int, int, str]] = set()
 
         for (season, episode), search_result in zip(targets, search_results, strict=False):
             if isinstance(search_result, Exception):
@@ -592,13 +593,26 @@ class TVDecisionService:
 
             for release in search_result.releases:
                 dedup_key = self._release_dedup_key(release)
-                if dedup_key in seen_keys:
+                is_exact_target_match = is_exact_single_episode_release(
+                    release.title,
+                    season,
+                    episode,
+                )
+                already_seen = dedup_key in seen_keys
+                if already_seen and not is_exact_target_match:
                     continue
-                seen_keys.add(dedup_key)
 
                 evaluation = rule_engine.evaluate(release)
-                evaluated_releases.append(evaluation)
-                if evaluation.passed and self._is_exact_episode_match(evaluation, season, episode):
+                if not already_seen:
+                    seen_keys.add(dedup_key)
+                    evaluated_releases.append(evaluation)
+                if not evaluation.passed or not is_exact_target_match:
+                    continue
+                exact_target_key = (season, episode, dedup_key)
+                if exact_target_key in seen_exact_target_keys:
+                    continue
+                seen_exact_target_keys.add(exact_target_key)
+                if self._is_exact_episode_match(evaluation, season, episode):
                     passing_releases.append((season, episode, evaluation))
 
         if progress_callback is not None:
