@@ -128,6 +128,38 @@ class TestStagedRouter:
         )
 
     @pytest.mark.asyncio
+    async def test_discard_staged_torrent_logs_manual_rejection(self, mock_db, monkeypatch):
+        """Discarding a staged torrent should log a manual rejection decision."""
+        torrent = MagicMock()
+        torrent.id = 7
+        torrent.request_id = 8
+        torrent.status = "staged"
+        torrent.torrent_path = "/tmp/reject.torrent"
+        torrent.json_path = "/tmp/reject.json"
+
+        request = MagicMock()
+        request.id = 8
+        request.status = RequestStatus.PENDING
+
+        torrent_result = MagicMock()
+        torrent_result.scalar_one_or_none.return_value = torrent
+        request_result = MagicMock()
+        request_result.scalar_one_or_none.return_value = request
+        mock_db.execute.side_effect = [torrent_result, request_result]
+
+        log_decision = MagicMock()
+        monkeypatch.setattr(staged, "log_manual_discard_decision", log_decision)
+        monkeypatch.setattr(staged.os.path, "exists", MagicMock(return_value=False))
+
+        response = await staged.discard_staged_torrent(
+            7, http_request=MagicMock(headers={}), db=mock_db
+        )
+
+        assert response.status_code == 303
+        assert torrent.status == "discarded"
+        log_decision.assert_called_once_with(request=request, rejected_torrent=torrent)
+
+    @pytest.mark.asyncio
     async def test_approve_uses_stored_download_url_when_file_missing(
         self, mock_db, monkeypatch, tmp_path
     ):
@@ -1002,6 +1034,8 @@ class TestStagedRouter:
         mock_db.execute.return_value = torrent_result
 
         monkeypatch.setattr(staged.os.path, "exists", MagicMock(return_value=False))
+        log_decision = MagicMock()
+        monkeypatch.setattr(staged, "log_manual_discard_decision", log_decision)
 
         response = await staged.bulk_staged_action(
             action="discard",
@@ -1013,6 +1047,9 @@ class TestStagedRouter:
         assert response.status_code == 200
         assert torrent_one.status == "discarded"
         assert torrent_two.status == "discarded"
+        assert log_decision.call_count == 2
+        log_decision.assert_any_call(request=None, rejected_torrent=torrent_one)
+        log_decision.assert_any_call(request=None, rejected_torrent=torrent_two)
 
     @pytest.mark.asyncio
     async def test_replace_staged_torrent_uses_redirect_to(self, mock_db, monkeypatch):

@@ -317,6 +317,25 @@ def log_replacement_decision(
         staging_decision_log.STAGING_DECISION_LOG_PATH = original_path
 
 
+def log_manual_discard_decision(
+    *,
+    request: Request | None,
+    rejected_torrent: StagedTorrent,
+    reason: str = "Manually discarded",
+) -> None:
+    """Append a manual discard/rejection decision for later rule tuning."""
+    original_path = staging_decision_log.STAGING_DECISION_LOG_PATH
+    staging_decision_log.STAGING_DECISION_LOG_PATH = STAGING_DECISION_LOG_PATH
+    try:
+        staging_decision_log.log_manual_discard_decision(
+            request=request,
+            rejected_torrent=rejected_torrent,
+            reason=reason,
+        )
+    finally:
+        staging_decision_log.STAGING_DECISION_LOG_PATH = original_path
+
+
 def _wants_json(http_request: FastAPIRequest) -> bool:
     return "application/json" in http_request.headers.get("accept", "")
 
@@ -578,6 +597,7 @@ async def _discard_torrent(torrent: StagedTorrent, db: AsyncSession) -> bool:
     # Snapshot paths before any commit that might expire the torrent object
     torrent_path = torrent.torrent_path
     json_path = torrent.json_path
+    request: Request | None = None
 
     if torrent.request_id:
         result = await db.execute(select(Request).where(Request.id == torrent.request_id))
@@ -595,6 +615,7 @@ async def _discard_torrent(torrent: StagedTorrent, db: AsyncSession) -> bool:
                 await lifecycle_service.transition(torrent.request_id, RequestStatus.PENDING)
 
     torrent.status = "discarded"
+    log_manual_discard_decision(request=request, rejected_torrent=torrent)
 
     try:
         if os.path.exists(torrent_path):

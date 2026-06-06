@@ -119,6 +119,48 @@ def test_log_staging_decision_records_manual_override(tmp_path):
     assert payload["rules_selected_release"]["id"] == rules_selected_torrent.id
 
 
+def test_log_manual_discard_decision_records_rejection(tmp_path):
+    """Manually discarding a staged torrent should log a rejection event."""
+    log_path = tmp_path / "decision-log.jsonl"
+    request = Request(
+        title="Rejected Movie",
+        media_type=MediaType.MOVIE,
+        tmdb_id=789,
+        tvdb_id=None,
+        year=2025,
+    )
+    request.id = 7
+    torrent = StagedTorrent(
+        request_id=7,
+        torrent_path="/tmp/rejected.torrent",
+        json_path="/tmp/rejected.json",
+        original_filename="rejected",
+        title="Rejected.Movie.2025.1080p",
+        size=3_000,
+        indexer="Indexer C",
+        score=65,
+        selection_source="manual",
+        status="discarded",
+    )
+    torrent.id = 13
+
+    original_path = staged.STAGING_DECISION_LOG_PATH
+    staged.STAGING_DECISION_LOG_PATH = log_path
+    try:
+        staged.log_manual_discard_decision(request=request, rejected_torrent=torrent)
+    finally:
+        staged.STAGING_DECISION_LOG_PATH = original_path
+
+    payload = json.loads(log_path.read_text(encoding="utf-8").strip())
+    assert payload["event_type"] == "manual_reject"
+    assert payload["outcome"] == "rejected"
+    assert payload["request"]["id"] == request.id
+    assert payload["selected_release"]["id"] == torrent.id
+    assert payload["selected_release"]["category"] == "rejected"
+    assert payload["selection"]["reason"] == "Manually discarded"
+    assert payload["failures"][0]["rejected_release"]["id"] == torrent.id
+
+
 def test_normalizes_legacy_and_preserves_full_links():
     legacy = {
         "logged_at": "2026-01-01T00:00:00+00:00",
