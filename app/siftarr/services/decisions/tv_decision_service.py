@@ -169,6 +169,20 @@ class TVDecisionService:
         return sorted(seasons), episodes_by_season
 
     @staticmethod
+    def _get_pack_eligible_seasons(request: Request) -> list[int]:
+        """Return requested seasons with no already-resolved episode rows."""
+        eligible: list[int] = []
+        for season in request.seasons:
+            episodes = list(getattr(season, "episodes", []) or [])
+            if any(
+                getattr(episode, "status", RequestStatus.PENDING) in ACTIONABLE_EXCLUDED_STATUSES
+                for episode in episodes
+            ):
+                continue
+            eligible.append(season.season_number)
+        return sorted(eligible)
+
+    @staticmethod
     def _get_sweep_seasons(
         requested_seasons: Sequence[int], requested_episodes: dict[int, list[int]]
     ) -> list[int]:
@@ -216,23 +230,23 @@ class TVDecisionService:
     @staticmethod
     def _get_actionable_pack_coverage(
         evaluation: ReleaseEvaluation,
-        actionable_seasons: set[int],
+        pack_eligible_seasons: set[int],
         all_requested_seasons: set[int],
     ) -> set[int]:
-        """Return pack coverage only when the torrent avoids completed requested seasons."""
+        """Return pack coverage only for seasons with zero resolved episodes."""
         coverage = cached_parse_release_coverage(evaluation.release.title)
         if coverage.episode_number is not None:
             return set()
 
         if coverage.is_complete_series:
-            if all_requested_seasons - actionable_seasons:
+            if all_requested_seasons - pack_eligible_seasons:
                 return set()
-            return set(actionable_seasons)
+            return set(pack_eligible_seasons)
 
         covered_requested_seasons = set(coverage.season_numbers).intersection(all_requested_seasons)
         if not covered_requested_seasons:
             return set()
-        if not covered_requested_seasons <= actionable_seasons:
+        if not covered_requested_seasons <= pack_eligible_seasons:
             return set()
         return covered_requested_seasons
 
@@ -804,6 +818,7 @@ class TVDecisionService:
         actionable_seasons, actionable_episodes = self._get_loaded_episode_targets(
             request, actionable_only=True
         )
+        pack_eligible_seasons = self._get_pack_eligible_seasons(request)
         requested_seasons = self._get_sweep_seasons(requested_seasons, requested_episodes)
 
         logger.info(
@@ -876,6 +891,7 @@ class TVDecisionService:
 
         pack_candidates: list[tuple[ReleaseEvaluation, set[int]]] = []
         actionable_season_set = set(actionable_seasons)
+        pack_eligible_season_set = set(pack_eligible_seasons)
         if not full_search:
             (
                 pack_evaluations,
@@ -893,7 +909,7 @@ class TVDecisionService:
             for evaluation in pack_passing:
                 coverage = self._get_actionable_pack_coverage(
                     evaluation,
-                    actionable_season_set,
+                    pack_eligible_season_set,
                     all_requested_seasons,
                 )
                 if not coverage:
@@ -963,7 +979,7 @@ class TVDecisionService:
             for evaluation in pack_passing:
                 coverage = self._get_actionable_pack_coverage(
                     evaluation,
-                    actionable_season_set,
+                    pack_eligible_season_set,
                     all_requested_seasons,
                 )
                 if not coverage:
