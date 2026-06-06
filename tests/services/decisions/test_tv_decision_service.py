@@ -332,6 +332,33 @@ class TestProcessRequest:
         assert set_episode.await_args_list[1].args == (1, 1, 2, RequestStatus.DOWNLOADING)
 
     @pytest.mark.asyncio
+    async def test_exact_episode_fallback_does_not_dedup_wrong_target_results(self, service):
+        ep1 = _make_release(title="Show.S01E01.1080p", info_hash="s01e01")
+        ep2 = _make_release(title="Show.S01E02.1080p", info_hash="s01e02")
+        ep3 = _make_release(title="Show.S01E03.1080p", info_hash="s01e03")
+        service.prowlarr.search_tv_episode_exact = AsyncMock(
+            return_value=ProwlarrSearchResult(releases=[ep1, ep2, ep3], query_time_ms=10)
+        )
+        request = _make_request(seasons=[1], episodes={1: [1, 2, 3]})
+        rule_engine = MagicMock()
+        rule_engine.evaluate.side_effect = lambda release: _passing_eval(release, score=60)
+
+        _, passing, _ = await service._search_exact_episode_fallbacks_and_evaluate(
+            request,
+            rule_engine,
+            [(1, 1), (1, 2), (1, 3)],
+            seen_keys=set(),
+        )
+
+        assert [
+            (season, episode, evaluation.release.title) for season, episode, evaluation in passing
+        ] == [
+            (1, 1, "Show.S01E01.1080p"),
+            (1, 2, "Show.S01E02.1080p"),
+            (1, 3, "Show.S01E03.1080p"),
+        ]
+
+    @pytest.mark.asyncio
     async def test_default_search_partial_pack_coverage_falls_back_for_uncovered_episode(
         self, service, mock_db
     ):
