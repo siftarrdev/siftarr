@@ -1,3 +1,5 @@
+from typing import cast
+
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
@@ -51,7 +53,14 @@ async def test_search_history_service_records_compact_candidates():
 
         rows = (await db.execute(select(SearchRunCandidate))).scalars().all()
         assert len(rows) == 1
-        assert rows[0].rule_evidence["matches"][0]["rule_name"] == "1080p"
-        assert rows[0].summary["title"] == release.title
-        assert "download_url" not in rows[0].summary
+        rule_evidence = rows[0].rule_evidence
+        summary = rows[0].summary
+        assert rule_evidence is not None
+        assert summary is not None
+        matches = rule_evidence["matches"]
+        assert isinstance(matches, list)
+        first_match = cast(dict[str, object], matches[0])
+        assert first_match["rule_name"] == "1080p"
+        assert summary["title"] == release.title
+        assert "download_url" not in summary
         assert run.counts == {"total": 1, "passed": 1, "rejected": 0, "staged": 0, "sent": 0}

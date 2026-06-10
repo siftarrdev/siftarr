@@ -1,6 +1,7 @@
 """Helpers for persisting searched releases."""
 
 import logging
+from typing import Any, cast
 
 from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -159,7 +160,7 @@ async def store_search_results(
                 evaluation.rejection_reason[:500] if evaluation.rejection_reason else None
             )
             existing.rule_evidence = rule_evidence
-            existing.parse_metadata = parse_metadata
+            cast(Any, existing).release_parse_metadata = parse_metadata
             existing.search_source = source
             records_by_key[dedupe_key] = existing
             matched_keys.add(dedupe_key)
@@ -190,7 +191,7 @@ async def store_search_results(
                 if evaluation.rejection_reason
                 else None,
                 rule_evidence=rule_evidence,
-                parse_metadata=parse_metadata,
+                release_parse_metadata=parse_metadata,
                 search_source=source,
             )
             db.add(record)

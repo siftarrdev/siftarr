@@ -6,6 +6,8 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from alembic import command
+from alembic.config import Config
 from fastapi import FastAPI
 
 
@@ -80,7 +82,7 @@ class TestInitDb:
     @pytest.mark.asyncio
     async def test_stamps_alembic_revision(self, tmp_path):
         """init_db should write the current Alembic revision to the version table."""
-        from app.siftarr.database import CURRENT_ALEMBIC_REVISION, init_db
+        from app.siftarr.database import get_alembic_head_revision, init_db
 
         db_path = tmp_path / "stamp.db"
         database_url = f"sqlite+aiosqlite:///{db_path}"
@@ -97,7 +99,56 @@ class TestInitDb:
                 "SELECT version_num FROM alembic_version LIMIT 1"
             ).fetchone()
             assert revision is not None
-            assert revision[0] == CURRENT_ALEMBIC_REVISION
+            assert revision[0] == get_alembic_head_revision()
+        finally:
+            connection.close()
+
+    @pytest.mark.asyncio
+    async def test_upgrades_existing_database_to_head(self, tmp_path):
+        """init_db should apply migrations instead of stamping over old schemas."""
+        from app.siftarr.database import get_alembic_head_revision, init_db
+
+        db_path = tmp_path / "production.db"
+        sync_url = f"sqlite:///{db_path}"
+        database_url = f"sqlite+aiosqlite:///{db_path}"
+        config = Config("alembic.ini")
+        config.set_main_option("sqlalchemy.url", sync_url)
+        command.upgrade(config, "f03b57417775")
+
+        connection = sqlite3.connect(db_path)
+        try:
+            connection.execute("DROP TABLE IF EXISTS search_run_candidates")
+            connection.execute("DROP TABLE IF EXISTS search_runs")
+            connection.execute("ALTER TABLE releases DROP COLUMN rule_evidence")
+            connection.execute("ALTER TABLE releases DROP COLUMN parse_metadata")
+            connection.execute("UPDATE alembic_version SET version_num = 'f03b57417775'")
+            connection.commit()
+        finally:
+            connection.close()
+
+        with patch(
+            "app.siftarr.database.get_settings",
+            return_value=SimpleNamespace(database_url=database_url),
+        ):
+            await init_db()
+
+        connection = sqlite3.connect(db_path)
+        try:
+            revision = connection.execute(
+                "SELECT version_num FROM alembic_version LIMIT 1"
+            ).fetchone()
+            release_columns = {row[1] for row in connection.execute("PRAGMA table_info(releases)")}
+            tables = {
+                row[0]
+                for row in connection.execute(
+                    "SELECT name FROM sqlite_master WHERE type='table'"
+                ).fetchall()
+            }
+            assert revision == (get_alembic_head_revision(),)
+            assert "rule_evidence" in release_columns
+            assert "parse_metadata" in release_columns
+            assert "search_runs" in tables
+            assert "search_run_candidates" in tables
         finally:
             connection.close()
 
@@ -209,19 +260,19 @@ class TestDatabaseHelpers:
         assert Base is not None
 
     def test_current_revision_is_defined(self):
-        """CURRENT_ALEMBIC_REVISION should be a non-empty string."""
-        from app.siftarr.database import CURRENT_ALEMBIC_REVISION
+        """Current Alembic head should be discoverable dynamically."""
+        from app.siftarr.database import CURRENT_ALEMBIC_REVISION, get_alembic_head_revision
 
-        assert CURRENT_ALEMBIC_REVISION == "f03b57417775"
+        assert CURRENT_ALEMBIC_REVISION == "head"
+        assert get_alembic_head_revision() == "a1b2c3d4e5f6"
 
-    def test_alembic_history_is_single_initial_revision(self):
-        """Alembic history should contain only the complete initial migration."""
+    def test_alembic_history_supports_incremental_revisions(self):
+        """Alembic history should include focused incremental migrations."""
 
         versions = list(Path("db/alembic/versions").glob("*.py"))
-        assert len(versions) == 1, versions
+        assert len(versions) >= 2, versions
 
-        text = versions[0].read_text()
-        assert 'revision: str = "f03b57417775"' in text
-        assert "down_revision: str | None = None" in text
-        assert "Base.metadata.create_all" in text
-        assert "search_source" in text or "Base.metadata.create_all" in text
+        revisions = {path.read_text() for path in versions}
+        assert any('revision: str = "f03b57417775"' in text for text in revisions)
+        assert any('down_revision: str | None = "f03b57417775"' in text for text in revisions)
+        assert any('revision: str = "a1b2c3d4e5f6"' in text for text in revisions)

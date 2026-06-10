@@ -69,8 +69,9 @@ Before using `gh` commands (PRs, issues, etc.), verify the active account is cor
 
 ## Database guidance
 
-- The database schema is currently in flux; keep migrations focused and compact.
-- If migration history is collapsed, reset or stamp local databases as instructed in the related PR.
+- Production schema changes must use focused, compact Alembic migrations.
+- Docker startup applies Alembic migrations to `head`; do not stamp production databases over unapplied revisions.
+- Fresh local databases should be initialized with `uv run alembic upgrade head`.
 
 ## Repo Map Maintenance
 

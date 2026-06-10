@@ -1,7 +1,7 @@
 """Helpers for recording compact search-run history."""
 
-from collections.abc import Iterable
-from typing import Any
+from collections.abc import Iterable, Mapping
+from typing import Any, cast
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -45,9 +45,12 @@ class SearchHistoryService:
     def normalize_failures(failures: Iterable[object] | None) -> list[dict[str, object]]:
         normalized: list[dict[str, object]] = []
         for failure in failures or []:
-            if isinstance(failure, dict):
-                reason = str(failure.get("reason") or failure.get("message") or failure)
-                category = str(failure.get("category") or "failure")
+            if isinstance(failure, Mapping):
+                failure_mapping = cast(Mapping[object, object], failure)
+                reason = str(
+                    failure_mapping.get("reason") or failure_mapping.get("message") or failure
+                )
+                category = str(failure_mapping.get("category") or "failure")
             else:
                 reason = str(failure)
                 category = "failure"
@@ -113,6 +116,7 @@ class SearchHistoryService:
             stored = stored_releases_by_key.get(key)
             stored_id = getattr(stored, "id", None)
             snapshot = compact_candidate_snapshot(evaluation, stored_release_id=stored_id)
+            score = snapshot.get("score", 0)
             self.db.add(
                 SearchRunCandidate(
                     search_run_id=run.id,
@@ -120,7 +124,7 @@ class SearchHistoryService:
                     stored_release_id=stored_id,
                     title=evaluation.release.title,
                     status=str(snapshot["status"]),
-                    score=int(snapshot["score"]),
+                    score=int(score) if isinstance(score, int | str) else 0,
                     summary=snapshot,
                     rule_evidence=snapshot["rule_evidence"],
                     parse_metadata=snapshot["parse_metadata"],
@@ -317,6 +321,6 @@ class SearchHistoryService:
             "status": "passed" if release.passed_rules else "rejected",
             "rejection_reason": release.rejection_reason,
             "rule_evidence": release.rule_evidence or {},
-            "parse_metadata": release.parse_metadata or {},
+            "parse_metadata": release.release_parse_metadata or {},
             "source": "stored_release",
         }

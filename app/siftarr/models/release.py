@@ -56,7 +56,9 @@ class Release(Base):
     passed_rules: Mapped[bool] = mapped_column(Boolean, default=False)
     rejection_reason: Mapped[str | None] = mapped_column(String(500), nullable=True)
     rule_evidence: Mapped[dict[str, object] | None] = mapped_column(JSON, nullable=True)
-    parse_metadata: Mapped[dict[str, object] | None] = mapped_column(JSON, nullable=True)
+    release_parse_metadata: Mapped[dict[str, object] | None] = mapped_column(
+        "parse_metadata", JSON, nullable=True
+    )
 
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now)
 
