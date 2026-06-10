@@ -39,6 +39,7 @@ from app.siftarr.services.lifecycle.lifecycle_service import LifecycleService
 from app.siftarr.services.lifecycle.overseerr_sync_service import (
     approve_overseerr_request_best_effort,
 )
+from app.siftarr.services.search_history_service import SearchHistoryService
 from app.siftarr.services.stats_metrics_service import record_staged_release_fact
 
 logger = logging.getLogger(__name__)
@@ -246,6 +247,17 @@ async def get_decision_log(
         "has_next": start + page_size < total,
         "filters": {k: v for k, v in filters.items() if v is not None},
     }
+
+
+@router.get("/{torrent_id}/alternatives", dependencies=[Depends(require_session_or_api_key)])
+async def get_staged_alternatives(
+    torrent_id: int,
+    db: AsyncSession = Depends(get_db),
+) -> JSONResponse:
+    payload = await SearchHistoryService(db).staged_alternatives(torrent_id)
+    if payload is None:
+        raise HTTPException(status_code=404, detail="Staged torrent not found")
+    return JSONResponse(payload)
 
 
 def _safe_local_redirect_url(redirect_to: str | None, default: str) -> str:

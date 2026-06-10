@@ -287,6 +287,7 @@ async function openRequestDetails(requestId, explicitIndex = null, options = {})
         window.currentRequestId = data.request.id;
         window.currentRequestMediaType = data.request.media_type || 'movie';
         window.updateActiveStageBanner(data);
+        window.loadSearchHistory();
 
         const cacheIndicator = document.getElementById('release-cache-indicator');
         const cacheIndicatorText = document.getElementById('release-cache-indicator-text');
@@ -343,6 +344,43 @@ async function openRequestDetails(requestId, explicitIndex = null, options = {})
         releases.innerHTML = '<div class="text-red-400 text-sm">Failed to load request details. Check that Overseerr is reachable.</div>';
     }
 }
+
+function renderRuleEvidence(evidence) {
+    const matches = (evidence && evidence.matches) || [];
+    if (!matches.length) return '<span class="text-gray-500">No rule details</span>';
+    return matches.slice(0, 8).map(m => {
+        const ok = m.matched ? 'badge-green' : 'badge-red';
+        const delta = Number(m.score_delta || 0);
+        return `<span class="badge ${ok}" title="${window.escapeHtml(m.rule_type || m.effect || '')}">${window.escapeHtml(m.rule_name || 'Rule')} ${delta ? `(${delta > 0 ? '+' : ''}${delta})` : ''}</span>`;
+    }).join(' ');
+}
+
+async function loadSearchHistory() {
+    if (!window.currentRequestId) return;
+    const container = document.getElementById('request-details-search-history');
+    if (!container) return;
+    container.innerHTML = '<div class="text-gray-500">Loading search history...</div>';
+    try {
+        const response = await fetch(`/requests/${window.currentRequestId}/search-history?limit=5`);
+        if (!response.ok) throw new Error(`Server error: ${response.status}`);
+        const data = await response.json();
+        const runs = data.runs || [];
+        if (!runs.length) {
+            container.innerHTML = '<div class="text-gray-500">No search history yet.</div>';
+            return;
+        }
+        container.innerHTML = runs.map(run => {
+            const counts = run.counts || {};
+            const candidates = (run.candidates || []).slice(0, 5).map(c => `<details class="mt-2 rounded-lg border border-gray-700/50 bg-surface-900/60 p-2"><summary class="cursor-pointer text-gray-200">${window.escapeHtml(c.title || 'Candidate')} <span class="text-emerald-400">Score ${window.escapeHtml(String(c.score ?? 0))}</span> <span class="text-gray-500">${window.escapeHtml(c.status || '')}</span></summary><div class="mt-2 flex flex-wrap gap-1">${renderRuleEvidence(c.rule_evidence || {})}</div>${c.rejection_reason ? `<div class="mt-2 text-red-300">${window.escapeHtml(c.rejection_reason)}</div>` : ''}</details>`).join('');
+            return `<div class="mb-3 rounded-lg border border-gray-700/60 bg-surface-900/70 p-3"><div class="flex flex-wrap items-center gap-2"><span class="badge badge-gray">${window.escapeHtml(run.status || 'unknown')}</span><span class="badge badge-gray">${window.escapeHtml(run.outcome || '')}</span><span>${window.escapeHtml(run.started_at || '')}</span><span>${window.escapeHtml(run.source || '')}</span><span>${window.escapeHtml(run.search_mode || '')}</span></div><div class="mt-2 text-xs text-gray-400">Total ${counts.total ?? 0} · Passed ${counts.passed ?? 0} · Rejected ${counts.rejected ?? 0} · Staged ${counts.staged ?? 0} · Sent ${counts.sent ?? 0}</div>${run.error ? `<div class="mt-2 text-red-300">${window.escapeHtml(run.error)}</div>` : ''}${candidates}</div>`;
+        }).join('');
+    } catch (err) {
+        container.innerHTML = `<div class="text-red-400">Failed to load search history: ${window.escapeHtml(err.message || 'Unknown error')}</div>`;
+    }
+}
+
+window.loadSearchHistory = loadSearchHistory;
+window.renderRuleEvidence = renderRuleEvidence;
 
 async function searchTvRequest(mode = 'new') {
     if (!window.currentRequestId) return;

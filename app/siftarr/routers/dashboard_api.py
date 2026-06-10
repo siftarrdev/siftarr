@@ -1,6 +1,7 @@
 """Dashboard JSON API router for request details, search, and state mutations."""
 
 import logging
+from datetime import datetime
 from typing import Any
 
 from fastapi import APIRouter, BackgroundTasks, Depends
@@ -24,10 +25,17 @@ from app.siftarr.services.dashboard.tv_details_service import (
 )
 from app.siftarr.services.integrations.plex_service import PlexService
 from app.siftarr.services.request_service import load_request_or_404, validate_tv_request
+from app.siftarr.services.search_history_service import SearchHistoryService
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/requests", tags=["dashboard-api"])
+
+
+def _parse_datetime(value: str | None) -> datetime | None:
+    if not value:
+        return None
+    return datetime.fromisoformat(value.replace("Z", "+00:00"))
 
 
 @router.get("/{request_id}/details")
@@ -56,6 +64,36 @@ async def request_details(
         direction=direction,
     )
     return JSONResponse(serialize_request_details_response(details), background=background_tasks)
+
+
+@router.get("/{request_id}/search-history")
+async def request_search_history(
+    request_id: int,
+    db: AsyncSession = Depends(get_db),
+    offset: int = 0,
+    limit: int = 20,
+    status: str | None = None,
+    outcome: str | None = None,
+    source: str | None = None,
+    search_mode: str | None = None,
+    started_after: str | None = None,
+    started_before: str | None = None,
+) -> JSONResponse:
+    """Return paginated search history for one request."""
+    await load_request_or_404(db, request_id)
+    service = SearchHistoryService(db)
+    payload = await service.list_runs(
+        request_id,
+        offset=offset,
+        limit=limit,
+        status=status,
+        outcome=outcome,
+        source=source,
+        search_mode=search_mode,
+        started_after=_parse_datetime(started_after),
+        started_before=_parse_datetime(started_before),
+    )
+    return JSONResponse(payload)
 
 
 @router.post("/{request_id}/search")
