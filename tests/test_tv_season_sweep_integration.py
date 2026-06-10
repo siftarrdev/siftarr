@@ -150,6 +150,46 @@ class FakeCappedEpisodeGapProwlarr(ProwlarrService):
         return ProwlarrSearchResult(releases=releases, query_time_ms=10)
 
 
+class FakePartialSeasonPackProwlarr(ProwlarrService):
+    def __init__(self) -> None:
+        super().__init__(Settings())
+        self.swept_seasons: list[int] = []
+        self.exact_episode_calls: list[tuple[int, int]] = []
+
+    async def search_tv_season_sweep(
+        self,
+        title: str,
+        season: int,
+        imdbid: str | int | None = None,
+        tvdbid: int | None = None,
+        categories: list[int] | None = None,
+        cacheable: bool = True,
+        request_id: int | None = None,
+        progress_callback=None,
+    ) -> ProwlarrSearchResult:
+        self.swept_seasons.append(season)
+        return ProwlarrSearchResult(
+            releases=[_release("Show.S01.1080p", 10, info_hash="season-s01")],
+            query_time_ms=10,
+        )
+
+    async def search_tv_episode_exact(
+        self,
+        title: str,
+        season: int,
+        episode: int,
+        categories: list[int] | None = None,
+        cacheable: bool = True,
+        request_id: int | None = None,
+        progress_callback=None,
+    ) -> ProwlarrSearchResult:
+        self.exact_episode_calls.append((season, episode))
+        return ProwlarrSearchResult(
+            releases=[_release("Show.S01E02.1080p", 11, info_hash="exact-s01e02")],
+            query_time_ms=10,
+        )
+
+
 class FakeCappedGeorgieProwlarr(ProwlarrService):
     def __init__(self) -> None:
         super().__init__(Settings())
@@ -306,6 +346,140 @@ async def test_tv_request_season_sweep_persists_buckets_and_statuses(monkeypatch
                 release["title"] == "Show.S01-S02.1080p"
                 for release in details.tv_info.releases_by_season["2"]
             )
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_partial_season_pack_persisted_but_exact_missing_episode_selected(
+    monkeypatch,
+) -> None:
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+    session_maker = async_sessionmaker(engine, expire_on_commit=False)
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+
+    try:
+        async with session_maker() as db:
+            request = Request(
+                external_id="tv-partial-pack",
+                media_type=MediaType.TV,
+                tmdb_id=999,
+                tvdb_id=12345,
+                title="Show",
+                year=2024,
+                status=RequestStatus.PENDING,
+            )
+            season = Season(season_number=1, status=RequestStatus.PENDING)
+            season.episodes = [
+                Episode(
+                    episode_number=1,
+                    title="S1E1",
+                    air_date=date(2024, 1, 1),
+                    status=RequestStatus.COMPLETED,
+                ),
+                Episode(episode_number=2, title="S1E2", air_date=date(2024, 1, 2)),
+            ]
+            request.seasons = [season]
+            db.add(request)
+            await db.commit()
+
+            class FakeStagingService:
+                def __init__(self, _db):
+                    pass
+
+                async def use_releases(self, _request, _releases, *, selection_source: str):
+                    return {"status": "staged", "message": "staged"}
+
+            monkeypatch.setattr(
+                "app.siftarr.services.decisions.tv_decision_service.StagingService",
+                FakeStagingService,
+            )
+
+            prowlarr = FakePartialSeasonPackProwlarr()
+            service = TVDecisionService(db, prowlarr, QbittorrentService())
+
+            async def fake_rule_engine() -> RejectNamedRuleEngine:
+                return RejectNamedRuleEngine()
+
+            monkeypatch.setattr(service, "_get_rule_engine", fake_rule_engine)
+
+            result = await service.process_request(request.id)
+
+            assert result["status"] == "staged"
+            assert [release["title"] for release in result["selected_releases"]] == [
+                "Show.S01E02.1080p"
+            ]
+            assert prowlarr.swept_seasons == [1]
+            assert prowlarr.exact_episode_calls == [(1, 2)]
+
+            stored = (await db.execute(select(Release))).scalars().all()
+            assert {release.title for release in stored} == {"Show.S01.1080p", "Show.S01E02.1080p"}
+
+            episodes = (await db.execute(select(Episode))).scalars().all()
+            statuses = {episode.episode_number: episode.status for episode in episodes}
+            assert statuses == {1: RequestStatus.COMPLETED, 2: RequestStatus.STAGED}
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_fully_missing_season_pack_selected_without_exact_fallback(monkeypatch) -> None:
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+    session_maker = async_sessionmaker(engine, expire_on_commit=False)
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+
+    try:
+        async with session_maker() as db:
+            request = Request(
+                external_id="tv-missing-pack",
+                media_type=MediaType.TV,
+                tmdb_id=999,
+                tvdb_id=12345,
+                title="Show",
+                year=2024,
+                status=RequestStatus.PENDING,
+            )
+            season = Season(season_number=1, status=RequestStatus.PENDING)
+            season.episodes = [
+                Episode(episode_number=1, title="S1E1", air_date=date(2024, 1, 1)),
+                Episode(episode_number=2, title="S1E2", air_date=date(2024, 1, 2)),
+            ]
+            request.seasons = [season]
+            db.add(request)
+            await db.commit()
+
+            class FakeStagingService:
+                def __init__(self, _db):
+                    pass
+
+                async def use_releases(self, _request, _releases, *, selection_source: str):
+                    return {"status": "staged", "message": "staged"}
+
+            monkeypatch.setattr(
+                "app.siftarr.services.decisions.tv_decision_service.StagingService",
+                FakeStagingService,
+            )
+
+            prowlarr = FakePartialSeasonPackProwlarr()
+            service = TVDecisionService(db, prowlarr, QbittorrentService())
+
+            async def fake_rule_engine() -> RejectNamedRuleEngine:
+                return RejectNamedRuleEngine()
+
+            monkeypatch.setattr(service, "_get_rule_engine", fake_rule_engine)
+
+            result = await service.process_request(request.id)
+
+            assert [release["title"] for release in result["selected_releases"]] == [
+                "Show.S01.1080p"
+            ]
+            assert prowlarr.swept_seasons == [1]
+            assert prowlarr.exact_episode_calls == []
+
+            episodes = (await db.execute(select(Episode))).scalars().all()
+            assert {episode.status for episode in episodes} == {RequestStatus.STAGED}
     finally:
         await engine.dispose()
 

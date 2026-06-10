@@ -184,12 +184,16 @@ class TestProcessRequest:
         service.prowlarr.search_tv_episode_exact = AsyncMock(
             return_value=ProwlarrSearchResult(releases=[ep2], query_time_ms=10)
         )
+        pack = _make_release(title="Show.S01.1080p", info_hash="s01pack")
         service.prowlarr.search_tv_season_sweep = AsyncMock(
-            return_value=ProwlarrSearchResult(releases=[], query_time_ms=10)
+            return_value=ProwlarrSearchResult(releases=[pack], query_time_ms=10)
         )
 
         rule_engine = MagicMock()
-        rule_engine.evaluate.return_value = _passing_eval(ep2, score=60)
+        rule_engine.evaluate.side_effect = [
+            _passing_eval(pack, score=80),
+            _passing_eval(ep2, score=60),
+        ]
         stored_ep2 = MagicMock(title="Show.S01E02.1080p")
         mock_staging = _mock_staging()
 
@@ -201,11 +205,13 @@ class TestProcessRequest:
                 "app.siftarr.services.decisions.tv_decision_service.store_search_results",
                 new_callable=AsyncMock,
                 return_value={"s01e02": stored_ep2},
-            ),
+            ) as store_mock,
             patch(
                 "app.siftarr.services.decisions.tv_decision_service.StagingService",
                 return_value=mock_staging,
             ),
+            patch.object(service, "_set_episodes_for_season", new_callable=AsyncMock) as set_season,
+            patch.object(service, "_set_episode_status", new_callable=AsyncMock) as set_episode,
         ):
             result = await service.process_request(1)
 
@@ -213,7 +219,17 @@ class TestProcessRequest:
             title="Test Show", season=1, episode=2, request_id=1
         )
         service.prowlarr.search_tv_season_sweep.assert_awaited_once()
+        assert store_mock.await_args is not None
+        assert [e.release.title for e in store_mock.await_args.args[2]] == [
+            "Show.S01.1080p",
+            "Show.S01E02.1080p",
+        ]
         assert [r["title"] for r in result["selected_releases"]] == ["Show.S01E02.1080p"]
+        mock_staging.use_releases.assert_awaited_once_with(
+            request, [stored_ep2], selection_source="rule"
+        )
+        set_season.assert_not_awaited()
+        set_episode.assert_awaited_once_with(1, 1, 2, RequestStatus.DOWNLOADING)
 
     @pytest.mark.asyncio
     async def test_default_search_stages_pack_without_exact_fallback(self, service, mock_db):
@@ -597,18 +613,37 @@ class TestProcessRequest:
         assert seasons == [3]
         assert episodes == {3: [1]}
 
-    def test_actionable_pack_coverage_rejects_completed_requested_seasons(self, service):
+    def test_pack_eligible_seasons_exclude_resolved_statuses_only(self, service):
+        request = _make_request(
+            seasons=[1, 2, 3, 4, 5], episodes={1: [1, 2], 2: [1], 3: [1], 4: [1]}
+        )
+        statuses = {
+            1: [RequestStatus.PENDING, RequestStatus.PENDING],
+            2: [RequestStatus.COMPLETED],
+            3: [RequestStatus.DOWNLOADING],
+            4: [RequestStatus.STAGED],
+        }
+        for season in request.seasons:
+            for episode, status in zip(
+                season.episodes, statuses.get(season.season_number, []), strict=False
+            ):
+                episode.status = status
+
+        assert service._get_pack_eligible_seasons(request) == [1, 5]
+
+    def test_actionable_pack_coverage_rejects_partial_requested_seasons(self, service):
         complete_series = _passing_eval(_make_release("Show.Complete.Series.1080p"))
         broad_requested_pack = _passing_eval(_make_release("Show.S01-S03.1080p"))
+        season_one_pack = _passing_eval(_make_release("Show.S01.1080p"))
         season_three_pack = _passing_eval(_make_release("Show.S03.1080p"))
 
         all_requested = {1, 2, 3}
-        actionable = {3}
+        pack_eligible = {1, 3}
 
         assert (
             service._get_actionable_pack_coverage(
                 complete_series,
-                actionable,
+                pack_eligible,
                 all_requested,
             )
             == set()
@@ -616,13 +651,18 @@ class TestProcessRequest:
         assert (
             service._get_actionable_pack_coverage(
                 broad_requested_pack,
-                actionable,
+                pack_eligible,
                 all_requested,
             )
             == set()
         )
         assert service._get_actionable_pack_coverage(
+            season_one_pack,
+            pack_eligible,
+            all_requested,
+        ) == {1}
+        assert service._get_actionable_pack_coverage(
             season_three_pack,
-            actionable,
+            pack_eligible,
             all_requested,
         ) == {3}
