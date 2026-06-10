@@ -26,6 +26,7 @@ from app.siftarr.services.releases.release_storage import (
     store_search_results,
 )
 from app.siftarr.services.releases.staging_service import StagingService
+from app.siftarr.services.search_history_service import SearchHistoryService
 from app.siftarr.services.staging_decision_log import log_evaluations
 from app.siftarr.services.stats_metrics_service import record_rule_outcomes
 
@@ -86,6 +87,14 @@ class MovieDecisionService:
             return {"status": "error", "message": "Request is not movie type"}
 
         request.status = RequestStatus.SEARCHING
+        history = SearchHistoryService(self.db)
+        search_run = await history.start_run(
+            request.id,
+            trigger="automatic",
+            source="prowlarr",
+            search_mode="movie",
+            scope={"media_type": "movie", "tmdb_id": request.tmdb_id, "year": request.year},
+        )
         await self.db.commit()
 
         logger.info(
@@ -100,7 +109,7 @@ class MovieDecisionService:
 
         if request.tmdb_id is None:
             request.status = RequestStatus.FAILED
-            await self.db.commit()
+            await history.fail_run(search_run, "No TMDB ID available for movie")
             logger.warning("Movie request %s has no TMDB ID", request_id)
             return {"status": "error", "message": "No TMDB ID available for movie"}
 
@@ -136,6 +145,14 @@ class MovieDecisionService:
                 indexer_stats={},
                 search_context={"media_type": "movie", "tmdb_id": request.tmdb_id},
             )
+            await history.finalize_run(
+                search_run,
+                failures=[search_result.error],
+                outcome="pending",
+                status="completed",
+                counts={"total": 0, "passed": 0, "rejected": 0, "staged": 0, "sent": 0},
+                error=search_result.error,
+            )
             return {
                 "status": "pending",
                 "message": f"Search failed: {search_result.error}, added to pending queue",
@@ -165,6 +182,13 @@ class MovieDecisionService:
                 counts={"search_results": 0, "evaluated": 0, "passed": 0},
                 indexer_stats={},
                 search_context={"media_type": "movie", "tmdb_id": request.tmdb_id},
+            )
+            await history.finalize_run(
+                search_run,
+                failures=["No releases found"],
+                outcome="pending",
+                status="completed",
+                counts={"total": 0, "passed": 0, "rejected": 0, "staged": 0, "sent": 0},
             )
 
             logger.info(
@@ -263,6 +287,18 @@ class MovieDecisionService:
                     "year": request.year,
                 },
             )
+            await history.finalize_run(
+                search_run,
+                evaluations=all_evaluated,
+                stored_releases_by_key=stored_releases_by_key,
+                winners=[best],
+                outcome=str(action_result.get("status") or "selected"),
+                counts=history.summarize_counts(
+                    all_evaluated,
+                    staged=1 if action_result.get("status") == "staged" else 0,
+                    sent=1 if action_result.get("status") in {"downloading", "completed"} else 0,
+                ),
+            )
 
             return {
                 "status": action_result["status"],
@@ -309,6 +345,16 @@ class MovieDecisionService:
                 "tmdb_id": request.tmdb_id,
                 "year": request.year,
             },
+        )
+        await history.finalize_run(
+            search_run,
+            evaluations=all_evaluated,
+            stored_releases_by_key=stored_releases_by_key,
+            failures=[
+                {"reason": reason, "category": "failure"}
+                for reason in sorted(set(rejection_reasons))
+            ],
+            outcome="pending",
         )
 
         logger.info(

@@ -3,7 +3,7 @@
 from datetime import datetime
 from typing import TYPE_CHECKING
 
-from sqlalchemy import BigInteger, Boolean, DateTime, ForeignKey, Index, Integer, String, Text
+from sqlalchemy import JSON, BigInteger, Boolean, DateTime, ForeignKey, Index, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.siftarr.models._base import Base, utc_now  # noqa: PLC0414
@@ -55,6 +55,8 @@ class Release(Base):
     score: Mapped[int] = mapped_column(Integer, default=0)
     passed_rules: Mapped[bool] = mapped_column(Boolean, default=False)
     rejection_reason: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    rule_evidence: Mapped[dict[str, object] | None] = mapped_column(JSON, nullable=True)
+    parse_metadata: Mapped[dict[str, object] | None] = mapped_column(JSON, nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now)
 

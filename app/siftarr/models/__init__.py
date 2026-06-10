@@ -7,6 +7,7 @@ from app.siftarr.models.episode import Episode
 from app.siftarr.models.release import Release
 from app.siftarr.models.request import MediaType, Request, RequestStatus
 from app.siftarr.models.rule import Rule, RuleType
+from app.siftarr.models.search_history import SearchRun, SearchRunCandidate
 from app.siftarr.models.season import Season
 from app.siftarr.models.staged_torrent import StagedTorrent
 from app.siftarr.models.stats_metrics import (
@@ -28,6 +29,8 @@ __all__ = [
     "Rule",
     "RuleType",
     "Season",
+    "SearchRun",
+    "SearchRunCandidate",
     "StagedTorrent",
     "StatsReleaseFact",
     "StatsRuleOutcome",

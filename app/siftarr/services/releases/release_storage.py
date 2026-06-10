@@ -15,6 +15,7 @@ from app.siftarr.services.releases.release_parser import (
     parse_stored_release_coverage,
     serialize_release_coverage,
 )
+from app.siftarr.services.releases.release_serializers import compact_rule_evidence
 
 logger = logging.getLogger(__name__)
 
@@ -125,6 +126,13 @@ async def store_search_results(
 
         parsed = parse_season_episode(release.title)
         coverage = cached_parse_release_coverage(release.title)
+        rule_evidence = compact_rule_evidence(evaluation)
+        parse_metadata = {
+            "season_number": parsed.season_number,
+            "episode_number": parsed.episode_number,
+            "season_numbers": list(coverage.season_numbers),
+            "is_complete_series": coverage.is_complete_series,
+        }
 
         existing = existing_by_key.get(dedupe_key)
         if existing is not None:
@@ -150,6 +158,8 @@ async def store_search_results(
             existing.rejection_reason = (
                 evaluation.rejection_reason[:500] if evaluation.rejection_reason else None
             )
+            existing.rule_evidence = rule_evidence
+            existing.parse_metadata = parse_metadata
             existing.search_source = source
             records_by_key[dedupe_key] = existing
             matched_keys.add(dedupe_key)
@@ -179,6 +189,8 @@ async def store_search_results(
                 rejection_reason=evaluation.rejection_reason[:500]
                 if evaluation.rejection_reason
                 else None,
+                rule_evidence=rule_evidence,
+                parse_metadata=parse_metadata,
                 search_source=source,
             )
             db.add(record)
