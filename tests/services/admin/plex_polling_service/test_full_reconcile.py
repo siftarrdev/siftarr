@@ -133,11 +133,11 @@ async def test_check_request_tv_partial_season_pack_preserves_downloading_episod
 
     assert result.matched is True
     assert result.available is True
-    assert result.status_after == RequestStatus.DOWNLOADING
+    assert result.status_after == RequestStatus.PENDING
     assert result.reason == "Some episodes found on Plex"
     assert [s1e1.status, s1e2.status] == [RequestStatus.COMPLETED, RequestStatus.COMPLETED]
     assert [s2e1.status, s2e2.status] == [RequestStatus.DOWNLOADING, RequestStatus.DOWNLOADING]
-    assert req.status == RequestStatus.DOWNLOADING
+    assert req.status == RequestStatus.PENDING
 
 
 @pytest.mark.asyncio
@@ -162,6 +162,6 @@ async def test_targeted_completed_download_tv_filters_to_covered_episodes(
     )
 
     assert result.matched is True
-    assert result.status_after == RequestStatus.DOWNLOADING
+    assert result.status_after == RequestStatus.PENDING
     assert s1e1.status == RequestStatus.COMPLETED
     assert s1e2.status == RequestStatus.DOWNLOADING

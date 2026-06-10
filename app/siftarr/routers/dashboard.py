@@ -112,6 +112,10 @@ async def dashboard(
         if t.request_id is None
         or is_active_staging_workflow_status(raw_staged_request_statuses.get(t.request_id))
         or (
+            t.status == "approved"
+            and staged_request_identity.get(t.request_id, (None, None, None))[0] == MediaType.TV
+        )
+        or (
             t.status == "staged"
             and staged_request_identity.get(t.request_id, (None, None, None))[0] == MediaType.TV
         )
@@ -122,7 +126,10 @@ async def dashboard(
         for t in active_workflow_torrents
         if t.status == "approved"
         and t.request_id is not None
-        and is_active_staging_workflow_status(raw_staged_request_statuses.get(t.request_id))
+        and (
+            is_active_staging_workflow_status(raw_staged_request_statuses.get(t.request_id))
+            or staged_request_identity.get(t.request_id, (None, None, None))[0] == MediaType.TV
+        )
     ]
     downloading_request_statuses = {
         request_id: status

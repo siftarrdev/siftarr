@@ -35,6 +35,7 @@ from app.siftarr.services.integrations.qbittorrent_service import (
     QbittorrentService,
 )
 from app.siftarr.services.lifecycle.activity_log_service import ActivityLogService
+from app.siftarr.services.lifecycle.download_queue_service import DownloadQueueService
 from app.siftarr.services.lifecycle.lifecycle_service import LifecycleService
 from app.siftarr.services.lifecycle.overseerr_sync_service import (
     approve_overseerr_request_best_effort,
@@ -760,6 +761,42 @@ async def discard_staged_torrent(
         http_request,
         "Torrent discarded successfully",
         redirect_url="/?tab=staged",
+    )
+
+
+@router.post("/{torrent_id}/delete-download", response_model=None)
+async def delete_downloading_torrent(
+    torrent_id: int,
+    http_request: FastAPIRequest,
+    redirect_to: str | None = Form(None),
+    db: AsyncSession = Depends(get_db),
+) -> RedirectResponse | JSONResponse:
+    """Delete an approved torrent and its qBittorrent data, then reset pending state."""
+    result = await db.execute(select(StagedTorrent).where(StagedTorrent.id == torrent_id))
+    torrent = result.scalar_one_or_none()
+    if not torrent:
+        raise HTTPException(status_code=404, detail="Staged torrent not found")
+    if torrent.status != "approved":
+        raise HTTPException(status_code=400, detail="Only downloading torrents can be deleted")
+
+    service = DownloadQueueService(db, QbittorrentService(settings=get_settings()))
+    delete_result = await service.delete_download(torrent)
+    if not delete_result.success:
+        await db.rollback()
+        raise HTTPException(
+            status_code=502, detail=delete_result.message or "qBittorrent delete failed"
+        )
+
+    await db.commit()
+    return await _finalize_action_response(
+        http_request,
+        "Download deleted; request returned to pending.",
+        redirect_url=_safe_local_redirect_url(redirect_to, "/?tab=downloading"),
+        payload={
+            "torrent_id": torrent.id,
+            "torrent_status": "discarded",
+            "refresh": ["downloading", "staged"],
+        },
     )
 
 
