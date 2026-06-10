@@ -64,6 +64,7 @@ from app.siftarr.services.releases.release_storage import (
     store_search_results,
 )
 from app.siftarr.services.releases.staging_service import StagingService
+from app.siftarr.services.search_history_service import SearchHistoryService
 from app.siftarr.services.staging_decision_log import log_evaluations
 from app.siftarr.services.stats_metrics_service import record_rule_outcomes
 
@@ -800,6 +801,19 @@ class TVDecisionService:
             request.title,
             request.tvdb_id,
         )
+        history = SearchHistoryService(self.db)
+        search_run = await history.start_run(
+            request.id,
+            trigger="automatic",
+            source="prowlarr",
+            search_mode=search_mode,
+            scope={
+                "media_type": "tv",
+                "tvdb_id": request.tvdb_id,
+                "search_episodes": search_episodes,
+            },
+        )
+        await self.db.commit()
         if progress_callback is not None:
             await progress_callback(
                 {
@@ -843,13 +857,20 @@ class TVDecisionService:
 
         if request.tvdb_id is None:
             logger.warning("TV request %s has no TVDB ID", request_id)
+            await history.fail_run(search_run, "No TVDB ID available for TV show")
             return {"status": "error", "message": "No TVDB ID available for TV show"}
 
         if not self._get_requested_seasons(request):
+            await history.fail_run(search_run, "No seasons specified")
             return {"status": "error", "message": "No seasons specified"}
         if not requested_seasons:
             await self._recompute_tv_statuses(request)
             await self.db.commit()
+            await history.finalize_run(
+                search_run,
+                outcome=request.status.value,
+                counts={"total": 0, "passed": 0, "rejected": 0, "staged": 0, "sent": 0},
+            )
             return {
                 "status": request.status.value,
                 "selected_releases": [],
@@ -1068,6 +1089,13 @@ class TVDecisionService:
         if full_search and not actionable_target_keys and not actionable_seasons:
             await self._recompute_tv_statuses(request)
             await self.db.commit()
+            await history.finalize_run(
+                search_run,
+                evaluations=all_evaluated_releases,
+                stored_releases_by_key=stored_releases_by_key,
+                failures=all_search_errors,
+                outcome=request.status.value,
+            )
             return {
                 "status": request.status.value,
                 "selected_releases": [],
@@ -1152,6 +1180,27 @@ class TVDecisionService:
                     "covered_seasons": sorted(covered_seasons),
                 },
             )
+            await history.finalize_run(
+                search_run,
+                evaluations=all_evaluated_releases,
+                stored_releases_by_key=stored_releases_by_key,
+                winners=all_selected_releases,
+                failures=all_search_errors,
+                outcome=str(action_result.get("status") or "selected"),
+                counts=history.summarize_counts(
+                    all_evaluated_releases,
+                    staged=len(all_selected_releases)
+                    if action_result.get("status") == "staged"
+                    else 0,
+                    sent=len(all_selected_releases)
+                    if action_result.get("status") in {"downloading", "completed"}
+                    else 0,
+                    extra={
+                        "passed_packs": passing_pack_count,
+                        "passed_episodes": len(episode_evaluations),
+                    },
+                ),
+            )
 
             # ── Episode status updates ────────────────────────────────
             # Episode status is the ground truth.  Set each episode covered
@@ -1213,6 +1262,13 @@ class TVDecisionService:
             # Derive request status from episodes (stage may already be reflected)
             await self._recompute_tv_statuses(request)
             await self.db.commit()
+            await history.finalize_run(
+                search_run,
+                evaluations=all_evaluated_releases,
+                stored_releases_by_key=stored_releases_by_key,
+                failures=all_search_errors,
+                outcome="staged",
+            )
             return {
                 "status": "staged",
                 "selected_releases": [],
@@ -1277,6 +1333,25 @@ class TVDecisionService:
                 "requested_episodes": requested_episodes,
                 "covered_seasons": sorted(covered_seasons),
             },
+        )
+        await history.finalize_run(
+            search_run,
+            evaluations=all_evaluated_releases,
+            stored_releases_by_key=stored_releases_by_key,
+            failures=[
+                {"reason": reason, "category": "failure"}
+                for reason in sorted(set(rejection_reasons))
+            ]
+            + [{"reason": error, "category": "failure"} for error in all_errors],
+            outcome="pending",
+            counts=history.summarize_counts(
+                all_evaluated_releases,
+                extra={
+                    "passed_packs": passing_pack_count,
+                    "passed_episodes": len(episode_evaluations),
+                    "search_errors": len(all_search_errors),
+                },
+            ),
         )
 
         return {

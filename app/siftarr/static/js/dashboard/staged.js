@@ -277,6 +277,34 @@ async function bulkStagedAction(action) {
     }
 }
 
+function closeStagedReview() {
+    document.getElementById('staged-review-modal')?.classList.add('hidden');
+}
+
+function renderAlternative(item) {
+    const evidence = item.rule_evidence || {};
+    const selected = item.selected ? '<span class="badge badge-yellow">Selected</span>' : '';
+    const active = item.active ? '<span class="badge badge-blue">Active</span>' : '';
+    return `<div class="rounded-xl border border-gray-700/60 bg-surface-850 p-3"><div class="flex flex-wrap items-center gap-2"><div class="min-w-0 flex-1 font-semibold text-white break-words">${window.escapeHtml(item.title || 'Unknown')}</div>${selected}${active}<span class="badge badge-gray">${window.escapeHtml(item.source || '')}</span></div><div class="mt-2 grid grid-cols-2 gap-2 text-xs text-gray-400 md:grid-cols-6"><div>Score <span class="text-emerald-400">${window.escapeHtml(String(item.score ?? 0))}</span></div><div>${window.escapeHtml(item.indexer || '-')}</div><div>${window.escapeHtml(item.resolution || '-')}</div><div>${window.escapeHtml(item.codec || '-')}</div><div>Seeders ${window.escapeHtml(String(item.seeders ?? '-'))}</div><div>${window.escapeHtml(item.status || '')}</div></div>${item.rejection_reason ? `<div class="mt-2 text-red-300 text-xs">${window.escapeHtml(item.rejection_reason)}</div>` : ''}<div class="mt-3 flex flex-wrap gap-1">${window.renderRuleEvidence ? window.renderRuleEvidence(evidence) : ''}</div></div>`;
+}
+
+async function openStagedReview(torrentId) {
+    const modal = document.getElementById('staged-review-modal');
+    const content = document.getElementById('staged-review-content');
+    if (!modal || !content) return;
+    modal.classList.remove('hidden');
+    content.innerHTML = '<div class="text-gray-500">Loading alternatives...</div>';
+    try {
+        const response = await fetch(`/staged/${torrentId}/alternatives`, { headers: { 'Accept': 'application/json' } });
+        if (!response.ok) throw new Error(`Server error: ${response.status}`);
+        const data = await response.json();
+        const items = data.alternatives || [];
+        content.innerHTML = items.length ? `<div class="space-y-3">${items.map(renderAlternative).join('')}</div>` : '<div class="text-gray-500">No alternatives found.</div>';
+    } catch (err) {
+        content.innerHTML = `<div class="text-red-400">Failed to load alternatives: ${window.escapeHtml(err.message || 'Unknown error')}</div>`;
+    }
+}
+
 // Export functions to window for HTML onclick handlers
 window.checkNow = checkNow;
 window.postStagedAction = postStagedAction;
@@ -286,3 +314,5 @@ window.refreshDownloadingTabData = refreshDownloadingTabData;
 window.bindStagedSelectionHandlers = bindStagedSelectionHandlers;
 window._startStagedStatusPoll = _startStagedStatusPoll;
 window._stopStagedStatusPoll = _stopStagedStatusPoll;
+window.openStagedReview = openStagedReview;
+window.closeStagedReview = closeStagedReview;

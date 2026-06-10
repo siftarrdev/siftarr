@@ -142,6 +142,52 @@ def serialize_rule_match(match: object) -> dict[str, object]:
     }
 
 
+def compact_rule_evidence(evaluation: ReleaseEvaluation | Any) -> dict[str, object]:
+    """Return durable, compact rule evidence for storage/history."""
+    return {
+        "passed": bool(getattr(evaluation, "passed", False)),
+        "score": normalize_int(getattr(evaluation, "total_score", 0)),
+        "rejection_reason": normalize_optional_text(getattr(evaluation, "rejection_reason", None)),
+        "size_passed": _derive_size_passed(evaluation),
+        "matches": [serialize_rule_match(match) for match in getattr(evaluation, "matches", [])],
+    }
+
+
+def compact_candidate_snapshot(
+    evaluation: ReleaseEvaluation | Any,
+    *,
+    stored_release_id: int | None = None,
+) -> dict[str, object]:
+    """Serialize a retention-safe candidate snapshot without raw download URLs."""
+    release = evaluation.release
+    coverage = cached_parse_release_coverage(release.title)
+    return {
+        "title": release.title,
+        "size_bytes": release.size,
+        "size": format_release_size(release.size),
+        "seeders": release.seeders,
+        "leechers": release.leechers,
+        "indexer": release.indexer,
+        "resolution": release.resolution,
+        "codec": release.codec,
+        "release_group": release.release_group,
+        "uploaded_by": release.uploaded_by,
+        "info_hash": release.info_hash,
+        "score": normalize_int(getattr(evaluation, "total_score", 0)),
+        "passed": bool(getattr(evaluation, "passed", False)),
+        "status": "passed" if getattr(evaluation, "passed", False) else "rejected",
+        "rejection_reason": normalize_optional_text(getattr(evaluation, "rejection_reason", None)),
+        "stored_release_id": stored_release_id,
+        "rule_evidence": compact_rule_evidence(evaluation),
+        "parse_metadata": {
+            "season_number": coverage.season_number,
+            "episode_number": coverage.episode_number,
+            "season_numbers": list(coverage.season_numbers),
+            "is_complete_series": coverage.is_complete_series,
+        },
+    }
+
+
 def serialize_evaluated_release(
     release: ProwlarrRelease | Any,
     evaluation: ReleaseEvaluation | Any,
@@ -175,6 +221,7 @@ def serialize_evaluated_release(
         "stored_release_id": None,
         "size_passed": _derive_size_passed(evaluation),
         "matches": [serialize_rule_match(match) for match in getattr(evaluation, "matches", [])],
+        "rule_evidence": compact_rule_evidence(evaluation),
         "files": getattr(release, "files", None),
     }
 
@@ -220,9 +267,11 @@ def serialize_stored_evaluated_release(
             "rejection_reason": getattr(evaluation, "rejection_reason", None),
             "season_number": release.season_number,
             "episode_number": release.episode_number,
-            "matches": [
-                serialize_rule_match(match) for match in getattr(evaluation, "matches", [])
-            ],
+            "matches": release.rule_evidence.get("matches", [])
+            if getattr(release, "rule_evidence", None)
+            else [serialize_rule_match(match) for match in getattr(evaluation, "matches", [])],
+            "rule_evidence": getattr(release, "rule_evidence", None)
+            or compact_rule_evidence(evaluation),
             "target_scope": serialize_target_scope(
                 media_type=media_type,
                 title=release.title,

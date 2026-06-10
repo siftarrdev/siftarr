@@ -5,7 +5,10 @@ from collections.abc import AsyncGenerator
 from contextlib import closing
 from pathlib import Path
 
-from sqlalchemy import create_engine, event, text
+from alembic import command
+from alembic.config import Config
+from alembic.script import ScriptDirectory
+from sqlalchemy import event
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
     AsyncSession,
@@ -14,9 +17,9 @@ from sqlalchemy.ext.asyncio import (
 )
 
 from app.siftarr.config import get_settings
-from app.siftarr.models import Base
 
-CURRENT_ALEMBIC_REVISION = "f03b57417775"
+ALEMBIC_INI_PATH = Path(__file__).resolve().parents[2] / "alembic.ini"
+CURRENT_ALEMBIC_REVISION = "head"
 ALEMBIC_VERSION_TABLE = "alembic_version"
 
 
@@ -125,39 +128,29 @@ async def get_db() -> AsyncGenerator[AsyncSession]:
             await session.close()
 
 
-def _stamp_alembic_head(sync_url: str) -> None:
-    """Write the current Alembic revision directly into the version table.
+def get_alembic_head_revision() -> str:
+    """Return the repository's current Alembic head revision."""
 
-    Uses raw SQL to avoid triggering Alembic's ``fileConfig()`` which
-    destroys the root logger configuration (and breaks caplog in tests).
-    The ``alembic_version`` table is an Alembic internal table that is
-    not part of ``Base.metadata``, so it must be created explicitly.
-    """
-    engine = create_engine(sync_url)
-    try:
-        with engine.begin() as conn:
-            conn.execute(
-                text(
-                    f"CREATE TABLE IF NOT EXISTS {ALEMBIC_VERSION_TABLE} "
-                    f"(version_num VARCHAR(32) NOT NULL)"
-                )
-            )
-            conn.execute(text(f"DELETE FROM {ALEMBIC_VERSION_TABLE}"))
-            conn.execute(
-                text(f"INSERT INTO {ALEMBIC_VERSION_TABLE} (version_num) VALUES (:rev)"),
-                {"rev": CURRENT_ALEMBIC_REVISION},
-            )
-    finally:
-        engine.dispose()
+    config = Config(str(ALEMBIC_INI_PATH))
+    head = ScriptDirectory.from_config(config).get_current_head()
+    if head is None:
+        raise RuntimeError("Alembic head revision is not defined")
+    return head
+
+
+def _run_alembic_upgrade_head(sync_url: str) -> None:
+    """Apply all pending Alembic migrations to the configured database."""
+
+    config = Config(str(ALEMBIC_INI_PATH))
+    config.set_main_option("sqlalchemy.url", sync_url)
+    command.upgrade(config, "head")
 
 
 async def init_db() -> None:
     """Ensure database schema is current at startup.
 
-    Uses ``Base.metadata.create_all()`` which is idempotent — it creates
-    missing tables and leaves existing ones untouched. After the schema is
-    current the Alembic version table is stamped so future migrations can
-    detect the starting point.
+    SQLite deployments use Alembic migrations so production databases are
+    upgraded incrementally instead of being stamped over old schemas.
     """
     init_engine()
 
@@ -166,15 +159,4 @@ async def init_db() -> None:
         return
 
     sync_url = _get_sync_sqlite_url(database_url)
-    sync_engine = create_engine(sync_url)
-    try:
-        with sync_engine.begin() as conn:
-            Base.metadata.create_all(conn)
-
-        db_path = _get_sqlite_db_path(database_url)
-        table_names, alembic_revision = _inspect_sqlite_database(db_path)
-
-        if alembic_revision != CURRENT_ALEMBIC_REVISION:
-            _stamp_alembic_head(sync_url)
-    finally:
-        sync_engine.dispose()
+    _run_alembic_upgrade_head(sync_url)
