@@ -35,8 +35,8 @@ from app.siftarr.services.releases.release_parser import (
     cached_parse_release_coverage,
 )
 from app.siftarr.services.releases.release_serializers import (
-    serialize_target_scope,
     scope_to_episode_set,
+    serialize_target_scope,
     tv_target_scopes_overlap,
 )
 from app.siftarr.services.releases.release_storage import build_prowlarr_release
