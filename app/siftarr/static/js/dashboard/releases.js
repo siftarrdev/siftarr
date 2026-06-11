@@ -439,7 +439,7 @@ async function stageRelease(btn) {
         });
         if (!resp.ok) {
             const errData = await resp.json().catch(() => null);
-            throw new Error(errData?.detail || `HTTP ${resp.status}`);
+            throw new Error(errData?.detail || errData?.message || `HTTP ${resp.status}`);
         }
         const payload = await resp.json().catch(() => ({}));
         btn.textContent = window.siftarrStagingModeEnabled ? 'Active ✓' : 'Sent ✓';

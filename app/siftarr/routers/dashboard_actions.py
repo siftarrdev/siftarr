@@ -6,7 +6,7 @@ from datetime import datetime
 from fastapi import APIRouter, Depends, Form, HTTPException
 from fastapi import Request as FastAPIRequest
 from fastapi.responses import JSONResponse, RedirectResponse
-from sqlalchemy import or_, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.siftarr.config import get_settings
@@ -37,6 +37,13 @@ from app.siftarr.services.request_service import (
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/requests", tags=["dashboard-actions"])
+
+
+def _release_has_usable_url():
+    return or_(
+        func.length(func.trim(Release.magnet_url)) > 0,
+        func.length(func.trim(Release.download_url)) > 0,
+    )
 
 
 async def _load_all_pending_search_requests(db: AsyncSession) -> list[RequestModel]:
@@ -244,7 +251,7 @@ async def stage_individual_episode_releases(
             Release.season_number == season_number,
             Release.episode_number.in_(episode_numbers),
             Release.passed_rules.is_(True),
-            or_(Release.magnet_url.is_not(None), Release.download_url != ""),
+            _release_has_usable_url(),
         )
         .order_by(Release.episode_number.asc(), Release.score.desc(), Release.seeders.desc())
     )

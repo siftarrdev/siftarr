@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock, MagicMock, call
 
 import pytest
 from fastapi import HTTPException
+from sqlalchemy.dialects import sqlite
 
 from app.siftarr.models.request import MediaType, RequestStatus
 from app.siftarr.routers import dashboard_actions
@@ -538,6 +539,17 @@ async def test_stage_individual_episode_releases_errors_for_missing_episode(mock
     body = json.loads(cast(bytes, response.body))
     assert response.status_code == 400
     assert body == {"status": "error", "message": "No eligible releases for episode(s): 2"}
+
+
+def test_stage_individual_episode_release_filter_requires_non_empty_url():
+    compiled = str(
+        dashboard_actions._release_has_usable_url().compile(
+            dialect=sqlite.dialect(), compile_kwargs={"literal_binds": True}
+        )
+    )
+
+    assert "length(trim(releases.magnet_url)) > 0" in compiled
+    assert "length(trim(releases.download_url)) > 0" in compiled
 
 
 @pytest.mark.asyncio
