@@ -192,6 +192,7 @@ async function openRequestDetails(requestId, explicitIndex = null, options = {})
     }
     window.updateNavigationButtons();
 
+    const timelineWasOpen = preserveUiState ? !!document.getElementById('request-details-timeline')?.open : false;
     const preservedDetailsState = preserveUiState && window.captureDetailsAccordionState
         ? window.captureDetailsAccordionState()
         : null;
@@ -323,7 +324,7 @@ async function openRequestDetails(requestId, explicitIndex = null, options = {})
         window.updateReleaseCountText(data);
 
         window.currentRequestTimeline = data.timeline || [];
-        renderTimeline(window.currentRequestTimeline);
+        renderTimeline(window.currentRequestTimeline, { open: timelineWasOpen });
 
         if (data.auto_search_eligible && !window.detailsAutoSearchStarted[requestId]) {
             window.detailsAutoSearchStarted[requestId] = true;
@@ -475,14 +476,20 @@ async function searchRequestFromDetails() {
     });
 }
 
-function renderTimeline(timelineData) {
+function renderTimeline(timelineData, options = {}) {
     const container = document.getElementById('request-details-timeline');
     const entries = document.getElementById('timeline-entries');
+    const count = document.getElementById('timeline-count');
+    if (!container || !entries) return;
     if (!timelineData || timelineData.length === 0) {
         container.classList.add('hidden');
+        container.open = false;
+        if (count) count.textContent = '';
         return;
     }
     container.classList.remove('hidden');
+    container.open = !!options.open;
+    if (count) count.textContent = timelineData.length + ' event' + (timelineData.length === 1 ? '' : 's');
     const colorMap = {
         search_started: 'bg-blue-500',
         search_completed: 'bg-blue-500',
