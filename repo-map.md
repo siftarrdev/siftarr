@@ -171,7 +171,7 @@ Business logic and integrations, organized into thematic subpackages:
 
 **`integrations/`** — External service adapters
 - `prowlarr_service.py` — Prowlarr indexer integration; LRU search cache (45s TTL, 50 entries), TV exact-episode, broad-pack, and guarded season-search helpers
-- `qbittorrent_service.py` — qBittorrent download client integration; includes idempotent single/bulk torrent add, serialized `save_path`/`seeding_time` access, listing completed torrents, `set_torrent_location()` with `move=True`, and batch delete with `delete_files=False`
+- `qbittorrent_service.py` — qBittorrent download client integration; includes idempotent single/bulk torrent add, serialized `save_path`/`seeding_time` access, listing completed torrents, `set_torrent_location()` with `move=True`, and torrent deletion with configurable file removal
 - `overseerr_service.py` — Overseerr request management integration
 - `connection_tester.py` — external connectivity test helpers
 - `plex_service/` — Plex media server integration (lookup, scan, episode availability)
@@ -183,6 +183,7 @@ Business logic and integrations, organized into thematic subpackages:
 - `episode_derive.py` — canonical derivation functions for TV episode/season/request statuses
 - `episode_sync_service.py` — syncing episode availability from Overseerr and Plex
 - `download_completion_service.py` — completion detection via qBit torrent list matching; qBit-finished torrents stay active until targeted Plex checks confirm availability
+- `download_queue_service.py` — active download deletion/reset workflow: removes qBit torrent data, marks Siftarr torrent discarded, and returns affected movie/TV request state to pending
 - `qbit_move_service.py` — qBit move and retention service: selects eligible completed torrents (managed first, optional unmanaged fallback), computes safe destinations using Siftarr metadata then regex fallback, moves via qBittorrent `set_location(move=True)`, updates move tracking fields on managed torrents, performs retention cleanup (remove old completed torrents by seeding_time, keep files); called from scheduler's download-completion loop
 - `overseerr_sync_service.py` — best-effort lifecycle sync back to Overseerr (approval evidence)
 - `unreleased_service.py` — unreleased content handling

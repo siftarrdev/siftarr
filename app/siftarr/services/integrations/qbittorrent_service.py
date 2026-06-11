@@ -514,16 +514,20 @@ class QbittorrentService:
             A dict containing torrent information if found, None otherwise.
         """
         try:
-            torrents = await asyncio.to_thread(
-                self.client.torrents_info,
-                torrent_hashes=torrent_hash,
-            )
-            if torrents:
-                torrent = torrents[0]
-                return self._serialize_torrent(torrent)
-            return None
+            return await self.get_torrent_info_or_raise(torrent_hash)
         except Exception:
             return None
+
+    async def get_torrent_info_or_raise(self, torrent_hash: str) -> dict | None:
+        """Get torrent information, raising on qBittorrent/API failures."""
+        torrents = await asyncio.to_thread(
+            self.client.torrents_info,
+            torrent_hashes=torrent_hash,
+        )
+        if torrents:
+            torrent = torrents[0]
+            return self._serialize_torrent(torrent)
+        return None
 
     async def get_torrents_by_category(self, category: str) -> list[dict]:
         """Get all torrents in a category.
@@ -550,10 +554,14 @@ class QbittorrentService:
             A list of dicts with keys: hash, name, progress, state, category.
         """
         try:
-            torrents = await asyncio.to_thread(self.client.torrents_info)
-            return [self._serialize_torrent(t) for t in torrents]
+            return await self.get_all_active_torrents_or_raise()
         except Exception:
             return []
+
+    async def get_all_active_torrents_or_raise(self) -> list[dict]:
+        """Get all active torrents, raising on qBittorrent/API failures."""
+        torrents = await asyncio.to_thread(self.client.torrents_info)
+        return [self._serialize_torrent(t) for t in torrents]
 
     async def get_completed_torrents(self) -> list[dict]:
         """Get completed torrents from qBittorrent."""
@@ -624,9 +632,17 @@ class QbittorrentService:
         Tries exact substring first, then falls back to normalised matching
         where separators (dots, dashes, spaces) are treated interchangeably.
         """
+        torrents = await self.get_all_active_torrents()
+        return self._find_torrent_info_by_name(torrents, name_fragment)
+
+    async def get_torrent_info_by_name_or_raise(self, name_fragment: str) -> dict | None:
+        """Get torrent information by name, raising on qBittorrent/API failures."""
+        torrents = await self.get_all_active_torrents_or_raise()
+        return self._find_torrent_info_by_name(torrents, name_fragment)
+
+    def _find_torrent_info_by_name(self, torrents: list[dict], name_fragment: str) -> dict | None:
         name_lower = name_fragment.lower()
         name_norm = _normalize_name(name_fragment)
-        torrents = await self.get_all_active_torrents()
         for torrent in torrents:
             qname = torrent.get("name") or ""
             qname_lower = qname.lower()

@@ -98,6 +98,23 @@ def derive_season_status(episodes: Sequence[Episode]) -> RequestStatus:
 
 def derive_request_status_from_episodes(episodes: Sequence[Episode]) -> RequestStatus:
     """Derive aggregate TV request status from episode statuses."""
+    if not episodes:
+        return RequestStatus.PENDING
+    statuses = {ep.status for ep in episodes}
+    if statuses == {RequestStatus.COMPLETED}:
+        return RequestStatus.COMPLETED
+    if statuses == {RequestStatus.DOWNLOADING}:
+        return RequestStatus.DOWNLOADING
+    if statuses == {RequestStatus.STAGED}:
+        return RequestStatus.STAGED
+    if statuses == {RequestStatus.SEARCHING}:
+        return RequestStatus.SEARCHING
+    if RequestStatus.PENDING in statuses:
+        return RequestStatus.PENDING
+    if RequestStatus.COMPLETED in statuses:
+        if statuses <= {RequestStatus.COMPLETED, RequestStatus.UNRELEASED}:
+            return RequestStatus.UNRELEASED
+        return RequestStatus.PENDING
     return derive_season_status(episodes)
 
 
@@ -138,14 +155,20 @@ def derive_tv_display_label(episodes: list[Episode]) -> str:
     completed = sum(1 for ep in episodes if ep.status == RequestStatus.COMPLETED)
     downloading = sum(1 for ep in episodes if ep.status == RequestStatus.DOWNLOADING)
     staged = sum(1 for ep in episodes if ep.status == RequestStatus.STAGED)
+    searching = sum(1 for ep in episodes if ep.status == RequestStatus.SEARCHING)
     pending = sum(1 for ep in episodes if ep.status == RequestStatus.PENDING)
 
     if completed == total:
         return "completed"
+    active = downloading + staged + searching
+    if active and active < total:
+        return "partial"
     if downloading:
         return "downloading"
     if staged:
         return "staged"
+    if searching:
+        return "searching"
     if pending == total:
         return "pending"
     if completed > 0:

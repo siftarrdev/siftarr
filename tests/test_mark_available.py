@@ -103,14 +103,14 @@ class TestDeriveRequestStatusFromEpisodes:
             _make_episode(RequestStatus.COMPLETED),
             _make_episode(RequestStatus.DOWNLOADING, 2),
         ]
-        assert derive_request_status_from_episodes(eps) == RequestStatus.DOWNLOADING
+        assert derive_request_status_from_episodes(eps) == RequestStatus.PENDING
 
     def test_staged_takes_precedence(self):
         eps = [
             _make_episode(RequestStatus.COMPLETED),
             _make_episode(RequestStatus.STAGED, 2),
         ]
-        assert derive_request_status_from_episodes(eps) == RequestStatus.STAGED
+        assert derive_request_status_from_episodes(eps) == RequestStatus.PENDING
 
 
 class TestMarkEpisodeAvailableEndpoint:
