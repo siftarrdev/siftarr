@@ -693,13 +693,6 @@
                     </div>
                 </div>
                 <div>
-                    <div id="request-details-search-history-section" class="mb-5 rounded-xl border border-gray-700/60 bg-surface-850/60 p-3">
-                        <div class="flex items-center justify-between gap-3">
-                            <div><div class="form-label">Search History</div><p class="mt-1 text-xs text-gray-500">Past searches, winners, failures, and candidate rule evidence.</p></div>
-                            <button type="button" onclick="loadSearchHistory()" class="btn-ghost btn-sm">Reload</button>
-                        </div>
-                        <div id="request-details-search-history" class="mt-3 text-sm text-gray-400">Loading search history...</div>
-                    </div>
                     <div id="release-results-header" class="flex items-center justify-between gap-4">
                         <div>
                             <div class="form-label">Search Results</div>
@@ -752,6 +745,13 @@
                     </summary>
                     <div id="timeline-entries" class="relative mt-3 pl-4 border-l border-gray-700/40 space-y-3"></div>
                 </details>
+                <div id="request-details-search-history-section" class="rounded-xl border border-gray-700/60 bg-surface-850/60 p-3">
+                    <div class="flex items-center justify-between gap-3">
+                        <div><div class="form-label">Search History</div><p class="mt-1 text-xs text-gray-500">Past searches, winners, failures, and candidate rule evidence.</p></div>
+                        <button type="button" onclick="loadSearchHistory()" class="btn-ghost btn-sm">Reload</button>
+                    </div>
+                    <div id="request-details-search-history" class="mt-3 text-sm text-gray-400">Loading search history...</div>
+                </div>
             </div>
         </div>
     </div>
