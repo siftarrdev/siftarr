@@ -105,20 +105,14 @@ async def dashboard(
         }
 
     # Only keep request-linked torrents while the linked request is still
-    # actively staged or downloading.
+    # actively staged or downloading. Completed TV requests may retain their
+    # approved staged_torrent rows for history/episode metadata, but they must
+    # not be shown as still sent to qBittorrent.
     active_workflow_torrents = [
         t
         for t in active_workflow_torrents
         if t.request_id is None
         or is_active_staging_workflow_status(raw_staged_request_statuses.get(t.request_id))
-        or (
-            t.status == "approved"
-            and staged_request_identity.get(t.request_id, (None, None, None))[0] == MediaType.TV
-        )
-        or (
-            t.status == "staged"
-            and staged_request_identity.get(t.request_id, (None, None, None))[0] == MediaType.TV
-        )
     ]
     staged_torrents = [t for t in active_workflow_torrents if t.status == "staged"]
     downloading_torrents = [
@@ -126,10 +120,7 @@ async def dashboard(
         for t in active_workflow_torrents
         if t.status == "approved"
         and t.request_id is not None
-        and (
-            is_active_staging_workflow_status(raw_staged_request_statuses.get(t.request_id))
-            or staged_request_identity.get(t.request_id, (None, None, None))[0] == MediaType.TV
-        )
+        and is_active_staging_workflow_status(raw_staged_request_statuses.get(t.request_id))
     ]
     downloading_request_statuses = {
         request_id: status
