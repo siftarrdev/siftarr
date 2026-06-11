@@ -212,6 +212,71 @@ async def use_request_release(
     )
 
 
+@router.post("/{request_id}/seasons/{season_number}/stage-individual-episodes", response_model=None)
+async def stage_individual_episode_releases(
+    request_id: int,
+    season_number: int,
+    http_request: FastAPIRequest,
+    redirect_to: str | None = Form(default=None),
+    db: AsyncSession = Depends(get_db),
+) -> RedirectResponse | JSONResponse:
+    """Stage the highest-scored stored release for each episode in a TV season."""
+    request = await load_request_or_404(db, request_id)
+    if request.media_type != MediaType.TV:
+        raise HTTPException(
+            status_code=400, detail="Stage individual episodes is only available for TV requests"
+        )
+
+    episode_result = await db.execute(
+        select(Episode.episode_number)
+        .join(Season, Episode.season_id == Season.id)
+        .where(Season.request_id == request_id, Season.season_number == season_number)
+        .order_by(Episode.episode_number.asc())
+    )
+    episode_numbers = list(episode_result.scalars().all())
+    if not episode_numbers:
+        raise HTTPException(status_code=404, detail="Season not found")
+
+    release_result = await db.execute(
+        select(Release)
+        .where(
+            Release.request_id == request_id,
+            Release.season_number == season_number,
+            Release.episode_number.in_(episode_numbers),
+            Release.passed_rules.is_(True),
+            or_(Release.magnet_url.is_not(None), Release.download_url != ""),
+        )
+        .order_by(Release.episode_number.asc(), Release.score.desc(), Release.seeders.desc())
+    )
+    releases_by_episode: dict[int, Release] = {}
+    for release in release_result.scalars().all():
+        if release.episode_number is not None and release.episode_number not in releases_by_episode:
+            releases_by_episode[release.episode_number] = release
+
+    missing = [episode for episode in episode_numbers if episode not in releases_by_episode]
+    if missing:
+        return JSONResponse(
+            {
+                "status": "error",
+                "message": f"No eligible releases for episode(s): {', '.join(map(str, missing))}",
+            },
+            status_code=400,
+        )
+
+    result = await StagingService(db).stage_individual_episode_releases(
+        request,
+        season_number,
+        [releases_by_episode[episode] for episode in episode_numbers],
+    )
+    message = _selection_success_message(result)
+    if "application/json" in http_request.headers.get("accept", ""):
+        return JSONResponse({"status": "ok", "message": message})
+    return RedirectResponse(
+        url=selection_redirect_url(redirect_to, request, prefer_staged_view=True),
+        status_code=303,
+    )
+
+
 @router.post("/{request_id}/manual-release/use", response_model=None)
 async def use_manual_release(
     request_id: int,
