@@ -35,6 +35,7 @@ from app.siftarr.services.releases.release_parser import (
     cached_parse_release_coverage,
 )
 from app.siftarr.services.releases.release_serializers import (
+    scope_to_episode_set,
     serialize_target_scope,
     tv_target_scopes_overlap,
 )
@@ -138,6 +139,18 @@ def _filter_active_staged_torrents_for_release(
         for staged in active_staged
         if tv_target_scopes_overlap(release_scope, _target_scope_from_title(staged.title))
     ]
+
+
+def _is_pack_scope_overlapping_season(scope: dict[str, object], season_number: int) -> bool:
+    """Return whether a staged TV pack covers the target season."""
+    scope_type = scope.get("type")
+    if scope_type not in {"season_pack", "multi_season_pack", "complete_series"}:
+        return False
+    return any(
+        season == season_number
+        for season, episode in scope_to_episode_set(scope, [season_number])
+        if episode is None
+    )
 
 
 def _should_delete_superseded_staged_torrents(
@@ -768,3 +781,76 @@ class StagingService:
             "message": f"Sent {len(added_hashes)} release(s) to qBittorrent.",
             "torrent_hashes": added_hashes,
         }
+
+    async def stage_individual_episode_releases(
+        self,
+        request: Request,
+        season_number: int,
+        releases: list[Release],
+    ) -> dict[str, object]:
+        """Replace overlapping season-pack stages with per-episode stages for one season."""
+        if request.media_type != MediaType.TV:
+            raise RuntimeError("Stage individual episodes is only available for TV requests.")
+
+        episode_numbers_result = await self.db.execute(
+            select(Episode.episode_number)
+            .join(Season, Episode.season_id == Season.id)
+            .where(Season.request_id == request.id, Season.season_number == season_number)
+            .order_by(Episode.episode_number.asc())
+        )
+        requested_episodes = set(episode_numbers_result.scalars().all())
+        if not requested_episodes:
+            raise RuntimeError("Season has no requested episodes.")
+
+        release_by_episode: dict[int, Release] = {}
+        for release in releases:
+            coverage = cached_parse_release_coverage(release.title)
+            release_season = release.season_number or coverage.season_number
+            release_episode = release.episode_number or coverage.episode_number
+            if release_season != season_number or release_episode not in requested_episodes:
+                raise RuntimeError(
+                    "All releases must be single episodes from the requested season."
+                )
+            if release_episode in release_by_episode:
+                raise RuntimeError("Only one release may be supplied per episode.")
+            release_by_episode[release_episode] = release
+
+        missing = sorted(requested_episodes - set(release_by_episode))
+        if missing:
+            raise RuntimeError(f"Missing releases for episode(s): {', '.join(map(str, missing))}.")
+
+        active_staged = await _get_active_staged_torrents(self.db, request.id)
+        superseded_packs = [
+            staged
+            for staged in active_staged
+            if _is_pack_scope_overlapping_season(
+                _target_scope_from_title(staged.title), season_number
+            )
+        ]
+        replaced_active_selection = await _delete_superseded_staged_torrents(
+            self.db,
+            self,
+            superseded_packs,
+        )
+
+        staged_ids: list[int] = []
+        for release in release_by_episode.values():
+            staged = await self.save_release(
+                build_prowlarr_release(release),
+                request,
+                score=release.score,
+                selection_source="manual",
+                commit=False,
+            )
+            staged_ids.append(staged.id)
+            await self._apply_release_to_episodes(release, RequestStatus.STAGED)
+
+        await self._recompute_tv_statuses(request.id)
+        await PendingQueueService(self.db).remove_from_queue(request.id)
+        await self.db.commit()
+        action, message = _staged_selection_outcome(
+            selection_source="manual",
+            staged_count=len(staged_ids),
+            replaced_active_selection=replaced_active_selection,
+        )
+        return {"status": "staged", "action": action, "message": message, "staged_ids": staged_ids}

@@ -6,8 +6,9 @@ from unittest.mock import AsyncMock, MagicMock, call
 
 import pytest
 from fastapi import HTTPException
+from sqlalchemy.dialects import sqlite
 
-from app.siftarr.models.request import RequestStatus
+from app.siftarr.models.request import MediaType, RequestStatus
 from app.siftarr.routers import dashboard_actions
 from app.siftarr.services.dashboard import search_service as search_service_mod
 
@@ -477,6 +478,78 @@ async def test_use_request_release_json_reports_auto_stage_outcome(mock_db, monk
 
     body = json.loads(cast(bytes, response.body))
     assert body == {"status": "ok", "message": "Request auto-staged successfully"}
+
+
+@pytest.mark.asyncio
+async def test_stage_individual_episode_releases_uses_top_per_episode(mock_db, monkeypatch):
+    request_record = MagicMock(id=21, media_type=MediaType.TV)
+    episodes_result = MagicMock()
+    episodes_result.scalars.return_value.all.return_value = [1, 2]
+    low_ep1 = MagicMock(id=10, episode_number=1, score=50)
+    top_ep1 = MagicMock(id=11, episode_number=1, score=90)
+    top_ep2 = MagicMock(id=12, episode_number=2, score=80)
+    releases_result = MagicMock()
+    releases_result.scalars.return_value.all.return_value = [top_ep1, low_ep1, top_ep2]
+    mock_db.execute.side_effect = [episodes_result, releases_result]
+
+    staging_instance = AsyncMock()
+    staging_instance.stage_individual_episode_releases = AsyncMock(
+        return_value={"status": "staged", "action": "replaced_active_selection"}
+    )
+    monkeypatch.setattr(
+        dashboard_actions, "load_request_or_404", AsyncMock(return_value=request_record)
+    )
+    monkeypatch.setattr(dashboard_actions, "StagingService", lambda db: staging_instance)
+
+    response = await dashboard_actions.stage_individual_episode_releases(
+        request_id=21,
+        season_number=1,
+        http_request=MagicMock(headers={"accept": "application/json"}),
+        db=mock_db,
+    )
+
+    body = json.loads(cast(bytes, response.body))
+    assert body == {"status": "ok", "message": "Active staged selection replaced successfully"}
+    staging_instance.stage_individual_episode_releases.assert_awaited_once_with(
+        request_record,
+        1,
+        [top_ep1, top_ep2],
+    )
+
+
+@pytest.mark.asyncio
+async def test_stage_individual_episode_releases_errors_for_missing_episode(mock_db, monkeypatch):
+    request_record = MagicMock(id=21, media_type=MediaType.TV)
+    episodes_result = MagicMock()
+    episodes_result.scalars.return_value.all.return_value = [1, 2]
+    releases_result = MagicMock()
+    releases_result.scalars.return_value.all.return_value = [MagicMock(id=11, episode_number=1)]
+    mock_db.execute.side_effect = [episodes_result, releases_result]
+    monkeypatch.setattr(
+        dashboard_actions, "load_request_or_404", AsyncMock(return_value=request_record)
+    )
+
+    response = await dashboard_actions.stage_individual_episode_releases(
+        request_id=21,
+        season_number=1,
+        http_request=MagicMock(headers={"accept": "application/json"}),
+        db=mock_db,
+    )
+
+    body = json.loads(cast(bytes, response.body))
+    assert response.status_code == 400
+    assert body == {"status": "error", "message": "No eligible releases for episode(s): 2"}
+
+
+def test_stage_individual_episode_release_filter_requires_non_empty_url():
+    compiled = str(
+        dashboard_actions._release_has_usable_url().compile(
+            dialect=sqlite.dialect(), compile_kwargs={"literal_binds": True}
+        )
+    )
+
+    assert "length(trim(releases.magnet_url)) > 0" in compiled
+    assert "length(trim(releases.download_url)) > 0" in compiled
 
 
 @pytest.mark.asyncio

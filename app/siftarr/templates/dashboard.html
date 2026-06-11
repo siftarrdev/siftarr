@@ -742,10 +742,16 @@
                     </div>
                     <div id="request-details-releases" class="mt-1 max-h-[42rem] space-y-1 overflow-y-auto pr-1"></div>
                 </div>
-                <div id="request-details-timeline" class="hidden">
-                    <div class="form-label mb-2">Activity Timeline</div>
-                    <div id="timeline-entries" class="relative pl-4 border-l border-gray-700/40 space-y-3"></div>
-                </div>
+                <details id="request-details-timeline" class="hidden group rounded-xl border border-gray-700/60 bg-surface-800 p-3">
+                    <summary class="flex cursor-pointer items-center justify-between gap-3">
+                        <div class="flex items-center gap-2">
+                            <svg class="accordion-chevron h-4 w-4 shrink-0 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
+                            <span class="form-label">Activity Timeline</span>
+                        </div>
+                        <span id="timeline-count" class="text-xs text-gray-500"></span>
+                    </summary>
+                    <div id="timeline-entries" class="relative mt-3 pl-4 border-l border-gray-700/40 space-y-3"></div>
+                </details>
             </div>
         </div>
     </div>
