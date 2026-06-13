@@ -57,6 +57,16 @@ def _download_completed_torrent_ids(details: str | None) -> set[int]:
     return torrent_ids
 
 
+def _is_actionable_workflow_torrent(
+    torrent: StagedTorrent,
+    request_statuses: dict[int, RequestStatus],
+) -> bool:
+    """Return whether a staged_torrent row should appear on active dashboard tabs."""
+    if torrent.request_id is None or torrent.status == "staged":
+        return True
+    return is_active_staging_workflow_status(request_statuses.get(torrent.request_id))
+
+
 @router.get("/")
 @router.get("/dashboard")
 async def dashboard(
@@ -104,15 +114,15 @@ async def dashboard(
             request_id: status.value for request_id, status in raw_staged_request_statuses.items()
         }
 
-    # Only keep request-linked torrents while the linked request is still
-    # actively staged or downloading. Completed TV requests may retain their
-    # approved staged_torrent rows for history/episode metadata, but they must
-    # not be shown as still sent to qBittorrent.
+    # Only hide request-linked torrents that are no longer actionable.  Staged
+    # rows are themselves actionable even when a TV request is only partially
+    # staged and therefore derives an aggregate request status like ``pending``.
+    # Approved rows, however, must still be scoped to active staged/downloading
+    # requests so completed TV history is not shown as still in qBittorrent.
     active_workflow_torrents = [
         t
         for t in active_workflow_torrents
-        if t.request_id is None
-        or is_active_staging_workflow_status(raw_staged_request_statuses.get(t.request_id))
+        if _is_actionable_workflow_torrent(t, raw_staged_request_statuses)
     ]
     staged_torrents = [t for t in active_workflow_torrents if t.status == "staged"]
     downloading_torrents = [
