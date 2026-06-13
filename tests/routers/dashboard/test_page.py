@@ -980,8 +980,10 @@ async def test_dashboard_keeps_tv_staged_approve_actions_after_one_episode_is_ap
 
 
 @pytest.mark.asyncio
-async def test_dashboard_excludes_tv_staged_rows_when_request_inactive(mock_db, monkeypatch):
-    """TV staged rows should not appear once their request is no longer active."""
+async def test_dashboard_includes_tv_staged_rows_when_request_aggregate_inactive(
+    mock_db, monkeypatch
+):
+    """TV staged rows remain actionable even if aggregate request status is pending."""
     lifecycle_service = AsyncMock()
     lifecycle_service.get_active_requests.return_value = []
     lifecycle_service.get_requests_by_status.return_value = []
@@ -1038,9 +1040,9 @@ async def test_dashboard_excludes_tv_staged_rows_when_request_inactive(mock_db, 
     response = await dashboard.dashboard(MagicMock(), db=mock_db)
 
     context = response.context
-    assert context["staged_torrents"] == []
-    assert context["stats"]["staged"] == 0
+    assert context["staged_torrents"] == staged_torrents
+    assert context["stats"]["staged"] == 3
     body = response.body.decode()
-    assert "Example Show S01E01 1080p WEB-DL" not in body
-    assert "Example Show S02 1080p WEB-DL" not in body
-    assert "Example Show S03-S04 1080p WEB-DL" not in body
+    assert "Example Show S01E01 1080p WEB-DL" in body
+    assert "Example Show S02 1080p WEB-DL" in body
+    assert "Example Show S03-S04 1080p WEB-DL" in body
