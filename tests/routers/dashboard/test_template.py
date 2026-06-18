@@ -106,8 +106,14 @@ def test_dashboard_js_includes_read_only_tv_buckets():
     """Dashboard JS should show read-only TV buckets filled by Search All."""
     js = _read_dashboard_js()
 
-    assert "Season packs and complete series" in js
-    assert "Larger releases that may cover more than one requested season" in js
+    # Scope chips replace the old "Season packs and complete series" drawer.
+    assert "Show:" in js
+    assert "All results" in js
+    assert "Season packs" in js
+    assert "Complete series" in js
+    assert "setDetailsScope" in js
+    assert "scope-season-packs-" in js
+    assert "scope-complete-series-" in js
     assert "Full search refreshes all aired episode and pack results." in js
     assert "No cached episode results yet" in js
 
@@ -124,19 +130,30 @@ def test_dashboard_js_includes_tv_details_expand_collapse_controls():
     )
 
     assert 'data-tv-accordion-toggle="panel"' in js
-    assert 'data-tv-accordion-toggle="season"' in js
     assert "const TV_ACCORDION_TOGGLE_CLASS" in js
     assert shared_toggle_class in js
     assert "function renderTvAccordionToggle(scope, requestId, seasonNumber = null)" in js
     assert "renderTvAccordionToggle('panel', requestId)" in js
-    assert "renderTvAccordionToggle('season', requestId, season.season_number)" in js
     assert "toggleTvDetailsAll" in js
     assert "toggleTvSeasonDetails" in js
     assert "updateTvAccordionControls" in js
     assert "aria-expanded" in js
     assert "button.textContent = allOpen ? 'Collapse all' : 'Expand all';" in js
-    assert "event.preventDefault(); event.stopPropagation(); toggleTvSeasonDetails" in js
     assert "No cached season-pack results yet" in js
+    # 2-level structure: Season → Episode details only (no nested pack drawers).
+    assert "season-details-" in js
+    assert "episode-details-" in js
+    assert "season-packs-details-" not in js
+    assert "season-packs-all-details-" not in js
+    # Season-row quiet links: Mark all / Stage individual episodes / Search season.
+    assert "Mark all" in js
+    assert "Stage individual episodes" in js
+    assert "Search season" in js
+    assert "searchSeasonPacks(' + requestId + ', ' + season.season_number + ')" in js
+    # Scope chips switch client-side without a backend reload.
+    assert "function setDetailsScope(requestId, scope)" in js
+    assert "window.setDetailsScope = setDetailsScope;" in js
+    assert "scope: 'all'" in js
     assert "function searchTvRequestNew()" in js
     assert "function searchTvRequestFull()" in js
     assert "search/stream?search_mode=' + encodeURIComponent(fullSearch ? 'full' : 'new')" in js

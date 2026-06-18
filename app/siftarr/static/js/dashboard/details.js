@@ -7,7 +7,11 @@ window.detailsControlDebounce = null;
 window.detailsAutoSearchStarted = window.detailsAutoSearchStarted || {};
 
 function defaultDetailsControls() {
-    return { title: '', resolution: 'all', sort: 'score', direction: 'desc' };
+    // `scope` is client-only (TV accordion: 'all' | 'season_packs' | 'complete_series').
+    // It is deliberately NOT sent in `buildDetailsUrl` — the backend filter/sort
+    // contract is unchanged; scope chips re-render client-side via
+    // `applyLocalReleaseSort`.
+    return { title: '', resolution: 'all', sort: 'score', direction: 'desc', scope: 'all' };
 }
 
 function getDetailsControls(requestId) {
@@ -127,6 +131,16 @@ function reloadDetailsWithControls(debounceMs = 0) {
     } else {
         run();
     }
+}
+
+// Client-only TV scope-chip handler. Switches the TV accordion between
+// "All results" (Season → Episode), "Season packs", and "Complete series"
+// without a backend reload — `applyLocalReleaseSort` re-renders the TV branch
+// from the cached `currentDetailsData`. No backend contract change.
+function setDetailsScope(requestId, scope) {
+    const controls = getDetailsControls(requestId);
+    controls.scope = scope;
+    applyLocalReleaseSort();
 }
 
 function ensureDetailsControlHandlers() {
@@ -614,6 +628,7 @@ window.buildDetailsUrl = buildDetailsUrl;
 window.applyDetailsControls = applyDetailsControls;
 window.updateReleaseCountText = updateReleaseCountText;
 window.applyLocalReleaseSort = applyLocalReleaseSort;
+window.setDetailsScope = setDetailsScope;
 window.refreshPlexAndReload = refreshPlexAndReload;
 window.searchRequestFromDetails = searchRequestFromDetails;
 window.searchTvRequest = searchTvRequest;
