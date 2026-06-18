@@ -24,6 +24,22 @@ ProgressCallback = Callable[[dict[str, Any]], Awaitable[None]]
 _search_cache: OrderedDict[str, tuple[float, ProwlarrSearchResult]] = OrderedDict()
 _SEARCH_CACHE_MAX_SIZE = 50
 _SEARCH_CACHE_TTL = 45  # seconds
+_RESOLUTION_PATTERNS = (
+    (re.compile(r"2160[pP]|4[kK]", re.IGNORECASE), "2160p"),
+    (re.compile(r"1080[pP]", re.IGNORECASE), "1080p"),
+    (re.compile(r"720[pP]", re.IGNORECASE), "720p"),
+    (re.compile(r"480[pP]", re.IGNORECASE), "480p"),
+)
+_CODEC_PATTERNS = (
+    (re.compile(r"x265|265|HEVC", re.IGNORECASE), "x265"),
+    (re.compile(r"x264|264|AVC", re.IGNORECASE), "x264"),
+    (re.compile(r"VP9", re.IGNORECASE), "VP9"),
+    (re.compile(r"VP10|AV1", re.IGNORECASE), "AV1"),
+)
+_RELEASE_GROUP_PATTERNS = (
+    re.compile(r"-(?P<group>[A-Za-z0-9]+)$"),
+    re.compile(r"\.(?P<group>[A-Za-z0-9]+)$"),
+)
 
 
 def _search_cache_key(params: dict) -> str:
@@ -32,11 +48,17 @@ def _search_cache_key(params: dict) -> str:
     return hashlib.md5(raw.encode()).hexdigest()
 
 
-def _cache_get(key: str) -> ProwlarrSearchResult | None:
+def _cache_settings(settings: Settings | None = None) -> tuple[int, int]:
+    settings = settings or get_settings()
+    return settings.prowlarr_search_cache_ttl_seconds, settings.prowlarr_search_cache_max_entries
+
+
+def _cache_get(key: str, settings: Settings | None = None) -> ProwlarrSearchResult | None:
     if key not in _search_cache:
         return None
     timestamp, result = _search_cache[key]
-    if time_module.monotonic() - timestamp > _SEARCH_CACHE_TTL:
+    ttl, _max_size = _cache_settings(settings)
+    if time_module.monotonic() - timestamp > ttl:
         del _search_cache[key]
         return None
     # Move to end (most-recently used)
@@ -44,8 +66,9 @@ def _cache_get(key: str) -> ProwlarrSearchResult | None:
     return result
 
 
-def _cache_set(key: str, result: ProwlarrSearchResult) -> None:
-    if len(_search_cache) >= _SEARCH_CACHE_MAX_SIZE:
+def _cache_set(key: str, result: ProwlarrSearchResult, settings: Settings | None = None) -> None:
+    _ttl, max_size = _cache_settings(settings)
+    while len(_search_cache) >= max_size:
         _search_cache.popitem(last=False)  # evict LRU
     _search_cache[key] = (time_module.monotonic(), result)
 
@@ -273,7 +296,7 @@ class ProwlarrService:
         # ── Cache check ──────────────────────────────────────────────
         if cacheable and not self.settings.siftarr_disable_search_cache:
             cache_key = _search_cache_key(params)
-            cached = _cache_get(cache_key)
+            cached = _cache_get(cache_key, self.settings)
             if cached is not None:
                 logger.info(
                     "Prowlarr search results loaded: source=cache type=%s query=%s categories=%s count=%s",
@@ -321,7 +344,7 @@ class ProwlarrService:
                         error=None,
                         source="prowlarr",
                     )
-                    _cache_set(cache_key, result_to_cache)
+                    _cache_set(cache_key, result_to_cache, self.settings)
             else:
                 error_message = f"HTTP {response.status_code}"
                 logger.warning(
@@ -369,39 +392,23 @@ class ProwlarrService:
 
     def _extract_resolution(self, title: str) -> str | None:
         """Extract resolution from release title."""
-        patterns = [
-            (r"2160[pP]|4[kK]", "2160p"),
-            (r"1080[pP]", "1080p"),
-            (r"720[pP]", "720p"),
-            (r"480[pP]", "480p"),
-        ]
-        for pattern, resolution in patterns:
-            if re.search(pattern, title, re.IGNORECASE):
+        for pattern, resolution in _RESOLUTION_PATTERNS:
+            if pattern.search(title):
                 return resolution
         return None
 
     def _extract_codec(self, title: str) -> str | None:
         """Extract codec from release title."""
-        patterns = [
-            (r"x265|265|HEVC", "x265"),
-            (r"x264|264|AVC", "x264"),
-            (r"VP9", "VP9"),
-            (r"VP10|AV1", "AV1"),
-        ]
-        for pattern, codec in patterns:
-            if re.search(pattern, title, re.IGNORECASE):
+        for pattern, codec in _CODEC_PATTERNS:
+            if pattern.search(title):
                 return codec
         return None
 
     def _extract_release_group(self, title: str) -> str | None:
         """Extract release group from title."""
         # Common pattern: Title-Y ReleaseGroup or Title.RELEASEGROUP
-        patterns = [
-            r"-(?P<group>[A-Za-z0-9]+)$",
-            r"\.(?P<group>[A-Za-z0-9]+)$",
-        ]
-        for pattern in patterns:
-            match = re.search(pattern, title)
+        for pattern in _RELEASE_GROUP_PATTERNS:
+            match = pattern.search(title)
             if match:
                 return match.group("group")
         return None

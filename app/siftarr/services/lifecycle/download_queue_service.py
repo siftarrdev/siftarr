@@ -20,6 +20,7 @@ from app.siftarr.services.lifecycle.episode_derive import (
     derive_season_status,
 )
 from app.siftarr.services.releases.release_parser import cached_parse_release_coverage
+from app.siftarr.services.utils.torrent_identity import parse_magnet_info_hash
 
 
 @dataclass(slots=True)
@@ -93,8 +94,7 @@ class DownloadQueueService:
 
     async def _resolve_qbit_hash(self, torrent: StagedTorrent) -> _HashResolutionResult:
         candidates = [torrent.info_hash]
-        if torrent.magnet_url and "btih:" in torrent.magnet_url.lower():
-            candidates.append(torrent.magnet_url.lower().split("btih:", 1)[1].split("&", 1)[0])
+        candidates.append(parse_magnet_info_hash(torrent.magnet_url))
         try:
             for candidate in candidates:
                 if candidate:

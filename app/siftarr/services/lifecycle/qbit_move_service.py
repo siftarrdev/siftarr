@@ -18,6 +18,8 @@ from app.siftarr.models.request import MediaType, Request
 from app.siftarr.models.staged_torrent import StagedTorrent
 from app.siftarr.services.integrations.qbittorrent_service import QbittorrentService
 from app.siftarr.services.lifecycle.activity_log_service import ActivityLogService
+from app.siftarr.services.utils.safe_names import safe_folder_name
+from app.siftarr.services.utils.torrent_identity import normalize_torrent_name
 
 logger = logging.getLogger(__name__)
 
@@ -25,8 +27,6 @@ TV_PATTERN = re.compile(
     r"[._\s](S\d{2}E\d{2}|Seasons?[\s._]?\d{1,2}(-\d{1,2})?|S\d{2}(?![._\s]?E\d{2}))",
     re.IGNORECASE,
 )
-_NON_ALNUM_RE = re.compile(r"[^a-zA-Z0-9]+")
-_UNSAFE_PATH_CHARS_RE = re.compile(r"[\\/:*?\"<>|]+")
 
 
 @dataclass(frozen=True)
@@ -45,13 +45,11 @@ class _MoveCandidate:
 
 
 def _normalize_name(name: str | None) -> str:
-    return _NON_ALNUM_RE.sub(" ", name or "").strip().lower()
+    return normalize_torrent_name(name)
 
 
 def _safe_folder_name(value: str | None, fallback: str) -> str:
-    cleaned = _UNSAFE_PATH_CHARS_RE.sub(" ", value or "").strip(" .")
-    cleaned = re.sub(r"\s+", " ", cleaned)
-    return cleaned or fallback
+    return safe_folder_name(value, fallback)
 
 
 def _resolved(path: str | Path) -> Path:

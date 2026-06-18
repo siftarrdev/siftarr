@@ -163,6 +163,8 @@ class Settings(BaseSettings):
 
     # Search result caching (Prowlarr)
     siftarr_disable_search_cache: bool = False
+    prowlarr_search_cache_ttl_seconds: int = Field(default=45, ge=0)
+    prowlarr_search_cache_max_entries: int = Field(default=50, ge=1)
 
     # Optional first-run rules import file (for Docker/Compose bind mounts).
     # By default, Docker users can mount a Rules export JSON at this path and

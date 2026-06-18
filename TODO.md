@@ -22,22 +22,13 @@ This file captures the biggest opportunities identified during a repo-wide revie
 6. **Consolidate stats aggregation queries**
    Combine repeated aggregate reads into fewer SQL calls, or parallelize independent queries where it is safe to do so.
 
-7. **Precompile hot regex paths**
-   Parsing and classification logic in release/Prowlarr code should avoid recompiling regexes on every item.
-
-8. **Make Prowlarr cache tunable**
-   Expose cache TTL and size so heavier installs can trade memory for fewer upstream calls.
-
-9. **Tighten broad TV pack searches**
+7. **Tighten broad TV pack searches**
    Add better limits, category narrowing, or query shaping so broad searches return less noise.
 
-10. **Bulk release storage operations**
+8. **Bulk release storage operations**
     Use bulk insert/update/delete patterns for large search result sets instead of row-by-row Python loops.
 
-11. **Normalize qBit names once**
-    Build lookup maps once per batch instead of recalculating normalized torrent names repeatedly.
-
-12. **Bound season sweep concurrency**
+9. **Bound season sweep concurrency**
     Add concurrency limits to season-wide TV searches to reduce upstream pressure and flapping.
 
 ## Simplification / refactor opportunities
@@ -72,10 +63,7 @@ This file captures the biggest opportunities identified during a repo-wide revie
 10. **Centralize lifecycle status semantics**
     Define one shared source of truth for active, terminal, and actionable request statuses.
 
-11. **Consolidate torrent hash parsing**
-    Put torrent/hash extraction in one utility instead of duplicating parsing logic across qBit-related code.
-
-12. **Replace string literals with enums/constants**
+11. **Replace string literals with enums/constants**
     Standardize search modes, sources, and staged statuses to reduce drift and typo risk.
 
 ## New feature ideas

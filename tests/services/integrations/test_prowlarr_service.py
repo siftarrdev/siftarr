@@ -7,6 +7,9 @@ from app.siftarr.services.integrations.prowlarr_service import (
     ProwlarrRelease,
     ProwlarrSearchResult,
     ProwlarrService,
+    _cache_get,
+    _cache_set,
+    _search_cache,
 )
 
 
@@ -23,6 +26,38 @@ def _release(index: int) -> ProwlarrRelease:
 
 class TestProwlarrService:
     """Test cases for ProwlarrService."""
+
+    def test_search_cache_defaults_preserve_ttl_and_size(self) -> None:
+        _search_cache.clear()
+        settings = Settings()
+        result = ProwlarrSearchResult(releases=[_release(1)], query_time_ms=10)
+
+        _cache_set("one", result, settings)
+
+        assert settings.prowlarr_search_cache_ttl_seconds == 45
+        assert settings.prowlarr_search_cache_max_entries == 50
+        assert _cache_get("one", settings) == result
+
+    def test_search_cache_custom_size_is_honored(self) -> None:
+        _search_cache.clear()
+        settings = Settings(prowlarr_search_cache_max_entries=1)
+        first = ProwlarrSearchResult(releases=[_release(1)], query_time_ms=10)
+        second = ProwlarrSearchResult(releases=[_release(2)], query_time_ms=10)
+
+        _cache_set("one", first, settings)
+        _cache_set("two", second, settings)
+
+        assert _cache_get("one", settings) is None
+        assert _cache_get("two", settings) == second
+
+    def test_search_cache_custom_zero_ttl_expires(self) -> None:
+        _search_cache.clear()
+        settings = Settings(prowlarr_search_cache_ttl_seconds=0)
+        result = ProwlarrSearchResult(releases=[_release(1)], query_time_ms=10)
+
+        _cache_set("one", result, settings)
+
+        assert _cache_get("one", settings) is None
 
     def test_normalize_search_title_strips_apostrophes(self) -> None:
         """Apostrophes should be stripped for broader indexer matching."""

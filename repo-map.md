@@ -199,6 +199,7 @@ Business logic and integrations, organized into thematic subpackages:
 - `async_utils.py` — `gather_limited` and async helpers
 - `type_utils.py` — type conversion utilities
 - `media_helpers.py` — media title/year extraction
+- `torrent_identity.py` / `safe_names.py` — shared torrent hash/name parsing and safe filename/folder helpers
 - `background_tasks.py` — background orchestration (DETAILS_SYNC_TASKS)
 
 ### `app/siftarr/templates/`
