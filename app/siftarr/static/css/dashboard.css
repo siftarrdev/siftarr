@@ -39,15 +39,29 @@ details summary { list-style: none; }
 details[open] summary .accordion-chevron { transform: rotate(90deg); }
 .accordion-chevron { transition: transform 0.15s ease; }
 
-/* Suppress the browser default bright (white) focus outline on details/summary
-   rows in the request-details modal — it clashes with the grey border theme.
-   Interactivity is already conveyed by the hover background, cursor, and chevron
-   rotation; keyboard focus keeps a subtle grey ring that matches the theme. */
-#request-details-modal summary { outline: none; }
-#request-details-modal summary:focus-visible {
+/* Keep details-modal outlines in the same muted grey family as the panel
+   borders. Tailwind v4/browser defaults can otherwise render clicked/focused
+   summary rows and inline buttons with a bright currentColor/white outline. */
+#request-details-modal :is(summary, button, a, [role="button"], input, select, textarea, [tabindex]):focus {
+    outline: none;
+    box-shadow: none;
+    --tw-ring-offset-color: transparent;
+    --tw-ring-color: rgba(75, 85, 99, 0.7);
+}
+
+#request-details-modal :is(summary, button, a, [role="button"], input, select, textarea, [tabindex]):focus-visible {
     outline: 2px solid rgba(75, 85, 99, 0.7);
+    outline-offset: 2px;
+    box-shadow: none;
+}
+
+#request-details-modal summary:focus-visible {
     outline-offset: -2px;
     border-radius: 0.25rem;
+}
+
+#request-details-releases details[id^="episode-details-"]:not([class*="border-cyan"]) {
+    border-color: rgba(55, 65, 81, 0.6);
 }
 .dashboard-search-loading {
     display: flex;
