@@ -97,6 +97,23 @@
         overflow-wrap: anywhere;
     }
 
+    /* Compact mobile touch targets: 36px primary, 32px secondary.
+       Used by the details modal header card / bottom bar / release cards
+       at <lg so nothing exceeds the mockups' calmer sizing. */
+    .tap-primary {
+        min-height: 2.25rem;
+    }
+    .tap {
+        min-height: 2rem;
+    }
+    .hide-scrollbar::-webkit-scrollbar {
+        display: none;
+    }
+    .hide-scrollbar {
+        -ms-overflow-style: none;
+        scrollbar-width: none;
+    }
+
     @media (max-width: 640px) {
         .card-header,
         .card-body {
