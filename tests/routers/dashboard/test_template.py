@@ -339,6 +339,38 @@ def test_dashboard_js_includes_release_status_column_and_upload_age():
     assert "Plex episode availability is being resolved for partial seasons" not in js
 
 
+def test_dashboard_details_stats_rail_is_populated():
+    """Desktop left-rail `<dl id="request-details-stats">` should be populated."""
+    js = _read_dashboard_js()
+    css = _read_dashboard_css()
+
+    # The renderer + its window export exist so the rail is filled at runtime.
+    assert "function renderDetailsStats(data)" in js
+    assert "window.renderDetailsStats = renderDetailsStats;" in js
+    # Wired into openRequestDetails after the details payload loads, and cleared
+    # on a fresh (non-preserveUiState) modal open.
+    assert "renderDetailsStats(data);" in js
+    assert "getElementById('request-details-stats')" in js
+    # The five named stat labels from the mockup are emitted by the renderer.
+    for label in ("Cached results", "Passed", "Rejected", "Staged", "Last search"):
+        assert label in js
+    # Tone classes per the mockup (emerald=passed, red=rejected, cyan=staged).
+    assert "text-emerald-400 tabular-nums" in js
+    assert "text-red-400 tabular-nums" in js
+    assert "text-cyan-300 tabular-nums" in js
+    # Stat values are sourced from the serializer's named fields, not hardcoded.
+    assert "data.total_releases" in js
+    assert "data.active_staged_torrents" in js
+    assert "data.active_staged_torrent" in js
+    # Last search reuses the shared relative-time helper, now exported.
+    assert "function formatRelativePublishAge(publishDate)" in js
+    assert "window.formatRelativePublishAge = formatRelativePublishAge;" in js
+    assert "window.formatRelativePublishAge" in js
+    # The dangling CSS rule referencing the removed `data-release-rejection-reason`
+    # attribute contract is gone (Phase 2 inlined the rejection reason as text).
+    assert '[data-release-rejection-reason="true"]' not in css
+
+
 def test_dashboard_js_supports_annotation_highlighting():
     """Torrent annotation highlighting helpers should exist in the JS."""
     js = _read_dashboard_js()

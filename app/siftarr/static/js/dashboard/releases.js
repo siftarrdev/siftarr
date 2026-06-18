@@ -712,6 +712,7 @@ window.renderReleaseCard = renderReleaseCard;
 window.renderSearchLoadingState = renderSearchLoadingState;
 window.renderMovieSearchLoadingState = renderMovieSearchLoadingState;
 window.renderSeasonAccordion = renderSeasonAccordion;
+window.formatRelativePublishAge = formatRelativePublishAge;
 window.markEpisodeAvailable = markEpisodeAvailable;
 window.markSeasonAvailable = markSeasonAvailable;
 window.searchSeasonPacks = searchSeasonPacks;

@@ -217,6 +217,8 @@ async function openRequestDetails(requestId, explicitIndex = null, options = {})
         overview.textContent = '';
         const mobileOverview = document.querySelector('[data-mobile-overview]');
         if (mobileOverview) mobileOverview.textContent = '';
+        const statsEl = document.getElementById('request-details-stats');
+        if (statsEl) statsEl.innerHTML = '';
     }
     if (overseerrLink) {
         overseerrLink.classList.add('hidden');
@@ -365,6 +367,7 @@ async function openRequestDetails(requestId, explicitIndex = null, options = {})
 
         window.currentRequestTimeline = data.timeline || [];
         renderTimeline(window.currentRequestTimeline, { open: timelineWasOpen });
+        renderDetailsStats(data);
 
         if (data.auto_search_eligible && !window.detailsAutoSearchStarted[requestId]) {
             window.detailsAutoSearchStarted[requestId] = true;
@@ -383,6 +386,62 @@ async function openRequestDetails(requestId, explicitIndex = null, options = {})
         window.setPoster(null, 'Poster unavailable');
         releases.innerHTML = '<div class="text-red-400 text-sm">Failed to load request details. Check that Overseerr is reachable.</div>';
     }
+}
+
+// Render the desktop left-rail stat list (`#request-details-stats`):
+// Cached results / Passed / Rejected / Staged / Last search. Desktop-only
+// (the element is `hidden lg:block`); the mobile header card omits stats.
+// Field names come from `serialize_request_details_response`:
+//   - data.total_releases          -> Cached results
+//   - data.releases[].passed       -> Passed (truthy) / Rejected (falsy)
+//   - data.active_staged_torrents  -> Staged count (plural list length when
+//                                     present; falls back to the singular
+//                                     `active_staged_torrent` flag)
+//   - data.timeline[].created_at   -> latest entry timestamp -> "Last search"
+function renderDetailsStats(data) {
+    const statsEl = document.getElementById('request-details-stats');
+    if (!statsEl) return;
+    const releases = Array.isArray(data && data.releases) ? data.releases : [];
+    const passed = releases.filter(r => r && r.passed).length;
+    const rejected = releases.filter(r => r && !r.passed).length;
+    const stagedCount = Array.isArray(data.active_staged_torrents) && data.active_staged_torrents.length
+        ? data.active_staged_torrents.length
+        : (data.active_staged_torrent ? 1 : 0);
+    const cachedResults = data.total_releases != null ? data.total_releases : releases.length;
+    const lastSearch = formatDetailsLastSearch(data && data.timeline);
+    statsEl.innerHTML = [
+        detailsStatRow('Cached results', 'text-gray-300 tabular-nums', String(cachedResults)),
+        detailsStatRow('Passed', 'text-emerald-400 tabular-nums', String(passed)),
+        detailsStatRow('Rejected', 'text-red-400 tabular-nums', String(rejected)),
+        detailsStatRow('Staged', 'text-cyan-300 tabular-nums', String(stagedCount)),
+        detailsStatRow('Last search', 'text-gray-300', lastSearch),
+    ].join('');
+}
+
+function detailsStatRow(label, ddClass, value) {
+    return `<div class="flex justify-between gap-3"><dt class="text-gray-500">${window.escapeHtml(label)}</dt><dd class="${ddClass}">${window.escapeHtml(value)}</dd></div>`;
+}
+
+// Derive a relative "Last search" string from the latest timeline entry's
+// `created_at` timestamp. Reuses the repo's `formatRelativePublishAge` helper
+// (exported from releases.js) when present; falls back to "—" when there is no
+// timeline, no parseable timestamp, or the formatter yields an empty string.
+function formatDetailsLastSearch(timeline) {
+    if (!Array.isArray(timeline) || timeline.length === 0) return '—';
+    let latestMs = null;
+    let latestCreatedAt = null;
+    for (const entry of timeline) {
+        if (!entry || !entry.created_at) continue;
+        const ts = new Date(entry.created_at);
+        if (Number.isNaN(ts.getTime())) continue;
+        if (latestMs === null || ts.getTime() > latestMs) {
+            latestMs = ts.getTime();
+            latestCreatedAt = entry.created_at;
+        }
+    }
+    if (latestCreatedAt === null) return '—';
+    const relative = window.formatRelativePublishAge ? window.formatRelativePublishAge(latestCreatedAt) : '';
+    return relative || '—';
 }
 
 function renderRuleEvidence(evidence) {
@@ -439,6 +498,7 @@ function updateActivityMobileCount(timelineDelta, runsDelta) {
 
 window.loadSearchHistory = loadSearchHistory;
 window.renderRuleEvidence = renderRuleEvidence;
+window.renderDetailsStats = renderDetailsStats;
 
 async function searchTvRequest(mode = 'new') {
     if (!window.currentRequestId) return;

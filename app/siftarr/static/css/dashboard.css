@@ -90,12 +90,6 @@ details[open] summary .accordion-chevron { transform: rotate(90deg); }
         text-align: left;
     }
 
-    #request-details-releases [data-release-rejection-reason="true"] {
-        max-width: none;
-        text-align: left;
-        overflow-wrap: anywhere;
-    }
-
     #request-details-releases summary {
         flex-wrap: wrap;
     }
