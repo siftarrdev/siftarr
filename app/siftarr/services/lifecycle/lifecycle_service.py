@@ -8,7 +8,13 @@ from sqlalchemy.orm import selectinload
 
 from app.siftarr.models.activity_log import EventType
 from app.siftarr.models.episode import Episode
-from app.siftarr.models.request import MediaType, Request, RequestStatus
+from app.siftarr.models.request import (
+    AVAILABILITY_SAFE_REQUEST_STATUSES,
+    NON_TERMINAL_REQUEST_STATUSES,
+    MediaType,
+    Request,
+    RequestStatus,
+)
 from app.siftarr.models.season import Season
 from app.siftarr.services.lifecycle.activity_log_service import ActivityLogService
 from app.siftarr.services.lifecycle.episode_derive import (
@@ -157,24 +163,17 @@ class LifecycleService:
         For TV, includes requests where any episode is in a non-terminal
         state (SEARCHING, PENDING, UNRELEASED, STAGED, DOWNLOADING).
         """
-        NON_TERMINAL = [
-            RequestStatus.SEARCHING,
-            RequestStatus.PENDING,
-            RequestStatus.UNRELEASED,
-            RequestStatus.STAGED,
-            RequestStatus.DOWNLOADING,
-        ]
         tv_active_ids_subq = (
             select(Season.request_id)
             .select_from(Episode)
             .join(Season, Episode.season_id == Season.id)
-            .where(Episode.status.in_(NON_TERMINAL))
+            .where(Episode.status.in_(NON_TERMINAL_REQUEST_STATUSES))
         ).subquery()
         result = await self.db.execute(
             select(Request)
             .where(
                 or_(
-                    Request.status.in_(NON_TERMINAL),
+                    Request.status.in_(NON_TERMINAL_REQUEST_STATUSES),
                     and_(
                         Request.media_type == MediaType.TV,
                         Request.id.in_(select(tv_active_ids_subq.c.request_id)),
@@ -275,12 +274,7 @@ class LifecycleService:
             select(Request)
             .where(
                 or_(
-                    Request.status.in_(
-                        [
-                            RequestStatus.UNRELEASED,
-                            RequestStatus.COMPLETED,
-                        ]
-                    ),
+                    Request.status.in_(AVAILABILITY_SAFE_REQUEST_STATUSES),
                     Request.media_type == MediaType.TV,
                 )
             )

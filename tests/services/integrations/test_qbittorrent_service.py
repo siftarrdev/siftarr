@@ -487,8 +487,8 @@ class TestQbittorrentServiceUnit:
                     category=MediaCategory.MOVIES,
                 )
 
-            assert result == "Ok."
-            get_info.assert_not_awaited()
+            assert result == "abcdefghijklmnopqrstuvwxyz234567"
+            get_info.assert_awaited_once_with("abcdefghijklmnopqrstuvwxyz234567")
 
     @pytest.mark.asyncio
     async def test_add_torrent_metadata_pending_is_success(self):
@@ -511,8 +511,8 @@ class TestQbittorrentServiceUnit:
                     category=MediaCategory.MOVIES,
                 )
 
-            assert result == "Ok."
-            get_info.assert_not_awaited()
+            assert result == "abcdefghijklmnopqrstuvwxyz234567"
+            get_info.assert_awaited_once_with("abcdefghijklmnopqrstuvwxyz234567")
 
     @pytest.mark.asyncio
     async def test_add_torrents_bulk_sends_more_than_seventeen_magnets_in_chunks(self):

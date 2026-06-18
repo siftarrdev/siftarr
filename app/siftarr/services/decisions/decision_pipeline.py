@@ -13,12 +13,11 @@ from __future__ import annotations
 import logging
 from collections.abc import Sequence
 
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.siftarr.models.activity_log import EventType
-from app.siftarr.models.rule import Rule
 from app.siftarr.services.decisions.rule_engine import ReleaseEvaluation, RuleEngine
+from app.siftarr.services.decisions.rule_engine_provider import get_rule_engine
 from app.siftarr.services.lifecycle.activity_log_service import ActivityLogService
 from app.siftarr.services.lifecycle.pending_queue_service import PendingQueueService
 
@@ -45,9 +44,7 @@ async def build_rule_engine(
     """
     if cached_engine is not None:
         return cached_engine
-    result = await db.execute(select(Rule))
-    rules = list(result.scalars().all())
-    return RuleEngine.from_db_rules(rules=rules, media_type=media_type)
+    return await get_rule_engine(db, media_type)
 
 
 # ── Activity logging ──────────────────────────────────────────────────

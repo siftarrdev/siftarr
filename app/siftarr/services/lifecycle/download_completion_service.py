@@ -2,7 +2,6 @@
 
 import json
 import logging
-import re
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
@@ -22,7 +21,6 @@ from app.siftarr.models.staged_torrent import StagedTorrent
 from app.siftarr.services.admin.plex_polling_service import PlexPollingService
 from app.siftarr.services.integrations.qbittorrent_service import (
     QbittorrentService,
-    _torrent_file_info_hash,
 )
 from app.siftarr.services.lifecycle.activity_log_service import ActivityLogService
 from app.siftarr.services.lifecycle.lifecycle_service import LifecycleService
@@ -33,22 +31,17 @@ from app.siftarr.services.releases.release_serializers import (
     scope_to_episode_set,
     serialize_target_scope,
 )
+from app.siftarr.services.utils.torrent_identity import (
+    extract_torrent_hash,
+    normalize_torrent_name,
+)
 
 logger = logging.getLogger(__name__)
-
-_BTIH_RE = re.compile(r"urn:btih:([0-9a-fA-F]{40}|[2-7A-Za-z]{32})", re.IGNORECASE)
-_NON_ALNUM_RE = re.compile(r"[^a-zA-Z0-9]+")
 
 
 def _extract_hash(magnet_url: str | None, torrent_path: str | None = None) -> str | None:
     """Extract the info-hash from a magnet URI, or compute it from a .torrent file."""
-    if magnet_url:
-        m = _BTIH_RE.search(magnet_url)
-        if m:
-            return m.group(1).lower()
-    if torrent_path:
-        return _torrent_file_info_hash(torrent_path)
-    return None
+    return extract_torrent_hash(magnet_url, torrent_path)
 
 
 def _download_completed_torrent_ids(details: str | None) -> set[int]:
@@ -78,7 +71,7 @@ def _normalize_name(name: str) -> str:
     lowercases, so that e.g. ``"Finding.Carter.S01-S02.1080p.WEB-DL"``
     and ``"Finding Carter S01-S02 1080p WEB-DL"`` compare as equal.
     """
-    return _NON_ALNUM_RE.sub(" ", name).strip().lower()
+    return normalize_torrent_name(name)
 
 
 class DownloadCompletionService:
@@ -144,7 +137,7 @@ class DownloadCompletionService:
                 by_hash[h.lower()] = t
             n = t.get("name")
             if n:
-                by_name[n.lower()] = t
+                by_name[normalize_torrent_name(str(n))] = t
 
         done_torrent_ids: set[int] = set()
         qbit_evidence_by_torrent_id: dict[int, dict[str, Any]] = {}
@@ -169,7 +162,7 @@ class DownloadCompletionService:
                 # normalised separators (spaces vs dots vs dashes).
                 title_norm = _normalize_name(torrent.title)
                 matched = next(
-                    (t for qname, t in by_name.items() if title_norm in _normalize_name(qname)),
+                    (t for qname, t in by_name.items() if title_norm in qname),
                     None,
                 )
                 if matched is not None:

@@ -1,9 +1,7 @@
 """Service for interacting with qBittorrent API."""
 
 import asyncio
-import hashlib
 import logging
-import re
 from dataclasses import dataclass
 from enum import StrEnum
 from typing import Any
@@ -11,6 +9,11 @@ from typing import Any
 import qbittorrentapi
 
 from app.siftarr.config import Settings, get_settings
+from app.siftarr.services.utils.torrent_identity import (
+    normalize_torrent_name,
+    parse_magnet_info_hash,
+    torrent_file_info_hash,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -47,15 +50,12 @@ class BulkAddResult:
     error: str | None = None
 
 
-_MAGNET_HASH_RE = re.compile(r"xt=urn:btih:([a-fA-F0-9]{40})")
-_NON_ALNUM_RE = re.compile(r"[^a-zA-Z0-9]+")
 _BULK_ADD_CHUNK_SIZE = 10
 
 
 def _parse_magnet_info_hash(magnet_uri: str) -> str | None:
     """Extract the info hash (hex) from a magnet URI."""
-    m = _MAGNET_HASH_RE.search(magnet_uri)
-    return m.group(1).lower() if m else None
+    return parse_magnet_info_hash(magnet_uri)
 
 
 def _torrent_file_info_hash(torrent_path: str) -> str | None:
@@ -64,23 +64,12 @@ def _torrent_file_info_hash(torrent_path: str) -> str | None:
     The info hash is SHA1 of the raw bencoded ``info`` dictionary inside the
     top-level torrent metadata.
     """
-    try:
-        with open(torrent_path, "rb") as f:
-            data = f.read()
-    except Exception:
-        return None
-
-    # Find the raw byte range of the value for the "info" key in the outermost
-    # bencoded dictionary.  We return the hex digest of SHA1 over those bytes.
-    info_raw = _bencode_extract_info_value(data)
-    if info_raw is None:
-        return None
-    return hashlib.sha1(info_raw).hexdigest()
+    return torrent_file_info_hash(torrent_path)
 
 
 def _normalize_name(name: str) -> str:
     """Normalize separators for loose name matching (dots, dashes, spaces → space)."""
-    return _NON_ALNUM_RE.sub(" ", name).strip().lower()
+    return normalize_torrent_name(name)
 
 
 def _qbit_response_value(response: Any, name: str) -> Any:

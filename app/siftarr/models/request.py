@@ -35,6 +35,32 @@ ACTIVE_STAGING_WORKFLOW_STATUSES: tuple[RequestStatus, ...] = (
     RequestStatus.STAGED,
     RequestStatus.DOWNLOADING,
 )
+NON_TERMINAL_REQUEST_STATUSES: tuple[RequestStatus, ...] = (
+    RequestStatus.SEARCHING,
+    RequestStatus.PENDING,
+    RequestStatus.UNRELEASED,
+    RequestStatus.STAGED,
+    RequestStatus.DOWNLOADING,
+)
+TERMINAL_REQUEST_STATUSES: tuple[RequestStatus, ...] = (
+    RequestStatus.COMPLETED,
+    RequestStatus.FAILED,
+    RequestStatus.DENIED,
+)
+MUTABLE_REQUEST_STATUSES: tuple[RequestStatus, ...] = tuple(
+    status
+    for status in RequestStatus
+    if status not in {RequestStatus.COMPLETED, RequestStatus.DENIED}
+)
+RESETTABLE_EPISODE_DOWNLOAD_STATUSES: tuple[RequestStatus, ...] = (
+    RequestStatus.DOWNLOADING,
+    RequestStatus.STAGED,
+    RequestStatus.SEARCHING,
+)
+AVAILABILITY_SAFE_REQUEST_STATUSES: tuple[RequestStatus, ...] = (
+    RequestStatus.UNRELEASED,
+    RequestStatus.COMPLETED,
+)
 
 
 def is_active_staging_workflow_status(status: RequestStatus | str | None) -> bool:
@@ -45,6 +71,26 @@ def is_active_staging_workflow_status(status: RequestStatus | str | None) -> boo
         return False
     try:
         return RequestStatus(status) in ACTIVE_STAGING_WORKFLOW_STATUSES
+    except ValueError:
+        return False
+
+
+def is_terminal_request_status(status: RequestStatus | str | None) -> bool:
+    """Return whether a request state is terminal for lifecycle transitions."""
+    if status is None:
+        return False
+    try:
+        return RequestStatus(status) in TERMINAL_REQUEST_STATUSES
+    except ValueError:
+        return False
+
+
+def is_mutable_request_status(status: RequestStatus | str | None) -> bool:
+    """Return whether operators/background jobs may reset/retry this state."""
+    if status is None:
+        return False
+    try:
+        return RequestStatus(status) in MUTABLE_REQUEST_STATUSES
     except ValueError:
         return False
 

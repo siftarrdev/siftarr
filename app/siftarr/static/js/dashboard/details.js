@@ -636,35 +636,58 @@ function renderTimeline(timelineData, options = {}) {
         error: 'Error',
         request_status_changed: 'Status changed',
     };
+    function formatTimelineTimestamp(value) {
+        if (!value) return '';
+        const date = new Date(value);
+        if (Number.isNaN(date.getTime())) return '';
+        const now = new Date();
+        const sameYear = date.getFullYear() === now.getFullYear();
+        return date.toLocaleString(undefined, {
+            month: 'short',
+            day: 'numeric',
+            ...(sameYear ? {} : { year: 'numeric' }),
+            hour: 'numeric',
+            minute: '2-digit',
+        });
+    }
+
+    function timelineDetail(entry) {
+        if (!entry.details) return '';
+        const d = entry.details;
+        if (entry.event_type === 'request_status_changed' && d.old_status && d.new_status) {
+            return `${d.old_status} → ${d.new_status}`;
+        }
+        if (entry.event_type === 'search_started') {
+            return '';
+        }
+        if (entry.event_type === 'search_completed') {
+            if (d.result_count !== undefined) return `${d.result_count} result${Number(d.result_count) === 1 ? '' : 's'}`;
+            if (typeof d.message === 'string') {
+                if (d.message.includes('No releases found')) return 'No releases found';
+                return d.message;
+            }
+            return '';
+        }
+        if (entry.event_type === 'release_staged' && d.title) return d.title;
+        if (entry.event_type === 'error' && d.error) return d.error;
+        if (entry.event_type === 'episode_marked_available' && d.episode) {
+            return `S${String(d.season || '?').padStart(2,'0')}E${String(d.episode).padStart(2,'0')}`;
+        }
+        if (entry.event_type === 'rule_evaluation') {
+            const parts = [];
+            if (d.passed !== undefined) parts.push(`${d.passed} passed`);
+            if (d.failed !== undefined) parts.push(`${d.failed} failed`);
+            if (d.title) parts.push(d.title);
+            return parts.join(', ');
+        }
+        return '';
+    }
+
     entries.innerHTML = timelineData.map(entry => {
         const dot = colorMap[entry.event_type] || 'bg-gray-500';
         const label = labelMap[entry.event_type] || entry.event_type.replace(/_/g, ' ');
-        let detail = '';
-        if (entry.details) {
-            const d = entry.details;
-            if (entry.event_type === 'request_status_changed' && d.old_status && d.new_status) {
-                detail = `${d.old_status} → ${d.new_status}`;
-                if (d.reason) detail += ` (${d.reason})`;
-            } else if (entry.event_type === 'search_completed' && d.result_count !== undefined) {
-                detail = `${d.result_count} results found`;
-            } else if (entry.event_type === 'release_staged' && d.title) {
-                detail = d.title;
-            } else if (entry.event_type === 'error' && d.error) {
-                detail = d.error;
-            } else if (entry.event_type === 'episode_marked_available' && d.episode) {
-                detail = `S${String(d.season || '?').padStart(2,'0')}E${String(d.episode).padStart(2,'0')}`;
-            } else if (entry.event_type === 'rule_evaluation') {
-                const parts = [];
-                if (d.passed !== undefined) parts.push(`${d.passed} passed`);
-                if (d.failed !== undefined) parts.push(`${d.failed} failed`);
-                if (d.title) parts.push(d.title);
-                detail = parts.join(', ');
-            } else {
-                const summary = Object.entries(d).slice(0, 3).map(([k, v]) => `${k}: ${v}`).join(', ');
-                if (summary) detail = summary;
-            }
-        }
-        const ts = entry.created_at ? new Date(entry.created_at).toLocaleString() : '';
+        const detail = timelineDetail(entry);
+        const ts = formatTimelineTimestamp(entry.created_at);
         const safeLabel = window.escapeHtml(label);
         const safeTs = window.escapeHtml(ts);
         const safeDetail = detail ? window.escapeHtml(String(detail)) : '';

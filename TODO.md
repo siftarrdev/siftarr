@@ -10,34 +10,22 @@ This file captures the biggest opportunities identified during a repo-wide revie
 2. **Avoid full release reloads in detail views**
    The request detail page should avoid re-reading or re-grouping the entire release set when only a paginated subset is needed.
 
-3. **Add composite indexes for common release filters**
-   Add indexes for request-scoped sorting/filtering such as resolution, score, seeders, and publish date.
-
-4. **Reuse stored release evaluation results**
+3. **Reuse stored release evaluation results**
    If score/rule outcomes already exist in the database, serialize those values directly unless the rule version changed.
 
-5. **Cache stats responses by date range**
+4. **Cache stats responses by date range**
    Stats aggregation is a good candidate for short-lived caching, especially for repeated dashboard refreshes.
 
-6. **Consolidate stats aggregation queries**
+5. **Consolidate stats aggregation queries**
    Combine repeated aggregate reads into fewer SQL calls, or parallelize independent queries where it is safe to do so.
 
-7. **Precompile hot regex paths**
-   Parsing and classification logic in release/Prowlarr code should avoid recompiling regexes on every item.
-
-8. **Make Prowlarr cache tunable**
-   Expose cache TTL and size so heavier installs can trade memory for fewer upstream calls.
-
-9. **Tighten broad TV pack searches**
+6. **Tighten broad TV pack searches**
    Add better limits, category narrowing, or query shaping so broad searches return less noise.
 
-10. **Bulk release storage operations**
+7. **Bulk release storage operations**
     Use bulk insert/update/delete patterns for large search result sets instead of row-by-row Python loops.
 
-11. **Normalize qBit names once**
-    Build lookup maps once per batch instead of recalculating normalized torrent names repeatedly.
-
-12. **Bound season sweep concurrency**
+8. **Bound season sweep concurrency**
     Add concurrency limits to season-wide TV searches to reduce upstream pressure and flapping.
 
 ## Simplification / refactor opportunities
@@ -51,31 +39,22 @@ This file captures the biggest opportunities identified during a repo-wide revie
 3. **Centralize deduplication logic**
    Use one canonical helper for release identity and dedup keys across search, storage, and decision flows.
 
-4. **Unify rule-engine loading**
-   Share a single rule-engine provider instead of rebuilding cache/access patterns in several modules.
-
-5. **Unify movie and TV decision pipelines**
+4. **Unify movie and TV decision pipelines**
    Keep media-specific selection logic separate, but share the common search → evaluate → persist → stage flow.
 
-6. **Move serialization into schemas**
+5. **Move serialization into schemas**
    Replace manual dashboard DTO assembly with response schemas or dedicated serializer helpers.
 
-7. **Extract SSE orchestration helpers**
+6. **Extract SSE orchestration helpers**
    Move search-streaming state, queue handling, and execution orchestration out of the router layer.
 
-8. **Split large dashboard templates**
+7. **Split large dashboard templates**
    Break tables, modals, and details into reusable partials/macros to reduce template complexity.
 
-9. **Modularize dashboard JavaScript**
+8. **Modularize dashboard JavaScript**
    Separate API access, state management, rendering, and event wiring into smaller JS modules.
 
-10. **Centralize lifecycle status semantics**
-    Define one shared source of truth for active, terminal, and actionable request statuses.
-
-11. **Consolidate torrent hash parsing**
-    Put torrent/hash extraction in one utility instead of duplicating parsing logic across qBit-related code.
-
-12. **Replace string literals with enums/constants**
+9. **Replace string literals with enums/constants**
     Standardize search modes, sources, and staged statuses to reduce drift and typo risk.
 
 ## New feature ideas

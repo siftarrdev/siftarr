@@ -7,7 +7,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.siftarr.models.request import MediaType, Request, RequestStatus
 from app.siftarr.services.decisions.decision_pipeline import (
     add_to_pending_queue,
-    build_rule_engine,
     collect_rejection_reasons,
     get_best_passing,
     log_release_staged,
@@ -15,9 +14,8 @@ from app.siftarr.services.decisions.decision_pipeline import (
 )
 from app.siftarr.services.decisions.rule_engine import (
     RuleEngine,
-    get_cached_engine,
-    set_cached_engine,
 )
+from app.siftarr.services.decisions.rule_engine_provider import get_rule_engine
 from app.siftarr.services.integrations.prowlarr_service import ProwlarrService
 from app.siftarr.services.integrations.qbittorrent_service import QbittorrentService
 from app.siftarr.services.releases.release_parser import movie_release_identity_rejection_reason
@@ -57,14 +55,7 @@ class MovieDecisionService:
 
     async def _get_rule_engine(self) -> RuleEngine:
         """Get configured rule engine from database rules (cached per media type)."""
-        media_type = MediaType.MOVIE.value
-        cached = get_cached_engine(media_type)
-        if cached is not None:
-            return cached
-
-        engine = await build_rule_engine(self.db, media_type)
-        set_cached_engine(media_type, engine)
-        return engine
+        return await get_rule_engine(self.db, MediaType.MOVIE.value)
 
     async def process_request(self, request_id: int) -> dict:
         """

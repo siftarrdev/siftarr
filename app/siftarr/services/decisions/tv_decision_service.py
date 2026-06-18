@@ -32,16 +32,14 @@ from app.siftarr.models.season import Season
 from app.siftarr.models.staged_torrent import StagedTorrent
 from app.siftarr.services.decisions.decision_pipeline import (
     add_to_pending_queue,
-    build_rule_engine,
     log_release_staged,
     log_rule_evaluation,
 )
 from app.siftarr.services.decisions.rule_engine import (
     ReleaseEvaluation,
     RuleEngine,
-    get_cached_engine,
-    set_cached_engine,
 )
+from app.siftarr.services.decisions.rule_engine_provider import get_rule_engine
 from app.siftarr.services.integrations.overseerr_service import OverseerrService
 from app.siftarr.services.integrations.prowlarr_service import (
     ProwlarrRelease,
@@ -101,14 +99,7 @@ class TVDecisionService:
 
     async def _get_rule_engine(self) -> RuleEngine:
         """Get configured rule engine from database rules (cached per media type)."""
-        media_type = MediaType.TV.value
-        cached = get_cached_engine(media_type)
-        if cached is not None:
-            return cached
-
-        engine = await build_rule_engine(self.db, media_type)
-        set_cached_engine(media_type, engine)
-        return engine
+        return await get_rule_engine(self.db, MediaType.TV.value)
 
     def _get_requested_seasons(self, request: Request) -> list[int]:
         return sorted([s.season_number for s in request.seasons])

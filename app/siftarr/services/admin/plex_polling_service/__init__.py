@@ -15,7 +15,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.siftarr.config import get_settings
-from app.siftarr.models.request import MediaType, Request, RequestStatus
+from app.siftarr.models.request import (
+    ACTIVE_STAGING_WORKFLOW_STATUSES,
+    NON_TERMINAL_REQUEST_STATUSES,
+    MediaType,
+    Request,
+    RequestStatus,
+)
 from app.siftarr.models.season import Season
 from app.siftarr.models.staged_torrent import StagedTorrent
 from app.siftarr.services.integrations.plex_service import PlexService, PlexTransientScanError
@@ -31,14 +37,6 @@ logger = logging.getLogger(__name__)
 T = TypeVar("T")
 type EpisodeKey = tuple[int, int]
 ProgressCallback = Callable[[dict[str, object]], Awaitable[None] | None]
-
-NON_TERMINAL_STATUSES = [
-    RequestStatus.SEARCHING,
-    RequestStatus.PENDING,
-    RequestStatus.UNRELEASED,
-    RequestStatus.STAGED,
-    RequestStatus.DOWNLOADING,
-]
 
 
 @dataclass(slots=True)
@@ -129,7 +127,7 @@ class PlexPollingService:
     async def get_active_requests(self) -> list[Request]:
         result = await self.db.execute(
             select(Request)
-            .where(Request.status.in_(NON_TERMINAL_STATUSES))
+            .where(Request.status.in_(NON_TERMINAL_REQUEST_STATUSES))
             .options(selectinload(Request.seasons).selectinload(Season.episodes))
         )
         return list(result.scalars().all())
@@ -144,7 +142,7 @@ class PlexPollingService:
         result = await self.db.execute(
             select(Request)
             .where(
-                Request.status.in_(NON_TERMINAL_STATUSES),
+                Request.status.in_(NON_TERMINAL_REQUEST_STATUSES),
                 (Request.status == RequestStatus.DOWNLOADING) | (Request.updated_at >= cutoff),
             )
             .order_by(Request.updated_at.desc())
@@ -302,8 +300,7 @@ class PlexPollingService:
         active_by_id = {
             req.id: req
             for req in requests
-            if req.status in {RequestStatus.STAGED, RequestStatus.DOWNLOADING}
-            and req.id not in exclude_request_ids
+            if req.status in ACTIVE_STAGING_WORKFLOW_STATUSES and req.id not in exclude_request_ids
         }
         if not active_by_id:
             return []
@@ -826,7 +823,7 @@ class PlexPollingService:
 __all__ = [
     "CheckRequestResult",
     "HasMetrics",
-    "NON_TERMINAL_STATUSES",
+    "NON_TERMINAL_REQUEST_STATUSES",
     "PlexJobResult",
     "PlexPollingService",
     "PlexPollResult",

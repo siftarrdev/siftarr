@@ -14,7 +14,6 @@ from app.siftarr.models import EventType
 from app.siftarr.models.release import Release
 from app.siftarr.models.request import MediaType
 from app.siftarr.models.request import Request as RequestModel
-from app.siftarr.models.rule import Rule
 from app.siftarr.models.season import Season
 from app.siftarr.services.dashboard.dashboard_service import TVSearchData
 from app.siftarr.services.dashboard.tv_enrichment_service import TVEnrichmentService
@@ -22,9 +21,8 @@ from app.siftarr.services.decisions.movie_decision_service import MovieDecisionS
 from app.siftarr.services.decisions.rule_engine import (
     ReleaseEvaluation,
     RuleEngine,
-    get_cached_engine,
-    set_cached_engine,
 )
+from app.siftarr.services.decisions.rule_engine_provider import get_rule_engine
 from app.siftarr.services.decisions.tv_decision_service import TVDecisionService
 from app.siftarr.services.integrations.overseerr_service import OverseerrService
 from app.siftarr.services.integrations.prowlarr_service import ProwlarrRelease, ProwlarrService
@@ -704,12 +702,4 @@ class SearchService:
 
     async def _build_rule_engine(self, *, media_type: str) -> RuleEngine:
         """Load rules from DB and build a RuleEngine (cached)."""
-        cached = get_cached_engine(media_type)
-        if cached is not None:
-            return cached
-
-        rules_result = await self.db.execute(select(Rule))
-        rules = list(rules_result.scalars().all())
-        engine = RuleEngine.from_db_rules(rules=rules, media_type=media_type)
-        set_cached_engine(media_type, engine)
-        return engine
+        return await get_rule_engine(self.db, media_type)

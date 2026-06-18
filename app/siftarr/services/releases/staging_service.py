@@ -7,7 +7,6 @@ handoff workflow into a single service boundary.
 import json
 import logging
 import os
-import re
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -42,6 +41,8 @@ from app.siftarr.services.releases.release_serializers import (
 from app.siftarr.services.releases.release_storage import build_prowlarr_release
 from app.siftarr.services.stats_metrics_service import record_release_fact
 from app.siftarr.services.utils.http_client import get_shared_client
+from app.siftarr.services.utils.safe_names import safe_staging_filename
+from app.siftarr.services.utils.torrent_identity import extract_torrent_hash
 
 STAGING_DIR = Path("/data/staging")
 
@@ -275,10 +276,7 @@ class StagingService:
 
         Removes/replaces characters that are problematic in filenames.
         """
-        title = re.sub(r"[<>:\"/\\|?*]", "_", title)
-        title = re.sub(r"\s+", "_", title)
-        title = re.sub(r"_+", "_", title)
-        return title[:100]
+        return safe_staging_filename(title)
 
     def _generate_filename(
         self,
@@ -395,18 +393,9 @@ class StagingService:
         # Compute info hash from magnet URI or .torrent file if not provided by the indexer
         info_hash: str | None = release.info_hash
         if not info_hash:
-            if release.magnet_url:
-                from app.siftarr.services.integrations.qbittorrent_service import (
-                    _parse_magnet_info_hash,
-                )
-
-                info_hash = _parse_magnet_info_hash(release.magnet_url)
-            if not info_hash and torrent_path and torrent_path.exists():
-                from app.siftarr.services.integrations.qbittorrent_service import (
-                    _torrent_file_info_hash,
-                )
-
-                info_hash = _torrent_file_info_hash(str(torrent_path))
+            info_hash = extract_torrent_hash(
+                release.magnet_url, str(torrent_path) if torrent_path.exists() else None
+            )
 
         staged = StagedTorrent(
             request_id=request.id,

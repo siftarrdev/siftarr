@@ -1,6 +1,10 @@
 """Expanded tests for RuleEngine."""
 
-from unittest.mock import MagicMock
+from typing import cast
+from unittest.mock import AsyncMock, MagicMock
+
+import pytest
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.siftarr.models.rule import Rule, RuleType, TVTarget
 from app.siftarr.services.decisions.rule_engine import (
@@ -8,8 +12,77 @@ from app.siftarr.services.decisions.rule_engine import (
     RuleEngine,
     RuleMatch,
     SizeLimitRule,
+    clear_engine_caches,
+    increment_rule_version,
 )
+from app.siftarr.services.decisions.rule_engine_provider import get_rule_engine
 from app.siftarr.services.integrations.prowlarr_service import ProwlarrRelease
+
+
+class _ScalarResult:
+    def __init__(self, rules: list[object]) -> None:
+        self._rules = rules
+
+    def all(self) -> list[object]:
+        return self._rules
+
+
+class _ExecuteResult:
+    def __init__(self, rules: list[object]) -> None:
+        self._rules = rules
+
+    def scalars(self) -> _ScalarResult:
+        return _ScalarResult(self._rules)
+
+
+class _Db:
+    def __init__(self, rules: list[object]) -> None:
+        self.execute = AsyncMock(return_value=_ExecuteResult(rules))
+
+
+@pytest.mark.asyncio
+async def test_rule_engine_provider_reuses_cached_engine(monkeypatch):
+    rules = [object()]
+    db = _Db(rules)
+    session = cast(AsyncSession, db)
+    built: list[tuple[list[object], str | None]] = []
+
+    def fake_from_db_rules(*, rules: list[object] | None = None, media_type: str | None = None):
+        built.append((list(rules or []), media_type))
+        return RuleEngine(scorer_patterns=[(len(built), "score", "x265", 10)])
+
+    monkeypatch.setattr(RuleEngine, "from_db_rules", fake_from_db_rules)
+
+    first = await get_rule_engine(session, "movie")
+    second = await get_rule_engine(session, "movie")
+
+    assert second is first
+    assert built == [(rules, "movie")]
+    assert db.execute.await_count == 1
+
+
+@pytest.mark.asyncio
+async def test_rule_engine_provider_rebuilds_after_rule_version_increment(monkeypatch):
+    rules = [object()]
+    db = _Db(rules)
+    session = cast(AsyncSession, db)
+    built = 0
+
+    def fake_from_db_rules(*, rules: list[object] | None = None, media_type: str | None = None):
+        nonlocal built
+        built += 1
+        return RuleEngine(scorer_patterns=[(built, "score", "x265", 10)])
+
+    monkeypatch.setattr(RuleEngine, "from_db_rules", fake_from_db_rules)
+
+    first = await get_rule_engine(session, "tv")
+    increment_rule_version()
+    second = await get_rule_engine(session, "tv")
+    clear_engine_caches()
+
+    assert second is not first
+    assert built == 2
+    assert db.execute.await_count == 2
 
 
 class TestRuleEngine:
