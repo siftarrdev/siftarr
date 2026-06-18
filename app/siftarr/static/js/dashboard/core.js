@@ -85,7 +85,10 @@ function setPoster(posterUrl, titleText) {
     if (posterUrl) {
         poster.src = posterUrl;
         poster.alt = titleText;
-        poster.className = 'w-full rounded-xl bg-surface-800 border border-gray-700/60 shadow-lg';
+        // Only toggle visibility + src/alt so the responsive classes authored in
+        // the template (h-20 w-14 ... lg:h-44 lg:w-full) survive across both the
+        // mobile header-card and the desktop rail. Resetting className would
+        // clobber the responsive breakpoints.
         poster.classList.remove('hidden');
         fallback.classList.add('hidden');
         return;
@@ -141,26 +144,48 @@ function updateNavigationButtons() {
     const position = document.getElementById('details-position');
     if (!prevBtn || !nextBtn || !position) return;
 
+    // Mobile bottom-bar prev/next set (guarded so desktop-only contexts work).
+    const prevBtnMobile = document.getElementById('details-prev-btn-mobile');
+    const nextBtnMobile = document.getElementById('details-next-btn-mobile');
+    const positionMobile = document.getElementById('details-position-mobile');
+
     const total = window.visibleRequests.length;
     if (total === 0) {
-        position.textContent = '- of -';
+        const emptyPosition = '- of -';
+        position.textContent = emptyPosition;
+        if (positionMobile) positionMobile.textContent = emptyPosition;
         prevBtn.disabled = true;
         nextBtn.disabled = true;
         prevBtn.title = 'No items';
         nextBtn.title = 'No items';
+        if (prevBtnMobile) prevBtnMobile.disabled = true;
+        if (nextBtnMobile) nextBtnMobile.disabled = true;
         return;
     }
 
     const currentIndex = window.currentDetailsIndex >= 0 ? window.currentDetailsIndex : -1;
-    position.textContent = currentIndex >= 0 ? `${currentIndex + 1} of ${total}` : `- of ${total}`;
+    const positionText = currentIndex >= 0 ? `${currentIndex + 1} of ${total}` : `- of ${total}`;
+    position.textContent = positionText;
+    if (positionMobile) positionMobile.textContent = positionText;
 
     const prevIndex = currentIndex >= 0 ? (currentIndex - 1 + total) % total : total - 1;
     const nextIndex = currentIndex >= 0 ? (currentIndex + 1) % total : 0;
 
+    const prevTitle = `← ${window.visibleRequests[prevIndex].title} (wraps around)`;
+    const nextTitle = `${window.visibleRequests[nextIndex].title} → (wraps around)`;
+
     prevBtn.disabled = false;
     nextBtn.disabled = false;
-    prevBtn.title = `← ${window.visibleRequests[prevIndex].title} (wraps around)`;
-    nextBtn.title = `${window.visibleRequests[nextIndex].title} → (wraps around)`;
+    prevBtn.title = prevTitle;
+    nextBtn.title = nextTitle;
+    if (prevBtnMobile) {
+        prevBtnMobile.disabled = false;
+        prevBtnMobile.title = prevTitle;
+    }
+    if (nextBtnMobile) {
+        nextBtnMobile.disabled = false;
+        nextBtnMobile.title = nextTitle;
+    }
 }
 
 function navigateDetails(direction) {

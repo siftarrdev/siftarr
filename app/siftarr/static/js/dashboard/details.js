@@ -232,6 +232,13 @@ async function openRequestDetails(requestId, explicitIndex = null, options = {})
         window.resetDetailsControls(requestId, { updateInputs: true });
         delete window.detailsAutoSearchStarted[requestId];
     }
+    // Reset the Activity panel to its default (open) state on a fresh modal
+    // open. Collapse state does not persist across modal reopens, and we only
+    // reset when the modal was previously closed (prev/next navigation reuses
+    // an already-visible modal and should not force the panel back open).
+    if (modal.classList.contains('hidden') && window.expandActivityPanel) {
+        window.expandActivityPanel();
+    }
     modal.classList.remove('hidden');
 
     try {
@@ -560,6 +567,44 @@ function renderTimeline(timelineData, options = {}) {
         </div>`;
     }).join('');
 }
+
+// Activity panel collapse/expand toggle.
+// The panel uses `hidden` (mobile off) + `lg:flex` (desktop on) authored in the
+// template. Collapsing on desktop toggles the `lg:flex` class (NOT `hidden`),
+// because toggling `hidden` alone would be overridden by `lg:flex` at the lg
+// breakpoint and fail to hide the panel. The `hidden` base stays in place so
+// the panel remains off on mobile regardless of collapse state. A
+// MutationObserver mirrors the panel state onto the expand tab (#activity-show)
+// by toggling its `lg:flex` class.
+function initActivityPanelToggle() {
+    const panel = document.getElementById('activity-panel');
+    const showBtn = document.getElementById('activity-show');
+    if (!panel || !showBtn) return;
+
+    const syncExpandTab = () => {
+        if (panel.classList.contains('lg:flex')) {
+            // Panel open on desktop -> hide the expand tab.
+            showBtn.classList.remove('lg:flex');
+        } else {
+            // Panel collapsed -> show the expand tab on desktop.
+            showBtn.classList.add('lg:flex');
+        }
+    };
+
+    const observer = new MutationObserver(syncExpandTab);
+    observer.observe(panel, { attributes: true, attributeFilter: ['class'] });
+
+    window.collapseActivityPanel = () => {
+        panel.classList.remove('lg:flex');
+    };
+    window.expandActivityPanel = () => {
+        panel.classList.add('lg:flex');
+    };
+
+    syncExpandTab();
+}
+
+initActivityPanelToggle();
 
 // Export functions to window for HTML onclick handlers
 window.openRequestDetails = openRequestDetails;
