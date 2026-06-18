@@ -21,7 +21,6 @@ window.currentDetailsIndex = -1;
 window.currentReleases = [];
 window.currentRequestId = null;
 window.currentTvSeasons = [];
-window.currentActiveStagedTorrent = null;
 window.currentRequestTimeline = [];
 
 const checkboxRangeAnchors = new Map();

@@ -235,7 +235,6 @@ async function openRequestDetails(requestId, explicitIndex = null, options = {})
         tvFullSearchBtn.classList.add('hidden');
     }
     window.currentTvSeasons = [];
-    window.updateActiveStageBanner({ active_staged_torrent: null });
     window.setPoster(null, 'Loading poster');
     // #release-results-header and #release-controls are hidden on mobile by
     // default (the mobile filter chip toggles #release-controls) and shown on
@@ -333,7 +332,6 @@ async function openRequestDetails(requestId, explicitIndex = null, options = {})
         window.currentDetailsData = data;
         window.currentRequestId = data.request.id;
         window.currentRequestMediaType = data.request.media_type || 'movie';
-        window.updateActiveStageBanner(data);
         window.loadSearchHistory();
 
         const cacheIndicator = document.getElementById('release-cache-indicator');
@@ -382,7 +380,6 @@ async function openRequestDetails(requestId, explicitIndex = null, options = {})
         title.textContent = 'Error loading details';
         meta.textContent = err.message || 'Unknown error';
         overview.textContent = '';
-        window.updateActiveStageBanner({ active_staged_torrent: null });
         window.setPoster(null, 'Poster unavailable');
         releases.innerHTML = '<div class="text-red-400 text-sm">Failed to load request details. Check that Overseerr is reachable.</div>';
     }

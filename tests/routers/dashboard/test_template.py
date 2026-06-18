@@ -381,10 +381,13 @@ def test_dashboard_js_includes_active_stage_replacement_copy():
     """Request details should explain replacement semantics for staged picks."""
     js = _read_dashboard_js()
 
-    # updateActiveStageBanner still ships until Phase 5, so its banner id and
-    # copy string remain in the JS bundle (the element is gone from the template).
-    assert "request-details-active-stage-banner" in js
-    assert "Selecting another result will replace it." in js
+    # The separate staged banner was removed in Phase 5 (element gone from the
+    # template, updateActiveStageBanner function and its call sites deleted).
+    # Replacement semantics now live entirely on the inline staged release card.
+    assert "request-details-active-stage-banner" not in js
+    assert "Selecting another result will replace it." not in js
+    assert "updateActiveStageBanner" not in js
+    assert "currentActiveStagedTorrent" not in js
     # Inline Approve/Discard/Replace live on the staged release card itself.
     assert "inlineStagedAction" in js
     assert "/approve" in js
@@ -394,6 +397,7 @@ def test_dashboard_js_includes_active_stage_replacement_copy():
     assert ">Replace</button>" in js
     assert ">Stage</button>" in js
     assert "Stage this torrent for review and approval." in js
+    assert "Replace the active staged torrent with this selection." in js
     assert "text-emerald-400" in js
     assert "text-red-400" in js
 
