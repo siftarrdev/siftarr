@@ -17,6 +17,10 @@ class Release(Base):
     __table_args__ = (
         Index("ix_releases_request_id", "request_id"),
         Index("ix_releases_score", "score"),
+        Index("ix_releases_request_score", "request_id", "score"),
+        Index("ix_releases_request_seeders", "request_id", "seeders"),
+        Index("ix_releases_request_publish_date", "request_id", "publish_date"),
+        Index("ix_releases_request_resolution", "request_id", "resolution"),
         Index(
             "ix_releases_request_season_episode", "request_id", "season_number", "episode_number"
         ),

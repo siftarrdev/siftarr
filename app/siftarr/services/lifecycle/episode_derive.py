@@ -13,7 +13,7 @@ from collections.abc import Sequence
 from datetime import UTC, date, datetime
 from typing import TYPE_CHECKING
 
-from app.siftarr.models.request import Request, RequestStatus
+from app.siftarr.models.request import ACTIVE_STAGING_WORKFLOW_STATUSES, Request, RequestStatus
 
 if TYPE_CHECKING:
     from app.siftarr.models.episode import Episode
@@ -53,11 +53,9 @@ def derive_season_status(episodes: Sequence[Episode]) -> RequestStatus:
 
     statuses = {ep.status for ep in episodes}
 
-    for candidate in (
-        RequestStatus.SEARCHING,
-        RequestStatus.DOWNLOADING,
-        RequestStatus.STAGED,
-    ):
+    # Episode aggregation has display/workflow precedence, not a generic lifecycle
+    # grouping: SEARCHING must outrank active staging/downloading states here.
+    for candidate in (RequestStatus.SEARCHING, *ACTIVE_STAGING_WORKFLOW_STATUSES[::-1]):
         if candidate in statuses:
             return candidate
 

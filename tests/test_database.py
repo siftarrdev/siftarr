@@ -264,7 +264,7 @@ class TestDatabaseHelpers:
         from app.siftarr.database import CURRENT_ALEMBIC_REVISION, get_alembic_head_revision
 
         assert CURRENT_ALEMBIC_REVISION == "head"
-        assert get_alembic_head_revision() == "a1b2c3d4e5f6"
+        assert get_alembic_head_revision() == "b7c8d9e0f1a2"
 
     def test_alembic_history_supports_incremental_revisions(self):
         """Alembic history should include focused incremental migrations."""

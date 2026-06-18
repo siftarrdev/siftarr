@@ -108,8 +108,8 @@ The old duplicated developer guide and stale product specification under `docs/`
 
 Database entities and enums.
 
-- `request.py` — media request state and request metadata
-- `release.py` — searched/candidate releases, including persisted compact rule evidence/parse metadata for later review
+- `request.py` — media request state, request metadata, and shared lifecycle status groupings/predicates
+- `release.py` — searched/candidate releases, including persisted compact rule evidence/parse metadata and request-scoped detail-view indexes
 - `search_history.py` — request search-run history and compact candidate snapshots
 - `rule.py` — rule definitions for filtering/scoring
 - `season.py` / `episode.py` — TV coverage and availability tracking
@@ -164,8 +164,9 @@ Business logic and integrations, organized into thematic subpackages:
 
 **`decisions/`** — Rule engine and decision pipeline
 - `rule_engine.py` — release filtering and scoring evaluation; module-level rule version cache (`_rule_version`)
+- `rule_engine_provider.py` — shared cached rule-engine loading from database rules
 - `rule_service.py` — CRUD/order logic for rules, export/import validation, existing-vs-imported diff preview and selected merge/replace application, and empty-database default-rule seeding from configured `rules.json`
-- `decision_pipeline.py` — shared decision pipeline helpers (rule loading, activity logging, pending queue, best-release selection)
+- `decision_pipeline.py` — shared decision pipeline helpers (activity logging, pending queue, best-release selection)
 - `tv_decision_service.py` — TV-specific decision logic (Search-for-new season-pack-first selection with exact episode fallback, Full-search broad pack evaluation, actionable staged selection)
 - `movie_decision_service.py` — movie-specific decision logic
 

@@ -24,6 +24,8 @@ _logger = logging.getLogger(__name__)
 
 _RELEASE_TYPES_AVAILABLE = {3, 4, 5}
 _TV_UNAIRED_STATUSES = {"Planned", "In Production", "Pilot"}
+# Unreleased detection only treats Plex-confirmed episodes as available; FAILED/DENIED
+# are terminal lifecycle states but do not prove availability for aired episodes.
 _AVAILABLE_EPISODE_STATUSES = {RequestStatus.COMPLETED}
 
 

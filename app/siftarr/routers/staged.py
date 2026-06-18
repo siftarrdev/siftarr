@@ -22,6 +22,7 @@ from app.siftarr.models.request import (
     Request,
     RequestStatus,
     is_active_staging_workflow_status,
+    is_terminal_request_status,
 )
 from app.siftarr.models.staged_torrent import StagedTorrent
 from app.siftarr.services import staging_decision_log
@@ -487,11 +488,7 @@ async def _approve_torrent(
         torrent.info_hash = torrent_hash.lower()
     if request:
         lifecycle_service = LifecycleService(db)
-        if request.status not in (
-            RequestStatus.COMPLETED,
-            RequestStatus.FAILED,
-            RequestStatus.DENIED,
-        ):
+        if not is_terminal_request_status(request.status):
             if commit_transition:
                 await lifecycle_service.transition(request.id, RequestStatus.DOWNLOADING)
             else:
@@ -597,11 +594,7 @@ async def _mark_torrent_approved_after_qbit(
     torrent.status = "approved"
     if isinstance(torrent_hash, str) and _is_hash_like(torrent_hash):
         torrent.info_hash = torrent_hash.lower()
-    if request and request.status not in (
-        RequestStatus.COMPLETED,
-        RequestStatus.FAILED,
-        RequestStatus.DENIED,
-    ):
+    if request and not is_terminal_request_status(request.status):
         lifecycle_service = LifecycleService(db)
         await lifecycle_service.transition(request.id, RequestStatus.DOWNLOADING, commit=False)
 

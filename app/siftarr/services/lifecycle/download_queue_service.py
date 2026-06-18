@@ -10,7 +10,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.siftarr.models.activity_log import EventType
-from app.siftarr.models.request import MediaType, Request, RequestStatus
+from app.siftarr.models.request import (
+    RESETTABLE_EPISODE_DOWNLOAD_STATUSES,
+    MediaType,
+    Request,
+    RequestStatus,
+    is_mutable_request_status,
+)
 from app.siftarr.models.season import Season
 from app.siftarr.models.staged_torrent import StagedTorrent
 from app.siftarr.services.integrations.qbittorrent_service import QbittorrentService
@@ -35,13 +41,6 @@ class _HashResolutionResult:
     success: bool
     qbit_hash: str | None = None
     message: str | None = None
-
-
-_RESETTABLE_EPISODE_STATUSES = {
-    RequestStatus.DOWNLOADING,
-    RequestStatus.STAGED,
-    RequestStatus.SEARCHING,
-}
 
 
 def _covered_episode(ep, coverage) -> bool:
@@ -81,7 +80,7 @@ class DownloadQueueService:
         if request is not None:
             if request.media_type == MediaType.TV:
                 self._reset_tv_covered_episodes(request, torrent.title)
-            elif request.status not in (RequestStatus.COMPLETED, RequestStatus.DENIED):
+            elif is_mutable_request_status(request.status):
                 request.status = RequestStatus.PENDING
 
         await ActivityLogService(self.db).log(
@@ -148,7 +147,7 @@ class DownloadQueueService:
         coverage = cached_parse_release_coverage(title)
         all_episodes = [ep for season in request.seasons for ep in season.episodes]
         for ep in all_episodes:
-            if ep.status in _RESETTABLE_EPISODE_STATUSES and _covered_episode(ep, coverage):
+            if ep.status in RESETTABLE_EPISODE_DOWNLOAD_STATUSES and _covered_episode(ep, coverage):
                 ep.status = RequestStatus.PENDING
         for season in request.seasons:
             season.status = derive_season_status(list(season.episodes))
