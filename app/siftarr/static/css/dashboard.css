@@ -38,6 +38,17 @@ details summary::-webkit-details-marker { display: none; }
 details summary { list-style: none; }
 details[open] summary .accordion-chevron { transform: rotate(90deg); }
 .accordion-chevron { transition: transform 0.15s ease; }
+
+/* Suppress the browser default bright (white) focus outline on details/summary
+   rows in the request-details modal — it clashes with the grey border theme.
+   Interactivity is already conveyed by the hover background, cursor, and chevron
+   rotation; keyboard focus keeps a subtle grey ring that matches the theme. */
+#request-details-modal summary { outline: none; }
+#request-details-modal summary:focus-visible {
+    outline: 2px solid rgba(75, 85, 99, 0.7);
+    outline-offset: -2px;
+    border-radius: 0.25rem;
+}
 .dashboard-search-loading {
     display: flex;
     align-items: center;
