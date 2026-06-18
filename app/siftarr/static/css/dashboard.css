@@ -38,6 +38,31 @@ details summary::-webkit-details-marker { display: none; }
 details summary { list-style: none; }
 details[open] summary .accordion-chevron { transform: rotate(90deg); }
 .accordion-chevron { transition: transform 0.15s ease; }
+
+/* Keep details-modal outlines in the same muted grey family as the panel
+   borders. Tailwind v4/browser defaults can otherwise render clicked/focused
+   summary rows and inline buttons with a bright currentColor/white outline. */
+#request-details-modal :is(summary, button, a, [role="button"], input, select, textarea, [tabindex]):focus {
+    outline: none;
+    box-shadow: none;
+    --tw-ring-offset-color: transparent;
+    --tw-ring-color: rgba(75, 85, 99, 0.7);
+}
+
+#request-details-modal :is(summary, button, a, [role="button"], input, select, textarea, [tabindex]):focus-visible {
+    outline: 2px solid rgba(75, 85, 99, 0.7);
+    outline-offset: 2px;
+    box-shadow: none;
+}
+
+#request-details-modal summary:focus-visible {
+    outline-offset: -2px;
+    border-radius: 0.25rem;
+}
+
+#request-details-releases details[id^="episode-details-"]:not([class*="border-cyan"]) {
+    border-color: rgba(55, 65, 81, 0.6);
+}
 .dashboard-search-loading {
     display: flex;
     align-items: center;
@@ -70,46 +95,6 @@ details[open] summary .accordion-chevron { transform: rotate(90deg); }
         font-size: 16px;
     }
 
-    #request-details-modal > .absolute.inset-4 > div:first-child,
-    #request-details-modal > .absolute.md\:inset-10 > div:first-child {
-        padding: 0.875rem 1rem;
-    }
-
-    #request-details-title {
-        font-size: 1.125rem;
-        line-height: 1.5rem;
-        overflow-wrap: anywhere;
-    }
-
-    #request-details-modal .grid {
-        gap: 1rem;
-        padding: 1rem;
-    }
-
-    #request-details-poster,
-    #request-details-poster-fallback {
-        max-height: 14rem;
-        width: auto;
-        max-width: 100%;
-        margin-inline: auto;
-    }
-
-    #request-details-poster-fallback {
-        min-height: 10rem;
-    }
-
-    #request-details-overview {
-        display: block;
-        width: 100%;
-        max-height: 11rem;
-        overflow-y: auto;
-        padding-right: 0.25rem;
-    }
-
-    #request-details-actions .btn-ghost {
-        flex: 1 1 10rem;
-    }
-
     #request-details-releases .rounded-xl,
     #request-details-releases details,
     #request-details-timeline,
@@ -130,38 +115,7 @@ details[open] summary .accordion-chevron { transform: rotate(90deg); }
         text-align: left;
     }
 
-    #request-details-releases [data-release-status-column="true"] {
-        align-items: stretch;
-        width: 100%;
-        text-align: left;
-    }
-
-    #request-details-releases [data-release-status-column="true"] .btn-primary,
-    #request-details-releases [data-release-status-column="true"] .btn-disabled {
-        width: 100%;
-        justify-content: center;
-        white-space: normal;
-        min-height: 2.5rem;
-    }
-
-    #request-details-releases [data-release-rejection-reason="true"] {
-        max-width: none;
-        text-align: left;
-        overflow-wrap: anywhere;
-    }
-
     #request-details-releases summary {
-        flex-wrap: wrap;
-    }
-
-    #request-details-releases summary > div:first-child,
-    #request-details-releases summary > div:last-child {
-        width: 100%;
-        min-width: 0;
-    }
-
-    #request-details-releases summary > div:last-child {
-        justify-content: flex-start;
         flex-wrap: wrap;
     }
 }

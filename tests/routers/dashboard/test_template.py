@@ -106,8 +106,14 @@ def test_dashboard_js_includes_read_only_tv_buckets():
     """Dashboard JS should show read-only TV buckets filled by Search All."""
     js = _read_dashboard_js()
 
-    assert "Season packs and complete series" in js
-    assert "Larger releases that may cover more than one requested season" in js
+    # Scope chips replace the old "Season packs and complete series" drawer.
+    assert "Show:" in js
+    assert "All results" in js
+    assert "Season packs" in js
+    assert "Complete series" in js
+    assert "setDetailsScope" in js
+    assert "scope-season-packs-" in js
+    assert "scope-complete-series-" in js
     assert "Full search refreshes all aired episode and pack results." in js
     assert "No cached episode results yet" in js
 
@@ -124,19 +130,30 @@ def test_dashboard_js_includes_tv_details_expand_collapse_controls():
     )
 
     assert 'data-tv-accordion-toggle="panel"' in js
-    assert 'data-tv-accordion-toggle="season"' in js
     assert "const TV_ACCORDION_TOGGLE_CLASS" in js
     assert shared_toggle_class in js
     assert "function renderTvAccordionToggle(scope, requestId, seasonNumber = null)" in js
     assert "renderTvAccordionToggle('panel', requestId)" in js
-    assert "renderTvAccordionToggle('season', requestId, season.season_number)" in js
     assert "toggleTvDetailsAll" in js
     assert "toggleTvSeasonDetails" in js
     assert "updateTvAccordionControls" in js
     assert "aria-expanded" in js
     assert "button.textContent = allOpen ? 'Collapse all' : 'Expand all';" in js
-    assert "event.preventDefault(); event.stopPropagation(); toggleTvSeasonDetails" in js
     assert "No cached season-pack results yet" in js
+    # 2-level structure: Season → Episode details only (no nested pack drawers).
+    assert "season-details-" in js
+    assert "episode-details-" in js
+    assert "season-packs-details-" not in js
+    assert "season-packs-all-details-" not in js
+    # Season-row quiet links: Mark all / Stage individual episodes / Search season.
+    assert "Mark all" in js
+    assert "Stage individual episodes" in js
+    assert "Search season" in js
+    assert "searchSeasonPacks(' + requestId + ', ' + season.season_number + ')" in js
+    # Scope chips switch client-side without a backend reload.
+    assert "function setDetailsScope(requestId, scope)" in js
+    assert "window.setDetailsScope = setDetailsScope;" in js
+    assert "scope: 'all'" in js
     assert "function searchTvRequestNew()" in js
     assert "function searchTvRequestFull()" in js
     assert "search/stream?search_mode=' + encodeURIComponent(fullSearch ? 'full' : 'new')" in js
@@ -306,12 +323,12 @@ def test_dashboard_js_uses_collapsible_episode_results():
 
 
 def test_dashboard_js_includes_release_status_column_and_upload_age():
-    """Torrent cards should render a right-side status area with rejection reason and age."""
+    """Torrent cards render a score-first row with annotation data hooks."""
     js = _read_dashboard_js()
 
-    assert 'data-release-status-column="true"' in js
-    assert 'data-release-rejection-reason="true"' in js
-    assert 'data-release-upload-age="true"' in js
+    assert 'data-release-status-column="true"' not in js
+    assert 'data-release-rejection-reason="true"' not in js
+    assert 'data-release-upload-age="true"' not in js
     assert 'data-release-size-per-season="true"' in js
     assert 'data-release-resolution="true"' in js
     assert 'data-release-codec="true"' in js
@@ -320,6 +337,38 @@ def test_dashboard_js_includes_release_status_column_and_upload_age():
     assert "/manual-release/use" in js
     assert "background refresh updates Plex/Overseerr data" not in js
     assert "Plex episode availability is being resolved for partial seasons" not in js
+
+
+def test_dashboard_details_stats_rail_is_populated():
+    """Desktop left-rail `<dl id="request-details-stats">` should be populated."""
+    js = _read_dashboard_js()
+    css = _read_dashboard_css()
+
+    # The renderer + its window export exist so the rail is filled at runtime.
+    assert "function renderDetailsStats(data)" in js
+    assert "window.renderDetailsStats = renderDetailsStats;" in js
+    # Wired into openRequestDetails after the details payload loads, and cleared
+    # on a fresh (non-preserveUiState) modal open.
+    assert "renderDetailsStats(data);" in js
+    assert "getElementById('request-details-stats')" in js
+    # The five named stat labels from the mockup are emitted by the renderer.
+    for label in ("Cached results", "Passed", "Rejected", "Staged", "Last search"):
+        assert label in js
+    # Tone classes per the mockup (emerald=passed, red=rejected, cyan=staged).
+    assert "text-emerald-400 tabular-nums" in js
+    assert "text-red-400 tabular-nums" in js
+    assert "text-cyan-300 tabular-nums" in js
+    # Stat values are sourced from the serializer's named fields, not hardcoded.
+    assert "data.total_releases" in js
+    assert "data.active_staged_torrents" in js
+    assert "data.active_staged_torrent" in js
+    # Last search reuses the shared relative-time helper, now exported.
+    assert "function formatRelativePublishAge(publishDate)" in js
+    assert "window.formatRelativePublishAge = formatRelativePublishAge;" in js
+    assert "window.formatRelativePublishAge" in js
+    # The dangling CSS rule referencing the removed `data-release-rejection-reason`
+    # attribute contract is gone (Phase 2 inlined the rejection reason as text).
+    assert '[data-release-rejection-reason="true"]' not in css
 
 
 def test_dashboard_js_supports_annotation_highlighting():
@@ -364,11 +413,23 @@ def test_dashboard_js_includes_active_stage_replacement_copy():
     """Request details should explain replacement semantics for staged picks."""
     js = _read_dashboard_js()
 
-    assert "request-details-active-stage-banner" in js
-    assert "Replace staged" in js
-    assert "Stage release" in js
+    # The separate staged banner was removed in Phase 5 (element gone from the
+    # template, updateActiveStageBanner function and its call sites deleted).
+    # Replacement semantics now live entirely on the inline staged release card.
+    assert "request-details-active-stage-banner" not in js
+    assert "Selecting another result will replace it." not in js
+    assert "updateActiveStageBanner" not in js
+    assert "currentActiveStagedTorrent" not in js
+    # Inline Approve/Discard/Replace live on the staged release card itself.
+    assert "inlineStagedAction" in js
+    assert "/approve" in js
+    assert "/discard" in js
+    assert ">Approve</button>" in js
+    assert ">Discard</button>" in js
+    assert ">Replace</button>" in js
+    assert ">Stage</button>" in js
     assert "Stage this torrent for review and approval." in js
-    assert "Selecting another result will replace it." in js
+    assert "Replace the active staged torrent with this selection." in js
     assert "text-emerald-400" in js
     assert "text-red-400" in js
 
@@ -388,8 +449,13 @@ def test_dashboard_js_uses_cyan_staged_release_indicators():
     js = _read_dashboard_js()
 
     assert "'staged': 'badge-cyan'" in js
-    assert "'badge-blue' : 'badge-cyan'" in js
-    assert "border-cyan-500/70 bg-cyan-950/20" in js
+    # New score-first card: staged items keep cyan-tinted backgrounds/badges,
+    # but outlines stay in the muted gray border family.
+    assert "bg-cyan-950/20" in js
+    assert "border-gray-700/60 bg-cyan-950/20" in js
+    assert "border-gray-700/60 bg-cyan-950/10" in js
+    # Staged badge on the card title uses the inline cyan pill style.
+    assert "bg-cyan-900/60 text-cyan-300" in js
 
 
 def test_dashboard_js_focuses_staged_tv_episode_after_reload():

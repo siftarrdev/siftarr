@@ -206,7 +206,7 @@ Business logic and integrations, organized into thematic subpackages:
 Server-rendered HTML templates.
 
 - `base.html` — shared layout (nav bar shows user avatar/name + logout when logged in)
-- `dashboard.html` — main dashboard UI, including details-modal release result filters/sorting/count controls, search-history summaries, staged alternative review, and move status badges/paths in downloads
+- `dashboard.html` — main dashboard UI; the request-details modal is a responsive 3-column redesign (desktop: sticky identity rail + center release list/2-level TV Season→Episode accordion with scope chips + collapsible Activity panel; mobile: compact header card, single-chip filter, sticky bottom prev/next, collapsed Activity), with inline staged Approve/Discard on the release card. Also covers release filters/sorting/count controls, search-history summaries, and move status badges/paths in downloads
 - `login.html` — Plex SSO login page with JS-driven OAuth PIN flow, denied-admin message, and safe next redirect handling
 - `initial_plex_sync.html` — first-claim setup gate that opens the full Plex sync SSE stream, shows progress/retry/logout, and unlocks protected navigation only after successful completion
 - `rules.html` — single-pane rules UI with unified rule table, multi-title tester, modal create/edit wizard, export, and import preview/merge UI with existing/imported keep selections
@@ -222,7 +222,7 @@ Static assets.
 - `css/dashboard.css` — supplemental UI styling
 - `css/tailwind.css` — built Tailwind CSS output (generated, committed)
 - `css/tailwind-input.css` — Tailwind CSS v4 input with CSS-based theme configuration and custom component classes
-- `js/dashboard*.js` and `js/dashboard/` — dashboard client-side behavior, filters, details-modal release/history controls, staged actions and alternative review modal, TV “Search for new”/“Full search” controls, movie release search UX, and SSE progress panel; polls move status fields in download-status endpoint and shows badges/paths
+- `js/dashboard*.js` and `js/dashboard/` — dashboard client-side behavior for the redesigned details modal (score-first release cards with inline staged Approve/Discard/Replace, client-only TV scope chips, collapsible Activity panel, responsive mobile reflow), filters, staged actions and alternative review modal, TV “Search for new”/“Full search” controls, movie release search UX, and SSE progress panel; polls move status fields in download-status endpoint and shows badges/paths
 - `js/staging_decision_log.js` — client-side fetching, URL-backed filters, pagination, and raw JSON expansion for the Rules decision-log page
 - `js/stats.js` — Stats API fetch/range handling and lightweight bar/time-series chart rendering
 - favicon assets

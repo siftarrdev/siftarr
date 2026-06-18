@@ -99,20 +99,17 @@ function formatRelativePublishAge(publishDate) {
     return years === 1 ? '1 year ago' : `${years} years ago`;
 }
 
-function renderReleaseCard(release, requestId) {
-    const statusClass = release.passed ? 'badge-green' : 'badge-yellow';
+// Render a release card in the calm, score-first layout. Movie list items wrap
+// the row in `<li>`; TV episode buckets (Phase 3) pass `{ bucket: true }` to
+// render a bordered `<div>` variant with tighter spacing. Both variants share
+// the score gutter + title/meta body + a single right-aligned action. Staged
+// (active selection) cards carry inline Approve + Discard; conflicting siblings
+// show Replace; passed releases show Stage; rejected releases dim and inline the
+// rejection reason as the meta line, with a Force action.
+function renderReleaseCard(release, requestId, options = {}) {
+    const bucket = !!(options && options.bucket);
     const releaseScope = release.target_scope || {};
     const isScopedEpisodeRelease = releaseScope.type === 'single_episode';
-    const secondaryMeta = [
-        renderAnnotation(release.size, releaseAnnotationTone(release, 'size'), 'data-release-size="true"'),
-        renderAnnotation(release.indexer, releaseAnnotationTone(release, 'indexer'), 'data-release-indexer="true"'),
-        renderAnnotation(release.resolution, releaseAnnotationTone(release, 'resolution'), 'data-release-resolution="true"'),
-        renderAnnotation(release.codec, releaseAnnotationTone(release, 'codec'), 'data-release-codec="true"'),
-        renderAnnotation(release.release_group, releaseAnnotationTone(release, 'group'), 'data-release-group="true"'),
-        release.files != null ? `<span class="text-gray-400">${release.files} file${release.files !== 1 ? 's' : ''}</span>` : null,
-    ].filter(Boolean).join(' \u00B7 ');
-    const availability = `Seeders ${release.seeders ?? 0} \u00B7 Leechers ${release.leechers ?? 0}`;
-    const downloaded = release.downloaded ? '<span class="badge badge-blue">Already sent</span>' : '';
     const activeStagedTorrent = release.active_staged_torrent || null;
     const conflictsActiveSelection = !!release.conflicts_active_selection;
     const hasActiveStagedSelection = window.siftarrStagingModeEnabled && conflictsActiveSelection;
@@ -120,19 +117,42 @@ function renderReleaseCard(release, requestId) {
         !isScopedEpisodeRelease && hasActiveStagedSelection && activeStagedTorrent && release.title === activeStagedTorrent.title
     );
     const activeSelectionMode = window.siftarrStagingModeEnabled && isActiveSelection;
-    const activeSelectionBadge = activeSelectionMode
-        ? `<span class="badge ${
-            (release.active_selection_status || activeStagedTorrent?.status) === 'approved' ? 'badge-blue' : 'badge-cyan'
-        }">${window.escapeHtml((release.active_selection_source || activeStagedTorrent?.selection_source) === 'rule' ? 'Auto-selected and staged' : 'Currently staged')}</span>`
+    const rejected = release.passed === false;
+
+    const scoreColor = release.passed ? 'text-emerald-400' : 'text-gray-200';
+    const gutterWidth = bucket ? 'w-8' : 'w-10';
+    const scoreSize = bucket ? 'text-base' : 'text-xl';
+    const scoreGutter = '<div class="shrink-0 ' + gutterWidth + ' text-right"><div class="' + scoreSize + ' font-bold ' + scoreColor + ' tabular-nums leading-none">' + window.escapeHtml(String(release.score ?? 0)) + '</div></div>';
+
+    const stagedBadge = activeSelectionMode
+        ? '<span class="inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-medium bg-cyan-900/60 text-cyan-300 ring-1 ring-inset ring-cyan-700/40">Staged</span>'
         : '';
-    const actionVerb = window.siftarrStagingModeEnabled
-        ? (isActiveSelection ? 'Already staged' : hasActiveStagedSelection ? 'Replace staged' : 'Stage release')
-        : 'Download';
-    const useLabel = release.passed ? actionVerb : `Force ${actionVerb}`;
+    const titleText = window.escapeHtml(release.title);
+    const titleHtml = stagedBadge
+        ? '<div class="flex items-center gap-2 flex-wrap"><span class="text-sm text-white font-medium truncate">' + titleText + '</span>' + stagedBadge + '</div>'
+        : '<div class="text-sm text-white font-medium truncate">' + titleText + '</div>';
+
+    let metaHtml;
+    if (rejected) {
+        const reason = release.rejection_reason ? ' · ' + window.escapeHtml(release.rejection_reason) : '';
+        metaHtml = '<div class="mt-0.5 text-xs text-red-300/80">Rejected' + reason + '</div>';
+    } else {
+        const metaParts = [
+            renderAnnotation(release.resolution, releaseAnnotationTone(release, 'resolution'), 'data-release-resolution="true"'),
+            renderAnnotation(release.codec, releaseAnnotationTone(release, 'codec'), 'data-release-codec="true"'),
+            renderAnnotation(release.size, releaseAnnotationTone(release, 'size'), 'data-release-size="true"'),
+            release.seeders != null ? '<span>' + window.escapeHtml(String(release.seeders)) + ' seeders</span>' : '',
+            release.indexer ? renderAnnotation(release.indexer, 'text-gray-500', 'data-release-indexer="true"') : '',
+        ].filter(Boolean);
+        metaHtml = metaParts.length ? '<div class="mt-0.5 text-xs text-gray-400 flex items-center gap-2 flex-wrap">' + metaParts.join('<span>·</span>') + '</div>' : '';
+    }
+
+    const bodyHtml = '<div class="min-w-0 flex-1">' + titleHtml + metaHtml + '</div>';
+
     const storedReleaseId = release.stored_release_id || release.id;
     const formAction = storedReleaseId
-        ? `/requests/${requestId}/releases/${storedReleaseId}/use`
-        : `/requests/${requestId}/manual-release/use`;
+        ? '/requests/' + requestId + '/releases/' + storedReleaseId + '/use'
+        : '/requests/' + requestId + '/manual-release/use';
     const disableAction = !(release.download_url || release.magnet_url);
     const manualDataJson = storedReleaseId ? '{}' : window.escapeHtml(JSON.stringify({
         title: release.title || '',
@@ -148,6 +168,7 @@ function renderReleaseCard(release, requestId) {
         codec: release.codec || '',
         release_group: release.release_group || '',
     }));
+    const stageScopeJson = window.escapeHtml(JSON.stringify(releaseScope || {}));
     const actionTitle = window.siftarrStagingModeEnabled
         ? (isActiveSelection
             ? 'This torrent is already the active staged selection.'
@@ -155,35 +176,39 @@ function renderReleaseCard(release, requestId) {
                 ? 'Replace the active staged torrent with this selection.'
                 : 'Stage this torrent for review and approval.')
         : 'Send this torrent to qBittorrent.';
-    const stageScopeJson = window.escapeHtml(JSON.stringify(releaseScope || {}));
-    const actionHtml = `<button type="button" class="btn-primary btn-sm" ${disableAction || activeSelectionMode ? 'disabled' : ''} title="${window.escapeHtml(disableAction ? 'No download source available' : actionTitle)}" data-stage-url="${window.escapeHtml(formAction)}" data-stage-fields="${manualDataJson}" data-stage-scope="${stageScopeJson}" onclick="stageRelease(this)">${useLabel}</button>`;
-    const publishAge = formatRelativePublishAge(release.publish_date);
-    const coverageHtml = (Array.isArray(release.covered_seasons) || release.is_complete_series)
-        ? renderCoverageBadge(release)
-        : '';
-    const rejectionIsSize = typeof release.rejection_reason === 'string' && release.rejection_reason.toLowerCase().startsWith('size ');
-    const rejectionHtml = !release.passed && release.rejection_reason && !rejectionIsSize
-        ? `<div class="mt-2 max-w-xs text-right text-xs text-red-300" data-release-rejection-reason="true">${window.escapeHtml(release.rejection_reason)}</div>`
-        : '';
 
-    return `
-        <div class="rounded-xl border ${activeSelectionMode ? 'border-cyan-500/70 bg-cyan-950/20' : 'border-gray-700/60 bg-surface-800'} p-2">
-            <div class="flex flex-col gap-2 lg:flex-row lg:items-start lg:justify-between">
-                <div class="min-w-0">
-                    <div class="font-medium text-white text-sm break-words">${window.escapeHtml(release.title)}</div>
-                    <div class="mt-1 text-xs text-gray-400">Score <span class="font-semibold text-emerald-400">${release.score}</span> &middot; ${secondaryMeta || '<span class="text-gray-400">No release metadata</span>'} &middot; ${window.escapeHtml(availability)}${publishAge ? ` &middot; <span data-release-upload-age="true">${window.escapeHtml(publishAge)}</span>` : ''}</div>
-                    ${coverageHtml}
-                </div>
-                <div class="flex shrink-0 flex-col items-end gap-2 text-right" data-release-status-column="true">
-                    <span class="badge ${statusClass}">${window.escapeHtml(release.status_label || (release.passed ? 'Passed' : 'Rejected'))}</span>
-                    ${downloaded}
-                    ${activeSelectionBadge}
-                    ${actionHtml}
-                    ${rejectionHtml}
-                </div>
-            </div>
-        </div>
-    `;
+    let actionHtml;
+    if (activeSelectionMode && activeStagedTorrent && activeStagedTorrent.id) {
+        const stagedId = activeStagedTorrent.id;
+        actionHtml = '<div class="flex items-center gap-2 shrink-0">' +
+            '<button type="button" onclick="inlineStagedAction(\'/staged/' + stagedId + '/approve\', this)" class="rounded-lg bg-emerald-600 hover:bg-emerald-500 px-3 py-1.5 text-xs font-semibold text-white">Approve</button>' +
+            '<button type="button" onclick="inlineStagedAction(\'/staged/' + stagedId + '/discard\', this)" class="rounded-lg text-xs px-3 py-1.5 text-red-400 hover:text-red-300 hover:bg-red-950/40">Discard</button>' +
+        '</div>';
+    } else {
+        const disabledAttr = disableAction ? ' disabled' : '';
+        const stageAttrs = ' title="' + window.escapeHtml(disableAction ? 'No download source available' : actionTitle) + '" data-stage-url="' + window.escapeHtml(formAction) + '" data-stage-fields="' + manualDataJson + '" data-stage-scope="' + stageScopeJson + '" onclick="stageRelease(this)"';
+        if (hasActiveStagedSelection && !isActiveSelection) {
+            actionHtml = '<button type="button" class="rounded-lg border border-gray-700 px-3 py-1.5 text-xs text-gray-400 hover:text-white shrink-0"' + disabledAttr + stageAttrs + '>Replace</button>';
+        } else if (!window.siftarrStagingModeEnabled) {
+            actionHtml = '<button type="button" class="' + (rejected ? 'rounded-lg border border-gray-700 px-3 py-1.5 text-xs text-gray-500 hover:text-white' : 'rounded-lg bg-brand-600 hover:bg-brand-500 px-3 py-1.5 text-xs font-semibold text-white') + ' shrink-0"' + disabledAttr + stageAttrs + '>' + (rejected ? 'Force Download' : 'Download') + '</button>';
+        } else if (rejected) {
+            actionHtml = '<button type="button" class="rounded-lg border border-gray-700 px-3 py-1.5 text-xs text-gray-500 hover:text-white shrink-0"' + disabledAttr + stageAttrs + '>Force</button>';
+        } else {
+            actionHtml = '<button type="button" class="rounded-lg bg-brand-600 hover:bg-brand-500 px-3 py-1.5 text-xs font-semibold text-white shrink-0"' + disabledAttr + stageAttrs + '>Stage</button>';
+        }
+    }
+
+    if (bucket) {
+        const outerClass = activeSelectionMode
+            ? 'rounded-lg border border-gray-700/60 bg-cyan-950/20'
+            : 'rounded-lg border border-gray-700/40 bg-surface-800';
+        return '<div class="' + outerClass + (rejected ? ' opacity-60' : '') + ' p-2.5 flex items-center gap-3">' + scoreGutter + bodyHtml + actionHtml + '</div>';
+    }
+
+    const outerClass = activeSelectionMode
+        ? 'bg-cyan-950/20 border-b border-gray-700/60'
+        : 'hover:bg-surface-850/60';
+    return '<li class="flex items-center gap-4 px-4 py-3 ' + outerClass + (rejected ? ' opacity-60' : '') + '">' + scoreGutter + bodyHtml + actionHtml + '</li>';
 }
 
 function renderCoverageBadge(release) {
@@ -217,7 +242,7 @@ function isUsableCachedRelease(release) {
 function renderStageTopEpisodeButton(requestId, release) {
     if (!isUsableCachedRelease(release)) return '';
     const storedReleaseId = release.stored_release_id || release.id;
-    return '<button type="button" onclick="stageTopEpisodeRelease(this, ' + requestId + ', ' + storedReleaseId + '); event.preventDefault(); event.stopPropagation();" class="btn-primary btn-sm">Stage top scored</button>';
+    return '<button type="button" onclick="stageTopEpisodeRelease(this, ' + requestId + ', ' + storedReleaseId + '); event.preventDefault(); event.stopPropagation();" class="shrink-0 rounded-lg bg-brand-600 hover:bg-brand-500 px-2.5 py-1 text-[11px] font-semibold text-white">Stage top</button>';
 }
 
 const TV_ACCORDION_TOGGLE_CLASS = 'tv-accordion-toggle inline-flex items-center justify-center rounded-md border border-gray-600/80 bg-surface-900/70 px-2.5 py-1 text-xs font-medium leading-4 text-gray-200 shadow-sm transition-colors hover:border-brand-400/70 hover:bg-surface-800 hover:text-white focus:outline-none focus:ring-2 focus:ring-brand-400/60 focus:ring-offset-2 focus:ring-offset-surface-900';
@@ -252,6 +277,20 @@ function episodeStatusBadge(status) {
     return colors[status] || 'badge-gray';
 }
 
+// Render a single TV scope chip for the "Show: All results · Season packs ·
+// Complete series" filter bar. The active chip uses the brand fill; inactive
+// chips use a quiet bordered pill. Clicking switches `detailsControlState.scope`
+// (client-only) via `setDetailsScope`, which re-renders the TV branch without a
+// backend reload.
+function renderScopeChip(requestId, value, label, count, activeScope) {
+    const isActive = (activeScope || 'all') === value;
+    const classes = isActive
+        ? 'inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-medium bg-brand-600 text-white'
+        : 'inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-medium border border-gray-600/80 text-gray-400 hover:text-white hover:border-brand-500 transition-colors';
+    const countClass = isActive ? 'text-white/70' : 'text-gray-600';
+    return '<button type="button" onclick="setDetailsScope(' + requestId + ', \'' + value + '\')" class="' + classes + '">' + window.escapeHtml(label) + ' <span class="' + countClass + '">' + count + '</span></button>';
+}
+
 function renderSeasonAccordion(data) {
     const tvInfo = data.tv_info;
     const requestId = data.request.id;
@@ -264,98 +303,133 @@ function renderSeasonAccordion(data) {
         return '<div class="text-gray-500 text-sm">' + window.escapeHtml(emptyState) + '</div>';
     }
 
-    const syncBanner = '';
+    // Client-only scope (detailsControlState.scope). Defaults to 'all' when the
+    // control state has not been initialized yet.
+    const controls = (window.detailsControlState && window.detailsControlState[requestId]) || {};
+    const scope = controls.scope || 'all';
 
+    // Collect multi-season pack + complete-series releases (now behind scope
+    // chips, not their own nested <details> drawers). Reuses the same
+    // releases_by_season scan + dedup as the previous deep accordion.
     const seenMultiSeasonReleases = new Set();
     const multiSeasonReleases = [];
+    const completeSeriesReleases = [];
     Object.values(tvInfo.releases_by_season || {}).forEach(function(releases) {
         (releases || []).forEach(function(release) {
-            const scope = release.target_scope || {};
+            const relScope = release.target_scope || {};
             const coveredSeasons = Array.isArray(release.covered_seasons) ? release.covered_seasons : [];
-            const isMultiSeason = scope.type === 'multi_season_pack' || scope.type === 'complete_series' || release.is_complete_series || coveredSeasons.length > 1;
+            const isMultiSeason = relScope.type === 'multi_season_pack' || relScope.type === 'complete_series' || release.is_complete_series || coveredSeasons.length > 1;
+            const isCompleteSeries = release.is_complete_series || release.covers_all_known_seasons || relScope.type === 'complete_series';
             const releaseKey = release.stored_release_id || release.id || release.title;
             if (isMultiSeason && !seenMultiSeasonReleases.has(releaseKey)) {
                 seenMultiSeasonReleases.add(releaseKey);
                 multiSeasonReleases.push(release);
+                if (isCompleteSeries) completeSeriesReleases.push(release);
             }
         });
     });
-    const multiSeasonSection = '<details id="season-packs-all-details-' + requestId + '" class="group rounded-xl border border-gray-700/60 bg-surface-800" ontoggle="window.updateTvAccordionControls && window.updateTvAccordionControls()">' +
-        '<summary class="flex cursor-pointer items-center justify-between gap-3 p-3 hover:bg-surface-850/80 transition-colors">' +
-            '<div class="flex items-center gap-3 min-w-0"><svg class="accordion-chevron w-4 h-4 text-gray-500 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg><div><div class="text-white font-medium">Season packs and complete series</div><div class="text-xs text-gray-500">Larger releases that may cover more than one requested season. ' + multiSeasonReleases.length + ' result' + (multiSeasonReleases.length === 1 ? '' : 's') + '.</div></div></div>' +
-        '</summary>' +
-        '<div id="season-packs-all-' + requestId + '" class="space-y-1 p-3 pt-0">' + (multiSeasonReleases.map(function(r) { return renderReleaseCard(r, requestId); }).join('') || '<div class="text-gray-500 text-sm py-2">No season pack or complete-series results yet. Full search refreshes all aired episode and pack results.</div>') + '</div>' +
-    '</details>';
 
-    var panelToggle = '<div class="flex justify-end">' + renderTvAccordionToggle('panel', requestId) + '</div>';
+    // Aggregate availability text from tv_info.aggregate_counts (e.g. "3 of 10 available").
+    const aggregateCounts = tvInfo.aggregate_counts || {};
+    const aggregateAvailable = Number(aggregateCounts.available || 0);
+    const aggregateTotal = Number(aggregateCounts.total || 0);
+    const aggregateText = aggregateAvailable + ' of ' + aggregateTotal + ' available';
 
-    return '<div class="space-y-3">' + syncBanner + panelToggle + multiSeasonSection + tvInfo.seasons.map(function(season) {
-        var seasonKey = String(season.season_number);
-        var seasonBadgeClass = episodeStatusBadge(season.status);
-        var seasonReleases = (tvInfo.releases_by_season && tvInfo.releases_by_season[seasonKey]) || [];
-        var seasonReleasesHtml = seasonReleases.map(function(r) { return renderReleaseCard(r, requestId); }).join('');
-        var episodeHtml = (season.episodes || []).map(function(ep) {
-            var epKey = seasonKey + '-' + ep.episode_number;
-            var badgeClass = episodeStatusBadge(ep.status);
-            var episodeReleases = (tvInfo.releases_by_episode && tvInfo.releases_by_episode[epKey]) || [];
-            var episodeReleasesHtml = episodeReleases.map(function(r) { return renderReleaseCard(r, requestId); }).join('');
-            var episodeDetailsId = 'episode-details-' + requestId + '-' + season.season_number + '-' + ep.episode_number;
-            var isOpen = episodeReleases.length > 0 ? ' open' : '';
-            var episodeBucketHtml = episodeReleasesHtml || '<div class="text-gray-500 text-sm py-2">No cached episode results yet. Search for new checks missing aired episodes; Full search refreshes all aired episode results.</div>';
-            var topRelease = episodeReleases.find(isUsableCachedRelease);
+    // Total episode count across seasons drives the "All results" chip count.
+    const totalEpisodeCount = tvInfo.seasons.reduce(function(sum, season) {
+        return sum + ((season.episodes || []).length);
+    }, 0);
 
-            return '<details id="' + episodeDetailsId + '" class="group rounded-lg border border-gray-700/40 bg-surface-800/50" ontoggle="window.updateTvAccordionControls && window.updateTvAccordionControls()"' + isOpen + '>' +
-                '<summary class="flex items-center justify-between gap-3 cursor-pointer px-3 py-2 hover:bg-surface-850/60 transition-colors">' +
-                    '<div class="flex items-center gap-3 min-w-0 flex-1">' +
-                        '<svg class="accordion-chevron w-4 h-4 text-gray-500 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>' +
-                        '<span class="text-gray-500 text-xs font-mono shrink-0">E' + String(ep.episode_number).padStart(2, '0') + '</span>' +
-                        '<span class="text-white text-sm truncate">' + window.escapeHtml(ep.title || 'Untitled') + '</span>' +
-                        (ep.air_date ? '<span class="text-gray-600 text-xs shrink-0">' + window.escapeHtml(ep.air_date) + '</span>' : '') +
-                    '</div>' +
-                    '<div class="flex items-center gap-2 shrink-0">' +
-                        '<span class="badge ' + badgeClass + '">' + window.escapeHtml(ep.status || 'unknown') + '</span>' +
-                        (ep.status !== 'available' && ep.status !== 'completed' ? renderStageTopEpisodeButton(requestId, topRelease) : '') +
-                        (ep.status !== 'available' && ep.status !== 'completed'
-                            ? '<button onclick="markEpisodeAvailable(' + requestId + ', ' + ep.id + '); event.stopPropagation();" class="bg-brand-500 hover:bg-brand-400 text-white text-xs px-2 py-0.5 rounded">Mark Available</button>'
-                            : '') +
-                    '</div>' +
-                '</summary>' +
-                '<div class="ml-7 mr-3 mb-3 space-y-1">' + episodeBucketHtml + '</div>' +
-            '</details>';
-        }).join('');
+    const scopeChipBar = '<div class="shrink-0 flex items-center gap-2 flex-wrap px-4 py-2.5 border-b border-gray-700/40">' +
+        '<span class="text-xs text-gray-500">Show:</span>' +
+        renderScopeChip(requestId, 'all', 'All results', totalEpisodeCount, scope) +
+        renderScopeChip(requestId, 'season_packs', 'Season packs', multiSeasonReleases.length, scope) +
+        renderScopeChip(requestId, 'complete_series', 'Complete series', completeSeriesReleases.length, scope) +
+        '<span class="ml-auto text-xs text-gray-500">' + window.escapeHtml(aggregateText) + '</span>' +
+    '</div>';
 
-        var hasMarkable = (season.episodes || []).some(function(ep) { return ep.status !== 'available' && ep.status !== 'completed'; });
+    // ── Section: All results (2-level Season → Episode accordion) ──
+    const panelToggle = '<div class="flex justify-end">' + renderTvAccordionToggle('panel', requestId) + '</div>';
 
-        var summaryBits = [season.available_count + '/' + season.total_count + ' available'];
+    const seasonAccordion = tvInfo.seasons.map(function(season) {
+        const seasonKey = String(season.season_number);
+        const seasonBadgeClass = episodeStatusBadge(season.status);
+        const hasMarkable = (season.episodes || []).some(function(ep) { return ep.status !== 'available' && ep.status !== 'completed'; });
+        const seasonHasStaged = (season.episodes || []).some(function(ep) { return ep.status === 'staged'; });
+
+        const summaryBits = [season.available_count + '/' + season.total_count + ' available'];
         if (season.staged_count) summaryBits.push(season.staged_count + ' staged');
         if (season.pending_count) summaryBits.push(season.pending_count + ' pending');
         if (season.unreleased_count) summaryBits.push(season.unreleased_count + ' unreleased');
-        var availableText = summaryBits.join(' \u00B7 ');
+        const availableText = summaryBits.join(' \u00B7 ');
 
-        return '<details id="season-details-' + requestId + '-' + season.season_number + '" class="group" ontoggle="window.updateTvAccordionControls && window.updateTvAccordionControls()">' +
-            '<summary class="flex items-center justify-between gap-3 cursor-pointer rounded-xl border border-gray-700/60 bg-surface-800 p-3 hover:bg-surface-850/80 transition-colors">' +
-                '<div class="flex items-center gap-3">' +
-                    '<svg class="accordion-chevron w-4 h-4 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>' +
-                    '<span class="text-white font-medium">Season ' + season.season_number + '</span>' +
-                    '<span class="text-gray-500 text-xs">' + availableText + '</span>' +
-                '</div>' +
-                '<div class="flex items-center gap-2 shrink-0">' +
-                    renderTvAccordionToggle('season', requestId, season.season_number) +
-                    '<span class="badge ' + seasonBadgeClass + '">' + window.escapeHtml(season.status || 'unknown') + '</span>' +
-                    (hasMarkable
-                        ? '<button onclick="markSeasonAvailable(' + requestId + ', ' + season.id + '); event.stopPropagation();" class="bg-brand-500 hover:bg-brand-400 text-white text-xs px-2 py-0.5 rounded">Mark All Available</button>'
-                        : '') +
-                '</div>' +
+        const seasonLinks = '<div class="ml-auto flex items-center gap-3 text-xs">' +
+            (hasMarkable
+                ? '<button type="button" onclick="markSeasonAvailable(' + requestId + ', ' + season.id + '); event.stopPropagation();" class="text-brand-400 hover:text-brand-300">Mark all</button>'
+                : '') +
+            '<button type="button" onclick="stageIndividualEpisodes(this, ' + requestId + ', ' + season.season_number + '); event.preventDefault(); event.stopPropagation();" class="text-brand-400 hover:text-brand-300">Stage individual episodes</button>' +
+            '<button type="button" onclick="searchSeasonPacks(' + requestId + ', ' + season.season_number + '); event.preventDefault(); event.stopPropagation();" class="text-brand-400 hover:text-brand-300">Search season</button>' +
+        '</div>';
+
+        const episodeHtml = (season.episodes || []).map(function(ep) {
+            const epKey = seasonKey + '-' + ep.episode_number;
+            const badgeClass = episodeStatusBadge(ep.status);
+            const episodeReleases = (tvInfo.releases_by_episode && tvInfo.releases_by_episode[epKey]) || [];
+            const episodeDetailsId = 'episode-details-' + requestId + '-' + season.season_number + '-' + ep.episode_number;
+            const isStaged = ep.status === 'staged';
+            const isOpen = episodeReleases.length > 0 || isStaged;
+            const episodeBucketHtml = episodeReleases.length
+                ? episodeReleases.map(function(r) { return renderReleaseCard(r, requestId, { bucket: true }); }).join('')
+                : '<div class="text-gray-500 text-sm py-2">No cached episode results yet. Search for new checks missing aired episodes; Full search refreshes all aired episode results.</div>';
+            const topRelease = episodeReleases.find(isUsableCachedRelease);
+            const showInlineActions = ep.status !== 'available' && ep.status !== 'completed';
+
+            return '<details id="' + episodeDetailsId + '" class="group rounded-lg border ' + (isStaged ? 'border-gray-700/60 bg-cyan-950/10' : 'border-gray-700/40 bg-surface-900/50') + '" ontoggle="window.updateTvAccordionControls && window.updateTvAccordionControls()"' + (isOpen ? ' open' : '') + '>' +
+                '<summary class="flex items-center gap-3 cursor-pointer px-3 py-2 hover:bg-surface-850/60 transition-colors">' +
+                    '<svg class="accordion-chevron w-3.5 h-3.5 text-gray-500 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>' +
+                    '<span class="text-xs font-mono text-gray-500 shrink-0">S' + String(season.season_number).padStart(2, '0') + 'E' + String(ep.episode_number).padStart(2, '0') + '</span>' +
+                    '<span class="text-sm text-white truncate flex-1">' + window.escapeHtml(ep.title || 'Untitled') + '</span>' +
+                    '<div class="flex items-center gap-2 shrink-0">' +
+                        '<span class="badge ' + badgeClass + '">' + window.escapeHtml(ep.status || 'unknown') + '</span>' +
+                        (showInlineActions ? renderStageTopEpisodeButton(requestId, topRelease) : '') +
+                        (showInlineActions
+                            ? '<button type="button" onclick="markEpisodeAvailable(' + requestId + ', ' + ep.id + '); event.stopPropagation();" class="shrink-0 text-xs text-brand-400 hover:text-brand-300">Mark Available</button>'
+                            : '') +
+                    '</div>' +
+                '</summary>' +
+                '<div class="px-3 pb-3 pt-2 space-y-2">' + episodeBucketHtml + '</div>' +
+            '</details>';
+        }).join('');
+
+        return '<details id="season-details-' + requestId + '-' + season.season_number + '" class="group rounded-xl border border-gray-700/60 bg-surface-850" ontoggle="window.updateTvAccordionControls && window.updateTvAccordionControls()"' + (seasonHasStaged ? ' open' : '') + '>' +
+            '<summary class="flex items-center gap-3 px-4 py-3 cursor-pointer hover:bg-surface-800 transition-colors">' +
+                '<svg class="accordion-chevron w-4 h-4 text-gray-500 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>' +
+                '<span class="text-white font-medium text-sm">Season ' + season.season_number + '</span>' +
+                '<span class="text-xs text-gray-500">' + window.escapeHtml(availableText) + '</span>' +
+                '<span class="badge ' + seasonBadgeClass + '">' + window.escapeHtml(season.status || 'unknown') + '</span>' +
+                seasonLinks +
             '</summary>' +
-            '<div class="mt-2 ml-2 space-y-2">' +
-                '<details id="season-packs-details-' + requestId + '-' + season.season_number + '" class="group rounded-lg border border-gray-700/40 bg-surface-800/50" ontoggle="window.updateTvAccordionControls && window.updateTvAccordionControls()">' +
-                    '<summary class="flex cursor-pointer items-center justify-between gap-3 px-3 py-2 hover:bg-surface-850/60 transition-colors"><div class="flex items-center gap-3"><svg class="accordion-chevron w-4 h-4 text-gray-500 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg><span class="text-white text-sm font-medium">Season ' + season.season_number + ' packs</span><span class="text-xs text-gray-500">' + seasonReleases.length + ' result' + (seasonReleases.length === 1 ? '' : 's') + '</span></div><button type="button" onclick="stageIndividualEpisodes(this, ' + requestId + ', ' + season.season_number + '); event.preventDefault(); event.stopPropagation();" class="btn-primary btn-sm">Stage individual episodes</button></summary>' +
-                    '<div id="season-packs-' + requestId + '-' + season.season_number + '" class="space-y-1 px-3 pb-3">' + (seasonReleasesHtml || '<div class="text-gray-500 text-sm py-2">No cached season-pack results yet. Full search runs one broad TV pack query and refreshes pack matches here.</div>') + '</div>' +
-                '</details>' +
-                episodeHtml +
-            '</div>' +
+            '<div class="px-4 pb-4 space-y-2 border-t border-gray-700/40 pt-3">' + episodeHtml + '</div>' +
         '</details>';
-    }).join('') + '</div>';
+    }).join('');
+
+    const allSection = '<div class="space-y-3"' + (scope === 'all' ? '' : ' hidden') + '>' + panelToggle + seasonAccordion + '</div>';
+
+    // ── Section: Season packs (flat list of multi-season pack releases) ──
+    const seasonPacksSection = '<div id="scope-season-packs-' + requestId + '" class="space-y-2"' + (scope === 'season_packs' ? '' : ' hidden') + '>' +
+        (multiSeasonReleases.length
+            ? '<ul class="divide-y divide-gray-700/40 rounded-xl border border-gray-700/60 bg-surface-850">' + multiSeasonReleases.map(function(r) { return renderReleaseCard(r, requestId); }).join('') + '</ul>'
+            : '<div class="text-gray-500 text-sm py-2">No cached season-pack results yet. Full search refreshes all aired episode and pack results.</div>') +
+    '</div>';
+
+    // ── Section: Complete series (flat list of complete-series releases) ──
+    const completeSeriesSection = '<div id="scope-complete-series-' + requestId + '" class="space-y-2"' + (scope === 'complete_series' ? '' : ' hidden') + '>' +
+        (completeSeriesReleases.length
+            ? '<ul class="divide-y divide-gray-700/40 rounded-xl border border-gray-700/60 bg-surface-850">' + completeSeriesReleases.map(function(r) { return renderReleaseCard(r, requestId); }).join('') + '</ul>'
+            : '<div class="text-gray-500 text-sm py-2">No complete-series results yet. Full search refreshes all aired episode and pack results.</div>') +
+    '</div>';
+
+    return '<div class="space-y-3">' + scopeChipBar + allSection + seasonPacksSection + completeSeriesSection + '</div>';
 }
 
 async function markEpisodeAvailable(requestId, episodeId) {
@@ -379,11 +453,17 @@ async function markSeasonAvailable(requestId, seasonId) {
 }
 
 async function searchSeasonPacks(requestId, seasonNumber) {
-    var container = document.getElementById('season-packs-' + requestId + '-' + seasonNumber);
+    // Season packs now live behind the "Season packs" scope chip, so switch to
+    // that view first (client-only re-render) and render results into its container.
+    if (window.setDetailsScope) window.setDetailsScope(requestId, 'season_packs');
+    var container = document.getElementById('scope-season-packs-' + requestId);
     if (!container) return;
     container.innerHTML = renderSearchLoadingState('Searching season packs...');
     window.startTvSearchProgress('/requests/' + requestId + '/seasons/' + seasonNumber + '/season-packs/search/stream', 'Season ' + seasonNumber, function(data) {
-        container.innerHTML = (data.releases || []).map(function(r) { return renderReleaseCard(r, requestId); }).join('') || '<div class="text-gray-500 text-sm py-2">No season pack results found.</div>';
+        var releases = data.releases || [];
+        container.innerHTML = releases.length
+            ? '<ul class="divide-y divide-gray-700/40 rounded-xl border border-gray-700/60 bg-surface-850">' + releases.map(function(r) { return renderReleaseCard(r, requestId); }).join('') + '</ul>'
+            : '<div class="text-gray-500 text-sm py-2">No season pack results found.</div>';
     });
 }
 
@@ -391,19 +471,6 @@ function renderSearchAllResults(releases) {
     return releases.map(function(release) {
         return renderReleaseCard(release, window.currentRequestId);
     }).join('');
-}
-
-async function searchMultiSeasonPacks(requestId = null) {
-    var targetRequestId = requestId || window.currentRequestId;
-    if (!targetRequestId) return;
-
-    var container = document.getElementById('season-packs-all-' + targetRequestId);
-    if (!container) return;
-
-    container.innerHTML = renderSearchLoadingState('Searching multi season packs...');
-    window.startTvSearchProgress('/requests/' + targetRequestId + '/multi-season-packs/search/stream', 'Multi-season', function(data) {
-        container.innerHTML = (data.releases || []).map(function(r) { return renderReleaseCard(r, targetRequestId); }).join('') || '<div class="text-gray-500 text-sm py-2">No multi season or complete-series results found.</div>';
-    });
 }
 
 async function searchEpisode(requestId, seasonNumber, episodeNumber) {
@@ -509,6 +576,44 @@ async function stageIndividualEpisodes(btn, requestId, seasonNumber) {
     }
 }
 
+// Inline Approve/Discard on a staged release card. Mirrors `postStagedAction`
+// (staged.js): POST `redirect_to='/?tab=staged'` to the action URL, then refresh
+// the staged tab and reload the open details modal so the card re-renders with
+// the new staged state. Disables the clicked button and shows "…" while in
+// flight.
+async function inlineStagedAction(actionUrl, btn = null) {
+    const originalText = btn ? btn.textContent : '';
+    if (btn) {
+        btn.disabled = true;
+        btn.textContent = '…';
+    }
+    try {
+        const formData = new FormData();
+        formData.append('redirect_to', '/?tab=staged');
+        const response = await fetch(actionUrl, {
+            method: 'POST',
+            headers: { 'Accept': 'application/json' },
+            body: formData,
+        });
+        if (!response.ok) {
+            const errorData = await response.json().catch(() => null);
+            throw new Error(errorData?.detail || errorData?.message || `Server error: ${response.status}`);
+        }
+        const data = await response.json().catch(() => ({}));
+        if (window.refreshStagedTabData) await window.refreshStagedTabData();
+        if (window.openRequestDetails && window.currentRequestId) {
+            await window.openRequestDetails(window.currentRequestId, window.currentDetailsIndex, { preserveUiState: true });
+        }
+        window.showToast(data.message || 'Staged torrent updated');
+    } catch (err) {
+        if (btn) {
+            btn.disabled = false;
+            btn.textContent = originalText;
+        }
+        window.showToast('Error: ' + err.message);
+    }
+}
+
 function captureDetailsAccordionState() {
     const state = {};
     document.querySelectorAll('#request-details-releases details[id]').forEach(function(details) {
@@ -528,11 +633,11 @@ function restoreDetailsAccordionState(state) {
 }
 
 function tvDetailsNodesForRequest(requestId) {
-    return Array.from(document.querySelectorAll('#request-details-releases details[id^="season-details-' + requestId + '-"], #request-details-releases details[id^="episode-details-' + requestId + '-"], #request-details-releases details[id^="season-packs-details-' + requestId + '-"], #season-packs-all-details-' + requestId));
+    return Array.from(document.querySelectorAll('#request-details-releases details[id^="season-details-' + requestId + '-"], #request-details-releases details[id^="episode-details-' + requestId + '-"]'));
 }
 
 function tvSeasonNodes(requestId, seasonNumber) {
-    return Array.from(document.querySelectorAll('#season-details-' + requestId + '-' + seasonNumber + ', #season-packs-details-' + requestId + '-' + seasonNumber + ', #request-details-releases details[id^="episode-details-' + requestId + '-' + seasonNumber + '-"]'));
+    return Array.from(document.querySelectorAll('#season-details-' + requestId + '-' + seasonNumber + ', #request-details-releases details[id^="episode-details-' + requestId + '-' + seasonNumber + '-"]'));
 }
 
 function setTvAccordionNodesOpen(nodes, open) {
@@ -602,48 +707,20 @@ function updateTvAccordionControls() {
     });
 }
 
-function updateActiveStageBanner(data) {
-    const banner = document.getElementById('request-details-active-stage-banner');
-    if (!banner) return;
-    const active = data.active_staged_torrent;
-    const allActive = data.active_staged_torrents || [];
-    window.currentActiveStagedTorrent = active || null;
-    if (!window.siftarrStagingModeEnabled || !active) {
-        banner.classList.add('hidden');
-        banner.textContent = '';
-        return;
-    }
-
-    // TV with multiple staged torrents: show more detail
-    if (window.currentRequestMediaType === 'tv' && allActive.length > 1) {
-        const seasonInfo = allActive.map(function(t) {
-            const match = t.title.match(/S(\d{1,2})/i);
-            return match ? 'S' + match[1].padStart(2, '0') : t.title;
-        }).join(', ');
-        banner.textContent = allActive.length + ' torrents already staged (' + seasonInfo + '). Selecting another season pack will replace overlapping seasons only.';
-        banner.classList.remove('hidden');
-        return;
-    }
-
-    const sourceLabel = active.selection_source === 'rule' ? 'Auto-selected torrent' : 'Active staged torrent';
-    const statusLabel = active.status === 'approved' ? 'sent to qBittorrent' : 'already staged';
-    banner.textContent = sourceLabel + ': ' + active.title + ' (' + statusLabel + '). Selecting another result will replace it.';
-    banner.classList.remove('hidden');
-}
-
 // Export functions to window for HTML onclick handlers
 window.renderReleaseCard = renderReleaseCard;
 window.renderSearchLoadingState = renderSearchLoadingState;
 window.renderMovieSearchLoadingState = renderMovieSearchLoadingState;
 window.renderSeasonAccordion = renderSeasonAccordion;
+window.formatRelativePublishAge = formatRelativePublishAge;
 window.markEpisodeAvailable = markEpisodeAvailable;
 window.markSeasonAvailable = markSeasonAvailable;
 window.searchSeasonPacks = searchSeasonPacks;
-window.searchMultiSeasonPacks = searchMultiSeasonPacks;
 window.searchEpisode = searchEpisode;
 window.stageRelease = stageRelease;
 window.stageTopEpisodeRelease = stageTopEpisodeRelease;
 window.stageIndividualEpisodes = stageIndividualEpisodes;
+window.inlineStagedAction = inlineStagedAction;
 window.focusTvEpisode = focusTvEpisode;
 window.focusStagedTvScope = focusStagedTvScope;
 window.openStagedRequestDetailsFromElement = openStagedRequestDetailsFromElement;
@@ -652,4 +729,3 @@ window.restoreDetailsAccordionState = restoreDetailsAccordionState;
 window.toggleTvDetailsAll = toggleTvDetailsAll;
 window.toggleTvSeasonDetails = toggleTvSeasonDetails;
 window.updateTvAccordionControls = updateTvAccordionControls;
-window.updateActiveStageBanner = updateActiveStageBanner;

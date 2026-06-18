@@ -7,7 +7,11 @@ window.detailsControlDebounce = null;
 window.detailsAutoSearchStarted = window.detailsAutoSearchStarted || {};
 
 function defaultDetailsControls() {
-    return { title: '', resolution: 'all', sort: 'score', direction: 'desc' };
+    // `scope` is client-only (TV accordion: 'all' | 'season_packs' | 'complete_series').
+    // It is deliberately NOT sent in `buildDetailsUrl` — the backend filter/sort
+    // contract is unchanged; scope chips re-render client-side via
+    // `applyLocalReleaseSort`.
+    return { title: '', resolution: 'all', sort: 'score', direction: 'desc', scope: 'all' };
 }
 
 function getDetailsControls(requestId) {
@@ -109,7 +113,7 @@ function applyLocalReleaseSort() {
     }
     if (Array.isArray(window.currentReleases)) {
         window.currentReleases = sortReleases(window.currentReleases);
-        releasesEl.innerHTML = window.currentReleases.map(release => window.renderReleaseCard(release, window.currentRequestId)).join('');
+        releasesEl.innerHTML = '<ul class="divide-y divide-gray-700/40">' + window.currentReleases.map(release => window.renderReleaseCard(release, window.currentRequestId)).join('') + '</ul>';
         if (window.currentDetailsData) window.currentDetailsData.releases = window.currentReleases;
         return true;
     }
@@ -127,6 +131,16 @@ function reloadDetailsWithControls(debounceMs = 0) {
     } else {
         run();
     }
+}
+
+// Client-only TV scope-chip handler. Switches the TV accordion between
+// "All results" (Season → Episode), "Season packs", and "Complete series"
+// without a backend reload — `applyLocalReleaseSort` re-renders the TV branch
+// from the cached `currentDetailsData`. No backend contract change.
+function setDetailsScope(requestId, scope) {
+    const controls = getDetailsControls(requestId);
+    controls.scope = scope;
+    applyLocalReleaseSort();
 }
 
 function ensureDetailsControlHandlers() {
@@ -201,6 +215,10 @@ async function openRequestDetails(requestId, explicitIndex = null, options = {})
         title.textContent = 'Loading...';
         meta.textContent = '';
         overview.textContent = '';
+        const mobileOverview = document.querySelector('[data-mobile-overview]');
+        if (mobileOverview) mobileOverview.textContent = '';
+        const statsEl = document.getElementById('request-details-stats');
+        if (statsEl) statsEl.innerHTML = '';
     }
     if (overseerrLink) {
         overseerrLink.classList.add('hidden');
@@ -219,10 +237,18 @@ async function openRequestDetails(requestId, explicitIndex = null, options = {})
         tvFullSearchBtn.classList.add('hidden');
     }
     window.currentTvSeasons = [];
-    window.updateActiveStageBanner({ active_staged_torrent: null });
     window.setPoster(null, 'Loading poster');
-    document.getElementById('release-results-header').classList.remove('hidden');
-    document.getElementById('release-controls').classList.remove('hidden');
+    // #release-results-header and #release-controls are hidden on mobile by
+    // default (the mobile filter chip toggles #release-controls) and shown on
+    // desktop via lg:flex. Avoid removing `hidden` here — that would surface
+    // them on <lg. Desktop visibility is handled by the lg:flex classes.
+    document.getElementById('release-controls').classList.add('hidden');
+    // Reset the mobile filter chip to collapsed whenever the modal (re)opens so
+    // the <lg view starts with the controls hidden behind the single chip.
+    const mobileFilterChip = document.querySelector('[onclick="toggleMobileFilter()"]');
+    if (mobileFilterChip) {
+        mobileFilterChip.setAttribute('aria-expanded', 'false');
+    }
     if (!preserveUiState) {
         releases.innerHTML = '<div class="text-gray-500 text-sm">Loading search results...</div>';
     }
@@ -231,6 +257,13 @@ async function openRequestDetails(requestId, explicitIndex = null, options = {})
     if (!preserveUiState) {
         window.resetDetailsControls(requestId, { updateInputs: true });
         delete window.detailsAutoSearchStarted[requestId];
+    }
+    // Reset the Activity panel to its default (open) state on a fresh modal
+    // open. Collapse state does not persist across modal reopens, and we only
+    // reset when the modal was previously closed (prev/next navigation reuses
+    // an already-visible modal and should not force the panel back open).
+    if (modal.classList.contains('hidden') && window.expandActivityPanel) {
+        window.expandActivityPanel();
     }
     modal.classList.remove('hidden');
 
@@ -242,8 +275,22 @@ async function openRequestDetails(requestId, explicitIndex = null, options = {})
         const data = await response.json();
 
         title.textContent = data.request.title;
-        meta.textContent = data.request.title;
+        // Mobile subtitle in the header card: a compact "year · type · status"
+        // line. The details API only exposes type + status today (year/age/by
+        // are absent), so only non-empty segments are joined to avoid stray
+        // separators.
+        const subtitleSegments = [
+            data.request.year ? window.escapeHtml(String(data.request.year)) : '',
+            data.request.media_type ? window.escapeHtml(String(data.request.media_type)) : '',
+            data.request.status ? window.escapeHtml(String(data.request.status).replace(/_/g, ' ')) : '',
+        ].filter(Boolean);
+        meta.textContent = subtitleSegments.join(' · ');
         overview.textContent = data.overseerr?.overview || 'No synopsis available.';
+        // Mirror the synopsis into the mobile synopsis <details> body so the
+        // collapsed rail synopsis (desktop-only) and the mobile synopsis stay
+        // in sync without duplicating the #request-details-overview ID.
+        const mobileOverview = document.querySelector('[data-mobile-overview]');
+        if (mobileOverview) mobileOverview.textContent = overview.textContent;
         const metaRow = document.getElementById('request-details-meta-row');
         if (metaRow) {
             const items = [];
@@ -287,7 +334,6 @@ async function openRequestDetails(requestId, explicitIndex = null, options = {})
         window.currentDetailsData = data;
         window.currentRequestId = data.request.id;
         window.currentRequestMediaType = data.request.media_type || 'movie';
-        window.updateActiveStageBanner(data);
         window.loadSearchHistory();
 
         const cacheIndicator = document.getElementById('release-cache-indicator');
@@ -295,8 +341,6 @@ async function openRequestDetails(requestId, explicitIndex = null, options = {})
 
         if (data.request.media_type === 'tv' && data.tv_info) {
             window.currentTvSeasons = data.tv_info.seasons || [];
-            document.getElementById('release-results-header').classList.remove('hidden');
-            document.getElementById('release-controls').classList.remove('hidden');
             if (cacheIndicator) cacheIndicator.classList.add('hidden');
             releases.innerHTML = window.renderSeasonAccordion(data);
             if (preservedDetailsState && window.restoreDetailsAccordionState) {
@@ -307,10 +351,8 @@ async function openRequestDetails(requestId, explicitIndex = null, options = {})
             }
             if (window.updateTvAccordionControls) window.updateTvAccordionControls();
         } else {
-            document.getElementById('release-results-header').classList.remove('hidden');
-            document.getElementById('release-controls').classList.remove('hidden');
             if (window.currentReleases.length > 0) {
-                releases.innerHTML = window.currentReleases.map(release => window.renderReleaseCard(release, window.currentRequestId)).join('');
+                releases.innerHTML = '<ul class="divide-y divide-gray-700/40">' + window.currentReleases.map(release => window.renderReleaseCard(release, window.currentRequestId)).join('') + '</ul>';
                 if (cacheIndicator && cacheIndicatorText) {
                     cacheIndicatorText.textContent = 'Showing cached results';
                     cacheIndicator.classList.remove('hidden');
@@ -325,6 +367,7 @@ async function openRequestDetails(requestId, explicitIndex = null, options = {})
 
         window.currentRequestTimeline = data.timeline || [];
         renderTimeline(window.currentRequestTimeline, { open: timelineWasOpen });
+        renderDetailsStats(data);
 
         if (data.auto_search_eligible && !window.detailsAutoSearchStarted[requestId]) {
             window.detailsAutoSearchStarted[requestId] = true;
@@ -340,10 +383,65 @@ async function openRequestDetails(requestId, explicitIndex = null, options = {})
         title.textContent = 'Error loading details';
         meta.textContent = err.message || 'Unknown error';
         overview.textContent = '';
-        window.updateActiveStageBanner({ active_staged_torrent: null });
         window.setPoster(null, 'Poster unavailable');
         releases.innerHTML = '<div class="text-red-400 text-sm">Failed to load request details. Check that Overseerr is reachable.</div>';
     }
+}
+
+// Render the desktop left-rail stat list (`#request-details-stats`):
+// Cached results / Passed / Rejected / Staged / Last search. Desktop-only
+// (the element is `hidden lg:block`); the mobile header card omits stats.
+// Field names come from `serialize_request_details_response`:
+//   - data.total_releases          -> Cached results
+//   - data.releases[].passed       -> Passed (truthy) / Rejected (falsy)
+//   - data.active_staged_torrents  -> Staged count (plural list length when
+//                                     present; falls back to the singular
+//                                     `active_staged_torrent` flag)
+//   - data.timeline[].created_at   -> latest entry timestamp -> "Last search"
+function renderDetailsStats(data) {
+    const statsEl = document.getElementById('request-details-stats');
+    if (!statsEl) return;
+    const releases = Array.isArray(data && data.releases) ? data.releases : [];
+    const passed = releases.filter(r => r && r.passed).length;
+    const rejected = releases.filter(r => r && !r.passed).length;
+    const stagedCount = Array.isArray(data.active_staged_torrents) && data.active_staged_torrents.length
+        ? data.active_staged_torrents.length
+        : (data.active_staged_torrent ? 1 : 0);
+    const cachedResults = data.total_releases != null ? data.total_releases : releases.length;
+    const lastSearch = formatDetailsLastSearch(data && data.timeline);
+    statsEl.innerHTML = [
+        detailsStatRow('Cached results', 'text-gray-300 tabular-nums', String(cachedResults)),
+        detailsStatRow('Passed', 'text-emerald-400 tabular-nums', String(passed)),
+        detailsStatRow('Rejected', 'text-red-400 tabular-nums', String(rejected)),
+        detailsStatRow('Staged', 'text-cyan-300 tabular-nums', String(stagedCount)),
+        detailsStatRow('Last search', 'text-gray-300', lastSearch),
+    ].join('');
+}
+
+function detailsStatRow(label, ddClass, value) {
+    return `<div class="flex justify-between gap-3"><dt class="text-gray-500">${window.escapeHtml(label)}</dt><dd class="${ddClass}">${window.escapeHtml(value)}</dd></div>`;
+}
+
+// Derive a relative "Last search" string from the latest timeline entry's
+// `created_at` timestamp. Reuses the repo's `formatRelativePublishAge` helper
+// (exported from releases.js) when present; falls back to "—" when there is no
+// timeline, no parseable timestamp, or the formatter yields an empty string.
+function formatDetailsLastSearch(timeline) {
+    if (!Array.isArray(timeline) || timeline.length === 0) return '—';
+    let latestMs = null;
+    let latestCreatedAt = null;
+    for (const entry of timeline) {
+        if (!entry || !entry.created_at) continue;
+        const ts = new Date(entry.created_at);
+        if (Number.isNaN(ts.getTime())) continue;
+        if (latestMs === null || ts.getTime() > latestMs) {
+            latestMs = ts.getTime();
+            latestCreatedAt = entry.created_at;
+        }
+    }
+    if (latestCreatedAt === null) return '—';
+    const relative = window.formatRelativePublishAge ? window.formatRelativePublishAge(latestCreatedAt) : '';
+    return relative || '—';
 }
 
 function renderRuleEvidence(evidence) {
@@ -361,13 +459,16 @@ async function loadSearchHistory() {
     const container = document.getElementById('request-details-search-history');
     if (!container) return;
     container.innerHTML = '<div class="text-gray-500">Loading search history...</div>';
+    let runsCount = 0;
     try {
         const response = await fetch(`/requests/${window.currentRequestId}/search-history?limit=5`);
         if (!response.ok) throw new Error(`Server error: ${response.status}`);
         const data = await response.json();
         const runs = data.runs || [];
+        runsCount = runs.length;
         if (!runs.length) {
             container.innerHTML = '<div class="text-gray-500">No search history yet.</div>';
+            updateActivityMobileCount(null, runsCount);
             return;
         }
         container.innerHTML = runs.map(run => {
@@ -378,10 +479,26 @@ async function loadSearchHistory() {
     } catch (err) {
         container.innerHTML = `<div class="text-red-400">Failed to load search history: ${window.escapeHtml(err.message || 'Unknown error')}</div>`;
     }
+    updateActivityMobileCount(null, runsCount);
+}
+
+// Update the mobile "Activity · N" count shown on the collapsed <details> summary.
+// `renderTimeline` and `loadSearchHistory` each contribute their segment count;
+// the running total is cached on the dataset of #activity-mobile-count so
+// independent loaders can collaborate without one clobbering the other.
+function updateActivityMobileCount(timelineDelta, runsDelta) {
+    const el = document.getElementById('activity-mobile-count');
+    if (!el) return;
+    if (timelineDelta != null) el.dataset.timeline = String(timelineDelta);
+    if (runsDelta != null) el.dataset.runs = String(runsDelta);
+    const timeline = Number(el.dataset.timeline || 0);
+    const runs = Number(el.dataset.runs || 0);
+    el.textContent = String(timeline + runs);
 }
 
 window.loadSearchHistory = loadSearchHistory;
 window.renderRuleEvidence = renderRuleEvidence;
+window.renderDetailsStats = renderDetailsStats;
 
 async function searchTvRequest(mode = 'new') {
     if (!window.currentRequestId) return;
@@ -481,15 +598,18 @@ function renderTimeline(timelineData, options = {}) {
     const entries = document.getElementById('timeline-entries');
     const count = document.getElementById('timeline-count');
     if (!container || !entries) return;
-    if (!timelineData || timelineData.length === 0) {
+    const timelineLength = Array.isArray(timelineData) ? timelineData.length : 0;
+    if (!timelineData || timelineLength === 0) {
         container.classList.add('hidden');
         container.open = false;
         if (count) count.textContent = '';
+        updateActivityMobileCount(timelineLength);
         return;
     }
     container.classList.remove('hidden');
     container.open = !!options.open;
-    if (count) count.textContent = timelineData.length + ' event' + (timelineData.length === 1 ? '' : 's');
+    if (count) count.textContent = timelineLength + ' event' + (timelineLength === 1 ? '' : 's');
+    updateActivityMobileCount(timelineLength);
     const colorMap = {
         search_started: 'bg-blue-500',
         search_completed: 'bg-blue-500',
@@ -561,6 +681,100 @@ function renderTimeline(timelineData, options = {}) {
     }).join('');
 }
 
+// Activity panel collapse/expand toggle.
+// The panel is a single <details id="activity-panel"> shared by both
+// breakpoints: it is the desktop right panel (lg:flex lg:flex-col) and the
+// mobile collapsed "Activity · N" feed (<lg). Because the element is a
+// <details>, its content visibility is governed by the `open` attribute, not
+// by classes — so on desktop we force `open=true` whenever the panel is
+// visible (lg:flex present), and on mobile we leave `open` user-controlled
+// (collapsed by default).
+//
+// Desktop collapse toggles `lg:flex` (remove) + `lg:hidden` (add) so the
+// panel actually disappears on lg+ even though the base class is no longer
+// `hidden` (the base must stay visible so the mobile <details> summary shows).
+// A MutationObserver mirrors the panel state onto the expand tab
+// (#activity-show) by toggling its `lg:flex` class.
+const ACTIVITY_DESKTOP_MQL = window.matchMedia ? window.matchMedia('(min-width: 1024px)') : null;
+
+function initActivityPanelToggle() {
+    const panel = document.getElementById('activity-panel');
+    const showBtn = document.getElementById('activity-show');
+    if (!panel || !showBtn) return;
+
+    const isDesktop = () => ACTIVITY_DESKTOP_MQL ? ACTIVITY_DESKTOP_MQL.matches : true;
+
+    // On desktop the <details> must always be open when the panel is visible
+    // so the timeline + search history render. On mobile it stays collapsed
+    // until the user taps the summary.
+    const syncOpenAttr = () => {
+        if (isDesktop() && panel.classList.contains('lg:flex')) {
+            panel.open = true;
+        }
+    };
+
+    const syncExpandTab = () => {
+        if (panel.classList.contains('lg:flex')) {
+            // Panel open on desktop -> hide the expand tab.
+            showBtn.classList.remove('lg:flex');
+        } else {
+            // Panel collapsed -> show the expand tab on desktop.
+            showBtn.classList.add('lg:flex');
+        }
+    };
+
+    const observer = new MutationObserver(syncExpandTab);
+    observer.observe(panel, { attributes: true, attributeFilter: ['class'] });
+
+    window.collapseActivityPanel = () => {
+        panel.classList.remove('lg:flex');
+        panel.classList.add('lg:hidden');
+    };
+    window.expandActivityPanel = () => {
+        panel.classList.remove('lg:hidden');
+        panel.classList.add('lg:flex');
+        if (isDesktop()) {
+            panel.open = true;
+        } else {
+            // Mobile: the <details> is always visible, but its content should
+            // start collapsed ("Activity · N") on a fresh modal open.
+            panel.open = false;
+        }
+    };
+
+    // Keep `open` in sync when crossing the lg breakpoint. On desktop the
+    // <details> must always be open when visible; on mobile it defaults to
+    // collapsed ("Activity · N") so a resize from desktop (where open is
+    // forced true) back to mobile re-collapses the feed.
+    if (ACTIVITY_DESKTOP_MQL) {
+        ACTIVITY_DESKTOP_MQL.addEventListener('change', () => {
+            if (isDesktop() && panel.classList.contains('lg:flex')) {
+                panel.open = true;
+            } else if (!isDesktop()) {
+                panel.open = false;
+            }
+        });
+    }
+
+    syncOpenAttr();
+    syncExpandTab();
+}
+
+initActivityPanelToggle();
+
+// Mobile filter chip toggle: expands/collapses #release-controls on <lg.
+// #release-controls is `hidden lg:flex` in the template, so toggling `hidden`
+// only affects mobile — on desktop `lg:flex` overrides `hidden` regardless.
+function toggleMobileFilter() {
+    const controls = document.getElementById('release-controls');
+    if (!controls) return;
+    const chip = document.querySelector('[onclick="toggleMobileFilter()"]');
+    const willShow = controls.classList.contains('hidden');
+    controls.classList.toggle('hidden', !willShow);
+    if (chip) chip.setAttribute('aria-expanded', willShow ? 'true' : 'false');
+}
+window.toggleMobileFilter = toggleMobileFilter;
+
 // Export functions to window for HTML onclick handlers
 window.openRequestDetails = openRequestDetails;
 window.ensureDetailsControlHandlers = ensureDetailsControlHandlers;
@@ -569,6 +783,7 @@ window.buildDetailsUrl = buildDetailsUrl;
 window.applyDetailsControls = applyDetailsControls;
 window.updateReleaseCountText = updateReleaseCountText;
 window.applyLocalReleaseSort = applyLocalReleaseSort;
+window.setDetailsScope = setDetailsScope;
 window.refreshPlexAndReload = refreshPlexAndReload;
 window.searchRequestFromDetails = searchRequestFromDetails;
 window.searchTvRequest = searchTvRequest;
