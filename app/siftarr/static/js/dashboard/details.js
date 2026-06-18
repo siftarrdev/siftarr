@@ -109,7 +109,7 @@ function applyLocalReleaseSort() {
     }
     if (Array.isArray(window.currentReleases)) {
         window.currentReleases = sortReleases(window.currentReleases);
-        releasesEl.innerHTML = window.currentReleases.map(release => window.renderReleaseCard(release, window.currentRequestId)).join('');
+        releasesEl.innerHTML = '<ul class="divide-y divide-gray-700/40">' + window.currentReleases.map(release => window.renderReleaseCard(release, window.currentRequestId)).join('') + '</ul>';
         if (window.currentDetailsData) window.currentDetailsData.releases = window.currentReleases;
         return true;
     }
@@ -317,7 +317,7 @@ async function openRequestDetails(requestId, explicitIndex = null, options = {})
             document.getElementById('release-results-header').classList.remove('hidden');
             document.getElementById('release-controls').classList.remove('hidden');
             if (window.currentReleases.length > 0) {
-                releases.innerHTML = window.currentReleases.map(release => window.renderReleaseCard(release, window.currentRequestId)).join('');
+                releases.innerHTML = '<ul class="divide-y divide-gray-700/40">' + window.currentReleases.map(release => window.renderReleaseCard(release, window.currentRequestId)).join('') + '</ul>';
                 if (cacheIndicator && cacheIndicatorText) {
                     cacheIndicatorText.textContent = 'Showing cached results';
                     cacheIndicator.classList.remove('hidden');

@@ -138,10 +138,10 @@ function filterReleaseCards() {
     const releasesContainer = document.getElementById('request-details-releases');
     if (!filterEl || !releasesContainer) return;
     const filter = filterEl.value.toLowerCase();
-    releasesContainer.innerHTML = window.currentReleases
+    releasesContainer.innerHTML = '<ul class="divide-y divide-gray-700/40">' + window.currentReleases
         .filter(r => !filter || r.title.toLowerCase().includes(filter))
         .map(release => window.renderReleaseCard(release, window.currentRequestId))
-        .join('');
+        .join('') + '</ul>';
 }
 
 function sortTable(tableName, sortKey, preserveDirection = false, forcedDirection = null) {

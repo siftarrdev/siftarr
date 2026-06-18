@@ -306,12 +306,12 @@ def test_dashboard_js_uses_collapsible_episode_results():
 
 
 def test_dashboard_js_includes_release_status_column_and_upload_age():
-    """Torrent cards should render a right-side status area with rejection reason and age."""
+    """Torrent cards render a score-first row with annotation data hooks."""
     js = _read_dashboard_js()
 
-    assert 'data-release-status-column="true"' in js
-    assert 'data-release-rejection-reason="true"' in js
-    assert 'data-release-upload-age="true"' in js
+    assert 'data-release-status-column="true"' not in js
+    assert 'data-release-rejection-reason="true"' not in js
+    assert 'data-release-upload-age="true"' not in js
     assert 'data-release-size-per-season="true"' in js
     assert 'data-release-resolution="true"' in js
     assert 'data-release-codec="true"' in js
@@ -364,11 +364,19 @@ def test_dashboard_js_includes_active_stage_replacement_copy():
     """Request details should explain replacement semantics for staged picks."""
     js = _read_dashboard_js()
 
+    # updateActiveStageBanner still ships until Phase 5, so its banner id and
+    # copy string remain in the JS bundle (the element is gone from the template).
     assert "request-details-active-stage-banner" in js
-    assert "Replace staged" in js
-    assert "Stage release" in js
-    assert "Stage this torrent for review and approval." in js
     assert "Selecting another result will replace it." in js
+    # Inline Approve/Discard/Replace live on the staged release card itself.
+    assert "inlineStagedAction" in js
+    assert "/approve" in js
+    assert "/discard" in js
+    assert ">Approve</button>" in js
+    assert ">Discard</button>" in js
+    assert ">Replace</button>" in js
+    assert ">Stage</button>" in js
+    assert "Stage this torrent for review and approval." in js
     assert "text-emerald-400" in js
     assert "text-red-400" in js
 
@@ -388,8 +396,13 @@ def test_dashboard_js_uses_cyan_staged_release_indicators():
     js = _read_dashboard_js()
 
     assert "'staged': 'badge-cyan'" in js
-    assert "'badge-blue' : 'badge-cyan'" in js
-    assert "border-cyan-500/70 bg-cyan-950/20" in js
+    # New score-first card: movie staged row uses a cyan bottom border on the
+    # cyan-tinted list item; TV episode buckets use a bordered cyan container.
+    assert "bg-cyan-950/20" in js
+    assert "border-cyan-500/50" in js
+    assert "border-cyan-500/40" in js
+    # Staged badge on the card title uses the inline cyan pill style.
+    assert "bg-cyan-900/60 text-cyan-300" in js
 
 
 def test_dashboard_js_focuses_staged_tv_episode_after_reload():

@@ -99,20 +99,17 @@ function formatRelativePublishAge(publishDate) {
     return years === 1 ? '1 year ago' : `${years} years ago`;
 }
 
-function renderReleaseCard(release, requestId) {
-    const statusClass = release.passed ? 'badge-green' : 'badge-yellow';
+// Render a release card in the calm, score-first layout. Movie list items wrap
+// the row in `<li>`; TV episode buckets (Phase 3) pass `{ bucket: true }` to
+// render a bordered `<div>` variant with tighter spacing. Both variants share
+// the score gutter + title/meta body + a single right-aligned action. Staged
+// (active selection) cards carry inline Approve + Discard; conflicting siblings
+// show Replace; passed releases show Stage; rejected releases dim and inline the
+// rejection reason as the meta line, with a Force action.
+function renderReleaseCard(release, requestId, options = {}) {
+    const bucket = !!(options && options.bucket);
     const releaseScope = release.target_scope || {};
     const isScopedEpisodeRelease = releaseScope.type === 'single_episode';
-    const secondaryMeta = [
-        renderAnnotation(release.size, releaseAnnotationTone(release, 'size'), 'data-release-size="true"'),
-        renderAnnotation(release.indexer, releaseAnnotationTone(release, 'indexer'), 'data-release-indexer="true"'),
-        renderAnnotation(release.resolution, releaseAnnotationTone(release, 'resolution'), 'data-release-resolution="true"'),
-        renderAnnotation(release.codec, releaseAnnotationTone(release, 'codec'), 'data-release-codec="true"'),
-        renderAnnotation(release.release_group, releaseAnnotationTone(release, 'group'), 'data-release-group="true"'),
-        release.files != null ? `<span class="text-gray-400">${release.files} file${release.files !== 1 ? 's' : ''}</span>` : null,
-    ].filter(Boolean).join(' \u00B7 ');
-    const availability = `Seeders ${release.seeders ?? 0} \u00B7 Leechers ${release.leechers ?? 0}`;
-    const downloaded = release.downloaded ? '<span class="badge badge-blue">Already sent</span>' : '';
     const activeStagedTorrent = release.active_staged_torrent || null;
     const conflictsActiveSelection = !!release.conflicts_active_selection;
     const hasActiveStagedSelection = window.siftarrStagingModeEnabled && conflictsActiveSelection;
@@ -120,19 +117,42 @@ function renderReleaseCard(release, requestId) {
         !isScopedEpisodeRelease && hasActiveStagedSelection && activeStagedTorrent && release.title === activeStagedTorrent.title
     );
     const activeSelectionMode = window.siftarrStagingModeEnabled && isActiveSelection;
-    const activeSelectionBadge = activeSelectionMode
-        ? `<span class="badge ${
-            (release.active_selection_status || activeStagedTorrent?.status) === 'approved' ? 'badge-blue' : 'badge-cyan'
-        }">${window.escapeHtml((release.active_selection_source || activeStagedTorrent?.selection_source) === 'rule' ? 'Auto-selected and staged' : 'Currently staged')}</span>`
+    const rejected = release.passed === false;
+
+    const scoreColor = release.passed ? 'text-emerald-400' : 'text-gray-200';
+    const gutterWidth = bucket ? 'w-8' : 'w-10';
+    const scoreSize = bucket ? 'text-base' : 'text-xl';
+    const scoreGutter = '<div class="shrink-0 ' + gutterWidth + ' text-right"><div class="' + scoreSize + ' font-bold ' + scoreColor + ' tabular-nums leading-none">' + window.escapeHtml(String(release.score ?? 0)) + '</div></div>';
+
+    const stagedBadge = activeSelectionMode
+        ? '<span class="inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-medium bg-cyan-900/60 text-cyan-300 ring-1 ring-inset ring-cyan-700/40">Staged</span>'
         : '';
-    const actionVerb = window.siftarrStagingModeEnabled
-        ? (isActiveSelection ? 'Already staged' : hasActiveStagedSelection ? 'Replace staged' : 'Stage release')
-        : 'Download';
-    const useLabel = release.passed ? actionVerb : `Force ${actionVerb}`;
+    const titleText = window.escapeHtml(release.title);
+    const titleHtml = stagedBadge
+        ? '<div class="flex items-center gap-2 flex-wrap"><span class="text-sm text-white font-medium truncate">' + titleText + '</span>' + stagedBadge + '</div>'
+        : '<div class="text-sm text-white font-medium truncate">' + titleText + '</div>';
+
+    let metaHtml;
+    if (rejected) {
+        const reason = release.rejection_reason ? ' · ' + window.escapeHtml(release.rejection_reason) : '';
+        metaHtml = '<div class="mt-0.5 text-xs text-red-300/80">Rejected' + reason + '</div>';
+    } else {
+        const metaParts = [
+            renderAnnotation(release.resolution, releaseAnnotationTone(release, 'resolution'), 'data-release-resolution="true"'),
+            renderAnnotation(release.codec, releaseAnnotationTone(release, 'codec'), 'data-release-codec="true"'),
+            renderAnnotation(release.size, releaseAnnotationTone(release, 'size'), 'data-release-size="true"'),
+            release.seeders != null ? '<span>' + window.escapeHtml(String(release.seeders)) + ' seeders</span>' : '',
+            release.indexer ? renderAnnotation(release.indexer, 'text-gray-500', 'data-release-indexer="true"') : '',
+        ].filter(Boolean);
+        metaHtml = metaParts.length ? '<div class="mt-0.5 text-xs text-gray-400 flex items-center gap-2 flex-wrap">' + metaParts.join('<span>·</span>') + '</div>' : '';
+    }
+
+    const bodyHtml = '<div class="min-w-0 flex-1">' + titleHtml + metaHtml + '</div>';
+
     const storedReleaseId = release.stored_release_id || release.id;
     const formAction = storedReleaseId
-        ? `/requests/${requestId}/releases/${storedReleaseId}/use`
-        : `/requests/${requestId}/manual-release/use`;
+        ? '/requests/' + requestId + '/releases/' + storedReleaseId + '/use'
+        : '/requests/' + requestId + '/manual-release/use';
     const disableAction = !(release.download_url || release.magnet_url);
     const manualDataJson = storedReleaseId ? '{}' : window.escapeHtml(JSON.stringify({
         title: release.title || '',
@@ -148,6 +168,7 @@ function renderReleaseCard(release, requestId) {
         codec: release.codec || '',
         release_group: release.release_group || '',
     }));
+    const stageScopeJson = window.escapeHtml(JSON.stringify(releaseScope || {}));
     const actionTitle = window.siftarrStagingModeEnabled
         ? (isActiveSelection
             ? 'This torrent is already the active staged selection.'
@@ -155,35 +176,39 @@ function renderReleaseCard(release, requestId) {
                 ? 'Replace the active staged torrent with this selection.'
                 : 'Stage this torrent for review and approval.')
         : 'Send this torrent to qBittorrent.';
-    const stageScopeJson = window.escapeHtml(JSON.stringify(releaseScope || {}));
-    const actionHtml = `<button type="button" class="btn-primary btn-sm" ${disableAction || activeSelectionMode ? 'disabled' : ''} title="${window.escapeHtml(disableAction ? 'No download source available' : actionTitle)}" data-stage-url="${window.escapeHtml(formAction)}" data-stage-fields="${manualDataJson}" data-stage-scope="${stageScopeJson}" onclick="stageRelease(this)">${useLabel}</button>`;
-    const publishAge = formatRelativePublishAge(release.publish_date);
-    const coverageHtml = (Array.isArray(release.covered_seasons) || release.is_complete_series)
-        ? renderCoverageBadge(release)
-        : '';
-    const rejectionIsSize = typeof release.rejection_reason === 'string' && release.rejection_reason.toLowerCase().startsWith('size ');
-    const rejectionHtml = !release.passed && release.rejection_reason && !rejectionIsSize
-        ? `<div class="mt-2 max-w-xs text-right text-xs text-red-300" data-release-rejection-reason="true">${window.escapeHtml(release.rejection_reason)}</div>`
-        : '';
 
-    return `
-        <div class="rounded-xl border ${activeSelectionMode ? 'border-cyan-500/70 bg-cyan-950/20' : 'border-gray-700/60 bg-surface-800'} p-2">
-            <div class="flex flex-col gap-2 lg:flex-row lg:items-start lg:justify-between">
-                <div class="min-w-0">
-                    <div class="font-medium text-white text-sm break-words">${window.escapeHtml(release.title)}</div>
-                    <div class="mt-1 text-xs text-gray-400">Score <span class="font-semibold text-emerald-400">${release.score}</span> &middot; ${secondaryMeta || '<span class="text-gray-400">No release metadata</span>'} &middot; ${window.escapeHtml(availability)}${publishAge ? ` &middot; <span data-release-upload-age="true">${window.escapeHtml(publishAge)}</span>` : ''}</div>
-                    ${coverageHtml}
-                </div>
-                <div class="flex shrink-0 flex-col items-end gap-2 text-right" data-release-status-column="true">
-                    <span class="badge ${statusClass}">${window.escapeHtml(release.status_label || (release.passed ? 'Passed' : 'Rejected'))}</span>
-                    ${downloaded}
-                    ${activeSelectionBadge}
-                    ${actionHtml}
-                    ${rejectionHtml}
-                </div>
-            </div>
-        </div>
-    `;
+    let actionHtml;
+    if (activeSelectionMode && activeStagedTorrent && activeStagedTorrent.id) {
+        const stagedId = activeStagedTorrent.id;
+        actionHtml = '<div class="flex items-center gap-2 shrink-0">' +
+            '<button type="button" onclick="inlineStagedAction(\'/staged/' + stagedId + '/approve\', this)" class="rounded-lg bg-emerald-600 hover:bg-emerald-500 px-3 py-1.5 text-xs font-semibold text-white">Approve</button>' +
+            '<button type="button" onclick="inlineStagedAction(\'/staged/' + stagedId + '/discard\', this)" class="rounded-lg text-xs px-3 py-1.5 text-red-400 hover:text-red-300 hover:bg-red-950/40">Discard</button>' +
+        '</div>';
+    } else {
+        const disabledAttr = disableAction ? ' disabled' : '';
+        const stageAttrs = ' title="' + window.escapeHtml(disableAction ? 'No download source available' : actionTitle) + '" data-stage-url="' + window.escapeHtml(formAction) + '" data-stage-fields="' + manualDataJson + '" data-stage-scope="' + stageScopeJson + '" onclick="stageRelease(this)"';
+        if (hasActiveStagedSelection && !isActiveSelection) {
+            actionHtml = '<button type="button" class="rounded-lg border border-gray-700 px-3 py-1.5 text-xs text-gray-400 hover:text-white shrink-0"' + disabledAttr + stageAttrs + '>Replace</button>';
+        } else if (!window.siftarrStagingModeEnabled) {
+            actionHtml = '<button type="button" class="' + (rejected ? 'rounded-lg border border-gray-700 px-3 py-1.5 text-xs text-gray-500 hover:text-white' : 'rounded-lg bg-brand-600 hover:bg-brand-500 px-3 py-1.5 text-xs font-semibold text-white') + ' shrink-0"' + disabledAttr + stageAttrs + '>' + (rejected ? 'Force Download' : 'Download') + '</button>';
+        } else if (rejected) {
+            actionHtml = '<button type="button" class="rounded-lg border border-gray-700 px-3 py-1.5 text-xs text-gray-500 hover:text-white shrink-0"' + disabledAttr + stageAttrs + '>Force</button>';
+        } else {
+            actionHtml = '<button type="button" class="rounded-lg bg-brand-600 hover:bg-brand-500 px-3 py-1.5 text-xs font-semibold text-white shrink-0"' + disabledAttr + stageAttrs + '>Stage</button>';
+        }
+    }
+
+    if (bucket) {
+        const outerClass = activeSelectionMode
+            ? 'rounded-lg border border-cyan-500/40 bg-cyan-950/20'
+            : 'rounded-lg border border-gray-700/40 bg-surface-800';
+        return '<div class="' + outerClass + (rejected ? ' opacity-60' : '') + ' p-2.5 flex items-center gap-3">' + scoreGutter + bodyHtml + actionHtml + '</div>';
+    }
+
+    const outerClass = activeSelectionMode
+        ? 'bg-cyan-950/20 border-b border-cyan-500/50'
+        : 'hover:bg-surface-850/60';
+    return '<li class="flex items-center gap-4 px-4 py-3 ' + outerClass + (rejected ? ' opacity-60' : '') + '">' + scoreGutter + bodyHtml + actionHtml + '</li>';
 }
 
 function renderCoverageBadge(release) {
@@ -509,6 +534,44 @@ async function stageIndividualEpisodes(btn, requestId, seasonNumber) {
     }
 }
 
+// Inline Approve/Discard on a staged release card. Mirrors `postStagedAction`
+// (staged.js): POST `redirect_to='/?tab=staged'` to the action URL, then refresh
+// the staged tab and reload the open details modal so the card re-renders with
+// the new staged state. Disables the clicked button and shows "…" while in
+// flight.
+async function inlineStagedAction(actionUrl, btn = null) {
+    const originalText = btn ? btn.textContent : '';
+    if (btn) {
+        btn.disabled = true;
+        btn.textContent = '…';
+    }
+    try {
+        const formData = new FormData();
+        formData.append('redirect_to', '/?tab=staged');
+        const response = await fetch(actionUrl, {
+            method: 'POST',
+            headers: { 'Accept': 'application/json' },
+            body: formData,
+        });
+        if (!response.ok) {
+            const errorData = await response.json().catch(() => null);
+            throw new Error(errorData?.detail || errorData?.message || `Server error: ${response.status}`);
+        }
+        const data = await response.json().catch(() => ({}));
+        if (window.refreshStagedTabData) await window.refreshStagedTabData();
+        if (window.openRequestDetails && window.currentRequestId) {
+            await window.openRequestDetails(window.currentRequestId, window.currentDetailsIndex, { preserveUiState: true });
+        }
+        window.showToast(data.message || 'Staged torrent updated');
+    } catch (err) {
+        if (btn) {
+            btn.disabled = false;
+            btn.textContent = originalText;
+        }
+        window.showToast('Error: ' + err.message);
+    }
+}
+
 function captureDetailsAccordionState() {
     const state = {};
     document.querySelectorAll('#request-details-releases details[id]').forEach(function(details) {
@@ -644,6 +707,7 @@ window.searchEpisode = searchEpisode;
 window.stageRelease = stageRelease;
 window.stageTopEpisodeRelease = stageTopEpisodeRelease;
 window.stageIndividualEpisodes = stageIndividualEpisodes;
+window.inlineStagedAction = inlineStagedAction;
 window.focusTvEpisode = focusTvEpisode;
 window.focusStagedTvScope = focusStagedTvScope;
 window.openStagedRequestDetailsFromElement = openStagedRequestDetailsFromElement;
