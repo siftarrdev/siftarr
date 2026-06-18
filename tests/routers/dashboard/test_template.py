@@ -449,11 +449,11 @@ def test_dashboard_js_uses_cyan_staged_release_indicators():
     js = _read_dashboard_js()
 
     assert "'staged': 'badge-cyan'" in js
-    # New score-first card: movie staged row uses a cyan bottom border on the
-    # cyan-tinted list item; TV episode buckets use a bordered cyan container.
+    # New score-first card: staged items keep cyan-tinted backgrounds/badges,
+    # but outlines stay in the muted gray border family.
     assert "bg-cyan-950/20" in js
-    assert "border-cyan-500/50" in js
-    assert "border-cyan-500/40" in js
+    assert "border-gray-700/60 bg-cyan-950/20" in js
+    assert "border-gray-700/60 bg-cyan-950/10" in js
     # Staged badge on the card title uses the inline cyan pill style.
     assert "bg-cyan-900/60 text-cyan-300" in js
 

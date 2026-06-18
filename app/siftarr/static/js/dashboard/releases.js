@@ -200,13 +200,13 @@ function renderReleaseCard(release, requestId, options = {}) {
 
     if (bucket) {
         const outerClass = activeSelectionMode
-            ? 'rounded-lg border border-cyan-500/40 bg-cyan-950/20'
+            ? 'rounded-lg border border-gray-700/60 bg-cyan-950/20'
             : 'rounded-lg border border-gray-700/40 bg-surface-800';
         return '<div class="' + outerClass + (rejected ? ' opacity-60' : '') + ' p-2.5 flex items-center gap-3">' + scoreGutter + bodyHtml + actionHtml + '</div>';
     }
 
     const outerClass = activeSelectionMode
-        ? 'bg-cyan-950/20 border-b border-cyan-500/50'
+        ? 'bg-cyan-950/20 border-b border-gray-700/60'
         : 'hover:bg-surface-850/60';
     return '<li class="flex items-center gap-4 px-4 py-3 ' + outerClass + (rejected ? ' opacity-60' : '') + '">' + scoreGutter + bodyHtml + actionHtml + '</li>';
 }
@@ -384,7 +384,7 @@ function renderSeasonAccordion(data) {
             const topRelease = episodeReleases.find(isUsableCachedRelease);
             const showInlineActions = ep.status !== 'available' && ep.status !== 'completed';
 
-            return '<details id="' + episodeDetailsId + '" class="group rounded-lg border ' + (isStaged ? 'border-cyan-500/30 bg-cyan-950/10' : 'border-gray-700/40 bg-surface-900/50') + '" ontoggle="window.updateTvAccordionControls && window.updateTvAccordionControls()"' + (isOpen ? ' open' : '') + '>' +
+            return '<details id="' + episodeDetailsId + '" class="group rounded-lg border ' + (isStaged ? 'border-gray-700/60 bg-cyan-950/10' : 'border-gray-700/40 bg-surface-900/50') + '" ontoggle="window.updateTvAccordionControls && window.updateTvAccordionControls()"' + (isOpen ? ' open' : '') + '>' +
                 '<summary class="flex items-center gap-3 cursor-pointer px-3 py-2 hover:bg-surface-850/60 transition-colors">' +
                     '<svg class="accordion-chevron w-3.5 h-3.5 text-gray-500 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>' +
                     '<span class="text-xs font-mono text-gray-500 shrink-0">S' + String(season.season_number).padStart(2, '0') + 'E' + String(ep.episode_number).padStart(2, '0') + '</span>' +
