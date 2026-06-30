@@ -57,8 +57,6 @@ async def test_request_details_serializes_unreleased_and_pending_tv_counts(
     count_result.scalar.return_value = 0
     release_result = MagicMock()
     release_result.scalars.return_value.all.return_value = []
-    rules_result = MagicMock()
-    rules_result.scalars.return_value.all.return_value = []
     active_stage_result = MagicMock()
     active_stage_result.scalars.return_value.all.return_value = []
     seasons_result = MagicMock()
@@ -69,7 +67,6 @@ async def test_request_details_serializes_unreleased_and_pending_tv_counts(
         request_result,
         count_result,
         release_result,
-        rules_result,
         active_stage_result,
         seasons_result,
         episodes_result,
@@ -153,8 +150,6 @@ async def test_request_details_flags_fresh_pending_tv_data_for_plex_enrichment(
     count_result.scalar.return_value = 0
     release_result = MagicMock()
     release_result.scalars.return_value.all.return_value = []
-    rules_result = MagicMock()
-    rules_result.scalars.return_value.all.return_value = []
     active_stage_result = MagicMock()
     active_stage_result.scalars.return_value.all.return_value = []
     seasons_result = MagicMock()
@@ -165,7 +160,6 @@ async def test_request_details_flags_fresh_pending_tv_data_for_plex_enrichment(
         request_result,
         count_result,
         release_result,
-        rules_result,
         active_stage_result,
         seasons_result,
         episodes_result,
@@ -256,8 +250,6 @@ async def test_request_details_flags_pending_unreleased_tv_data_for_plex_enrichm
     count_result.scalar.return_value = 0
     release_result = MagicMock()
     release_result.scalars.return_value.all.return_value = []
-    rules_result = MagicMock()
-    rules_result.scalars.return_value.all.return_value = []
     active_stage_result = MagicMock()
     active_stage_result.scalars.return_value.all.return_value = []
     seasons_result = MagicMock()
@@ -268,7 +260,6 @@ async def test_request_details_flags_pending_unreleased_tv_data_for_plex_enrichm
         request_result,
         count_result,
         release_result,
-        rules_result,
         active_stage_result,
         seasons_result,
         episodes_result,
@@ -354,8 +345,6 @@ async def test_request_details_surfaces_request_level_tv_aggregate_counts(
     count_result.scalar.return_value = 0
     release_result = MagicMock()
     release_result.scalars.return_value.all.return_value = []
-    rules_result = MagicMock()
-    rules_result.scalars.return_value.all.return_value = []
     active_stage_result = MagicMock()
     active_stage_result.scalars.return_value.all.return_value = []
     seasons_result = MagicMock()
@@ -370,7 +359,6 @@ async def test_request_details_surfaces_request_level_tv_aggregate_counts(
         request_result,
         count_result,
         release_result,
-        rules_result,
         active_stage_result,
         seasons_result,
         episodes_result,

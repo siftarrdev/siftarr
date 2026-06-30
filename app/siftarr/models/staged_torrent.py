@@ -7,6 +7,12 @@ from sqlalchemy.orm import Mapped, mapped_column
 
 from app.siftarr.models._base import Base, utc_now
 
+STAGED_STATUS_STAGED = "staged"
+STAGED_STATUS_APPROVED = "approved"
+STAGED_STATUS_DISCARDED = "discarded"
+STAGED_STATUS_REPLACED = "replaced"
+ACTIVE_STAGED_STATUSES = (STAGED_STATUS_STAGED, STAGED_STATUS_APPROVED)
+
 
 class StagedTorrent(Base):
     __tablename__ = "staged_torrents"
@@ -34,7 +40,7 @@ class StagedTorrent(Base):
 
     # Status
     status: Mapped[str] = mapped_column(
-        String(50), default="staged"
+        String(50), default=STAGED_STATUS_STAGED
     )  # staged, approved, discarded, replaced
     move_status: Mapped[str | None] = mapped_column(String(50), nullable=True)
     moved_path: Mapped[str | None] = mapped_column(String(1000), nullable=True)

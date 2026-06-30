@@ -11,6 +11,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.siftarr.models.request import RequestStatus
+from app.siftarr.models.staged_torrent import STAGED_STATUS_STAGED
 from app.siftarr.services.dashboard.dashboard_service import DashboardTVDetails
 from app.siftarr.services.dashboard.tv_details_service import (
     compute_sync_metadata,
@@ -54,7 +55,9 @@ class TVEnrichmentService:
         """Build TV detail payload with seasons, episodes, and release grouping."""
         active_staged_torrents = active_staged_torrents or []
         staged_overlay_torrents = [
-            staged for staged in active_staged_torrents if staged.get("status") == "staged"
+            staged
+            for staged in active_staged_torrents
+            if staged.get("status") == STAGED_STATUS_STAGED
         ]
         seasons, episodes = await load_tv_seasons_with_episodes(self.db, request_id)
 
@@ -93,7 +96,7 @@ class TVEnrichmentService:
                 {
                     "id": season.id,
                     "season_number": season.season_number,
-                    "status": "staged" if season_staged else season.status.value,
+                    "status": STAGED_STATUS_STAGED if season_staged else season.status.value,
                     "available_count": available_count,
                     "total_count": len(season_episodes),
                     "pending_count": pending_count,
@@ -105,7 +108,7 @@ class TVEnrichmentService:
                             "episode_number": ep.episode_number,
                             "title": ep.title,
                             "air_date": ep.air_date.isoformat() if ep.air_date else None,
-                            "status": "staged"
+                            "status": STAGED_STATUS_STAGED
                             if ep.episode_number in staged_episode_numbers
                             else ep.status.value,
                         }

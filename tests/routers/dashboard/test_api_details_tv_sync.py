@@ -45,8 +45,6 @@ async def test_request_details_returns_cached_tv_data_and_sync_state(
     count_result.scalar.return_value = 0
     release_result = MagicMock()
     release_result.scalars.return_value.all.return_value = []
-    rules_result = MagicMock()
-    rules_result.scalars.return_value.all.return_value = []
     active_stage_result = MagicMock()
     active_stage_result.scalars.return_value.all.return_value = []
     seasons_result = MagicMock()
@@ -57,7 +55,6 @@ async def test_request_details_returns_cached_tv_data_and_sync_state(
         request_result,
         count_result,
         release_result,
-        rules_result,
         active_stage_result,
         seasons_result,
         episodes_result,

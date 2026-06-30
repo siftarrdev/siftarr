@@ -631,9 +631,13 @@ async def test_georgie_sweep_episode_rows_persist_without_exact_fallbacks(
                 limit=2,
             )
             assert details.tv_info is not None
-            s2_episode_keys = {
-                key for key in details.tv_info.releases_by_episode if key.startswith("2-")
+            assert details.filtered_total_releases > len(details.releases)
+            visible_release_titles = {release["title"] for release in details.releases}
+            visible_bucket_titles = {
+                release["title"]
+                for bucket in details.tv_info.releases_by_episode.values()
+                for release in bucket
             }
-            assert {*(f"2-{episode}" for episode in range(12, 19))} <= s2_episode_keys
+            assert visible_bucket_titles <= visible_release_titles
     finally:
         await engine.dispose()

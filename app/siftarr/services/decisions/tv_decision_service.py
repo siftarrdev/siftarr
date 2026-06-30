@@ -65,6 +65,7 @@ from app.siftarr.services.releases.staging_service import StagingService
 from app.siftarr.services.search_history_service import SearchHistoryService
 from app.siftarr.services.staging_decision_log import log_evaluations
 from app.siftarr.services.stats_metrics_service import record_rule_outcomes
+from app.siftarr.services.utils.async_utils import gather_limited
 
 logger = logging.getLogger(__name__)
 
@@ -431,9 +432,9 @@ class TVDecisionService:
                 payload["subtitle"] = f"{completed_seasons} of {len(seasons)} season(s) searched."
             await progress_callback(payload)
 
-        search_results = await asyncio.gather(
-            *(
-                self.prowlarr.search_tv_season_sweep(
+        async def run_season_sweep(season: int) -> ProwlarrSearchResult:
+            if progress_callback:
+                return await self.prowlarr.search_tv_season_sweep(
                     title=request.title,
                     season=season,
                     imdbid=imdb_id,
@@ -441,16 +442,18 @@ class TVDecisionService:
                     request_id=request.id,
                     progress_callback=season_progress,
                 )
-                if progress_callback
-                else self.prowlarr.search_tv_season_sweep(
-                    title=request.title,
-                    season=season,
-                    imdbid=imdb_id,
-                    tvdbid=request.tvdb_id,
-                    request_id=request.id,
-                )
-                for season in seasons
-            ),
+            return await self.prowlarr.search_tv_season_sweep(
+                title=request.title,
+                season=season,
+                imdbid=imdb_id,
+                tvdbid=request.tvdb_id,
+                request_id=request.id,
+            )
+
+        search_results = await gather_limited(
+            seasons,
+            MAX_CONCURRENT_SEARCHES,
+            run_season_sweep,
             return_exceptions=True,
         )
 

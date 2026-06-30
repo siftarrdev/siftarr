@@ -1,7 +1,12 @@
 """Unit tests for app.siftarr.services.release_serializers."""
 
 from datetime import UTC, datetime
+from typing import Any, cast
+from unittest.mock import MagicMock
 
+from app.siftarr.models.release import Release
+from app.siftarr.models.request import MediaType
+from app.siftarr.models.staged_torrent import STAGED_STATUS_APPROVED, StagedTorrent
 from app.siftarr.services.decisions.rule_engine import ReleaseEvaluation, RuleMatch
 from app.siftarr.services.integrations.prowlarr_service import ProwlarrRelease
 from app.siftarr.services.releases.release_parser import ParsedReleaseCoverage
@@ -12,7 +17,9 @@ from app.siftarr.services.releases.release_serializers import (
     format_release_size,
     release_failed_size_limit,
     season_pack_release_sort_key,
+    serialize_active_staged_torrent,
     serialize_evaluated_release,
+    serialize_stored_evaluated_release,
 )
 
 # -- format_release_size -------------------------------------------------------
@@ -325,6 +332,81 @@ class TestSerializeEvaluatedRelease:
         evaluation = self._make_evaluation()
         result = serialize_evaluated_release(release, evaluation)
         assert result["publish_date"] is None
+
+    def test_stored_release_reuses_rule_evidence_without_live_evaluation(self) -> None:
+        release = Release(
+            title="Stored.Movie.1080p",
+            size=1024,
+            seeders=4,
+            leechers=0,
+            download_url="https://example.test/download",
+            magnet_url=None,
+            indexer="Idx",
+            resolution="1080p",
+            codec="h264",
+            release_group="GRP",
+            uploaded_by=None,
+            publish_date=datetime(2026, 1, 1, tzinfo=UTC),
+            score=91,
+            passed_rules=True,
+            rule_evidence={
+                "passed": True,
+                "score": 91,
+                "rejection_reason": None,
+                "matches": [{"rule_name": "Stored", "matched": True, "score_delta": 91}],
+            },
+        )
+
+        result = serialize_stored_evaluated_release(release, None, media_type=MediaType.MOVIE)
+
+        assert result["score"] == 91
+        assert result["passed"] is True
+        assert result["matches"] == [{"rule_name": "Stored", "matched": True, "score_delta": 91}]
+
+    def test_stored_release_legacy_row_uses_live_evaluation_fallback(self) -> None:
+        release = Release(
+            title="Legacy.Movie.1080p",
+            size=1024,
+            seeders=4,
+            leechers=0,
+            download_url="https://example.test/download",
+            indexer="Idx",
+            resolution="1080p",
+            score=0,
+            passed_rules=False,
+            rule_evidence=None,
+        )
+        evaluation = MagicMock(
+            passed=False,
+            total_score=-25,
+            rejection_reason="Legacy fallback rejected",
+            matches=[],
+        )
+
+        result = serialize_stored_evaluated_release(release, evaluation, media_type=MediaType.MOVIE)
+
+        assert result["rejection_reason"] == "Legacy fallback rejected"
+        rule_evidence = cast(dict[str, Any], result["rule_evidence"])
+        assert rule_evidence["score"] == -25
+
+    def test_active_staged_torrent_status_output_uses_stored_value(self) -> None:
+        torrent = StagedTorrent(
+            id=7,
+            request_id=1,
+            torrent_path="/tmp/test.torrent",
+            json_path="",
+            original_filename="test.torrent",
+            title="Stored.Movie.1080p",
+            size=1024,
+            indexer="Idx",
+            score=10,
+            status=STAGED_STATUS_APPROVED,
+            selection_source="rule",
+        )
+
+        result = serialize_active_staged_torrent(torrent, media_type=MediaType.MOVIE)
+
+        assert result["status"] == "approved"
 
 
 # -- dashboard_release_sort_key -----------------------------------------------

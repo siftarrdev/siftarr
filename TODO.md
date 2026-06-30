@@ -7,15 +7,6 @@ This file captures the biggest opportunities identified during a repo-wide revie
 1. **Batch TV lifecycle queries**
    Reduce N+1-style loading in lifecycle and episode/season status checks by using joined or select-in loading, and prefer set-based updates where possible.
 
-2. **Avoid full release reloads in detail views**
-   The request detail page should avoid re-reading or re-grouping the entire release set when only a paginated subset is needed.
-
-3. **Reuse stored release evaluation results**
-   If score/rule outcomes already exist in the database, serialize those values directly unless the rule version changed.
-
-4. **Cache stats responses by date range**
-   Stats aggregation is a good candidate for short-lived caching, especially for repeated dashboard refreshes.
-
 5. **Consolidate stats aggregation queries**
    Combine repeated aggregate reads into fewer SQL calls, or parallelize independent queries where it is safe to do so.
 
@@ -24,9 +15,6 @@ This file captures the biggest opportunities identified during a repo-wide revie
 
 7. **Bulk release storage operations**
     Use bulk insert/update/delete patterns for large search result sets instead of row-by-row Python loops.
-
-8. **Bound season sweep concurrency**
-    Add concurrency limits to season-wide TV searches to reduce upstream pressure and flapping.
 
 ## Simplification / refactor opportunities
 
@@ -55,7 +43,7 @@ This file captures the biggest opportunities identified during a repo-wide revie
    Separate API access, state management, rendering, and event wiring into smaller JS modules.
 
 9. **Replace string literals with enums/constants**
-    Standardize search modes, sources, and staged statuses to reduce drift and typo risk.
+     Standardize search modes, sources, and remaining literals to reduce drift and typo risk. Staged torrent status literals are covered by shared constants.
 
 ## New feature ideas
 

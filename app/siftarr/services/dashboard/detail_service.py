@@ -13,7 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.siftarr.config import Settings, get_settings
 from app.siftarr.models.request import MediaType, RequestStatus, is_active_staging_workflow_status
-from app.siftarr.models.staged_torrent import StagedTorrent
+from app.siftarr.models.staged_torrent import ACTIVE_STAGED_STATUSES, StagedTorrent
 from app.siftarr.services.dashboard.dashboard_service import (
     DashboardRequestSummary,
     DashboardTimelineEntry,
@@ -154,17 +154,6 @@ class DetailService:
         tv_info = None
         if request.media_type == MediaType.TV:
             tv_releases = releases
-            if filtered_total_releases > len(releases):
-                tv_releases, _, _ = await self._load_serialized_stored_releases(
-                    request_id,
-                    media_type=request.media_type,
-                    offset=0,
-                    limit=filtered_total_releases,
-                    controls=controls,
-                )
-                apply_active_selection_metadata(
-                    tv_releases, active_staged_torrents, media_type=request.media_type
-                )
             tv_enrichment = TVEnrichmentService(self.db)
             tv_info = await tv_enrichment.load_tv_info(
                 request_id=request_id,
@@ -285,15 +274,21 @@ class DetailService:
             total_count,
             filtered_total,
         )
-        engine = await self._build_rule_engine(media_type=media_type.value)
-        serialized = [
-            serialize_stored_evaluated_release(
-                release,
-                engine.evaluate(build_prowlarr_release(release)),
-                media_type=media_type,
+        engine = None
+        serialized = []
+        for release in releases:
+            evaluation = None
+            if not getattr(release, "rule_evidence", None):
+                if engine is None:
+                    engine = await self._build_rule_engine(media_type=media_type.value)
+                evaluation = engine.evaluate(build_prowlarr_release(release))
+            serialized.append(
+                serialize_stored_evaluated_release(
+                    release,
+                    evaluation,
+                    media_type=media_type,
+                )
             )
-            for release in releases
-        ]
         return (
             finalize_releases(
                 serialized,
@@ -341,7 +336,7 @@ class DetailService:
             select(StagedTorrent)
             .where(
                 StagedTorrent.request_id == request_id,
-                StagedTorrent.status.in_(["staged", "approved"]),
+                StagedTorrent.status.in_(ACTIVE_STAGED_STATUSES),
             )
             .order_by(StagedTorrent.updated_at.desc(), StagedTorrent.created_at.desc())
         )

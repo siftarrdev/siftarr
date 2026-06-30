@@ -17,7 +17,20 @@ from app.siftarr.models import (
 from app.siftarr.models.activity_log import EventType
 from app.siftarr.models.request import MediaType, RequestStatus
 from app.siftarr.models.rule import RuleType
-from app.siftarr.services.stats_service import StatsRangeError, StatsService, build_stats_range
+from app.siftarr.services.stats_service import (
+    STATS_CACHE_TTL_SECONDS,
+    StatsRangeError,
+    StatsService,
+    build_stats_range,
+    clear_stats_cache,
+)
+
+
+@pytest.fixture(autouse=True)
+def _clear_stats_cache():
+    clear_stats_cache()
+    yield
+    clear_stats_cache()
 
 
 @pytest.fixture
@@ -232,3 +245,59 @@ async def test_historical_stats_derive_supported_metrics_and_mark_unavailable(se
     assert payload["availability"]["rule_outcomes"] == "unavailable"
     assert payload["availability"]["rule_rejections_series"] == "unavailable"
     assert payload["availability"]["processing_times"] == "unavailable"
+
+
+@pytest.mark.asyncio
+async def test_stats_cache_reuses_results_and_returns_copy(session_maker, monkeypatch):
+    async with session_maker() as session:
+        service = StatsService(session)
+        calls = 0
+
+        async def compute(stats_range):
+            nonlocal calls
+            calls += 1
+            return {
+                "empty": False,
+                "range": {"key": stats_range.key},
+                "cards": {"total_requests": calls},
+            }
+
+        monkeypatch.setattr(service, "_compute_stats", compute)
+        first = await service.get_stats(build_stats_range("all"))
+        first["cards"]["total_requests"] = 999
+        second = await service.get_stats(build_stats_range("all"))
+
+    assert calls == 1
+    assert second["cards"]["total_requests"] == 1
+
+
+@pytest.mark.asyncio
+async def test_stats_cache_separates_ranges_and_expires(session_maker, monkeypatch):
+    async with session_maker() as session:
+        service = StatsService(session)
+        calls = 0
+
+        async def compute(stats_range):
+            nonlocal calls
+            calls += 1
+            return {
+                "empty": False,
+                "range": {"key": stats_range.key},
+                "cards": {"total_requests": calls},
+            }
+
+        class FrozenDatetime(datetime):
+            current = datetime(2026, 5, 1, 12, 0)
+
+            @classmethod
+            def now(cls, tz=None):
+                return cls.current
+
+        monkeypatch.setattr("app.siftarr.services.stats_service.datetime", FrozenDatetime)
+        monkeypatch.setattr(service, "_compute_stats", compute)
+        await service.get_stats(build_stats_range("all"))
+        await service.get_stats(build_stats_range("7d", now=datetime(2026, 5, 1, 12, 0)))
+        FrozenDatetime.current = datetime(2026, 5, 1, 12, 0, STATS_CACHE_TTL_SECONDS + 1)
+        await service.get_stats(build_stats_range("all"))
+
+    assert calls == 3

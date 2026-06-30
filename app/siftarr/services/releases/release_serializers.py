@@ -246,7 +246,7 @@ def serialize_evaluated_release(
 
 def serialize_stored_evaluated_release(
     release: Any,
-    evaluation: ReleaseEvaluation | Any,
+    evaluation: ReleaseEvaluation | Any | None,
     *,
     media_type: MediaType,
 ) -> dict[str, object]:
@@ -259,19 +259,33 @@ def serialize_stored_evaluated_release(
             release.episode_number,
         )
 
+    rule_evidence = getattr(release, "rule_evidence", None)
+    if rule_evidence:
+
+        class _StoredEvaluation:
+            passed = bool(release.passed_rules)
+            total_score = normalize_int(release.score)
+            rejection_reason = normalize_optional_text(rule_evidence.get("rejection_reason"))
+            matches = rule_evidence.get("matches", [])
+
+        evaluation = _StoredEvaluation()
+    elif evaluation is None:
+        raise ValueError("evaluation is required when stored rule evidence is unavailable")
+
     payload = serialize_evaluated_release(release, evaluation, coverage=coverage)
     payload.update(
         {
             "score": release.score,
             "passed": release.passed_rules,
-            "rejection_reason": getattr(evaluation, "rejection_reason", None),
+            "rejection_reason": normalize_optional_text(rule_evidence.get("rejection_reason"))
+            if rule_evidence
+            else getattr(evaluation, "rejection_reason", None),
             "season_number": release.season_number,
             "episode_number": release.episode_number,
-            "matches": release.rule_evidence.get("matches", [])
-            if getattr(release, "rule_evidence", None)
+            "matches": rule_evidence.get("matches", [])
+            if rule_evidence
             else [serialize_rule_match(match) for match in getattr(evaluation, "matches", [])],
-            "rule_evidence": getattr(release, "rule_evidence", None)
-            or compact_rule_evidence(evaluation),
+            "rule_evidence": rule_evidence or compact_rule_evidence(evaluation),
             "target_scope": serialize_target_scope(
                 media_type=media_type,
                 title=release.title,
