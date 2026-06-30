@@ -2,7 +2,7 @@
 
 from datetime import date, datetime
 from typing import cast
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
@@ -71,6 +71,75 @@ async def test_load_stored_releases_sorts_by_size_and_reports_filtered_total(db_
     assert [release["title"] for release in releases] == ["Small.Movie.2160p", "Big.Movie.2160p"]
     assert total == 3
     assert filtered_total == 2
+
+
+@pytest.mark.asyncio
+async def test_tv_detail_pagination_enriches_only_paginated_releases(db_session, monkeypatch):
+    request = Request(
+        external_id="tv-paginated-detail",
+        media_type=MediaType.TV,
+        title="Show",
+        status=RequestStatus.PENDING,
+    )
+    db_session.add(request)
+    await db_session.flush()
+    season = Season(request_id=request.id, season_number=1, status=RequestStatus.PENDING)
+    db_session.add(season)
+    await db_session.flush()
+    db_session.add(Episode(season_id=season.id, episode_number=1, status=RequestStatus.PENDING))
+    for idx in range(3):
+        db_session.add(
+            Release(
+                request_id=request.id,
+                title=f"Show.S01E0{idx + 1}.1080p",
+                size=1000 + idx,
+                seeders=10 - idx,
+                leechers=0,
+                download_url="https://example.test/download",
+                indexer="Idx",
+                publish_date=datetime(2026, 1, 1),
+                resolution="1080p",
+                score=100 - idx,
+                passed_rules=True,
+                rule_evidence={"passed": True, "score": 100 - idx, "matches": []},
+            )
+        )
+    await db_session.commit()
+
+    serialized_titles: list[str] = []
+
+    def spy_serializer(release, evaluation, *, media_type):
+        serialized_titles.append(release.title)
+        return {
+            "title": release.title,
+            "score": release.score,
+            "_size_bytes": release.size,
+            "seeders": release.seeders,
+            "target_scope": {"type": "single_episode", "season_number": 1, "episode_number": 1},
+        }
+
+    monkeypatch.setattr(
+        "app.siftarr.services.dashboard.detail_service.serialize_stored_evaluated_release",
+        spy_serializer,
+    )
+    monkeypatch.setattr(
+        "app.siftarr.services.dashboard.detail_service.MetadataService.load_overseerr_details",
+        AsyncMock(return_value=None),
+    )
+    service = DetailService(db_session, settings=MagicMock())
+
+    details = await service.load_request_details(
+        request,
+        request_id=request.id,
+        background_tasks=MagicMock(),
+        offset=0,
+        limit=1,
+    )
+
+    assert details.filtered_total_releases == 3
+    assert len(details.releases) == 1
+    assert serialized_titles == ["Show.S01E01.1080p"]
+    assert details.tv_info is not None
 
 
 def test_detail_release_controls_normalize_invalid_values():

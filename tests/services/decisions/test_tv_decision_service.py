@@ -1,5 +1,6 @@
 """Tests for TVDecisionService."""
 
+import asyncio
 from datetime import date, timedelta
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -7,7 +8,10 @@ import pytest
 
 from app.siftarr.models.request import MediaType, Request, RequestStatus
 from app.siftarr.services.decisions.rule_engine import ReleaseEvaluation
-from app.siftarr.services.decisions.tv_decision_service import TVDecisionService
+from app.siftarr.services.decisions.tv_decision_service import (
+    MAX_CONCURRENT_SEARCHES,
+    TVDecisionService,
+)
 from app.siftarr.services.integrations.prowlarr_service import ProwlarrRelease, ProwlarrSearchResult
 
 
@@ -146,6 +150,54 @@ class TestProcessRequest:
             tvdbid=12345,
             request_id=1,
         )
+
+    @pytest.mark.asyncio
+    async def test_season_sweep_preserves_order_collects_exceptions_and_bounds_concurrency(
+        self, service
+    ):
+        request = _make_request(seasons=list(range(1, MAX_CONCURRENT_SEARCHES + 4)))
+        active = 0
+        max_active = 0
+        started: list[int] = []
+        release_by_season = {
+            season: _make_release(f"Test.Show.S{season:02d}.1080p", info_hash=f"s{season}")
+            for season in range(1, MAX_CONCURRENT_SEARCHES + 4)
+        }
+
+        async def search_tv_season_sweep(**kwargs):
+            nonlocal active, max_active
+            season = kwargs["season"]
+            started.append(season)
+            active += 1
+            max_active = max(max_active, active)
+            await asyncio.sleep(0.01)
+            active -= 1
+            if season == 3:
+                raise RuntimeError("boom season 3")
+            return ProwlarrSearchResult(releases=[release_by_season[season]], query_time_ms=1)
+
+        service.prowlarr.search_tv_season_sweep = AsyncMock(side_effect=search_tv_season_sweep)
+        engine = MagicMock()
+        engine.evaluate.side_effect = lambda release: _passing_eval(release, score=release.seeders)
+
+        evaluated, passing, errors, seen = await service._search_season_sweeps_and_evaluate(
+            request, engine, list(range(1, MAX_CONCURRENT_SEARCHES + 4))
+        )
+
+        assert max_active <= MAX_CONCURRENT_SEARCHES
+        assert sorted(started) == list(range(1, MAX_CONCURRENT_SEARCHES + 4))
+        assert [evaluation.release.title for evaluation in evaluated] == [
+            release_by_season[season].title
+            for season in range(1, MAX_CONCURRENT_SEARCHES + 4)
+            if season != 3
+        ]
+        assert [evaluation.release.title for evaluation in passing] == [
+            evaluation.release.title for evaluation in evaluated
+        ]
+        assert errors == ["boom season 3"]
+        assert seen == {
+            f"ih:s{season}" for season in range(1, MAX_CONCURRENT_SEARCHES + 4) if season != 3
+        }
 
     @pytest.mark.asyncio
     async def test_request_not_found_returns_error(self, service, mock_db):

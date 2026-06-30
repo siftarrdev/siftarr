@@ -1,5 +1,6 @@
 """Stats aggregation service for the Stats API/UI."""
 
+from copy import deepcopy
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, time, timedelta
 from typing import Any
@@ -18,8 +19,12 @@ from app.siftarr.models import (
     StatsRuleOutcome,
     StatsTimingEvent,
 )
+from app.siftarr.models.staged_torrent import STAGED_STATUS_APPROVED
 
 PRESET_DAYS = {"7d": 7, "30d": 30, "90d": 90}
+STATS_CACHE_TTL_SECONDS = 30
+_STATS_CACHE: dict[tuple[str, str | None, str | None], tuple[datetime, dict[str, Any]]] = {}
+
 TIMING_LABELS = {
     "search_completed": "Search duration",
     "request_to_approval": "Request to approval",
@@ -94,11 +99,37 @@ def _series(rows: list[Any]) -> list[dict[str, Any]]:
     return [{"label": row[0] or "Unknown", "value": int(row[1] or 0)} for row in rows]
 
 
+def _stats_cache_key(stats_range: StatsRange) -> tuple[str, str | None, str | None]:
+    return (
+        stats_range.key,
+        stats_range.start.isoformat() if stats_range.start else None,
+        stats_range.end.isoformat() if stats_range.end else None,
+    )
+
+
+def clear_stats_cache() -> None:
+    _STATS_CACHE.clear()
+
+
 class StatsService:
     def __init__(self, db: AsyncSession) -> None:
         self.db = db
 
     async def get_stats(self, stats_range: StatsRange) -> dict[str, Any]:
+        key = _stats_cache_key(stats_range)
+        now = datetime.now(UTC)
+        cached = _STATS_CACHE.get(key)
+        if cached is not None:
+            cached_at, payload = cached
+            if (now - cached_at).total_seconds() < STATS_CACHE_TTL_SECONDS:
+                return deepcopy(payload)
+            _STATS_CACHE.pop(key, None)
+        payload = await self._compute_stats(stats_range)
+        if not payload.get("empty"):
+            _STATS_CACHE[key] = (now, deepcopy(payload))
+        return deepcopy(payload)
+
+    async def _compute_stats(self, stats_range: StatsRange) -> dict[str, Any]:
         total_requests = await self._scalar_count(
             _apply_range(select(func.count(Request.id)), Request.created_at, stats_range)
         )
@@ -376,7 +407,7 @@ class StatsService:
         return await self._scalar_count(
             _apply_range(
                 select(func.count(distinct(StagedTorrent.request_id))).where(
-                    StagedTorrent.status == "approved",
+                    StagedTorrent.status == STAGED_STATUS_APPROVED,
                     StagedTorrent.request_id.is_not(None),
                 ),
                 StagedTorrent.updated_at,
@@ -400,7 +431,7 @@ class StatsService:
         return await self._group_counts(
             _apply_range(
                 select(StagedTorrent.indexer, func.count(StagedTorrent.id))
-                .where(StagedTorrent.status == "approved")
+                .where(StagedTorrent.status == STAGED_STATUS_APPROVED)
                 .group_by(StagedTorrent.indexer),
                 StagedTorrent.updated_at,
                 stats_range,
@@ -415,7 +446,7 @@ class StatsService:
                 (Release.request_id == StagedTorrent.request_id)
                 & (Release.title == StagedTorrent.title),
             )
-            .where(StagedTorrent.status == "approved")
+            .where(StagedTorrent.status == STAGED_STATUS_APPROVED)
             .group_by(Release.resolution)
         )
         rows = await self._group_counts(_apply_range(stmt, StagedTorrent.updated_at, stats_range))
@@ -428,7 +459,10 @@ class StatsService:
                     func.date(StagedTorrent.updated_at),
                     func.count(distinct(StagedTorrent.request_id)),
                 )
-                .where(StagedTorrent.status == "approved", StagedTorrent.request_id.is_not(None))
+                .where(
+                    StagedTorrent.status == STAGED_STATUS_APPROVED,
+                    StagedTorrent.request_id.is_not(None),
+                )
                 .group_by(func.date(StagedTorrent.updated_at))
                 .order_by(func.date(StagedTorrent.updated_at)),
                 StagedTorrent.updated_at,
@@ -444,7 +478,7 @@ class StatsService:
                 StagedTorrent.indexer,
                 func.count(StagedTorrent.id),
             )
-            .where(StagedTorrent.status == "approved")
+            .where(StagedTorrent.status == STAGED_STATUS_APPROVED)
             .group_by(func.date(StagedTorrent.updated_at), StagedTorrent.indexer)
             .order_by(func.date(StagedTorrent.updated_at), StagedTorrent.indexer)
         )

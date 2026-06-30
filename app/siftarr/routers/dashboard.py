@@ -23,7 +23,12 @@ from app.siftarr.models.request import (
 )
 from app.siftarr.models.request import Request as RequestModel
 from app.siftarr.models.season import Season
-from app.siftarr.models.staged_torrent import StagedTorrent
+from app.siftarr.models.staged_torrent import (
+    ACTIVE_STAGED_STATUSES,
+    STAGED_STATUS_APPROVED,
+    STAGED_STATUS_STAGED,
+    StagedTorrent,
+)
 from app.siftarr.services.dashboard.tv_details_service import load_tv_seasons_with_episodes_bulk
 from app.siftarr.services.integrations.overseerr_service import OverseerrService
 from app.siftarr.services.lifecycle.episode_derive import derive_tv_display_label
@@ -62,7 +67,7 @@ def _is_actionable_workflow_torrent(
     request_statuses: dict[int, RequestStatus],
 ) -> bool:
     """Return whether a staged_torrent row should appear on active dashboard tabs."""
-    if torrent.request_id is None or torrent.status == "staged":
+    if torrent.request_id is None or torrent.status == STAGED_STATUS_STAGED:
         return True
     return is_active_staging_workflow_status(request_statuses.get(torrent.request_id))
 
@@ -83,7 +88,7 @@ async def dashboard(
     # Get selected torrents that are either waiting in staging or already sent to qBittorrent.
     result = await db.execute(
         select(StagedTorrent)
-        .where(StagedTorrent.status.in_(["staged", "approved"]))
+        .where(StagedTorrent.status.in_(ACTIVE_STAGED_STATUSES))
         .order_by(StagedTorrent.created_at.desc())
     )
     active_workflow_torrents = list(result.scalars().all())
@@ -124,11 +129,11 @@ async def dashboard(
         for t in active_workflow_torrents
         if _is_actionable_workflow_torrent(t, raw_staged_request_statuses)
     ]
-    staged_torrents = [t for t in active_workflow_torrents if t.status == "staged"]
+    staged_torrents = [t for t in active_workflow_torrents if t.status == STAGED_STATUS_STAGED]
     downloading_torrents = [
         t
         for t in active_workflow_torrents
-        if t.status == "approved"
+        if t.status == STAGED_STATUS_APPROVED
         and t.request_id is not None
         and is_active_staging_workflow_status(raw_staged_request_statuses.get(t.request_id))
     ]
