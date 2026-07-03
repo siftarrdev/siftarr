@@ -489,22 +489,22 @@ class TestDownloadCompletionService:
         completed_request.media_type = MediaType.MOVIE
         completed_request.status = RequestStatus.COMPLETED
 
-        pending_torrent = MagicMock()
-        pending_torrent.id = 2
-        pending_torrent.request_id = 11
-        pending_torrent.title = "Pending Request"
-        pending_torrent.magnet_url = "magnet:?xt=urn:btih:ea39a3ee5e6b4b0d3255bfef95601890afd80709"
+        denied_torrent = MagicMock()
+        denied_torrent.id = 2
+        denied_torrent.request_id = 11
+        denied_torrent.title = "Denied Request"
+        denied_torrent.magnet_url = "magnet:?xt=urn:btih:ea39a3ee5e6b4b0d3255bfef95601890afd80709"
 
-        pending_request = MagicMock()
-        pending_request.id = 11
-        pending_request.title = "Pending Request"
-        pending_request.media_type = MediaType.TV
-        pending_request.status = RequestStatus.PENDING
+        denied_request = MagicMock()
+        denied_request.id = 11
+        denied_request.title = "Denied Request"
+        denied_request.media_type = MediaType.TV
+        denied_request.status = RequestStatus.DENIED
 
         mock_db.execute.return_value = _rows_result(
             [
                 (completed_torrent, completed_request),
-                (pending_torrent, pending_request),
+                (denied_torrent, denied_request),
             ]
         )
 
@@ -513,6 +513,50 @@ class TestDownloadCompletionService:
 
         assert result == 0
         mock_qbit.get_all_active_torrents.assert_not_called()
+        mock_plex_polling.check_request.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_tv_pending_request_with_approved_torrent_is_still_checked(
+        self, mock_db, mock_qbit, mock_plex_polling
+    ):
+        """A TV request that derives PENDING (mixed episode states) must still be reconciled.
+
+        Regression test: an approved episode torrent downloads in qBittorrent
+        while sibling episodes are still PENDING, so the request-level status
+        derives to PENDING.  The completion service must still check it.
+        """
+        from app.siftarr.models.request import MediaType, RequestStatus
+
+        torrent = MagicMock()
+        torrent.id = 1
+        torrent.request_id = 10
+        torrent.title = "Test Show S01E01"
+        torrent.magnet_url = "magnet:?xt=urn:btih:da39a3ee5e6b4b0d3255bfef95601890afd80709"
+
+        request = MagicMock()
+        request.id = 10
+        request.title = "Test Show"
+        request.media_type = MediaType.TV
+        request.status = RequestStatus.PENDING
+
+        mock_qbit.get_all_active_torrents = AsyncMock(
+            return_value=[
+                {
+                    "hash": "da39a3ee5e6b4b0d3255bfef95601890afd80709",
+                    "name": "Test Show S01E01",
+                    "progress": 0.4,
+                    "state": "downloading",
+                }
+            ]
+        )
+        mock_db.execute.side_effect = [_rows_result([(torrent, request)])]
+
+        service = DownloadCompletionService(mock_db, mock_qbit, mock_plex_polling)
+        result = await service.check_downloading_requests()
+
+        assert result == 0
+        # The torrent was not skipped: qBittorrent progress was checked.
+        mock_qbit.get_all_active_torrents.assert_called_once()
         mock_plex_polling.check_request.assert_not_called()
 
     @pytest.mark.asyncio
