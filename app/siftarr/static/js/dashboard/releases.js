@@ -142,6 +142,7 @@ function renderReleaseCard(release, requestId, options = {}) {
             renderAnnotation(release.codec, releaseAnnotationTone(release, 'codec'), 'data-release-codec="true"'),
             renderAnnotation(release.size, releaseAnnotationTone(release, 'size'), 'data-release-size="true"'),
             release.seeders != null ? '<span>' + window.escapeHtml(String(release.seeders)) + ' seeders</span>' : '',
+            release.files != null ? '<span data-release-files="true">' + window.escapeHtml(String(release.files)) + ' file' + (release.files === 1 ? '' : 's') + '</span>' : '',
             release.indexer ? renderAnnotation(release.indexer, 'text-gray-500', 'data-release-indexer="true"') : '',
         ].filter(Boolean);
         metaHtml = metaParts.length ? '<div class="mt-0.5 text-xs text-gray-400 flex items-center gap-2 flex-wrap">' + metaParts.join('<span>·</span>') + '</div>' : '';

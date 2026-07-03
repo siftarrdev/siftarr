@@ -337,6 +337,7 @@ def test_dashboard_js_includes_release_status_column_and_upload_age():
     assert 'data-release-size-per-season="true"' in js
     assert 'data-release-resolution="true"' in js
     assert 'data-release-codec="true"' in js
+    assert 'data-release-files="true"' in js
     assert "function formatRelativePublishAge(publishDate)" in js
     assert "window.siftarrStagingModeEnabled" in js
     assert "/manual-release/use" in js
