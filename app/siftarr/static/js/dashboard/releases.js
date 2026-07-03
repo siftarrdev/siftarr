@@ -147,7 +147,8 @@ function renderReleaseCard(release, requestId, options = {}) {
         metaHtml = metaParts.length ? '<div class="mt-0.5 text-xs text-gray-400 flex items-center gap-2 flex-wrap">' + metaParts.join('<span>·</span>') + '</div>' : '';
     }
 
-    const bodyHtml = '<div class="min-w-0 flex-1">' + titleHtml + metaHtml + '</div>';
+    const coverageHtml = !rejected && options.coverageHtml ? options.coverageHtml : '';
+    const bodyHtml = '<div class="min-w-0 flex-1">' + titleHtml + metaHtml + coverageHtml + '</div>';
 
     const storedReleaseId = release.stored_release_id || release.id;
     const formAction = storedReleaseId
@@ -235,6 +236,133 @@ function renderCoverageBadge(release) {
     '</div>';
 }
 
+// ── Season pack helpers (shared by the inline per-season drawer and the
+// "Season packs" scope tab) ──
+const SEASON_PACK_ICON_SVG = '<svg class="w-3.5 h-3.5 text-brand-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4"/></svg>';
+
+function isMultiSeasonRelease(release) {
+    const scope = release.target_scope || {};
+    const coveredSeasons = Array.isArray(release.covered_seasons) ? release.covered_seasons : [];
+    return scope.type === 'multi_season_pack' || scope.type === 'complete_series' || !!release.is_complete_series || coveredSeasons.length > 1;
+}
+
+function seasonNeededCount(season) {
+    return (season && season.episodes ? season.episodes : []).filter(function(ep) {
+        return ep.status !== 'available' && ep.status !== 'completed';
+    }).length;
+}
+
+function findDetailsSeason(requestId, seasonNumber) {
+    const data = window.currentDetailsData;
+    if (!data || !data.tv_info || !Array.isArray(data.tv_info.seasons)) return null;
+    if (data.request && data.request.id !== requestId) return null;
+    return data.tv_info.seasons.find(function(s) { return s.season_number === seasonNumber; }) || null;
+}
+
+// Coverage line for a single-season pack. The backend parser treats a season
+// pack as covering the entire season (episode granularity is not parsed for
+// packs), so the bar is full-width; the label compares that coverage to the
+// episodes still needed (non-available/completed) in the season.
+function renderPackCoverage(release, season) {
+    const scope = release.target_scope || {};
+    if (scope.type !== 'season_pack') return '';
+    const episodes = (season && season.episodes) || [];
+    const total = episodes.length;
+    if (!total) return '';
+    const needed = seasonNeededCount(season);
+    const neededText = needed ? 'all ' + needed + ' needed' : 'none still needed';
+    return '<div class="mt-1.5 flex items-center gap-1.5">' +
+        '<div class="flex h-1.5 w-40 overflow-hidden rounded-full bg-gray-700/60"><div class="bg-emerald-500" style="width:100%"></div></div>' +
+        '<span class="text-[11px] text-emerald-400">' + total + '/' + total + ' episodes · ' + neededText + '</span>' +
+    '</div>';
+}
+
+// Shared pack row renderer: a bucket-variant release card with an episode
+// coverage line (single-season packs) or the season-coverage badge
+// (multi-season / complete-series packs).
+function renderPackRow(release, requestId, season) {
+    const coverageHtml = isMultiSeasonRelease(release)
+        ? renderCoverageBadge(release)
+        : renderPackCoverage(release, season);
+    return renderReleaseCard(release, requestId, { bucket: true, coverageHtml: coverageHtml });
+}
+
+const SEASON_PACK_SEARCH_BUTTON_CLASS = 'shrink-0 rounded-lg bg-brand-600 hover:bg-brand-500 px-2.5 py-1 text-[11px] font-semibold text-white';
+const SEASON_PACK_EMPTY_MESSAGE = '<div class="text-gray-500 text-sm py-2">No cached season-pack results yet. Search to fetch fresh results from your indexers.</div>';
+
+function renderSeasonPackRows(releases, requestId, season) {
+    return releases.length
+        ? releases.map(function(r) { return renderPackRow(r, requestId, season); }).join('')
+        : SEASON_PACK_EMPTY_MESSAGE;
+}
+
+// Inline "Season packs" sub-drawer rendered as the first row inside each
+// season's accordion in the "All results" scope. Brand-tinted so it stands
+// apart from episode rows; the id keeps open/closed state across re-renders
+// via captureDetailsAccordionState/restoreDetailsAccordionState.
+function renderSeasonPacksDrawer(requestId, season, seasonPacks) {
+    const seasonNumber = season.season_number;
+    return '<details id="season-packs-details-' + requestId + '-' + seasonNumber + '" class="group rounded-lg border border-brand-500/25 bg-brand-600/5" ontoggle="window.updateTvAccordionControls && window.updateTvAccordionControls()">' +
+        '<summary class="flex items-center gap-3 cursor-pointer px-3 py-2 hover:bg-surface-850/60 transition-colors">' +
+            '<svg class="accordion-chevron w-3.5 h-3.5 text-gray-500 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>' +
+            SEASON_PACK_ICON_SVG +
+            '<span class="text-sm text-white font-medium">Season packs</span>' +
+            '<span class="text-xs text-gray-500">' + seasonPacks.length + ' cached</span>' +
+            '<div class="ml-auto flex items-center gap-2 shrink-0">' +
+                '<button type="button" onclick="searchSeasonPacks(' + requestId + ', ' + seasonNumber + '); event.preventDefault(); event.stopPropagation();" class="' + SEASON_PACK_SEARCH_BUTTON_CLASS + '">Search packs</button>' +
+            '</div>' +
+        '</summary>' +
+        '<div class="px-3 pb-3 pt-2 space-y-2" data-season-pack-results="' + requestId + '-' + seasonNumber + '">' +
+            renderSeasonPackRows(seasonPacks, requestId, season) +
+        '</div>' +
+    '</details>';
+}
+
+// Per-season group card for the "Season packs" scope tab: header row with
+// pack count + needed-episode summary + a per-season "Search packs" button,
+// followed by the shared pack rows.
+function renderSeasonPackGroup(requestId, season, seasonPacks) {
+    const seasonNumber = season.season_number;
+    const total = (season.episodes || []).length;
+    const needed = seasonNeededCount(season);
+    const packCountText = seasonPacks.length
+        ? seasonPacks.length + ' pack' + (seasonPacks.length === 1 ? '' : 's')
+        : 'no cached packs';
+    const headerMeta = packCountText + ' · need ' + needed + ' of ' + total + ' episodes';
+    return '<div class="rounded-xl border border-gray-700/60 bg-surface-850 overflow-hidden">' +
+        '<div class="flex items-center gap-3 px-4 py-3 border-b border-gray-700/40 bg-surface-900/40">' +
+            '<span class="text-white font-medium text-sm">Season ' + seasonNumber + '</span>' +
+            '<span class="text-xs text-gray-500">' + window.escapeHtml(headerMeta) + '</span>' +
+            '<div class="ml-auto flex items-center gap-2">' +
+                '<button type="button" onclick="searchSeasonPacks(' + requestId + ', ' + seasonNumber + ')" class="' + SEASON_PACK_SEARCH_BUTTON_CLASS + '">Search packs</button>' +
+            '</div>' +
+        '</div>' +
+        '<div class="p-2.5 space-y-2" data-season-pack-results="' + requestId + '-' + seasonNumber + '">' +
+            renderSeasonPackRows(seasonPacks, requestId, season) +
+        '</div>' +
+    '</div>';
+}
+
+// "Multi-season packs" group at the bottom of the "Season packs" scope tab.
+function renderMultiSeasonPackGroup(requestId, multiSeasonReleases) {
+    const countText = multiSeasonReleases.length
+        ? multiSeasonReleases.length + ' pack' + (multiSeasonReleases.length === 1 ? '' : 's') + ' spanning multiple seasons'
+        : 'no cached multi-season packs';
+    const rows = multiSeasonReleases.length
+        ? multiSeasonReleases.map(function(r) { return renderPackRow(r, requestId, null); }).join('')
+        : '<div class="text-gray-500 text-sm py-2">No cached multi-season pack results yet. Search to fetch fresh results from your indexers.</div>';
+    return '<div class="rounded-xl border border-gray-700/60 bg-surface-850 overflow-hidden">' +
+        '<div class="flex items-center gap-3 px-4 py-3 border-b border-gray-700/40 bg-surface-900/40">' +
+            '<span class="text-white font-medium text-sm">Multi-season packs</span>' +
+            '<span class="text-xs text-gray-500">' + window.escapeHtml(countText) + '</span>' +
+            '<div class="ml-auto flex items-center gap-2">' +
+                '<button type="button" onclick="searchMultiSeasonPacks(' + requestId + ')" class="' + SEASON_PACK_SEARCH_BUTTON_CLASS + '">Search multi-season</button>' +
+            '</div>' +
+        '</div>' +
+        '<div class="p-2.5 space-y-2" data-multi-season-pack-results="' + requestId + '">' + rows + '</div>' +
+    '</div>';
+}
+
 function isUsableCachedRelease(release) {
     return !!release && !!(release.stored_release_id || release.id) && !!(release.download_url || release.magnet_url) && release.passed !== false;
 }
@@ -317,17 +445,28 @@ function renderSeasonAccordion(data) {
     Object.values(tvInfo.releases_by_season || {}).forEach(function(releases) {
         (releases || []).forEach(function(release) {
             const relScope = release.target_scope || {};
-            const coveredSeasons = Array.isArray(release.covered_seasons) ? release.covered_seasons : [];
-            const isMultiSeason = relScope.type === 'multi_season_pack' || relScope.type === 'complete_series' || release.is_complete_series || coveredSeasons.length > 1;
             const isCompleteSeries = release.is_complete_series || release.covers_all_known_seasons || relScope.type === 'complete_series';
             const releaseKey = release.stored_release_id || release.id || release.title;
-            if (isMultiSeason && !seenMultiSeasonReleases.has(releaseKey)) {
+            if (isMultiSeasonRelease(release) && !seenMultiSeasonReleases.has(releaseKey)) {
                 seenMultiSeasonReleases.add(releaseKey);
                 multiSeasonReleases.push(release);
                 if (isCompleteSeries) completeSeriesReleases.push(release);
             }
         });
     });
+
+    // Single-season packs grouped under their actual season. releases_by_season
+    // buckets multi-season packs under every covered season, so filter those out
+    // here — they live in the dedicated "Multi-season packs" group instead.
+    const packsBySeason = {};
+    let singleSeasonPackCount = 0;
+    tvInfo.seasons.forEach(function(season) {
+        const seasonReleases = (tvInfo.releases_by_season && tvInfo.releases_by_season[String(season.season_number)]) || [];
+        const packs = seasonReleases.filter(function(release) { return !isMultiSeasonRelease(release); });
+        packsBySeason[season.season_number] = packs;
+        singleSeasonPackCount += packs.length;
+    });
+    const totalPackCount = singleSeasonPackCount + multiSeasonReleases.length;
 
     // Aggregate availability text from tv_info.aggregate_counts (e.g. "3 of 10 available").
     const aggregateCounts = tvInfo.aggregate_counts || {};
@@ -343,7 +482,7 @@ function renderSeasonAccordion(data) {
     const scopeChipBar = '<div class="shrink-0 flex items-center gap-2 flex-wrap px-4 py-2.5 border-b border-gray-700/40">' +
         '<span class="text-xs text-gray-500">Show:</span>' +
         renderScopeChip(requestId, 'all', 'All results', totalEpisodeCount, scope) +
-        renderScopeChip(requestId, 'season_packs', 'Season packs', multiSeasonReleases.length, scope) +
+        renderScopeChip(requestId, 'season_packs', 'Season packs', totalPackCount, scope) +
         renderScopeChip(requestId, 'complete_series', 'Complete series', completeSeriesReleases.length, scope) +
         '<span class="ml-auto text-xs text-gray-500">' + window.escapeHtml(aggregateText) + '</span>' +
     '</div>';
@@ -354,6 +493,10 @@ function renderSeasonAccordion(data) {
     const seasonAccordion = tvInfo.seasons.map(function(season) {
         const seasonKey = String(season.season_number);
         const seasonBadgeClass = episodeStatusBadge(season.status);
+        const seasonPacks = packsBySeason[season.season_number] || [];
+        const packsChip = seasonPacks.length
+            ? '<span class="inline-flex items-center gap-1 rounded-full border border-brand-500/30 bg-brand-600/10 px-2 py-0.5 text-[11px] text-brand-300">' + seasonPacks.length + ' pack' + (seasonPacks.length === 1 ? '' : 's') + '</span>'
+            : '';
         const hasMarkable = (season.episodes || []).some(function(ep) { return ep.status !== 'available' && ep.status !== 'completed'; });
         const seasonHasStaged = (season.episodes || []).some(function(ep) { return ep.status === 'staged'; });
 
@@ -407,19 +550,27 @@ function renderSeasonAccordion(data) {
                 '<span class="text-white font-medium text-sm">Season ' + season.season_number + '</span>' +
                 '<span class="text-xs text-gray-500">' + window.escapeHtml(availableText) + '</span>' +
                 '<span class="badge ' + seasonBadgeClass + '">' + window.escapeHtml(season.status || 'unknown') + '</span>' +
+                packsChip +
                 seasonLinks +
             '</summary>' +
-            '<div class="px-4 pb-4 space-y-2 border-t border-gray-700/40 pt-3">' + episodeHtml + '</div>' +
+            '<div class="px-4 pb-4 space-y-2 border-t border-gray-700/40 pt-3">' + renderSeasonPacksDrawer(requestId, season, seasonPacks) + episodeHtml + '</div>' +
         '</details>';
     }).join('');
 
     const allSection = '<div class="space-y-3"' + (scope === 'all' ? '' : ' hidden') + '>' + panelToggle + seasonAccordion + '</div>';
 
-    // ── Section: Season packs (flat list of multi-season pack releases) ──
-    const seasonPacksSection = '<div id="scope-season-packs-' + requestId + '" class="space-y-2"' + (scope === 'season_packs' ? '' : ' hidden') + '>' +
-        (multiSeasonReleases.length
-            ? '<ul class="divide-y divide-gray-700/40 rounded-xl border border-gray-700/60 bg-surface-850">' + multiSeasonReleases.map(function(r) { return renderReleaseCard(r, requestId); }).join('') + '</ul>'
-            : '<div class="text-gray-500 text-sm py-2">No cached season-pack results yet. Full search refreshes all aired episode and pack results.</div>') +
+    // ── Section: Season packs (per-season groups + multi-season group) ──
+    const packsHelperRow = '<div class="flex items-center justify-between gap-2">' +
+        '<span class="text-xs text-gray-500">Packs grouped by season. Coverage compares pack contents to episodes you still need.</span>' +
+        '<button type="button" onclick="searchAllSeasonPacks(' + requestId + ', this)" class="rounded-md border border-gray-600/80 bg-surface-900/70 px-2.5 py-1 text-xs font-medium text-gray-200 transition-colors hover:border-brand-400/70 hover:bg-surface-800 hover:text-white">Search all seasons</button>' +
+    '</div>';
+    const seasonPackGroups = tvInfo.seasons.map(function(season) {
+        return renderSeasonPackGroup(requestId, season, packsBySeason[season.season_number] || []);
+    }).join('');
+    const seasonPacksSection = '<div id="scope-season-packs-' + requestId + '" class="space-y-3"' + (scope === 'season_packs' ? '' : ' hidden') + '>' +
+        packsHelperRow +
+        seasonPackGroups +
+        renderMultiSeasonPackGroup(requestId, multiSeasonReleases) +
     '</div>';
 
     // ── Section: Complete series (flat list of complete-series releases) ──
@@ -452,19 +603,73 @@ async function markSeasonAvailable(requestId, seasonId) {
     }
 }
 
-async function searchSeasonPacks(requestId, seasonNumber) {
-    // Season packs now live behind the "Season packs" scope chip, so switch to
-    // that view first (client-only re-render) and render results into its container.
-    if (window.setDetailsScope) window.setDetailsScope(requestId, 'season_packs');
-    var container = document.getElementById('scope-season-packs-' + requestId);
-    if (!container) return;
-    container.innerHTML = renderSearchLoadingState('Searching season packs...');
-    window.startTvSearchProgress('/requests/' + requestId + '/seasons/' + seasonNumber + '/season-packs/search/stream', 'Season ' + seasonNumber, function(data) {
-        var releases = data.releases || [];
-        container.innerHTML = releases.length
-            ? '<ul class="divide-y divide-gray-700/40 rounded-xl border border-gray-700/60 bg-surface-850">' + releases.map(function(r) { return renderReleaseCard(r, requestId); }).join('') + '</ul>'
-            : '<div class="text-gray-500 text-sm py-2">No season pack results found.</div>';
+// Stream a per-season pack search into every pack container for that season —
+// the inline drawer in the "All results" scope and the season group in the
+// "Season packs" scope share the same data attribute. Results are persisted
+// server-side, so on completion the details modal reloads (preserving UI
+// state) to rebuild counts, chips, and groups from the cached payload.
+function searchSeasonPacks(requestId, seasonNumber) {
+    return new Promise(function(resolve) {
+        var containers = document.querySelectorAll('[data-season-pack-results="' + requestId + '-' + seasonNumber + '"]');
+        if (!containers.length) return resolve();
+        var drawer = document.getElementById('season-packs-details-' + requestId + '-' + seasonNumber);
+        if (drawer) drawer.open = true;
+        containers.forEach(function(c) { c.innerHTML = renderSearchLoadingState('Searching season packs...'); });
+        window.startTvSearchProgress('/requests/' + requestId + '/seasons/' + seasonNumber + '/season-packs/search/stream', 'Season ' + seasonNumber + ' packs', async function(data) {
+            var releases = (data.releases || []).filter(function(r) { return !isMultiSeasonRelease(r); });
+            var season = findDetailsSeason(requestId, seasonNumber);
+            var rows = releases.length
+                ? releases.map(function(r) { return renderPackRow(r, requestId, season); }).join('')
+                : '<div class="text-gray-500 text-sm py-2">No season pack results found.</div>';
+            containers.forEach(function(c) { c.innerHTML = rows; });
+            await window.openRequestDetails(requestId, window.currentDetailsIndex, { preserveUiState: true });
+            resolve();
+        }, function() { resolve(); });
     });
+}
+
+// Stream a multi-season pack search into the "Multi-season packs" group in the
+// "Season packs" scope tab.
+function searchMultiSeasonPacks(requestId) {
+    return new Promise(function(resolve) {
+        var containers = document.querySelectorAll('[data-multi-season-pack-results="' + requestId + '"]');
+        if (!containers.length) return resolve();
+        containers.forEach(function(c) { c.innerHTML = renderSearchLoadingState('Searching multi-season packs...'); });
+        window.startTvSearchProgress('/requests/' + requestId + '/multi-season-packs/search/stream', 'Multi-season packs', async function(data) {
+            var releases = data.releases || [];
+            var rows = releases.length
+                ? releases.map(function(r) { return renderPackRow(r, requestId, null); }).join('')
+                : '<div class="text-gray-500 text-sm py-2">No multi-season or complete-series results found.</div>';
+            containers.forEach(function(c) { c.innerHTML = rows; });
+            await window.openRequestDetails(requestId, window.currentDetailsIndex, { preserveUiState: true });
+            resolve();
+        }, function() { resolve(); });
+    });
+}
+
+// "Search all seasons" in the Season packs tab: run the per-season pack
+// searches sequentially (each one streams progress and reloads the modal).
+async function searchAllSeasonPacks(requestId, btn = null) {
+    var data = window.currentDetailsData;
+    var seasons = (data && data.tv_info && data.tv_info.seasons) || [];
+    if (!seasons.length) return;
+    var originalText = btn ? btn.textContent : '';
+    if (btn) {
+        btn.disabled = true;
+        btn.textContent = 'Searching…';
+    }
+    try {
+        for (var i = 0; i < seasons.length; i++) {
+            await searchSeasonPacks(requestId, seasons[i].season_number);
+        }
+    } finally {
+        // The modal re-renders after each search, so the original button node is
+        // usually gone; only restore it if it is still attached.
+        if (btn && btn.isConnected) {
+            btn.disabled = false;
+            btn.textContent = originalText;
+        }
+    }
 }
 
 function renderSearchAllResults(releases) {
@@ -633,11 +838,11 @@ function restoreDetailsAccordionState(state) {
 }
 
 function tvDetailsNodesForRequest(requestId) {
-    return Array.from(document.querySelectorAll('#request-details-releases details[id^="season-details-' + requestId + '-"], #request-details-releases details[id^="episode-details-' + requestId + '-"]'));
+    return Array.from(document.querySelectorAll('#request-details-releases details[id^="season-details-' + requestId + '-"], #request-details-releases details[id^="episode-details-' + requestId + '-"], #request-details-releases details[id^="season-packs-details-' + requestId + '-"]'));
 }
 
 function tvSeasonNodes(requestId, seasonNumber) {
-    return Array.from(document.querySelectorAll('#season-details-' + requestId + '-' + seasonNumber + ', #request-details-releases details[id^="episode-details-' + requestId + '-' + seasonNumber + '-"]'));
+    return Array.from(document.querySelectorAll('#season-details-' + requestId + '-' + seasonNumber + ', #season-packs-details-' + requestId + '-' + seasonNumber + ', #request-details-releases details[id^="episode-details-' + requestId + '-' + seasonNumber + '-"]'));
 }
 
 function setTvAccordionNodesOpen(nodes, open) {
@@ -716,6 +921,8 @@ window.formatRelativePublishAge = formatRelativePublishAge;
 window.markEpisodeAvailable = markEpisodeAvailable;
 window.markSeasonAvailable = markSeasonAvailable;
 window.searchSeasonPacks = searchSeasonPacks;
+window.searchMultiSeasonPacks = searchMultiSeasonPacks;
+window.searchAllSeasonPacks = searchAllSeasonPacks;
 window.searchEpisode = searchEpisode;
 window.stageRelease = stageRelease;
 window.stageTopEpisodeRelease = stageTopEpisodeRelease;

@@ -140,11 +140,16 @@ def test_dashboard_js_includes_tv_details_expand_collapse_controls():
     assert "aria-expanded" in js
     assert "button.textContent = allOpen ? 'Collapse all' : 'Expand all';" in js
     assert "No cached season-pack results yet" in js
-    # 2-level structure: Season → Episode details only (no nested pack drawers).
+    # Season → Episode details plus the per-season "Season packs" sub-drawer.
     assert "season-details-" in js
     assert "episode-details-" in js
-    assert "season-packs-details-" not in js
+    assert "season-packs-details-" in js
     assert "season-packs-all-details-" not in js
+    # Season packs scope tab: per-season groups plus a multi-season group.
+    assert "data-season-pack-results=" in js
+    assert "data-multi-season-pack-results=" in js
+    assert "function searchAllSeasonPacks(requestId" in js
+    assert "multi-season-packs/search/stream" in js
     # Season-row quiet links: Mark all / Stage individual episodes / Search season.
     assert "Mark all" in js
     assert "Stage individual episodes" in js
