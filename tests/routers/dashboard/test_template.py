@@ -327,6 +327,53 @@ def test_dashboard_js_uses_collapsible_episode_results():
     assert "No cached episode results yet" in js
 
 
+def test_dashboard_js_collapses_completed_episodes_by_default():
+    """Completed episodes start collapsed even when they have cached releases."""
+    js = _read_dashboard_js()
+
+    # One shared completeness helper instead of repeated inline status checks.
+    assert "function isEpisodeComplete(episode)" in js
+    assert "const isComplete = isEpisodeComplete(ep);" in js
+    assert "const isOpen = !isComplete && (episodeReleases.length > 0 || isStaged);" in js
+    assert "const showInlineActions = !isComplete;" in js
+    assert "return !isEpisodeComplete(ep);" in js
+    # The old inline convention is gone from the season/episode renderers.
+    assert "ep.status !== 'available' && ep.status !== 'completed'" not in js
+    # Manual expansion still survives re-renders through the accordion state hooks.
+    assert "function captureDetailsAccordionState()" in js
+    assert "function restoreDetailsAccordionState(state)" in js
+
+
+def test_dashboard_tv_ui_is_responsive_at_mobile_widths():
+    """Season-pack / release UI emits real responsive classes for narrow viewports."""
+    js = _read_dashboard_js()
+    css = _read_dashboard_css()
+
+    # Release cards reflow instead of squeezing the title.
+    assert "min-w-0 flex-1 basis-[70%] lg:basis-auto" in js
+    assert "p-2.5 flex flex-wrap items-start gap-x-3 gap-y-2 lg:flex-nowrap lg:items-center" in js
+    # Season / episode / pack-group headers wrap on their own, not via a CSS patch.
+    assert "flex flex-wrap items-center gap-x-3 gap-y-2 px-3 py-3 lg:flex-nowrap lg:px-4" in js
+    assert "flex flex-wrap items-center gap-x-3 gap-y-1.5 lg:flex-nowrap" in js
+    # Pack coverage bar shrinks on small screens.
+    assert "h-1.5 w-24 lg:w-40" in js
+    # Long titles wrap (capped at two lines) instead of truncating to nothing.
+    assert "overflow-wrap-anywhere line-clamp-2 lg:line-clamp-none lg:truncate" in js
+    # The blunt summary flex-wrap escape hatch is retired.
+    assert "#request-details-releases summary" not in css
+
+
+def test_dashboard_details_title_gets_its_own_line_on_mobile(dashboard_template_path):
+    """Details modal title should not share a truncated flex row at 390px."""
+    with open(dashboard_template_path, encoding="utf-8") as handle:
+        template = handle.read()
+
+    assert 'class="flex min-w-0 flex-col items-start gap-0.5 lg:flex-row' in template
+    assert "overflow-wrap-anywhere line-clamp-2 lg:line-clamp-none lg:truncate" in template
+    # Desktop table title cells are consistent (width cap + wrapping).
+    assert template.count("text-sm font-medium text-white max-w-sm overflow-wrap-anywhere") == 4
+
+
 def test_dashboard_js_includes_release_status_column_and_upload_age():
     """Torrent cards render a score-first row with annotation data hooks."""
     js = _read_dashboard_js()
