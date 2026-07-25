@@ -160,7 +160,7 @@
                                 <td class="px-4 py-3.5  text-sm" onclick="event.stopPropagation()">
                                     <input name="request_ids" value="{{ req.id }}" type="checkbox" class="pending-request-checkbox rounded-sm border-gray-600 bg-surface-900 text-brand-500 focus:ring-brand-500">
                                 </td>
-                                <td class="px-4 py-3.5 text-sm font-medium text-white max-w-sm">{{ req.title }}</td>
+                                <td class="px-4 py-3.5 text-sm font-medium text-white max-w-sm overflow-wrap-anywhere">{{ req.title }}</td>
                                 <td class="px-4 py-3.5  text-sm text-gray-500 tabular-nums" data-sort-value="{{ req.year or 0 }}">{{ req.year or '-' }}</td>
                                 <td class="px-4 py-3.5  text-sm capitalize text-gray-400">{{ req.media_type.value }}</td>
                                 <td class="px-4 py-3.5  text-sm text-gray-500 tabular-nums">{{ req.created_at.strftime('%Y-%m-%d %H:%M') }}</td>
@@ -252,7 +252,7 @@
                         {% for req in unreleased_requests %}
                         {% set expected_date = unreleased_release_dates.get(req.id) %}
                         <tr class="hover:bg-surface-850/80 cursor-pointer transition-colors" onclick="openRequestDetails({{ req.id }})" data-request-id="{{ req.id }}" data-title="{{ req.title|lower }}" data-type="{{ req.media_type.value|lower }}" data-requestedby="{{ req.requester_username|default('Unknown')|lower }}" data-requested="{{ req.created_at.strftime('%Y-%m-%d %H:%M') }}" data-releasedate="{{ expected_date or '9999-12-31' }}" data-year="{{ req.year or 0 }}">
-                            <td class="px-5 py-3.5  text-sm font-medium text-white">{{ req.title }}</td>
+                            <td class="px-5 py-3.5 text-sm font-medium text-white max-w-sm overflow-wrap-anywhere">{{ req.title }}</td>
                             <td class="px-5 py-3.5  text-sm text-gray-500 tabular-nums" data-sort-value="{{ req.year or 0 }}">{{ req.year or '-' }}</td>
                             <td class="px-5 py-3.5  text-sm capitalize text-gray-400">{{ req.media_type.value }}</td>
                             <td class="px-5 py-3.5  text-sm text-gray-500 tabular-nums">{{ req.created_at.strftime('%Y-%m-%d %H:%M') }}</td>
@@ -346,7 +346,7 @@
                             <td class="px-5 py-3.5 text-sm" onclick="event.stopPropagation()">
                                 <input type="checkbox" class="staged-torrent-checkbox rounded-sm border-gray-600 bg-surface-900 text-brand-500 focus:ring-brand-500" value="{{ torrent.id }}">
                             </td>
-                            <td class="px-5 py-3.5 text-sm font-medium text-white">
+                            <td class="px-5 py-3.5 text-sm font-medium text-white max-w-sm overflow-wrap-anywhere">
                                 <div>{{ torrent.title }}</div>
                                 {% if identity_warning %}
                                 <div class="mt-1 text-xs text-amber-300">Possible wrong movie: {{ identity_warning }}</div>
@@ -444,7 +444,7 @@
                         {% set move_status = torrent.move_status if torrent.move_status in ['pending', 'moved', 'error'] else 'pending' %}
                         {% set moved_path = torrent.moved_path if torrent.moved_path is string else none %}
                         <tr class="hover:bg-surface-850/80 cursor-pointer transition-colors" onclick="{% if torrent.request_id %}openRequestDetails({{ torrent.request_id }}){% endif %}" data-torrent-id="{{ torrent.id }}" data-request-id="{{ torrent.request_id }}" data-title="{{ torrent.title|lower }}" data-state="{{ 'qbit_finished_waiting_plex' if waiting_for_plex else torrent.status|lower }}" data-requeststate="{{ request_state|lower }}" data-movestatus="{{ move_status }}" data-progress="-1" data-eta="999999999" data-size="{{ torrent.size }}" data-indexer="{{ torrent.indexer|lower }}" data-score="{{ torrent.score }}" data-qbit-finished-waiting-plex="{{ 'true' if waiting_for_plex else 'false' }}">
-                            <td class="px-5 py-3.5 text-sm font-medium text-white">
+                            <td class="px-5 py-3.5 text-sm font-medium text-white max-w-sm overflow-wrap-anywhere">
                                 <div>{{ torrent.title }}</div>
                                 {% if identity_warning %}
                                 <div class="mt-1 text-xs text-amber-300">Possible wrong movie: {{ identity_warning }}</div>
@@ -541,7 +541,7 @@
                     <tbody class="divide-y divide-gray-700/40" id="finished-requests-body">
                         {% for req in completed_requests %}
                         <tr class="hover:bg-surface-850/80 cursor-pointer transition-colors" onclick="openRequestDetails({{ req.id }})" data-request-id="{{ req.id }}" data-title="{{ req.title|lower }}" data-type="{{ req.media_type.value|lower }}" data-requestedby="{{ req.requester_username|default('Unknown')|lower }}" data-requested="{{ req.created_at.strftime('%Y-%m-%d %H:%M') }}" data-completed="{{ req.updated_at.strftime('%Y-%m-%d %H:%M') }}" data-year="{{ req.year or 0 }}">
-                            <td class="px-5 py-3.5  text-sm font-medium text-white">{{ req.title }}</td>
+                            <td class="px-5 py-3.5 text-sm font-medium text-white max-w-sm overflow-wrap-anywhere">{{ req.title }}</td>
                             <td class="px-5 py-3.5  text-sm text-gray-500 tabular-nums" data-sort-value="{{ req.year or 0 }}">{{ req.year or '-' }}</td>
                             <td class="px-5 py-3.5  text-sm capitalize text-gray-400">{{ req.media_type.value }}</td>
                             <td class="px-5 py-3.5  text-sm text-gray-400">{{ req.requester_username or 'Unknown' }}</td>
@@ -626,7 +626,7 @@
                     <tbody class="divide-y divide-gray-700/40" id="rejected-requests-body">
                         {% for req in denied_requests %}
                         <tr class="hover:bg-surface-850/80 cursor-pointer transition-colors" onclick="openRequestDetails({{ req.id }})" data-request-id="{{ req.id }}" data-title="{{ req.title|lower }}" data-type="{{ req.media_type.value|lower }}" data-requestedby="{{ req.requester_username|default('Unknown')|lower }}" data-reason="{{ (req.rejection_reason or '')|lower }}" data-rejectedat="{{ req.updated_at.strftime('%Y-%m-%d %H:%M') }}" data-year="{{ req.year or 0 }}">
-                            <td class="px-5 py-3.5  text-sm font-medium text-white">{{ req.title }}</td>
+                            <td class="px-5 py-3.5 text-sm font-medium text-white max-w-sm overflow-wrap-anywhere">{{ req.title }}</td>
                             <td class="px-5 py-3.5  text-sm text-gray-500 tabular-nums" data-sort-value="{{ req.year or 0 }}">{{ req.year or '-' }}</td>
                             <td class="px-5 py-3.5  text-sm capitalize text-gray-400">{{ req.media_type.value }}</td>
                             <td class="px-5 py-3.5  text-sm text-gray-400">{{ req.requester_username or 'Unknown' }}</td>
@@ -651,9 +651,9 @@
     <div class="absolute inset-4 md:inset-10 bg-surface-900 border border-gray-700/60 rounded-2xl shadow-2xl overflow-hidden flex flex-col">
         {# ── Header bar: title + status (left) | desktop prev/next + close (right) ── #}
         <div class="shrink-0 px-4 lg:px-5 py-2 lg:py-3 border-b border-gray-700/60 flex items-center justify-between gap-3">
-            <div class="flex items-center gap-3 min-w-0">
-                <h2 id="request-details-title" class="text-sm lg:text-lg font-semibold text-white truncate">Request Details</h2>
-                <p id="request-details-meta" class="lg:hidden text-xs text-gray-500 truncate"></p>
+            <div class="flex min-w-0 flex-col items-start gap-0.5 lg:flex-row lg:items-center lg:gap-3">
+                <h2 id="request-details-title" class="w-full text-[13px] lg:w-auto lg:text-lg font-semibold text-white overflow-wrap-anywhere line-clamp-2 lg:line-clamp-none lg:truncate">Request Details</h2>
+                <p id="request-details-meta" class="w-full lg:hidden text-xs text-gray-500 truncate"></p>
                 <div id="request-details-meta-row" class="hidden lg:flex flex-wrap items-center gap-2 text-xs text-gray-400"></div>
                 <div id="request-details-release-date" class="text-sm text-purple-300 hidden shrink-0"></div>
             </div>

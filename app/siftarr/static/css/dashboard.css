@@ -114,8 +114,4 @@ details[open] summary .accordion-chevron { transform: rotate(90deg); }
         overflow-wrap: anywhere;
         text-align: left;
     }
-
-    #request-details-releases summary {
-        flex-wrap: wrap;
-    }
 }
