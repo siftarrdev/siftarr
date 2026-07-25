@@ -69,6 +69,7 @@ class TestStagedRouter:
             request.id,
             RequestStatus.DOWNLOADING,
             commit=False,
+            coverage_title=torrent.title,
         )
         log_decision.assert_called_once_with(
             request=request,
@@ -252,6 +253,7 @@ class TestStagedRouter:
             request.id,
             RequestStatus.DOWNLOADING,
             commit=False,
+            coverage_title=torrent.title,
         )
         sync.assert_awaited_once_with(mock_db, request, reason="staged_approval_qbit_sent")
 
@@ -330,11 +332,13 @@ class TestStagedRouter:
             request_one.id,
             RequestStatus.DOWNLOADING,
             commit=False,
+            coverage_title=torrent_one.title,
         )
         lifecycle_service.transition.assert_any_await(
             request_two.id,
             RequestStatus.DOWNLOADING,
             commit=False,
+            coverage_title=torrent_two.title,
         )
         mock_db.commit.assert_awaited_once()
 
@@ -698,6 +702,7 @@ class TestStagedRouter:
             request.id,
             RequestStatus.DOWNLOADING,
             commit=False,
+            coverage_title=torrent.title,
         )
         mock_db.commit.assert_awaited_once()
 
@@ -744,6 +749,7 @@ class TestStagedRouter:
             request.id,
             RequestStatus.DOWNLOADING,
             commit=False,
+            coverage_title=torrent.title,
         )
 
     @pytest.mark.asyncio
@@ -1010,6 +1016,146 @@ class TestStagedRouter:
             status_response = await staged.get_download_status(db=db)
             body = json.loads(bytes(status_response.body))  # type: ignore[arg-type]
             assert body["torrents"][0]["request_status"] == RequestStatus.DOWNLOADING.value
+        await engine.dispose()
+
+    @pytest.mark.asyncio
+    async def test_approve_single_episode_torrent_scopes_downloading(self, monkeypatch):
+        """Approving an S01E01 torrent must not mark the whole show downloading."""
+        engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+        session_maker = async_sessionmaker(engine, expire_on_commit=False)
+        async with session_maker() as db:
+            request = Request(
+                external_id="scoped-episode",
+                media_type=MediaType.TV,
+                title="Scoped Show",
+                status=RequestStatus.STAGED,
+            )
+            db.add(request)
+            await db.flush()
+            season = Season(request_id=request.id, season_number=1, status=RequestStatus.STAGED)
+            db.add(season)
+            await db.flush()
+            db.add_all(
+                [
+                    Episode(season_id=season.id, episode_number=1, status=RequestStatus.STAGED),
+                    Episode(season_id=season.id, episode_number=2, status=RequestStatus.PENDING),
+                    Episode(season_id=season.id, episode_number=3, status=RequestStatus.PENDING),
+                    StagedTorrent(
+                        request_id=request.id,
+                        torrent_path="/tmp/scoped.torrent",
+                        json_path="/tmp/scoped.json",
+                        original_filename="scoped.torrent",
+                        title="Scoped.Show.S01E01.1080p.WEB-DL",
+                        size=100,
+                        indexer="test",
+                        score=90,
+                        magnet_url="magnet:?xt=urn:btih:5555555555555555555555555555555555555555",
+                        selection_source="rule",
+                    ),
+                ]
+            )
+            await db.commit()
+
+            qbit = AsyncMock()
+            qbit.add_torrent.return_value = "5555555555555555555555555555555555555555"
+            qbit.get_torrent_info.return_value = None
+            monkeypatch.setattr(staged, "get_settings", lambda: MagicMock())
+            monkeypatch.setattr(staged, "QbittorrentService", MagicMock(return_value=qbit))
+            monkeypatch.setattr(staged, "log_staging_decision", MagicMock())
+            monkeypatch.setattr(staged, "approve_overseerr_request_best_effort", AsyncMock())
+            monkeypatch.setattr(staged.os.path, "exists", MagicMock(return_value=False))
+
+            await staged.approve_staged_torrent(
+                1,
+                http_request=MagicMock(headers={"accept": "application/json"}),
+                db=db,
+            )
+
+            episodes = (
+                (await db.execute(select(Episode).order_by(Episode.episode_number))).scalars().all()
+            )
+            assert [ep.status for ep in episodes] == [
+                RequestStatus.DOWNLOADING,
+                RequestStatus.PENDING,
+                RequestStatus.PENDING,
+            ]
+            request_row = await db.get(Request, request.id)
+            assert request_row is not None
+            assert request_row.status != RequestStatus.DOWNLOADING
+        await engine.dispose()
+
+    @pytest.mark.asyncio
+    async def test_approve_season_pack_scopes_to_that_season(self, monkeypatch):
+        """A season pack approval covers its own season only."""
+        engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+        session_maker = async_sessionmaker(engine, expire_on_commit=False)
+        async with session_maker() as db:
+            request = Request(
+                external_id="scoped-season-pack",
+                media_type=MediaType.TV,
+                title="Pack Show",
+                status=RequestStatus.STAGED,
+            )
+            db.add(request)
+            await db.flush()
+            season_one = Season(request_id=request.id, season_number=1, status=RequestStatus.STAGED)
+            season_two = Season(request_id=request.id, season_number=2, status=RequestStatus.STAGED)
+            db.add_all([season_one, season_two])
+            await db.flush()
+            db.add_all(
+                [
+                    Episode(season_id=season_one.id, episode_number=1, status=RequestStatus.STAGED),
+                    Episode(season_id=season_one.id, episode_number=2, status=RequestStatus.STAGED),
+                    Episode(
+                        season_id=season_two.id, episode_number=1, status=RequestStatus.PENDING
+                    ),
+                    StagedTorrent(
+                        request_id=request.id,
+                        torrent_path="/tmp/pack.torrent",
+                        json_path="/tmp/pack.json",
+                        original_filename="pack.torrent",
+                        title="Pack.Show.S01.1080p.WEB-DL",
+                        size=100,
+                        indexer="test",
+                        score=90,
+                        magnet_url="magnet:?xt=urn:btih:6666666666666666666666666666666666666666",
+                        selection_source="rule",
+                    ),
+                ]
+            )
+            await db.commit()
+
+            qbit = AsyncMock()
+            qbit.add_torrent.return_value = "6666666666666666666666666666666666666666"
+            qbit.get_torrent_info.return_value = None
+            monkeypatch.setattr(staged, "get_settings", lambda: MagicMock())
+            monkeypatch.setattr(staged, "QbittorrentService", MagicMock(return_value=qbit))
+            monkeypatch.setattr(staged, "log_staging_decision", MagicMock())
+            monkeypatch.setattr(staged, "approve_overseerr_request_best_effort", AsyncMock())
+            monkeypatch.setattr(staged.os.path, "exists", MagicMock(return_value=False))
+
+            await staged.approve_staged_torrent(
+                1,
+                http_request=MagicMock(headers={"accept": "application/json"}),
+                db=db,
+            )
+
+            season_one_eps = (
+                (await db.execute(select(Episode).where(Episode.season_id == season_one.id)))
+                .scalars()
+                .all()
+            )
+            season_two_eps = (
+                (await db.execute(select(Episode).where(Episode.season_id == season_two.id)))
+                .scalars()
+                .all()
+            )
+            assert all(ep.status == RequestStatus.DOWNLOADING for ep in season_one_eps)
+            assert all(ep.status == RequestStatus.PENDING for ep in season_two_eps)
         await engine.dispose()
 
     @pytest.mark.asyncio

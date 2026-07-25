@@ -489,14 +489,12 @@ async def _approve_torrent(
     if request:
         lifecycle_service = LifecycleService(db)
         if not is_terminal_request_status(request.status):
-            if commit_transition:
-                await lifecycle_service.transition(request.id, RequestStatus.DOWNLOADING)
-            else:
-                await lifecycle_service.transition(
-                    request.id,
-                    RequestStatus.DOWNLOADING,
-                    commit=False,
-                )
+            await lifecycle_service.transition(
+                request.id,
+                RequestStatus.DOWNLOADING,
+                commit=commit_transition,
+                coverage_title=torrent.title,
+            )
 
     if cleanup_paths is not None:
         cleanup_paths.append((torrent_path, json_path))
@@ -596,7 +594,12 @@ async def _mark_torrent_approved_after_qbit(
         torrent.info_hash = torrent_hash.lower()
     if request and not is_terminal_request_status(request.status):
         lifecycle_service = LifecycleService(db)
-        await lifecycle_service.transition(request.id, RequestStatus.DOWNLOADING, commit=False)
+        await lifecycle_service.transition(
+            request.id,
+            RequestStatus.DOWNLOADING,
+            commit=False,
+            coverage_title=torrent.title,
+        )
 
 
 async def _discard_torrent(torrent: StagedTorrent, db: AsyncSession) -> bool:

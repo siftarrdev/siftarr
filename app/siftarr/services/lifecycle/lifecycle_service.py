@@ -21,6 +21,7 @@ from app.siftarr.services.lifecycle.episode_derive import (
     derive_request_status_from_episodes,
     derive_season_status,
 )
+from app.siftarr.services.releases.release_parser import cached_parse_release_coverage
 
 logger = logging.getLogger(__name__)
 
@@ -52,6 +53,32 @@ class LifecycleService:
             all_episodes.extend(result.scalars().all())
         return all_episodes
 
+    @staticmethod
+    def _episodes_covered_by_title(
+        episodes: list[Episode],
+        season_number_by_id: dict[int, int],
+        coverage_title: str,
+    ) -> list[Episode]:
+        """Filter episodes down to those covered by a release title.
+
+        Uses the same coverage parsing as the staging service so single
+        episodes, season packs, multi-season packs and complete-series
+        releases all resolve to their real scope.
+        """
+        coverage = cached_parse_release_coverage(coverage_title)
+        if coverage.is_complete_series:
+            return list(episodes)
+        if not coverage.season_numbers:
+            # Unparseable scope — fall back to the whole request rather than
+            # silently marking nothing as downloading.
+            return list(episodes)
+
+        covered_seasons = set(coverage.season_numbers)
+        scoped = [ep for ep in episodes if season_number_by_id.get(ep.season_id) in covered_seasons]
+        if coverage.episode_number is not None:
+            scoped = [ep for ep in scoped if ep.episode_number == coverage.episode_number]
+        return scoped
+
     async def transition(
         self,
         request_id: int,
@@ -59,6 +86,7 @@ class LifecycleService:
         reason: str | None = None,
         *,
         commit: bool = True,
+        coverage_title: str | None = None,
     ) -> Request | None:
         """
         Transition a request to a new status.
@@ -67,6 +95,10 @@ class LifecycleService:
             request_id: The request ID
             new_status: The new status
             reason: Optional reason for the transition
+            commit: Whether to commit the surrounding transaction
+            coverage_title: Optional release title used to scope a TV
+                DOWNLOADING transition to only the episodes that release
+                actually covers. Ignored for movies and other statuses.
 
         Returns:
             Updated Request or None if not found
@@ -106,7 +138,15 @@ class LifecycleService:
                         ):
                             ep.status = RequestStatus.FAILED
                 elif new_status == RequestStatus.DOWNLOADING:
-                    for ep in all_episodes:
+                    target_episodes = all_episodes
+                    if coverage_title:
+                        season_number_by_id = {
+                            season.id: season.season_number for season in request.seasons
+                        }
+                        target_episodes = self._episodes_covered_by_title(
+                            all_episodes, season_number_by_id, coverage_title
+                        )
+                    for ep in target_episodes:
                         if ep.status in (
                             RequestStatus.STAGED,
                             RequestStatus.PENDING,

@@ -178,7 +178,7 @@ Business logic and integrations, organized into thematic subpackages:
 - `plex_service/` — Plex media server integration (lookup, scan, episode availability)
 
 **`lifecycle/`** — Request/media lifecycle and state
-- `lifecycle_service.py` — request lifecycle status transitions; 30s TTL stats cache
+- `lifecycle_service.py` — request lifecycle status transitions (TV DOWNLOADING transitions can be scoped to a release title's episode coverage); 30s TTL stats cache
 - `activity_log_service.py` — activity/audit logging
 - `pending_queue_service.py` — retry pending queue management; supports optional `commit=False` for batched transactions
 - `episode_derive.py` — canonical derivation functions for TV episode/season/request statuses

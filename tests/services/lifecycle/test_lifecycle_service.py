@@ -5,9 +5,13 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
+from app.siftarr.models import Base
 from app.siftarr.models.episode import Episode
-from app.siftarr.models.request import Request, RequestStatus
+from app.siftarr.models.request import MediaType, Request, RequestStatus
+from app.siftarr.models.season import Season
 from app.siftarr.services.lifecycle.episode_derive import derive_request_status_from_episodes
 from app.siftarr.services.lifecycle.lifecycle_service import LifecycleService
 from app.siftarr.services.lifecycle.unreleased_service import is_unreleased
@@ -347,3 +351,92 @@ def test_is_unreleased_false_without_tmdb_id():
     }
 
     assert is_unreleased(request, media_details=details, today=TODAY) is False
+
+
+async def _tv_request_with_two_seasons(db):
+    """Create a TV request with S01E01-E03 and S02E01, all pending."""
+    request = Request(
+        external_id="lifecycle-tv",
+        media_type=MediaType.TV,
+        title="Lifecycle Show",
+        status=RequestStatus.STAGED,
+    )
+    db.add(request)
+    await db.flush()
+    season_one = Season(request_id=request.id, season_number=1, status=RequestStatus.STAGED)
+    season_two = Season(request_id=request.id, season_number=2, status=RequestStatus.PENDING)
+    db.add_all([season_one, season_two])
+    await db.flush()
+    db.add_all(
+        [
+            Episode(season_id=season_one.id, episode_number=1, status=RequestStatus.STAGED),
+            Episode(season_id=season_one.id, episode_number=2, status=RequestStatus.PENDING),
+            Episode(season_id=season_one.id, episode_number=3, status=RequestStatus.PENDING),
+            Episode(season_id=season_two.id, episode_number=1, status=RequestStatus.PENDING),
+        ]
+    )
+    await db.commit()
+    return request, season_one, season_two
+
+
+async def _episode_statuses(db, season_id):
+    result = await db.execute(
+        select(Episode).where(Episode.season_id == season_id).order_by(Episode.episode_number)
+    )
+    return [ep.status for ep in result.scalars().all()]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("coverage_title", "expected_season_one", "expected_season_two"),
+    [
+        (
+            "Lifecycle.Show.S01E01.1080p.WEB-DL",
+            [RequestStatus.DOWNLOADING, RequestStatus.PENDING, RequestStatus.PENDING],
+            [RequestStatus.PENDING],
+        ),
+        (
+            "Lifecycle.Show.S01.1080p.WEB-DL",
+            [RequestStatus.DOWNLOADING] * 3,
+            [RequestStatus.PENDING],
+        ),
+        (
+            "Lifecycle.Show.S01-S02.1080p.WEB-DL",
+            [RequestStatus.DOWNLOADING] * 3,
+            [RequestStatus.DOWNLOADING],
+        ),
+        (
+            None,
+            [RequestStatus.DOWNLOADING] * 3,
+            [RequestStatus.DOWNLOADING],
+        ),
+    ],
+)
+async def test_transition_downloading_scope(
+    coverage_title, expected_season_one, expected_season_two
+):
+    """DOWNLOADING transitions honour release coverage, and stay bulk without it."""
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+    session_maker = async_sessionmaker(engine, expire_on_commit=False)
+    async with session_maker() as db:
+        request, season_one, season_two = await _tv_request_with_two_seasons(db)
+        request_id = request.id
+        season_one_id = season_one.id
+        season_two_id = season_two.id
+
+        await LifecycleService(db).transition(
+            request_id,
+            RequestStatus.DOWNLOADING,
+            coverage_title=coverage_title,
+        )
+
+        assert await _episode_statuses(db, season_one_id) == expected_season_one
+        assert await _episode_statuses(db, season_two_id) == expected_season_two
+
+        refreshed = await db.get(Request, request_id)
+        assert refreshed is not None
+        all_episodes = list((await db.execute(select(Episode))).scalars().all())
+        assert refreshed.status == derive_request_status_from_episodes(all_episodes)
+    await engine.dispose()
