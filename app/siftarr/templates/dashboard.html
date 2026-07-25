@@ -346,7 +346,7 @@
                             <td class="px-5 py-3.5 text-sm" onclick="event.stopPropagation()">
                                 <input type="checkbox" class="staged-torrent-checkbox rounded-sm border-gray-600 bg-surface-900 text-brand-500 focus:ring-brand-500" value="{{ torrent.id }}">
                             </td>
-                            <td class="px-5 py-3.5 text-sm font-medium text-white">
+                            <td class="px-5 py-3.5 text-sm font-medium text-white max-w-sm overflow-wrap-anywhere">
                                 <div>{{ torrent.title }}</div>
                                 {% if identity_warning %}
                                 <div class="mt-1 text-xs text-amber-300">Possible wrong movie: {{ identity_warning }}</div>
@@ -444,7 +444,7 @@
                         {% set move_status = torrent.move_status if torrent.move_status in ['pending', 'moved', 'error'] else 'pending' %}
                         {% set moved_path = torrent.moved_path if torrent.moved_path is string else none %}
                         <tr class="hover:bg-surface-850/80 cursor-pointer transition-colors" onclick="{% if torrent.request_id %}openRequestDetails({{ torrent.request_id }}){% endif %}" data-torrent-id="{{ torrent.id }}" data-request-id="{{ torrent.request_id }}" data-title="{{ torrent.title|lower }}" data-state="{{ 'qbit_finished_waiting_plex' if waiting_for_plex else torrent.status|lower }}" data-requeststate="{{ request_state|lower }}" data-movestatus="{{ move_status }}" data-progress="-1" data-eta="999999999" data-size="{{ torrent.size }}" data-indexer="{{ torrent.indexer|lower }}" data-score="{{ torrent.score }}" data-qbit-finished-waiting-plex="{{ 'true' if waiting_for_plex else 'false' }}">
-                            <td class="px-5 py-3.5 text-sm font-medium text-white">
+                            <td class="px-5 py-3.5 text-sm font-medium text-white max-w-sm overflow-wrap-anywhere">
                                 <div>{{ torrent.title }}</div>
                                 {% if identity_warning %}
                                 <div class="mt-1 text-xs text-amber-300">Possible wrong movie: {{ identity_warning }}</div>
