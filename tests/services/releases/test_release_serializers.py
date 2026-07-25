@@ -20,6 +20,7 @@ from app.siftarr.services.releases.release_serializers import (
     serialize_active_staged_torrent,
     serialize_evaluated_release,
     serialize_stored_evaluated_release,
+    serialize_target_scope,
 )
 
 # -- format_release_size -------------------------------------------------------
@@ -568,3 +569,41 @@ class TestFinalizeReleases:
     def test_empty_list(self) -> None:
         result = finalize_releases([])
         assert result == []
+
+
+# -- serialize_target_scope (season-pack UI contract) ---------------------------
+
+
+class TestSerializeTargetScopeForPacks:
+    """Lock the target_scope contract the dashboard season-pack UI groups by."""
+
+    def test_single_season_pack_scope(self) -> None:
+        scope = serialize_target_scope(
+            media_type=MediaType.TV,
+            title="Top.Gear.S14.1080p.WEB-DL.x265",
+            season_number=14,
+            episode_number=None,
+            season_coverage=None,
+        )
+        assert scope == {"type": "season_pack", "season_numbers": [14]}
+
+    def test_multi_season_pack_scope_from_stored_coverage(self) -> None:
+        scope = serialize_target_scope(
+            media_type=MediaType.TV,
+            title="Top.Gear.S14-S22.1080p.Mixed.WEB",
+            season_number=14,
+            episode_number=None,
+            season_coverage="14,15,16,17,18,19,20,21,22",
+        )
+        assert scope["type"] == "multi_season_pack"
+        assert scope["season_numbers"] == [14, 15, 16, 17, 18, 19, 20, 21, 22]
+
+    def test_complete_series_scope(self) -> None:
+        scope = serialize_target_scope(
+            media_type=MediaType.TV,
+            title="Top.Gear.Complete.Series.720p",
+            season_number=None,
+            episode_number=None,
+            season_coverage="*",
+        )
+        assert scope == {"type": "complete_series"}

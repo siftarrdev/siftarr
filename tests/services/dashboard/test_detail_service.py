@@ -267,3 +267,40 @@ async def test_tv_details_count_completed_as_available_and_unreleased_separate(d
         "unreleased": 1,
         "total": 2,
     }
+
+
+class TestGroupTvReleasesForPackUI:
+    """Season-pack grouping contract used by the dashboard packs UI.
+
+    Single-season packs must bucket under their actual season key only, while
+    multi-season packs bucket under every covered season.
+    """
+
+    def test_single_season_pack_groups_under_its_season(self) -> None:
+        from app.siftarr.services.dashboard.tv_enrichment_service import TVEnrichmentService
+
+        service = TVEnrichmentService(MagicMock())
+        single_pack: dict[str, object] = {
+            "title": "Show.S02.1080p",
+            "season_number": 2,
+            "episode_number": None,
+        }
+        multi_pack: dict[str, object] = {
+            "title": "Show.S01-S02.1080p",
+            "season_number": 1,
+            "episode_number": None,
+            "covered_seasons": [1, 2],
+        }
+        episode_release: dict[str, object] = {
+            "title": "Show.S01E03.1080p",
+            "season_number": 1,
+            "episode_number": 3,
+        }
+
+        by_season, by_episode = service._group_tv_releases(
+            [single_pack, multi_pack, episode_release], [1, 2]
+        )
+
+        assert by_season[2] == [single_pack, multi_pack]
+        assert by_season[1] == [multi_pack]
+        assert by_episode[(1, 3)] == [episode_release]
