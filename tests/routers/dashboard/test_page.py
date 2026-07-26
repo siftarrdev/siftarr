@@ -40,8 +40,9 @@ def test_downloading_poll_uses_current_qbit_queue_endpoint(dashboard_template_pa
     assert "function renderQbitDownloads(torrents)" in js
     assert "Not managed by Siftarr" in js
     assert (
-        '<th class="px-5 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500">Size</th>'
-        in template
+        '<th class="px-5 py-3 text-left text-xs font-medium uppercase tracking-wider'
+        ' text-gray-500" data-col-key="size" style="position: relative;">'
+        '<span class="sort-title">Size</span><div class="resize-handle"></div></th>' in template
     )
     assert "((torrent.size or 0) / 1024 / 1024 / 1024)|round(2)" in template
 

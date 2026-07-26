@@ -805,3 +805,37 @@ def test_dashboard_active_unreleased_toggle_removed_and_filters_refresh_navigati
     assert "window.refreshDetailsNavigationContext();" in js
     assert "rows.forEach(row => tbody.appendChild(row));" in js
     assert "if (card) cardContainer.appendChild(card);" in js
+
+
+def test_downloads_poll_interval_is_two_seconds():
+    """Downloads status polling should refresh every 2s via a named constant."""
+    js = _read_dashboard_js()
+
+    assert "const DOWNLOADS_POLL_INTERVAL_MS = 2000;" in js
+    assert "setInterval(_patchStagedDownloadStatus, DOWNLOADS_POLL_INTERVAL_MS)" in js
+    assert "30000" not in js.split("_startStagedStatusPoll")[1][:400]
+
+
+def test_downloads_poll_guards_overlap_and_hidden_tabs():
+    """Fast polling must not pile up requests or run in a hidden browser tab."""
+    js = _read_dashboard_js()
+
+    assert "if (_downloadStatusPatchInFlight) return;" in js
+    assert "_downloadStatusPatchInFlight = true;" in js
+    assert "_downloadStatusPatchInFlight = false;" in js
+    assert "document.addEventListener('visibilitychange'" in js
+    assert "document.visibilityState === 'hidden'" in js
+
+
+def test_downloading_torrents_table_is_column_resizable(dashboard_template_path):
+    """Downloads table needs colgroup, col keys and handles for ColumnResizer."""
+    with open(dashboard_template_path, encoding="utf-8") as handle:
+        template = handle.read()
+
+    table = template.split('id="downloading-torrents-table"')[1].split("</table>")[0]
+
+    assert "<colgroup>" in table
+    for key in ("name", "progress", "state", "eta", "speed", "size", "category", "actions"):
+        assert f'<col data-col-key="{key}"' in table
+        assert f'data-col-key="{key}" style="position: relative;"' in table
+    assert table.count('<div class="resize-handle"></div>') == 8
