@@ -102,7 +102,7 @@ async def test_completed_endpoint_groups_terminal_request_torrents(monkeypatch):
     _patch_settings(
         monkeypatch,
         SimpleNamespace(
-            get_completed_torrents=AsyncMock(
+            get_completed_torrents_or_raise=AsyncMock(
                 return_value=[
                     {"hash": "abc123", "name": "Managed Release", "progress": 1.0, "uploaded": 3}
                 ]
@@ -125,7 +125,9 @@ async def test_completed_endpoint_groups_terminal_request_torrents(monkeypatch):
 async def test_completed_endpoint_reports_qbit_unavailable(monkeypatch):
     _patch_settings(
         monkeypatch,
-        SimpleNamespace(get_completed_torrents=AsyncMock(side_effect=RuntimeError("boom"))),
+        SimpleNamespace(
+            get_completed_torrents_or_raise=AsyncMock(side_effect=RuntimeError("boom"))
+        ),
     )
 
     payload = await dashboard.qbit_completed_torrents_api(db=MagicMock())

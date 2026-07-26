@@ -115,7 +115,9 @@ async def qbit_completed_torrents_api(db: AsyncSession = Depends(get_db)):
         return {"groups": [], "qbit_unavailable": True}
 
     try:
-        qbit_torrents = await QbittorrentService(settings=settings).get_completed_torrents()
+        qbit_torrents = await QbittorrentService(
+            settings=settings
+        ).get_completed_torrents_or_raise()
     except Exception:
         logger.warning("Unable to refresh completed qBittorrent torrents")
         return {"groups": [], "qbit_unavailable": True}

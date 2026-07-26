@@ -177,6 +177,20 @@ function setQbitGroupOpen(prefix, key, open) {
     document
         .querySelectorAll(`tr[data-download-group-child="${key}"][data-group-prefix="${prefix}"]`)
         .forEach((row) => row.classList.toggle('hidden', !open));
+    // Keep the mobile card in sync. Both representations share one group key and
+    // are always in the DOM (visibility is CSS-only), so if they are allowed to
+    // disagree the OR in captureQbitGroupState makes a collapse spring back open
+    // on the next poll.
+    const card = document.querySelector(
+        `details[data-download-group="${key}"][data-group-prefix="${prefix}"]`,
+    );
+    if (card && card.open !== open) card.open = open;
+}
+
+// Mobile <details> toggles natively, so mirror its state onto the desktop row.
+// setQbitGroupOpen only writes card.open when it differs, so this cannot recurse.
+function syncQbitGroupFromCard(prefix, key, open) {
+    setQbitGroupOpen(prefix, key, !!open);
 }
 
 function toggleQbitGroup(prefix, key) {
@@ -246,7 +260,7 @@ function renderQbitGroups(groups, options) {
             );
         });
         cardChunks.push(
-            `<details data-download-group="${escape(key)}" data-group-prefix="${prefix}" class="rounded-xl border border-gray-700/60 bg-surface-900/60"><summary class="tap cursor-pointer px-3 py-2"><div class="overflow-wrap-anywhere text-sm font-semibold text-white">${title}</div><div class="mt-1 text-xs text-gray-400 tabular-nums">${count} torrents · ${summary}</div></summary><div class="space-y-3 p-3">${torrents.map(cardHtml).join('')}</div></details>`,
+            `<details data-download-group="${escape(key)}" data-group-prefix="${prefix}" ontoggle="syncQbitGroupFromCard('${prefix}', '${escape(key)}', this.open)" class="rounded-xl border border-gray-700/60 bg-surface-900/60"><summary class="tap cursor-pointer px-3 py-2"><div class="overflow-wrap-anywhere text-sm font-semibold text-white">${title}</div><div class="mt-1 text-xs text-gray-400 tabular-nums">${count} torrents · ${summary}</div></summary><div class="space-y-3 p-3">${torrents.map(cardHtml).join('')}</div></details>`,
         );
     });
 
@@ -549,6 +563,7 @@ window.refreshDownloadingTabData = refreshDownloadingTabData;
 window.bindStagedSelectionHandlers = bindStagedSelectionHandlers;
 window.showQbitView = showQbitView;
 window.toggleQbitGroup = toggleQbitGroup;
+window.syncQbitGroupFromCard = syncQbitGroupFromCard;
 window._startStagedStatusPoll = _startStagedStatusPoll;
 window._stopStagedStatusPoll = _stopStagedStatusPoll;
 window.openStagedReview = openStagedReview;
