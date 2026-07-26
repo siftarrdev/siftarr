@@ -153,7 +153,7 @@ async def qbit_downloads_api(db: AsyncSession = Depends(get_db)):
         for torrent in candidates
         if torrent.status == STAGED_STATUS_APPROVED
         and torrent.request_id is not None
-        and is_active_staging_workflow_status(request_statuses.get(torrent.request_id))
+        and not is_terminal_request_status(request_statuses.get(torrent.request_id))
     ]
     matched = _match_qbit_torrents(qbit_torrents, managed)
     return {
