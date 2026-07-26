@@ -124,7 +124,7 @@ Database entities and enums.
 HTTP route layer.
 
 - `auth_router.py` — Plex SSO auth endpoints (login page, first-login admin claim, initial Plex sync gate page/completion, same-admin token refresh, guarded full Plex sync kick-off after later successful admin sign-in, non-admin denial UX, logout, session info); included without global auth dependency
-- `dashboard.py` — main dashboard page routes
+- `dashboard.py` — main dashboard page routes; downloads list reflects all unfinished qBittorrent torrents, with lifecycle actions limited to matched Siftarr rows
 - `dashboard_api.py` — dashboard JSON endpoints for details/search/history data, including validated detail-release filter/sort query controls
 - `dashboard_actions.py` — dashboard-triggered actions and mutations
 - `search_sse.py` — SSE streaming endpoints for live search progress; `/requests/{id}/search/stream` supports TV `search_mode=new|full`, while TV scope-specific streams remain compatibility/debug inspect paths
@@ -172,7 +172,7 @@ Business logic and integrations, organized into thematic subpackages:
 
 **`integrations/`** — External service adapters
 - `prowlarr_service.py` — Prowlarr indexer integration; LRU search cache (45s TTL, 50 entries), TV exact-episode, broad-pack, and guarded season-search helpers
-- `qbittorrent_service.py` — qBittorrent download client integration; includes idempotent single/bulk torrent add, serialized `save_path`/`seeding_time` access, listing completed torrents, `set_torrent_location()` with `move=True`, and torrent deletion with configurable file removal
+- `qbittorrent_service.py` — qBittorrent download client integration; includes idempotent single/bulk torrent add, unfinished/completed listing, serialized `save_path`/`seeding_time` access, `set_torrent_location()` with `move=True`, and torrent deletion with configurable file removal
 - `overseerr_service.py` — Overseerr request management integration
 - `connection_tester.py` — external connectivity test helpers
 - `plex_service/` — Plex media server integration (lookup, scan, episode availability)
@@ -208,7 +208,7 @@ Business logic and integrations, organized into thematic subpackages:
 Server-rendered HTML templates.
 
 - `base.html` — shared layout (nav bar shows user avatar/name + logout when logged in)
-- `dashboard.html` — main dashboard UI; the request-details modal is a responsive 3-column redesign (desktop: sticky identity rail + center release list/2-level TV Season→Episode accordion with scope chips + collapsible Activity panel; mobile: compact header card, single-chip filter, sticky bottom prev/next, collapsed Activity), with inline staged Approve/Discard on the release card. Also covers release filters/sorting/count controls, search-history summaries, and move status badges/paths in downloads
+- `dashboard.html` — main dashboard UI; includes a qBittorrent-backed unfinished-download list with managed-only lifecycle actions and optional lazy WebUI iframe, plus the responsive request-details modal and staged/download controls
 - `login.html` — Plex SSO login page with JS-driven OAuth PIN flow, denied-admin message, and safe next redirect handling
 - `initial_plex_sync.html` — first-claim setup gate that opens the full Plex sync SSE stream, shows progress/retry/logout, and unlocks protected navigation only after successful completion
 - `rules.html` — single-pane rules UI with unified rule table, multi-title tester, modal create/edit wizard, export, and import preview/merge UI with existing/imported keep selections

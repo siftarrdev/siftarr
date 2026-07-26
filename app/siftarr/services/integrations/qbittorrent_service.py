@@ -552,6 +552,31 @@ class QbittorrentService:
         torrents = await asyncio.to_thread(self.client.torrents_info)
         return [self._serialize_torrent(t) for t in torrents]
 
+    async def get_unfinished_torrents_or_raise(self) -> list[dict]:
+        """Return every qBittorrent torrent that has not completed.
+
+        qBittorrent's unfiltered torrent endpoint is used deliberately: category
+        and Siftarr database linkage must not hide an in-progress torrent.
+        """
+        torrents = await self.get_all_active_torrents_or_raise()
+        unfinished: list[dict] = []
+        for torrent in torrents:
+            progress = torrent.get("progress")
+            if isinstance(progress, int | float | str):
+                try:
+                    is_complete = float(progress) >= 1.0
+                except ValueError:
+                    # Keep entries with malformed progress visible rather than
+                    # accidentally concealing an active qBit download.
+                    is_complete = False
+            else:
+                # Keep entries with unknown progress visible rather than
+                # accidentally concealing an active qBit download.
+                is_complete = False
+            if not is_complete:
+                unfinished.append(torrent)
+        return unfinished
+
     async def get_completed_torrents(self) -> list[dict]:
         """Get completed torrents from qBittorrent."""
         try:
