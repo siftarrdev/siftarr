@@ -121,6 +121,7 @@ async function refreshStagedTabData() {
         if (!newContent) return;
 
         stagedContent.innerHTML = newContent.innerHTML;
+        if (window.reinitColumnResizer) window.reinitColumnResizer();
         bindStagedSelectionHandlers();
         const stagedSelectAll = document.getElementById('staged-select-all');
         if (stagedSelectAll && window.bindSelectAll) {
@@ -153,6 +154,7 @@ async function refreshDownloadingTabData() {
         if (!newContent) return;
 
         downloadingContent.innerHTML = newContent.innerHTML;
+        if (window.reinitColumnResizer) window.reinitColumnResizer();
         await _patchStagedDownloadStatus();
         restore();
 

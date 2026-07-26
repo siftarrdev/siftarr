@@ -39,6 +39,18 @@ class ColumnResizer {
     }
 
     init() {
+        this.attachHandles();
+
+        document.addEventListener('mousemove', (e) => this.onMouseMove(e));
+        document.addEventListener('mouseup', (e) => this.endResize(e));
+        document.addEventListener('mouseleave', (e) => this.endResize(e));
+    }
+
+    // Re-queryable: tab refreshes replace table markup, so handles must be
+    // re-attached against the new DOM without duplicating the document-level
+    // drag listeners bound in init().
+    attachHandles() {
+        this.tables = document.querySelectorAll('table.data-resizable');
         this.tables.forEach(table => {
             const tableId = table.id;
             if (!this.savedWidths[tableId]) {
@@ -60,10 +72,6 @@ class ColumnResizer {
                 }
             });
         });
-
-        document.addEventListener('mousemove', (e) => this.onMouseMove(e));
-        document.addEventListener('mouseup', (e) => this.endResize(e));
-        document.addEventListener('mouseleave', (e) => this.endResize(e));
     }
 
     startResize(e, col) {
@@ -110,7 +118,12 @@ class ColumnResizer {
 // guard pattern (same as modals.js).
 function initDashboard() {
     // Initialize column resizer
-    new ColumnResizer();
+    const columnResizer = new ColumnResizer();
+
+    // Re-attach resize handles after a tab's markup is replaced wholesale
+    // (refreshStagedTabData / refreshDownloadingTabData swap innerHTML, which
+    // discards the previous handles and their listeners).
+    window.reinitColumnResizer = () => columnResizer.attachHandles();
 
     // Set initial tab from URL
     const initialTab = new URLSearchParams(window.location.search).get('tab');
