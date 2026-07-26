@@ -591,7 +591,7 @@ def test_dashboard_template_staged_details_uses_row_card_clicks(dashboard_templa
         template = handle.read()
 
     staged_section = template[
-        template.index('id="content-staged"') : template.index("{# ═══════════════ DOWNLOADING TAB")
+        template.index('id="content-staged"') : template.index("{# ═══════════════ TORRENT STATUS TAB")
     ]
     assert "openStagedRequestDetailsFromElement(this)" in staged_section
     assert "openRequestDetails({{ torrent.request_id }})" not in staged_section
@@ -807,13 +807,73 @@ def test_dashboard_active_unreleased_toggle_removed_and_filters_refresh_navigati
     assert "if (card) cardContainer.appendChild(card);" in js
 
 
-def test_downloads_poll_interval_is_two_seconds():
-    """Downloads status polling should refresh every 2s via a named constant."""
+def test_torrent_status_poll_intervals_are_named_constants():
+    """Active downloads poll every 1s, completed torrents every 10s."""
     js = _read_dashboard_js()
 
-    assert "const DOWNLOADS_POLL_INTERVAL_MS = 2000;" in js
-    assert "setInterval(_patchStagedDownloadStatus, DOWNLOADS_POLL_INTERVAL_MS)" in js
-    assert "30000" not in js.split("_startStagedStatusPoll")[1][:400]
+    assert "const ACTIVE_DOWNLOADS_POLL_INTERVAL_MS = 1000;" in js
+    assert "const COMPLETED_TORRENTS_POLL_INTERVAL_MS = 10000;" in js
+    assert "setInterval(_patchStagedDownloadStatus, _currentPollIntervalMs())" in js
+
+
+def test_torrent_status_subtabs_and_grouped_rendering():
+    """Sub-tab toggle, grouped rendering and collapse-state preservation exist."""
+    js = _read_dashboard_js()
+
+    assert "function showQbitView(view)" in js
+    assert "qbit-completed-list" in js
+    assert "'/api/torrents/completed' : '/api/downloads'" in js
+    assert "function renderQbitGroups(groups, options)" in js
+    assert "function renderQbitCompleted(groups)" in js
+    assert "function captureQbitGroupState(prefix)" in js
+    assert "function restoreQbitGroupState(prefix, state)" in js
+    assert "function toggleQbitGroup(prefix, key)" in js
+    # Groups of one render flat instead of as a needless collapsible group.
+    assert "if (group.count === 1 && torrents.length === 1)" in js
+    assert "if (window.reinitColumnResizer) window.reinitColumnResizer();" in js
+
+
+def test_torrent_status_tab_drops_embedded_webui(dashboard_template_path):
+    """The embedded qBittorrent Web UI sub-view is gone; the external link stays."""
+    with open(dashboard_template_path, encoding="utf-8") as handle:
+        template = handle.read()
+    js = _read_dashboard_js()
+
+    assert "qbit-webui-panel" not in template
+    assert "qbit-webui-frame" not in template
+    assert "<iframe" not in template
+    assert "siftarrQbittorrentUrl" not in template
+    assert "qbit-webui" not in js
+    assert ">Torrent Status</button>" in template
+    assert 'id="qbit-subtab-downloading"' in template
+    assert 'id="qbit-subtab-completed"' in template
+    assert 'id="completed-torrents-table"' in template
+    assert 'id="completed-torrents-body"' in template
+    assert 'id="completed-torrent-cards" class="space-y-3 p-3 md:hidden"' in template
+    assert "Open qBittorrent ↗" in template
+
+
+def test_completed_torrents_table_is_column_resizable(dashboard_template_path):
+    """Completed table needs its own id plus resizable markup."""
+    with open(dashboard_template_path, encoding="utf-8") as handle:
+        template = handle.read()
+
+    table = template.split('id="completed-torrents-table"')[1].split("</table>")[0]
+
+    assert "<colgroup>" in table
+    for key in (
+        "name",
+        "size",
+        "downloaded",
+        "uploaded",
+        "ratio",
+        "state",
+        "category",
+        "actions",
+    ):
+        assert f'<col data-col-key="{key}"' in table
+        assert f'data-col-key="{key}" style="position: relative;"' in table
+    assert table.count('<div class="resize-handle"></div>') == 8
 
 
 def test_downloads_poll_guards_overlap_and_hidden_tabs():

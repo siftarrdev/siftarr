@@ -63,7 +63,7 @@
                     class="tab-button border-b-2 border-transparent pb-3 text-sm font-medium text-gray-500 hover:text-gray-300 whitespace-nowrap">Staged</button>
 {% endif %}
             <button onclick="showTab('downloading')" id="tab-downloading"
-                    class="tab-button border-b-2 border-transparent pb-3 text-sm font-medium text-gray-500 hover:text-gray-300 whitespace-nowrap">Downloading</button>
+                    class="tab-button border-b-2 border-transparent pb-3 text-sm font-medium text-gray-500 hover:text-gray-300 whitespace-nowrap">Torrent Status</button>
             <button onclick="showTab('finished')" id="tab-finished"
                     class="tab-button border-b-2 border-transparent pb-3 text-sm font-medium text-gray-500 hover:text-gray-300 whitespace-nowrap">Finished</button>
             <button onclick="showTab('rejected')" id="tab-rejected"
@@ -366,20 +366,20 @@
         </div>
     </div>
 
-    {# ═══════════════ DOWNLOADING TAB ═══════════════ #}
+    {# ═══════════════ TORRENT STATUS TAB (id kept as "downloading" for deep links) ═══════════════ #}
     <div id="content-downloading" class="tab-content hidden">
         {# id="downloading-torrent-cards" class="space-y-3 p-3 md:hidden" #}
         <div class="card overflow-hidden">
             <div class="card-header flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
                 <div>
-                    <div class="section-title">qBittorrent Downloads</div>
-                    <div class="section-subtitle">All unfinished torrents currently reported by qBittorrent. Siftarr actions appear only for matched torrents.</div>
+                    <div class="section-title">Torrent Status</div>
+                    <div class="section-subtitle">Torrents reported by qBittorrent, grouped by the Siftarr request that owns them. Siftarr actions appear only for matched torrents.</div>
                 </div>
                 <div class="flex flex-wrap items-center gap-2">
-                    <button type="button" id="qbit-list-view" class="btn-ghost btn-sm" onclick="showQbitView('list')">List</button>
+                    <button type="button" id="qbit-subtab-downloading" class="btn-primary btn-sm tap-primary" onclick="showQbitView('downloading')">Downloading</button>
+                    <button type="button" id="qbit-subtab-completed" class="btn-ghost btn-sm tap" onclick="showQbitView('completed')">Completed</button>
                     {% if qbittorrent_url %}
-                    <button type="button" id="qbit-webui-view" class="btn-ghost btn-sm" onclick="showQbitView('webui')">Web UI</button>
-                    <a href="{{ qbittorrent_url }}" target="_blank" rel="noopener noreferrer" class="btn-ghost btn-sm">Open qBittorrent ↗</a>
+                    <a href="{{ qbittorrent_url }}" target="_blank" rel="noopener noreferrer" class="btn-ghost btn-sm tap">Open qBittorrent ↗</a>
                     {% endif %}
                 </div>
             </div>
@@ -431,12 +431,29 @@
                     </table>
                 </div>
             </div>
-            {% if qbittorrent_url %}
-            <div id="qbit-webui-panel" class="hidden border-t border-gray-700/60 p-4">
-                <p class="mb-3 text-sm text-gray-400">The Web UI loads directly from qBittorrent. If login, browser security, or qBittorrent framing settings block it, use <a href="{{ qbittorrent_url }}" target="_blank" rel="noopener noreferrer" class="text-brand-400 hover:text-brand-300">Open qBittorrent</a> instead.</p>
-                <iframe id="qbit-webui-frame" data-src="{{ qbittorrent_url }}" title="qBittorrent Web UI" class="h-[70vh] w-full rounded-lg border border-gray-700/60 bg-surface-900"></iframe>
+            <div id="qbit-completed-list" class="hidden">
+                <div id="completed-torrent-cards" class="space-y-3 p-3 md:hidden">
+                    <p class="text-sm text-gray-500">Loading completed torrents…</p>
+                </div>
+                <div class="hidden md:block overflow-x-auto">
+                    <table class="min-w-full divide-y divide-gray-700/60 data-resizable" id="completed-torrents-table">
+                        <colgroup>
+                            <col data-col-key="name" style="width: 320px;">
+                            <col data-col-key="size" style="width: 100px;">
+                            <col data-col-key="downloaded" style="width: 110px;">
+                            <col data-col-key="uploaded" style="width: 110px;">
+                            <col data-col-key="ratio" style="width: 90px;">
+                            <col data-col-key="state" style="width: 120px;">
+                            <col data-col-key="category" style="width: 120px;">
+                            <col data-col-key="actions" style="width: 200px;">
+                        </colgroup>
+                        <thead><tr class="bg-surface-850"><th class="px-5 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500" data-col-key="name" style="position: relative;"><span class="sort-title">Name</span><div class="resize-handle"></div></th><th class="px-5 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500" data-col-key="size" style="position: relative;"><span class="sort-title">Size</span><div class="resize-handle"></div></th><th class="px-5 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500" data-col-key="downloaded" style="position: relative;"><span class="sort-title">Downloaded</span><div class="resize-handle"></div></th><th class="px-5 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500" data-col-key="uploaded" style="position: relative;"><span class="sort-title">Uploaded</span><div class="resize-handle"></div></th><th class="px-5 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500" data-col-key="ratio" style="position: relative;"><span class="sort-title">Ratio</span><div class="resize-handle"></div></th><th class="px-5 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500" data-col-key="state" style="position: relative;"><span class="sort-title">State</span><div class="resize-handle"></div></th><th class="px-5 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500" data-col-key="category" style="position: relative;"><span class="sort-title">Category</span><div class="resize-handle"></div></th><th class="px-5 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500" data-col-key="actions" style="position: relative;"><span class="sort-title">Actions</span><div class="resize-handle"></div></th></tr></thead>
+                        <tbody class="divide-y divide-gray-700/40" id="completed-torrents-body">
+                            <tr><td colspan="8" class="px-5 py-6 text-sm text-gray-500">Loading completed torrents…</td></tr>
+                        </tbody>
+                    </table>
+                </div>
             </div>
-            {% endif %}
         </div>
     </div>
 
@@ -866,23 +883,8 @@
 </div>
 
 <script>
-function showQbitView(view) {
-    const list = document.getElementById('qbit-download-list');
-    const panel = document.getElementById('qbit-webui-panel');
-    if (!panel) return;
-    const webui = view === 'webui';
-    list.classList.toggle('hidden', webui);
-    panel.classList.toggle('hidden', !webui);
-    if (webui) {
-        const frame = document.getElementById('qbit-webui-frame');
-        if (frame && !frame.src) frame.src = frame.dataset.src;
-    }
-}
-</script>
-<script>
 // Global config - must be set before dashboard.js loads
 window.siftarrStagingModeEnabled = {{ 'true' if staging_mode_enabled else 'false' }};
-window.siftarrQbittorrentUrl = {{ qbittorrent_url | tojson }};
 window.siftarrStaticVersion = {{ static_version | tojson }};
 </script>
 <script type="module" src="{{ url_for('static', path='/js/dashboard.js') }}?v={{ static_version }}"></script>

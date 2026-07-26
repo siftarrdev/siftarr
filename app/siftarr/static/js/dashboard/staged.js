@@ -1,20 +1,56 @@
 // Dashboard Staged Module - Staged tab polling and bulk actions
 // =============================================================
 
-const DOWNLOADS_POLL_INTERVAL_MS = 2000;
+// Torrent Status tab poll intervals. The active/downloading sub-tab refreshes
+// aggressively; completed torrents barely change, so they poll slowly.
+const ACTIVE_DOWNLOADS_POLL_INTERVAL_MS = 1000;
+const COMPLETED_TORRENTS_POLL_INTERVAL_MS = 10000;
 
 let stagedTabRefreshInFlight = false;
 let downloadingTabRefreshInFlight = false;
 let _stagedStatusPollInterval = null;
 let _downloadStatusPatchInFlight = false;
 let _stagedStatusPollWanted = false;
+// Which sub-view of the Torrent Status tab is visible: 'downloading' | 'completed'.
+let _torrentStatusView = 'downloading';
+
+function _currentPollIntervalMs() {
+    return _torrentStatusView === 'completed'
+        ? COMPLETED_TORRENTS_POLL_INTERVAL_MS
+        : ACTIVE_DOWNLOADS_POLL_INTERVAL_MS;
+}
 
 function _startStagedStatusPoll() {
     _stagedStatusPollWanted = true;
     _stopPollTimer();
     _patchStagedDownloadStatus();
     if (document.visibilityState === 'hidden') return;
-    _stagedStatusPollInterval = setInterval(_patchStagedDownloadStatus, DOWNLOADS_POLL_INTERVAL_MS);
+    _stagedStatusPollInterval = setInterval(_patchStagedDownloadStatus, _currentPollIntervalMs());
+}
+
+// Sub-view toggle for the Torrent Status tab. Only the visible sub-view is
+// polled, and switching restarts the timer at that sub-view's interval.
+function showQbitView(view) {
+    const downloading = document.getElementById('qbit-download-list');
+    const completed = document.getElementById('qbit-completed-list');
+    if (!downloading || !completed) return;
+    const showCompleted = view === 'completed';
+    _torrentStatusView = showCompleted ? 'completed' : 'downloading';
+    downloading.classList.toggle('hidden', showCompleted);
+    completed.classList.toggle('hidden', !showCompleted);
+    const downloadingButton = document.getElementById('qbit-subtab-downloading');
+    const completedButton = document.getElementById('qbit-subtab-completed');
+    if (downloadingButton) {
+        downloadingButton.className = showCompleted
+            ? 'btn-ghost btn-sm tap'
+            : 'btn-primary btn-sm tap-primary';
+    }
+    if (completedButton) {
+        completedButton.className = showCompleted
+            ? 'btn-primary btn-sm tap-primary'
+            : 'btn-ghost btn-sm tap';
+    }
+    if (_stagedStatusPollWanted) _startStagedStatusPoll();
 }
 
 function _stopPollTimer() {
@@ -41,13 +77,20 @@ document.addEventListener('visibilitychange', () => {
 async function _patchStagedDownloadStatus() {
     const downloadingContent = document.getElementById('content-downloading');
     if (!downloadingContent || downloadingContent.classList.contains('hidden')) return;
+    // In-flight guard: at a 1s interval a slow qBittorrent must not queue requests.
     if (_downloadStatusPatchInFlight) return;
+    const completedView = _torrentStatusView === 'completed';
+    const panel = document.getElementById(completedView ? 'qbit-completed-list' : 'qbit-download-list');
+    if (!panel || panel.classList.contains('hidden')) return;
     _downloadStatusPatchInFlight = true;
     try {
-        const response = await fetch('/api/downloads');
+        const response = await fetch(completedView ? '/api/torrents/completed' : '/api/downloads');
         if (!response.ok) return;
         const data = await response.json();
-        if (!data.qbit_unavailable) renderQbitDownloads(data.torrents || []);
+        if (data.qbit_unavailable) return;
+        const groups = data.groups || [];
+        if (completedView) renderQbitCompleted(groups);
+        else renderQbitDownloads(groups);
     } catch (_err) {
         // silently ignore poll errors
     } finally {
@@ -69,12 +112,137 @@ function qbitManagedActions(managed, card = false) {
     return `<button type="button" onclick="openRequestDetails(${requestId})" class="${classes}">Details</button><button type="button" onclick="checkNow(${torrentId})" class="${classes}">Check Now</button><button type="button" onclick="if (confirm('Delete this torrent and downloaded data from qBittorrent, then return the request to pending?')) postStagedAction('/staged/${torrentId}/delete-download', '/?tab=downloading')" class="${deleteClasses}">Delete</button>`;
 }
 
-function renderQbitDownloads(torrents) {
+function qbitBytes(value) {
+    const number = Number(value);
+    if (!Number.isFinite(number)) return '—';
+    if (Math.abs(number) >= 1024 * 1024 * 1024) return `${(number / 1024 / 1024 / 1024).toFixed(2)} GB`;
+    return `${(number / 1024 / 1024).toFixed(1)} MB`;
+}
+
+function qbitSpeed(value) {
+    return `${qbitNumber(value, 1024 * 1024)} MB/s`;
+}
+
+function qbitGroupKey(group) {
+    return group.request_id === null || group.request_id === undefined
+        ? 'unmanaged'
+        : String(group.request_id);
+}
+
+// Collapse state is keyed by request_id (via the group key) and captured/restored
+// around every re-render, mirroring the accordion pattern in releases.js. Without
+// it a 1s poll would slam every expanded group shut.
+function captureQbitGroupState(prefix) {
+    const state = {};
+    document.querySelectorAll(`[data-download-group][data-group-prefix="${prefix}"]`).forEach((el) => {
+        state[el.dataset.downloadGroup] = el.getAttribute('aria-expanded') === 'true';
+    });
+    document.querySelectorAll(`details[data-download-group][data-group-prefix="${prefix}"]`).forEach((el) => {
+        state[el.dataset.downloadGroup] = !!el.open;
+    });
+    return state;
+}
+
+function restoreQbitGroupState(prefix, state) {
+    if (!state) return;
+    document.querySelectorAll(`details[data-download-group][data-group-prefix="${prefix}"]`).forEach((el) => {
+        const key = el.dataset.downloadGroup;
+        if (Object.prototype.hasOwnProperty.call(state, key)) el.open = !!state[key];
+    });
+    document.querySelectorAll(`tr[data-download-group][data-group-prefix="${prefix}"]`).forEach((el) => {
+        const key = el.dataset.downloadGroup;
+        if (!Object.prototype.hasOwnProperty.call(state, key)) return;
+        setQbitGroupOpen(prefix, key, !!state[key]);
+    });
+}
+
+function setQbitGroupOpen(prefix, key, open) {
+    const header = document.querySelector(
+        `tr[data-download-group="${key}"][data-group-prefix="${prefix}"]`,
+    );
+    if (header) {
+        header.setAttribute('aria-expanded', open ? 'true' : 'false');
+        const chevron = header.querySelector('[data-group-chevron]');
+        if (chevron) chevron.textContent = open ? '▾' : '▸';
+    }
+    document
+        .querySelectorAll(`tr[data-download-group-child="${key}"][data-group-prefix="${prefix}"]`)
+        .forEach((row) => row.classList.toggle('hidden', !open));
+}
+
+function toggleQbitGroup(prefix, key) {
+    const header = document.querySelector(
+        `tr[data-download-group="${key}"][data-group-prefix="${prefix}"]`,
+    );
+    if (!header) return;
+    setQbitGroupOpen(prefix, key, header.getAttribute('aria-expanded') !== 'true');
+}
+
+function qbitGroupTotalsText(totals, showSpeeds) {
+    const parts = [];
+    if (showSpeeds) {
+        parts.push(`↓ ${qbitSpeed(totals.dlspeed)}`);
+        parts.push(`↑ ${qbitSpeed(totals.upspeed)}`);
+    }
+    parts.push(`Size ${qbitBytes(totals.size)}`);
+    parts.push(`Down ${qbitBytes(totals.downloaded)}`);
+    parts.push(`Up ${qbitBytes(totals.uploaded)}`);
+    return parts.join(' · ');
+}
+
+// Shared grouped renderer for both sub-views. Groups with a single torrent are
+// rendered as a flat row/card (no needless expand click); everything else gets a
+// collapsible header carrying the aggregate totals.
+function renderQbitGroups(groups, options) {
+    const { prefix, colspan, showSpeeds, rowHtml, cardHtml, emptyText, cards, body } = options;
+    if (!cards || !body) return;
+    const escape = window.escapeHtml;
+    const state = captureQbitGroupState(prefix);
+
+    if (!groups.length) {
+        cards.innerHTML = `<p class="text-sm text-gray-500">${escape(emptyText)}</p>`;
+        body.innerHTML = `<tr><td colspan="${colspan}" class="px-5 py-6 text-sm text-gray-500">${escape(emptyText)}</td></tr>`;
+        return;
+    }
+
+    const tableChunks = [];
+    const cardChunks = [];
+    groups.forEach((group) => {
+        const key = qbitGroupKey(group);
+        const torrents = group.torrents || [];
+        if (group.count === 1 && torrents.length === 1) {
+            tableChunks.push(rowHtml(torrents[0], ''));
+            cardChunks.push(cardHtml(torrents[0]));
+            return;
+        }
+        const title = escape(group.title || 'Unknown');
+        const totals = group.totals || {};
+        const summary = escape(qbitGroupTotalsText(totals, showSpeeds));
+        const count = Number(group.count) || torrents.length;
+        tableChunks.push(
+            `<tr class="bg-surface-850/70 cursor-pointer" data-download-group="${escape(key)}" data-group-prefix="${prefix}" aria-expanded="false" onclick="toggleQbitGroup('${prefix}', '${escape(key)}')"><td colspan="${colspan}" class="px-5 py-3 text-sm"><div class="flex flex-wrap items-center gap-x-3 gap-y-1"><span class="text-gray-500" data-group-chevron>▸</span><span class="overflow-wrap-anywhere font-semibold text-white">${title}</span><span class="badge badge-gray">${count}</span><span class="ml-auto text-xs text-gray-400 tabular-nums">${summary}</span></div></td></tr>`,
+        );
+        torrents.forEach((torrent) => {
+            tableChunks.push(
+                rowHtml(torrent, ` data-download-group-child="${escape(key)}" data-group-prefix="${prefix}"`, true),
+            );
+        });
+        cardChunks.push(
+            `<details data-download-group="${escape(key)}" data-group-prefix="${prefix}" class="rounded-xl border border-gray-700/60 bg-surface-900/60"><summary class="tap cursor-pointer px-3 py-2"><div class="overflow-wrap-anywhere text-sm font-semibold text-white">${title}</div><div class="mt-1 text-xs text-gray-400 tabular-nums">${count} torrents · ${summary}</div></summary><div class="space-y-3 p-3">${torrents.map(cardHtml).join('')}</div></details>`,
+        );
+    });
+
+    body.innerHTML = tableChunks.join('');
+    cards.innerHTML = cardChunks.join('');
+    restoreQbitGroupState(prefix, state);
+}
+
+function renderQbitDownloads(groups) {
     const cards = document.getElementById('downloading-torrent-cards');
     const body = document.getElementById('downloading-torrents-body');
     if (!cards || !body) return;
     const escape = window.escapeHtml;
-    const rows = torrents.map((torrent) => {
+    const view = (torrent) => {
         const name = escape(torrent.name || torrent.hash || 'Unnamed torrent');
         const hash = escape(torrent.hash || '-');
         const state = escape(torrent.state || '-');
@@ -86,10 +254,68 @@ function renderQbitDownloads(torrents) {
         const speed = `${qbitNumber(torrent.dlspeed, 1024 * 1024)} MB/s`;
         const size = `${qbitNumber(torrent.size, 1024 * 1024 * 1024, 2)} GB`;
         const managedData = torrent.managed ? ` data-torrent-id="${Number(torrent.managed.id)}"` : '';
-        return { torrent, name, hash, state, category, progress, eta, speed, size, managedData };
+        return { name, hash, state, category, progress, eta, speed, size, managedData };
+    };
+    const rowHtml = (torrent, groupAttrs, child = false) => {
+        const { name, hash, state, category, progress, eta, speed, size, managedData } = view(torrent);
+        const rowClass = child ? 'hover:bg-surface-850/80 hidden' : 'hover:bg-surface-850/80';
+        return `<tr class="${rowClass}"${groupAttrs}${managedData}><td class="px-5 py-3.5 text-sm font-medium text-white max-w-sm"><div class="truncate" title="${name}">${name}</div><div class="mt-1 truncate text-xs text-gray-500" title="${hash}">${hash}</div></td><td class="px-5 py-3.5 text-sm text-gray-400 tabular-nums" data-download-progress>${progress}%</td><td class="px-5 py-3.5 text-sm text-gray-400">${state}</td><td class="px-5 py-3.5 text-sm text-gray-400 tabular-nums" data-download-eta>${eta}</td><td class="px-5 py-3.5 text-sm text-gray-400 tabular-nums">${speed}</td><td class="px-5 py-3.5 text-sm text-gray-400 tabular-nums">${size}</td><td class="px-5 py-3.5 text-sm text-gray-400">${category}</td><td class="px-5 py-3.5 text-sm"><div class="flex items-center gap-3">${qbitManagedActions(torrent.managed)}</div></td></tr>`;
+    };
+    const cardHtml = (torrent) => {
+        const { name, hash, state, category, progress, eta, size, managedData } = view(torrent);
+        return `<div class="rounded-xl border border-gray-700/60 bg-surface-850 p-3"${managedData}><div class="overflow-wrap-anywhere text-sm font-semibold text-white">${name}</div><div class="mt-2 grid grid-cols-2 gap-2 text-xs text-gray-400"><div><div class="text-gray-500">Progress</div><div>${progress}%</div></div><div><div class="text-gray-500">State</div><div>${state}</div></div><div><div class="text-gray-500">ETA</div><div>${eta}</div></div><div><div class="text-gray-500">Category</div><div>${category}</div></div><div><div class="text-gray-500">Size</div><div>${size}</div></div><div class="col-span-2"><div class="text-gray-500">Hash</div><div class="overflow-wrap-anywhere" title="${hash}">${hash}</div></div></div><div class="mt-3 grid grid-cols-3 gap-2">${qbitManagedActions(torrent.managed, true)}</div></div>`;
+    };
+    renderQbitGroups(groups, {
+        prefix: 'dl',
+        colspan: 8,
+        showSpeeds: true,
+        rowHtml,
+        cardHtml,
+        emptyText: 'No unfinished qBittorrent torrents.',
+        cards,
+        body,
     });
-    cards.innerHTML = rows.length ? rows.map(({ torrent, name, hash, state, category, progress, eta, size, managedData }) => `<div class="rounded-xl border border-gray-700/60 bg-surface-850 p-3"${managedData}><div class="overflow-wrap-anywhere text-sm font-semibold text-white">${name}</div><div class="mt-2 grid grid-cols-2 gap-2 text-xs text-gray-400"><div><div class="text-gray-500">Progress</div><div>${progress}%</div></div><div><div class="text-gray-500">State</div><div>${state}</div></div><div><div class="text-gray-500">ETA</div><div>${eta}</div></div><div><div class="text-gray-500">Category</div><div>${category}</div></div><div><div class="text-gray-500">Size</div><div>${size}</div></div><div class="col-span-2"><div class="text-gray-500">Hash</div><div class="truncate" title="${hash}">${hash}</div></div></div><div class="mt-3 grid grid-cols-3 gap-2">${qbitManagedActions(torrent.managed, true)}</div></div>`).join('') : '<p class="text-sm text-gray-500">No unfinished qBittorrent torrents.</p>';
-    body.innerHTML = rows.length ? rows.map(({ torrent, name, hash, state, category, progress, eta, speed, size, managedData }) => `<tr class="hover:bg-surface-850/80"${managedData}><td class="px-5 py-3.5 text-sm font-medium text-white max-w-sm"><div class="truncate" title="${name}">${name}</div><div class="mt-1 truncate text-xs text-gray-500" title="${hash}">${hash}</div></td><td class="px-5 py-3.5 text-sm text-gray-400 tabular-nums" data-download-progress>${progress}%</td><td class="px-5 py-3.5 text-sm text-gray-400">${state}</td><td class="px-5 py-3.5 text-sm text-gray-400 tabular-nums" data-download-eta>${eta}</td><td class="px-5 py-3.5 text-sm text-gray-400 tabular-nums">${speed}</td><td class="px-5 py-3.5 text-sm text-gray-400 tabular-nums">${size}</td><td class="px-5 py-3.5 text-sm text-gray-400">${category}</td><td class="px-5 py-3.5 text-sm"><div class="flex items-center gap-3">${qbitManagedActions(torrent.managed)}</div></td></tr>`).join('') : '<tr><td colspan="8" class="px-5 py-6 text-sm text-gray-500">No unfinished qBittorrent torrents.</td></tr>';
+    if (window.reinitColumnResizer) window.reinitColumnResizer();
+}
+
+// Completed sub-view: speeds are meaningless once a torrent is done, so the
+// columns are size / downloaded / uploaded / ratio instead.
+function renderQbitCompleted(groups) {
+    const cards = document.getElementById('completed-torrent-cards');
+    const body = document.getElementById('completed-torrents-body');
+    if (!cards || !body) return;
+    const escape = window.escapeHtml;
+    const view = (torrent) => ({
+        name: escape(torrent.name || torrent.hash || 'Unnamed torrent'),
+        hash: escape(torrent.hash || '-'),
+        state: escape(torrent.state || '-'),
+        category: escape(torrent.category || '-'),
+        size: qbitBytes(torrent.size),
+        downloaded: qbitBytes(torrent.downloaded),
+        uploaded: qbitBytes(torrent.uploaded),
+        ratio: qbitNumber(torrent.ratio, 1, 2),
+        managedData: torrent.managed ? ` data-torrent-id="${Number(torrent.managed.id)}"` : '',
+    });
+    const rowHtml = (torrent, groupAttrs, child = false) => {
+        const { name, hash, state, category, size, downloaded, uploaded, ratio, managedData } = view(torrent);
+        const rowClass = child ? 'hover:bg-surface-850/80 hidden' : 'hover:bg-surface-850/80';
+        return `<tr class="${rowClass}"${groupAttrs}${managedData}><td class="px-5 py-3.5 text-sm font-medium text-white max-w-sm"><div class="truncate" title="${name}">${name}</div><div class="mt-1 truncate text-xs text-gray-500" title="${hash}">${hash}</div></td><td class="px-5 py-3.5 text-sm text-gray-400 tabular-nums">${size}</td><td class="px-5 py-3.5 text-sm text-gray-400 tabular-nums">${downloaded}</td><td class="px-5 py-3.5 text-sm text-gray-400 tabular-nums">${uploaded}</td><td class="px-5 py-3.5 text-sm text-gray-400 tabular-nums">${ratio}</td><td class="px-5 py-3.5 text-sm text-gray-400">${state}</td><td class="px-5 py-3.5 text-sm text-gray-400">${category}</td><td class="px-5 py-3.5 text-sm"><div class="flex items-center gap-3">${qbitManagedActions(torrent.managed)}</div></td></tr>`;
+    };
+    const cardHtml = (torrent) => {
+        const { name, hash, state, category, size, downloaded, uploaded, ratio, managedData } = view(torrent);
+        return `<div class="rounded-xl border border-gray-700/60 bg-surface-850 p-3"${managedData}><div class="overflow-wrap-anywhere text-sm font-semibold text-white">${name}</div><div class="mt-2 grid grid-cols-2 gap-2 text-xs text-gray-400"><div><div class="text-gray-500">Size</div><div>${size}</div></div><div><div class="text-gray-500">Ratio</div><div>${ratio}</div></div><div><div class="text-gray-500">Downloaded</div><div>${downloaded}</div></div><div><div class="text-gray-500">Uploaded</div><div>${uploaded}</div></div><div><div class="text-gray-500">State</div><div>${state}</div></div><div><div class="text-gray-500">Category</div><div>${category}</div></div><div class="col-span-2"><div class="text-gray-500">Hash</div><div class="overflow-wrap-anywhere" title="${hash}">${hash}</div></div></div><div class="mt-3 grid grid-cols-3 gap-2">${qbitManagedActions(torrent.managed, true)}</div></div>`;
+    };
+    renderQbitGroups(groups, {
+        prefix: 'cp',
+        colspan: 8,
+        showSpeeds: false,
+        rowHtml,
+        cardHtml,
+        emptyText: 'No completed qBittorrent torrents.',
+        cards,
+        body,
+    });
+    if (window.reinitColumnResizer) window.reinitColumnResizer();
 }
 
 function formatEta(seconds) {
@@ -155,6 +381,7 @@ async function refreshDownloadingTabData() {
 
         downloadingContent.innerHTML = newContent.innerHTML;
         if (window.reinitColumnResizer) window.reinitColumnResizer();
+        showQbitView(_torrentStatusView);
         await _patchStagedDownloadStatus();
         restore();
 
@@ -304,6 +531,8 @@ window.bulkStagedAction = bulkStagedAction;
 window.refreshStagedTabData = refreshStagedTabData;
 window.refreshDownloadingTabData = refreshDownloadingTabData;
 window.bindStagedSelectionHandlers = bindStagedSelectionHandlers;
+window.showQbitView = showQbitView;
+window.toggleQbitGroup = toggleQbitGroup;
 window._startStagedStatusPoll = _startStagedStatusPoll;
 window._stopStagedStatusPoll = _stopStagedStatusPoll;
 window.openStagedReview = openStagedReview;
