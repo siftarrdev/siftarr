@@ -1,26 +1,48 @@
 // Dashboard Staged Module - Staged tab polling and bulk actions
 // =============================================================
 
+const DOWNLOADS_POLL_INTERVAL_MS = 2000;
+
 let stagedTabRefreshInFlight = false;
 let downloadingTabRefreshInFlight = false;
 let _stagedStatusPollInterval = null;
+let _downloadStatusPatchInFlight = false;
+let _stagedStatusPollWanted = false;
 
 function _startStagedStatusPoll() {
-    _stopStagedStatusPoll();
+    _stagedStatusPollWanted = true;
+    _stopPollTimer();
     _patchStagedDownloadStatus();
-    _stagedStatusPollInterval = setInterval(_patchStagedDownloadStatus, 30000);
+    if (document.visibilityState === 'hidden') return;
+    _stagedStatusPollInterval = setInterval(_patchStagedDownloadStatus, DOWNLOADS_POLL_INTERVAL_MS);
 }
 
-function _stopStagedStatusPoll() {
+function _stopPollTimer() {
     if (_stagedStatusPollInterval !== null) {
         clearInterval(_stagedStatusPollInterval);
         _stagedStatusPollInterval = null;
     }
 }
 
+function _stopStagedStatusPoll() {
+    _stagedStatusPollWanted = false;
+    _stopPollTimer();
+}
+
+document.addEventListener('visibilitychange', () => {
+    if (!_stagedStatusPollWanted) return;
+    if (document.visibilityState === 'hidden') {
+        _stopPollTimer();
+    } else if (_stagedStatusPollInterval === null) {
+        _startStagedStatusPoll();
+    }
+});
+
 async function _patchStagedDownloadStatus() {
     const downloadingContent = document.getElementById('content-downloading');
     if (!downloadingContent || downloadingContent.classList.contains('hidden')) return;
+    if (_downloadStatusPatchInFlight) return;
+    _downloadStatusPatchInFlight = true;
     try {
         const response = await fetch('/api/downloads');
         if (!response.ok) return;
@@ -28,6 +50,8 @@ async function _patchStagedDownloadStatus() {
         if (!data.qbit_unavailable) renderQbitDownloads(data.torrents || []);
     } catch (_err) {
         // silently ignore poll errors
+    } finally {
+        _downloadStatusPatchInFlight = false;
     }
 }
 
