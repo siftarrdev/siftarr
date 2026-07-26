@@ -225,6 +225,9 @@ class QbittorrentService:
             "seeding_time": getattr(torrent, "seeding_time", None),
             "eta": getattr(torrent, "eta", None),
             "dlspeed": getattr(torrent, "dlspeed", None),
+            "upspeed": getattr(torrent, "upspeed", None),
+            "downloaded": getattr(torrent, "downloaded", None),
+            "uploaded": getattr(torrent, "uploaded", None),
         }
 
     async def authenticate(self) -> bool:

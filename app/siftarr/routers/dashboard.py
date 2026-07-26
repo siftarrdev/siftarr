@@ -29,6 +29,11 @@ from app.siftarr.models.staged_torrent import (
     STAGED_STATUS_STAGED,
     StagedTorrent,
 )
+from app.siftarr.services.dashboard.torrent_grouping import (
+    build_grouped_torrent_payload,
+    match_qbit_torrents,
+    serialize_qbit_download,
+)
 from app.siftarr.services.dashboard.tv_details_service import load_tv_seasons_with_episodes_bulk
 from app.siftarr.services.integrations.overseerr_service import OverseerrService
 from app.siftarr.services.integrations.qbittorrent_service import QbittorrentService
@@ -36,7 +41,6 @@ from app.siftarr.services.lifecycle.episode_derive import derive_tv_display_labe
 from app.siftarr.services.lifecycle.lifecycle_service import LifecycleService
 from app.siftarr.services.releases.release_parser import movie_release_identity_rejection_reason
 from app.siftarr.services.utils.http_client import get_shared_client
-from app.siftarr.services.utils.torrent_identity import normalize_torrent_name
 
 logger = logging.getLogger(__name__)
 
@@ -78,55 +82,16 @@ def _is_actionable_workflow_torrent(
     return not is_terminal_request_status(request_statuses.get(torrent.request_id))
 
 
-def _match_qbit_torrents(
-    qbit_torrents: list[dict], managed_torrents: list[StagedTorrent]
-) -> list[dict]:
-    """Attach a managed torrent only when its hash or unique name matches qBit."""
-    by_hash = {
-        torrent.info_hash.lower(): torrent for torrent in managed_torrents if torrent.info_hash
-    }
-    by_name: dict[str, StagedTorrent | None] = {}
-    for torrent in managed_torrents:
-        name = normalize_torrent_name(torrent.title)
-        if not name:
-            continue
-        by_name[name] = torrent if name not in by_name else None
-
-    matched: list[dict] = []
-    for qbit_torrent in qbit_torrents:
-        torrent_hash = str(qbit_torrent.get("hash") or "").lower()
-        managed = by_hash.get(torrent_hash)
-        if managed is None:
-            managed = by_name.get(normalize_torrent_name(str(qbit_torrent.get("name") or "")))
-        matched.append({**qbit_torrent, "managed_torrent": managed})
-    return matched
-
-
-def _serialize_qbit_download(torrent: dict) -> dict:
-    """Return qBit metadata plus the minimum, server-authorized action data."""
-    managed = torrent.get("managed_torrent")
-    row = {
-        key: torrent.get(key)
-        for key in ("hash", "name", "size", "progress", "state", "category", "eta", "dlspeed")
-    }
-    if managed is not None:
-        row["managed"] = {
-            "id": managed.id,
-            "request_id": managed.request_id,
-            "move_status": managed.move_status or "pending",
-            "moved_path": managed.moved_path,
-        }
-    else:
-        row["managed"] = None
-    return row
+_match_qbit_torrents = match_qbit_torrents
+_serialize_qbit_download = serialize_qbit_download
 
 
 @router.get("/api/downloads")
 async def qbit_downloads_api(db: AsyncSession = Depends(get_db)):
-    """Return the current unfinished qBit queue and authorized managed matches."""
+    """Return unfinished qBit torrents grouped by owning Siftarr request."""
     settings = get_settings()
     if not settings.qbittorrent_url:
-        return {"torrents": [], "qbit_unavailable": True}
+        return {"groups": [], "qbit_unavailable": True}
 
     try:
         qbit_torrents = await QbittorrentService(
@@ -134,32 +99,30 @@ async def qbit_downloads_api(db: AsyncSession = Depends(get_db)):
         ).get_unfinished_torrents_or_raise()
     except Exception:
         logger.warning("Unable to refresh unfinished qBittorrent torrents")
-        return {"torrents": [], "qbit_unavailable": True}
+        return {"groups": [], "qbit_unavailable": True}
 
-    result = await db.execute(
-        select(StagedTorrent).where(StagedTorrent.status.in_(ACTIVE_STAGED_STATUSES))
-    )
-    candidates = list(result.scalars().all())
-    request_ids = {torrent.request_id for torrent in candidates if torrent.request_id is not None}
-    request_statuses: dict[int, RequestStatus] = {}
-    if request_ids:
-        request_result = await db.execute(
-            select(RequestModel.id, RequestModel.status).where(RequestModel.id.in_(request_ids))
-        )
-        for request_id, status in request_result.all():
-            request_statuses[request_id] = status
-    managed = [
-        torrent
-        for torrent in candidates
-        if torrent.status == STAGED_STATUS_APPROVED
-        and torrent.request_id is not None
-        and not is_terminal_request_status(request_statuses.get(torrent.request_id))
-    ]
-    matched = _match_qbit_torrents(qbit_torrents, managed)
-    return {
-        "torrents": [_serialize_qbit_download(torrent) for torrent in matched],
-        "qbit_unavailable": False,
-    }
+    return await build_grouped_torrent_payload(db, qbit_torrents, exclude_terminal_requests=True)
+
+
+@router.get("/api/torrents/completed")
+async def qbit_completed_torrents_api(db: AsyncSession = Depends(get_db)):
+    """Return completed qBit torrents grouped by owning Siftarr request.
+
+    This is a live view of qBittorrent only; no completion history is stored.
+    """
+    settings = get_settings()
+    if not settings.qbittorrent_url:
+        return {"groups": [], "qbit_unavailable": True}
+
+    try:
+        qbit_torrents = await QbittorrentService(settings=settings).get_completed_torrents()
+    except Exception:
+        logger.warning("Unable to refresh completed qBittorrent torrents")
+        return {"groups": [], "qbit_unavailable": True}
+
+    # Completed torrents usually belong to requests that already reached a
+    # terminal status, so terminal requests must stay matchable here.
+    return await build_grouped_torrent_payload(db, qbit_torrents, exclude_terminal_requests=False)
 
 
 @router.get("/")
