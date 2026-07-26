@@ -423,8 +423,8 @@
             </div>
             {% if qbittorrent_url %}
             <div id="qbit-webui-panel" class="hidden border-t border-gray-700/60 p-4">
-                <p class="mb-3 text-sm text-gray-400">The Web UI loads directly from qBittorrent. If login, browser security, or qBittorrent framing settings block it, use <a href="{{ qbittorrent_url }}" target="_blank" rel="noopener noreferrer" class="text-brand-400 hover:text-brand-300">Open qBittorrent</a> instead.</p>
-                <iframe id="qbit-webui-frame" data-src="{{ qbittorrent_url }}" title="qBittorrent Web UI" class="h-[70vh] w-full rounded-lg border border-gray-700/60 bg-surface-900"></iframe>
+                <p class="mb-3 text-sm text-gray-400">The Web UI is proxied through Siftarr on this origin, so sign in here as you would in qBittorrent. If it fails to load, qBittorrent may be unreachable — use <a href="{{ qbittorrent_url }}" target="_blank" rel="noopener noreferrer" class="text-brand-400 hover:text-brand-300">Open qBittorrent</a> instead.</p>
+                <iframe id="qbit-webui-frame" data-src="/qbit/" title="qBittorrent Web UI" class="h-[70vh] w-full rounded-lg border border-gray-700/60 bg-surface-900"></iframe>
             </div>
             {% endif %}
         </div>

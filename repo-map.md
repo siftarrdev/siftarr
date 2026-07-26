@@ -131,6 +131,7 @@ HTTP route layer.
 - `rules.py` — rule management UI/API, including unified rule listing, multi-title testing, modal create/edit actions, export, import preview/apply flows that merge explicit keep selections from existing and imported rules, and the Rules-area staging decision-log page for rule tuning
 - `settings.py` — settings UI (connection test/save/reset, scheduler interval save/reset, staging toggle, Plex rescan, Overseerr sync, cache/reseed actions, SSE progress streams, API key management, Plex SSO status, non-secret settings backup preview/restore, qBit mover enable/paths/retention settings and manual trigger, and Settings-hosted background job status/manual triggers), uses SettingsStore for DB-backed persistence and keeps the SSO-managed Plex token out of connection saves/resets/backups
 - `stats.py` — protected Stats page and JSON data endpoint for all-time, preset, and custom date ranges, including chart-ready time-series payloads
+- `qbit_proxy.py` — authenticated same-origin reverse proxy at `/qbit` for the qBittorrent Web UI iframe (strips framing headers, re-scopes upstream cookies, injects `<base href="/qbit/">`)
 - `staged.py` — staged torrent review/approval endpoints, staged-alternative comparison API, session/API-key staging decision-log API, and download-status endpoint returning move tracking fields (status, path, error) for dashboard visibility
 - `webhooks.py` — inbound webhook handling
 
@@ -236,6 +237,7 @@ Tests mirror the service subpackage organization under `tests/services/`:
 - `tests/routers/auth/` — auth router coverage (login, plex auth, logout, session info)
 - `tests/routers/dashboard/` — dashboard page/API/action coverage, including details controls and SSE search streams
 - `tests/routers/settings/` — settings page, connections, maintenance, and jobs coverage
+- `tests/routers/test_qbit_proxy.py` — qBittorrent Web UI reverse-proxy coverage (header/cookie/CSP rewriting, base-href injection, error paths)
 - `tests/routers/stats/` — Stats page/API coverage, including protection, range validation, and JSON payload shape
 - `tests/services/auth/` — PlexOAuthService unit tests and auth_service (require_auth, get_session_user) tests
 - `tests/services/admin/` — settings, scheduler, and Plex polling service tests

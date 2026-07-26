@@ -20,6 +20,7 @@ from app.siftarr.routers import (
     dashboard,
     dashboard_actions,
     dashboard_api,
+    qbit_proxy,
     rules,
     search_sse,
     settings,
@@ -145,6 +146,7 @@ async def lifespan(app: FastAPI):
     _launch_startup_catchup_syncs(scheduler_service, logger)
     yield
     await close_shared_client()
+    await qbit_proxy.close_proxy_client()
     if scheduler_service:
         scheduler_service.stop()
         logger.info("Siftarr shutdown complete")
@@ -188,6 +190,7 @@ def create_app() -> FastAPI:
     app.include_router(settings.router, dependencies=auth)
     app.include_router(stats.router, dependencies=auth)
     app.include_router(staged.router, dependencies=auth)
+    app.include_router(qbit_proxy.router, dependencies=auth)
 
     @app.get("/", dependencies=auth)
     async def root() -> RedirectResponse:

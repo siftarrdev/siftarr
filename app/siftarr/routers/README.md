@@ -7,6 +7,7 @@ HTTP boundary for the FastAPI app. Routers should translate requests into servic
 - `dashboard.py` renders the main dashboard page.
 - `dashboard_api.py` returns dashboard JSON for details, release search, timeline, and enrichment flows.
 - `dashboard_actions.py` handles dashboard-triggered mutations such as retries, discard, and availability actions.
+- `qbit_proxy.py` reverse-proxies the qBittorrent Web UI under `/qbit` on Siftarr's origin so the dashboard iframe can load and log in.
 - `rules.py` manages rule UI/API interactions.
 - `search_sse.py` provides SSE streaming endpoints for live search progress and TV inspect results.
 - `settings.py` manages settings, maintenance, connection tests, sync jobs, and scheduler actions.
