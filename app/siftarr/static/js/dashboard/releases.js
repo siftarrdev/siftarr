@@ -388,6 +388,24 @@ function renderStageTopEpisodeButton(requestId, release) {
     return '<button type="button" onclick="stageTopEpisodeRelease(this, ' + requestId + ', ' + storedReleaseId + '); event.preventDefault(); event.stopPropagation();" class="shrink-0 rounded-lg bg-brand-600 hover:bg-brand-500 px-2.5 py-1 text-[11px] font-semibold text-white">Stage top</button>';
 }
 
+function stagedTorrentForEpisode(stagedTorrents, seasonNumber, episodeNumber) {
+    return (stagedTorrents || []).find(function(torrent) {
+        const scope = torrent.target_scope || {};
+        if (scope.type === 'single_episode') {
+            return scope.season_number === seasonNumber && scope.episode_number === episodeNumber;
+        }
+        if (scope.type === 'season_pack' || scope.type === 'multi_season_pack') {
+            return Array.isArray(scope.season_numbers) && scope.season_numbers.includes(seasonNumber);
+        }
+        return scope.type === 'complete_series';
+    }) || null;
+}
+
+function renderApproveTopEpisodeButton(stagedTorrent) {
+    if (!stagedTorrent || !stagedTorrent.id) return '';
+    return '<button type="button" onclick="inlineStagedAction(\'/staged/' + stagedTorrent.id + '/approve\', this); event.preventDefault(); event.stopPropagation();" class="shrink-0 rounded-lg bg-emerald-600 hover:bg-emerald-500 px-2.5 py-1 text-[11px] font-semibold text-white">Approve</button>';
+}
+
 const TV_ACCORDION_TOGGLE_CLASS = 'tv-accordion-toggle inline-flex items-center justify-center rounded-md border border-gray-600/80 bg-surface-900/70 px-2.5 py-1 text-xs font-medium leading-4 text-gray-200 shadow-sm transition-colors hover:border-brand-400/70 hover:bg-surface-800 hover:text-white focus:outline-none focus:ring-2 focus:ring-brand-400/60 focus:ring-offset-2 focus:ring-offset-surface-900';
 
 function renderTvAccordionToggle(scope, requestId, seasonNumber = null) {
@@ -545,6 +563,9 @@ function renderSeasonAccordion(data) {
                 ? episodeReleases.map(function(r) { return renderReleaseCard(r, requestId, { bucket: true }); }).join('')
                 : '<div class="text-gray-500 text-sm py-2">No cached episode results yet. Search for new checks missing aired episodes; Full search refreshes all aired episode results.</div>';
             const topRelease = episodeReleases.find(isUsableCachedRelease);
+            const stagedTorrent = isStaged
+                ? stagedTorrentForEpisode(data.active_staged_torrents, season.season_number, ep.episode_number)
+                : null;
             const showInlineActions = !isComplete;
 
             return '<details id="' + episodeDetailsId + '" class="group rounded-lg border ' + (isStaged ? 'border-gray-700/60 bg-cyan-950/10' : 'border-gray-700/40 bg-surface-900/50') + '" ontoggle="window.updateTvAccordionControls && window.updateTvAccordionControls()"' + (isOpen ? ' open' : '') + '>' +
@@ -554,7 +575,7 @@ function renderSeasonAccordion(data) {
                     '<span class="min-w-0 flex-1 basis-[55%] text-[13px] lg:text-sm text-white truncate lg:basis-auto">' + window.escapeHtml(ep.title || 'Untitled') + '</span>' +
                     '<div class="ml-auto flex flex-wrap items-center justify-end gap-2 shrink-0">' +
                         '<span class="badge ' + badgeClass + '">' + window.escapeHtml(ep.status || 'unknown') + '</span>' +
-                        (showInlineActions ? renderStageTopEpisodeButton(requestId, topRelease) : '') +
+                        (isStaged ? renderApproveTopEpisodeButton(stagedTorrent) : showInlineActions ? renderStageTopEpisodeButton(requestId, topRelease) : '') +
                         (showInlineActions
                             ? '<button type="button" onclick="markEpisodeAvailable(' + requestId + ', ' + ep.id + '); event.stopPropagation();" class="shrink-0 text-xs text-brand-400 hover:text-brand-300">Mark Available</button>'
                             : '') +
@@ -808,6 +829,9 @@ async function stageIndividualEpisodes(btn, requestId, seasonNumber) {
 // flight.
 async function inlineStagedAction(actionUrl, btn = null) {
     const originalText = btn ? btn.textContent : '';
+    const approvedEpisodeDetailsId = actionUrl.endsWith('/approve')
+        ? btn?.closest?.('details[id^="episode-details-"]')?.id || null
+        : null;
     if (btn) {
         btn.disabled = true;
         btn.textContent = '…';
@@ -828,6 +852,11 @@ async function inlineStagedAction(actionUrl, btn = null) {
         if (window.refreshStagedTabData) await window.refreshStagedTabData();
         if (window.openRequestDetails && window.currentRequestId) {
             await window.openRequestDetails(window.currentRequestId, window.currentDetailsIndex, { preserveUiState: true });
+        }
+        if (approvedEpisodeDetailsId) {
+            const approvedEpisodeDetails = document.getElementById(approvedEpisodeDetailsId);
+            if (approvedEpisodeDetails) approvedEpisodeDetails.open = false;
+            if (window.updateTvAccordionControls) window.updateTvAccordionControls();
         }
         window.showToast(data.message || 'Staged torrent updated');
     } catch (err) {

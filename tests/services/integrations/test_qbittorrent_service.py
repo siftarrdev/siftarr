@@ -203,6 +203,24 @@ class TestQbittorrentServiceUnit:
             )
 
     @pytest.mark.asyncio
+    async def test_get_unfinished_torrents_keeps_unknown_progress(self):
+        service = QbittorrentService(settings=MagicMock())
+        with patch.object(
+            service,
+            "get_all_active_torrents_or_raise",
+            AsyncMock(
+                return_value=[
+                    {"hash": "active", "progress": 0.5},
+                    {"hash": "done", "progress": 1.0},
+                    {"hash": "unknown", "progress": None},
+                ]
+            ),
+        ):
+            torrents = await service.get_unfinished_torrents_or_raise()
+
+        assert [torrent["hash"] for torrent in torrents] == ["active", "unknown"]
+
+    @pytest.mark.asyncio
     async def test_set_torrent_location_moves_by_default(self):
         with patch("app.siftarr.config.get_settings") as mock_get_settings:
             mock_get_settings.return_value = MagicMock()

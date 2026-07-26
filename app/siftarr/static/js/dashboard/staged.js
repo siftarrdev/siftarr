@@ -19,87 +19,53 @@ function _stopStagedStatusPoll() {
 }
 
 async function _patchStagedDownloadStatus() {
+    const downloadingContent = document.getElementById('content-downloading');
+    if (!downloadingContent || downloadingContent.classList.contains('hidden')) return;
     try {
-        const response = await fetch('/staged/download-status');
+        const response = await fetch('/api/downloads');
         if (!response.ok) return;
         const data = await response.json();
-        if ((data.torrents || []).some((torrent) => torrent.refresh_staged_tab)) {
-            await refreshDownloadingTabData();
-            return;
-        }
-        const activeTorrentIds = new Set((data.torrents || []).map((torrent) => String(torrent.id)));
-        const staleApprovedRows = Array.from(
-            document.querySelectorAll('#downloading-torrents-body tr, #downloading-torrent-cards [data-torrent-id]')
-        ).filter((row) => !activeTorrentIds.has(row.dataset.torrentId || ''));
-        if (staleApprovedRows.length > 0) {
-            await refreshDownloadingTabData();
-            return;
-        }
-
-        for (const torrent of (data.torrents || [])) {
-            const rows = document.querySelectorAll(`#downloading-torrents-body tr[data-torrent-id="${torrent.id}"], #downloading-torrent-cards [data-torrent-id="${torrent.id}"]`);
-            if (rows.length === 0) continue;
-
-            for (const row of rows) {
-                const progress = torrent.qbit_progress_percent;
-                const progressEl = row.querySelector('[data-download-progress]');
-                if (progressEl) {
-                    progressEl.textContent = progress === null || progress === undefined ? '—' : `${progress.toFixed(1)}%`;
-                }
-                row.dataset.progress = progress === null || progress === undefined ? '-1' : String(progress);
-
-                const etaSeconds = torrent.qbit_eta_seconds;
-                const etaEl = row.querySelector('[data-download-eta]');
-                if (etaEl) etaEl.textContent = formatEta(etaSeconds);
-                row.dataset.eta = etaSeconds === null || etaSeconds === undefined || etaSeconds < 0 ? '999999999' : String(etaSeconds);
-
-                const stateSpan = row.querySelector('[data-download-state]');
-                if (stateSpan) {
-                    const waitingForPlex = !!torrent.waiting_for_plex;
-                    const stateLabel = waitingForPlex
-                        ? 'qBittorrent finished; waiting for Plex'
-                        : (torrent.qbit_state || 'sent to qBittorrent');
-                    const done = torrent.qbit_complete || (torrent.qbit_progress !== null && torrent.qbit_progress !== undefined && torrent.qbit_progress >= 1.0);
-                    stateSpan.className = `badge ${waitingForPlex ? 'badge-yellow' : (done ? 'badge-green' : 'badge-blue')}`;
-                    stateSpan.textContent = stateLabel;
-                    row.dataset.state = waitingForPlex ? 'qbit_finished_waiting_plex' : stateLabel.toLowerCase();
-                    row.dataset.qbitFinishedWaitingPlex = waitingForPlex ? 'true' : 'false';
-                }
-
-                const reqStateTd = row.querySelector('[data-request-state-cell]');
-                if (reqStateTd && torrent.request_status) {
-                    const span = reqStateTd.querySelector('.badge');
-                    if (span) {
-                        const rs = torrent.request_status;
-                        const cls = rs === 'downloading' ? 'badge-blue' : rs === 'staged' ? 'badge-yellow' : 'badge-gray';
-                        span.className = `badge ${cls}`;
-                        span.textContent = rs;
-                        row.dataset.requeststate = rs;
-                    }
-                }
-
-                const moveCell = row.querySelector('[data-move-cell]');
-                if (moveCell) {
-                    const status = torrent.move_status || 'pending';
-                    const badge = moveCell.querySelector('[data-move-status]');
-                    if (badge) {
-                        const cls = status === 'moved' ? 'badge-green' : status === 'error' ? 'badge-red' : 'badge-gray';
-                        badge.className = `badge ${cls}`;
-                        badge.textContent = status;
-                    }
-                    const movedPath = moveCell.querySelector('[data-moved-path]');
-                    if (movedPath) {
-                        movedPath.textContent = torrent.moved_path || '';
-                        movedPath.title = torrent.moved_path || '';
-                        movedPath.classList.toggle('hidden', !torrent.moved_path);
-                    }
-                    row.dataset.movestatus = status;
-                }
-            }
-        }
+        if (!data.qbit_unavailable) renderQbitDownloads(data.torrents || []);
     } catch (_err) {
         // silently ignore poll errors
     }
+}
+
+function qbitNumber(value, divisor = 1, digits = 1) {
+    return Number.isFinite(Number(value)) ? `${(Number(value) / divisor).toFixed(digits)}` : '—';
+}
+
+function qbitManagedActions(managed, card = false) {
+    if (!managed) return '<span class="text-xs text-gray-500">Not managed by Siftarr</span>';
+    const requestId = Number(managed.request_id);
+    const torrentId = Number(managed.id);
+    if (!Number.isInteger(requestId) || !Number.isInteger(torrentId)) return '';
+    const classes = card ? 'btn-ghost btn-sm' : 'text-brand-400 hover:text-brand-300 font-medium';
+    const deleteClasses = card ? 'btn-danger btn-sm' : 'text-red-400 hover:text-red-300 font-medium';
+    return `<button type="button" onclick="openRequestDetails(${requestId})" class="${classes}">Details</button><button type="button" onclick="checkNow(${torrentId})" class="${classes}">Check Now</button><button type="button" onclick="if (confirm('Delete this torrent and downloaded data from qBittorrent, then return the request to pending?')) postStagedAction('/staged/${torrentId}/delete-download', '/?tab=downloading')" class="${deleteClasses}">Delete</button>`;
+}
+
+function renderQbitDownloads(torrents) {
+    const cards = document.getElementById('downloading-torrent-cards');
+    const body = document.getElementById('downloading-torrents-body');
+    if (!cards || !body) return;
+    const escape = window.escapeHtml;
+    const rows = torrents.map((torrent) => {
+        const name = escape(torrent.name || torrent.hash || 'Unnamed torrent');
+        const hash = escape(torrent.hash || '-');
+        const state = escape(torrent.state || '-');
+        const category = escape(torrent.category || '-');
+        const progress = qbitNumber(
+            torrent.progress === null || torrent.progress === undefined ? null : Number(torrent.progress) * 100
+        );
+        const eta = formatEta(torrent.eta);
+        const speed = `${qbitNumber(torrent.dlspeed, 1024 * 1024)} MB/s`;
+        const size = `${qbitNumber(torrent.size, 1024 * 1024 * 1024, 2)} GB`;
+        const managedData = torrent.managed ? ` data-torrent-id="${Number(torrent.managed.id)}"` : '';
+        return { torrent, name, hash, state, category, progress, eta, speed, size, managedData };
+    });
+    cards.innerHTML = rows.length ? rows.map(({ torrent, name, hash, state, category, progress, eta, size, managedData }) => `<div class="rounded-xl border border-gray-700/60 bg-surface-850 p-3"${managedData}><div class="overflow-wrap-anywhere text-sm font-semibold text-white">${name}</div><div class="mt-2 grid grid-cols-2 gap-2 text-xs text-gray-400"><div><div class="text-gray-500">Progress</div><div>${progress}%</div></div><div><div class="text-gray-500">State</div><div>${state}</div></div><div><div class="text-gray-500">ETA</div><div>${eta}</div></div><div><div class="text-gray-500">Category</div><div>${category}</div></div><div><div class="text-gray-500">Size</div><div>${size}</div></div><div class="col-span-2"><div class="text-gray-500">Hash</div><div class="truncate" title="${hash}">${hash}</div></div></div><div class="mt-3 grid grid-cols-3 gap-2">${qbitManagedActions(torrent.managed, true)}</div></div>`).join('') : '<p class="text-sm text-gray-500">No unfinished qBittorrent torrents.</p>';
+    body.innerHTML = rows.length ? rows.map(({ torrent, name, hash, state, category, progress, eta, speed, size, managedData }) => `<tr class="hover:bg-surface-850/80"${managedData}><td class="px-5 py-3.5 text-sm font-medium text-white max-w-sm"><div class="truncate" title="${name}">${name}</div><div class="mt-1 truncate text-xs text-gray-500" title="${hash}">${hash}</div></td><td class="px-5 py-3.5 text-sm text-gray-400 tabular-nums" data-download-progress>${progress}%</td><td class="px-5 py-3.5 text-sm text-gray-400">${state}</td><td class="px-5 py-3.5 text-sm text-gray-400 tabular-nums" data-download-eta>${eta}</td><td class="px-5 py-3.5 text-sm text-gray-400 tabular-nums">${speed}</td><td class="px-5 py-3.5 text-sm text-gray-400 tabular-nums">${size}</td><td class="px-5 py-3.5 text-sm text-gray-400">${category}</td><td class="px-5 py-3.5 text-sm"><div class="flex items-center gap-3">${qbitManagedActions(torrent.managed)}</div></td></tr>`).join('') : '<tr><td colspan="8" class="px-5 py-6 text-sm text-gray-500">No unfinished qBittorrent torrents.</td></tr>';
 }
 
 function formatEta(seconds) {

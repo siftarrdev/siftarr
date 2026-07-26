@@ -530,6 +530,62 @@ def test_dashboard_js_focuses_staged_tv_episode_after_reload():
     assert "collapseStagedTvScope" not in js
 
 
+def test_dashboard_js_uses_matching_episode_stage_for_approve_and_collapses_it():
+    """A staged episode approves its own torrent, then only its drawer closes."""
+    js_path = os.path.join(
+        os.path.dirname(__file__), "../../../app/siftarr/static/js/dashboard/releases.js"
+    )
+    script = textwrap.dedent(
+        f"""
+        const fs = require('fs');
+        const approved = {{id: 'episode-details-9-1-2', open: true}};
+        const sibling = {{id: 'episode-details-9-1-3', open: true}};
+        global.document = {{
+          getElementById: (id) => id === approved.id ? approved : id === sibling.id ? sibling : null,
+          querySelectorAll: () => [],
+        }};
+        global.window = {{
+          escapeHtml: (value) => String(value),
+          siftarrStagingModeEnabled: true,
+          detailsControlState: {{}},
+          currentRequestId: 9,
+          currentDetailsIndex: 0,
+          refreshStagedTabData: async () => {{}},
+          openRequestDetails: async () => {{ sibling.open = true; }},
+          showToast: () => {{}},
+        }};
+        eval(fs.readFileSync({js_path!r}, 'utf8'));
+        const html = renderSeasonAccordion({{
+          request: {{id: 9}},
+          active_staged_torrents: [
+            {{id: 71, status: 'staged', target_scope: {{type: 'single_episode', season_number: 1, episode_number: 3}}}},
+            {{id: 72, status: 'staged', target_scope: {{type: 'single_episode', season_number: 1, episode_number: 2}}}},
+          ],
+          tv_info: {{
+            seasons: [{{id: 1, season_number: 1, status: 'staged', available_count: 0, total_count: 2, staged_count: 1, pending_count: 1, unreleased_count: 0, episodes: [
+              {{id: 2, episode_number: 2, title: 'Two', status: 'staged'}},
+              {{id: 3, episode_number: 3, title: 'Three', status: 'pending'}},
+            ]}}],
+            releases_by_episode: {{'1-2': [{{id: 200, passed: true, download_url: 'https://example.test/torrent'}}]}},
+            releases_by_season: {{}}, aggregate_counts: {{available: 0, total: 2}},
+          }},
+        }});
+        if (!html.includes("/staged/72/approve") || html.includes("stageTopEpisodeRelease(this, 9, 200)")) {{
+          throw new Error('staged episode did not render its matching Approve action');
+        }}
+        global.fetch = async () => ({{ok: true, json: async () => ({{}})}});
+        inlineStagedAction('/staged/72/approve', {{
+          textContent: 'Approve', disabled: false,
+          closest: () => ({{id: approved.id}}),
+        }}).then(() => {{
+          if (approved.open || !sibling.open) throw new Error('approval collapsed the wrong drawer');
+        }}).catch((error) => {{ console.error(error); process.exit(1); }});
+        """
+    )
+
+    subprocess.run(["node", "-e", script], check=True)
+
+
 def test_dashboard_template_staged_details_uses_row_card_clicks(dashboard_template_path):
     with open(dashboard_template_path, encoding="utf-8") as handle:
         template = handle.read()

@@ -31,10 +31,12 @@ from app.siftarr.models.staged_torrent import (
 )
 from app.siftarr.services.dashboard.tv_details_service import load_tv_seasons_with_episodes_bulk
 from app.siftarr.services.integrations.overseerr_service import OverseerrService
+from app.siftarr.services.integrations.qbittorrent_service import QbittorrentService
 from app.siftarr.services.lifecycle.episode_derive import derive_tv_display_label
 from app.siftarr.services.lifecycle.lifecycle_service import LifecycleService
 from app.siftarr.services.releases.release_parser import movie_release_identity_rejection_reason
 from app.siftarr.services.utils.http_client import get_shared_client
+from app.siftarr.services.utils.torrent_identity import normalize_torrent_name
 
 logger = logging.getLogger(__name__)
 
@@ -70,6 +72,90 @@ def _is_actionable_workflow_torrent(
     if torrent.request_id is None or torrent.status == STAGED_STATUS_STAGED:
         return True
     return is_active_staging_workflow_status(request_statuses.get(torrent.request_id))
+
+
+def _match_qbit_torrents(
+    qbit_torrents: list[dict], managed_torrents: list[StagedTorrent]
+) -> list[dict]:
+    """Attach a managed torrent only when its hash or unique name matches qBit."""
+    by_hash = {
+        torrent.info_hash.lower(): torrent for torrent in managed_torrents if torrent.info_hash
+    }
+    by_name: dict[str, StagedTorrent | None] = {}
+    for torrent in managed_torrents:
+        name = normalize_torrent_name(torrent.title)
+        if not name:
+            continue
+        by_name[name] = torrent if name not in by_name else None
+
+    matched: list[dict] = []
+    for qbit_torrent in qbit_torrents:
+        torrent_hash = str(qbit_torrent.get("hash") or "").lower()
+        managed = by_hash.get(torrent_hash)
+        if managed is None:
+            managed = by_name.get(normalize_torrent_name(str(qbit_torrent.get("name") or "")))
+        matched.append({**qbit_torrent, "managed_torrent": managed})
+    return matched
+
+
+def _serialize_qbit_download(torrent: dict) -> dict:
+    """Return qBit metadata plus the minimum, server-authorized action data."""
+    managed = torrent.get("managed_torrent")
+    row = {
+        key: torrent.get(key)
+        for key in ("hash", "name", "size", "progress", "state", "category", "eta", "dlspeed")
+    }
+    if managed is not None:
+        row["managed"] = {
+            "id": managed.id,
+            "request_id": managed.request_id,
+            "move_status": managed.move_status or "pending",
+            "moved_path": managed.moved_path,
+        }
+    else:
+        row["managed"] = None
+    return row
+
+
+@router.get("/api/downloads")
+async def qbit_downloads_api(db: AsyncSession = Depends(get_db)):
+    """Return the current unfinished qBit queue and authorized managed matches."""
+    settings = get_settings()
+    if not settings.qbittorrent_url:
+        return {"torrents": [], "qbit_unavailable": True}
+
+    try:
+        qbit_torrents = await QbittorrentService(
+            settings=settings
+        ).get_unfinished_torrents_or_raise()
+    except Exception:
+        logger.warning("Unable to refresh unfinished qBittorrent torrents")
+        return {"torrents": [], "qbit_unavailable": True}
+
+    result = await db.execute(
+        select(StagedTorrent).where(StagedTorrent.status.in_(ACTIVE_STAGED_STATUSES))
+    )
+    candidates = list(result.scalars().all())
+    request_ids = {torrent.request_id for torrent in candidates if torrent.request_id is not None}
+    request_statuses: dict[int, RequestStatus] = {}
+    if request_ids:
+        request_result = await db.execute(
+            select(RequestModel.id, RequestModel.status).where(RequestModel.id.in_(request_ids))
+        )
+        for request_id, status in request_result.all():
+            request_statuses[request_id] = status
+    managed = [
+        torrent
+        for torrent in candidates
+        if torrent.status == STAGED_STATUS_APPROVED
+        and torrent.request_id is not None
+        and is_active_staging_workflow_status(request_statuses.get(torrent.request_id))
+    ]
+    matched = _match_qbit_torrents(qbit_torrents, managed)
+    return {
+        "torrents": [_serialize_qbit_download(torrent) for torrent in matched],
+        "qbit_unavailable": False,
+    }
 
 
 @router.get("/")
@@ -359,6 +445,44 @@ async def dashboard(
     )
     denied_requests = list(denied_result.scalars().all())
 
+    # The downloads view is a direct qBittorrent view.  Do not limit it to
+    # torrents Siftarr knows about; a managed match only enables lifecycle
+    # actions for that one row.
+    qbit_unavailable = False
+    qbit_downloads: list[dict] = []
+    if effective_settings.qbittorrent_url:
+        try:
+            qbit_downloads = await QbittorrentService(
+                settings=effective_settings
+            ).get_unfinished_torrents_or_raise()
+        except Exception:
+            logger.warning("Unable to load unfinished qBittorrent torrents")
+            qbit_unavailable = True
+    else:
+        qbit_unavailable = True
+    managed_downloading_torrents = downloading_torrents
+    if qbit_unavailable:
+        # Keep the last-known managed queue useful when qBit is down.  It is
+        # explicitly labelled unavailable in the UI and is not counted as a
+        # live qBit result.
+        qbit_downloading_torrents = [
+            {
+                "hash": torrent.info_hash,
+                "name": torrent.title,
+                "progress": None,
+                "state": "qBittorrent unavailable",
+                "category": None,
+                "eta": None,
+                "dlspeed": None,
+                "managed_torrent": torrent,
+            }
+            for torrent in managed_downloading_torrents
+        ]
+    else:
+        qbit_downloading_torrents = _match_qbit_torrents(
+            qbit_downloads, managed_downloading_torrents
+        )
+
     # Attach display_label to every request passed to the template.
     # For TV, derive from episode data when available (safety net against
     # stale cached status); fall back to the DB-level status otherwise.
@@ -395,6 +519,8 @@ async def dashboard(
             "pending_requests": pending_requests,
             "staged_torrents": staged_torrents,
             "downloading_torrents": downloading_torrents,
+            "qbit_downloading_torrents": qbit_downloading_torrents,
+            "qbit_unavailable": qbit_unavailable,
             "staged_request_statuses": staged_request_statuses,
             "downloading_request_statuses": downloading_request_statuses,
             "downloading_request_ids": downloading_request_ids,
@@ -412,7 +538,7 @@ async def dashboard(
                 "active": len(filtered_requests),
                 "pending": len(pending_requests),
                 "staged": len(staged_torrents),
-                "downloading": len(downloading_torrents),
+                "downloading": len(qbit_downloading_torrents),
                 "completed": len(completed_requests),
                 "unreleased": len(unreleased_requests),
                 "denied": len(denied_requests),

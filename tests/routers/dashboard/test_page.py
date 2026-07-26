@@ -31,6 +31,21 @@ def test_staged_js_refreshes_approval_targets_and_current_stat_cards(dashboard_t
     assert "[data-dashboard-stat-cards]" in js
 
 
+def test_downloading_poll_uses_current_qbit_queue_endpoint(dashboard_template_path):
+    js_path = dashboard_template_path.parents[1] / "static/js/dashboard/staged.js"
+    js = js_path.read_text()
+    template = dashboard_template_path.read_text()
+
+    assert "fetch('/api/downloads')" in js
+    assert "function renderQbitDownloads(torrents)" in js
+    assert "Not managed by Siftarr" in js
+    assert (
+        '<th class="px-5 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500">Size</th>'
+        in template
+    )
+    assert "((torrent.size or 0) / 1024 / 1024 / 1024)|round(2)" in template
+
+
 @pytest.mark.asyncio
 async def test_pending_requests_include_searching_requests(mock_db, monkeypatch):
     """Pending tab should keep in-flight searches visible."""
