@@ -21,7 +21,6 @@ from app.siftarr.models.request import (
     MediaType,
     Request,
     RequestStatus,
-    is_active_staging_workflow_status,
     is_terminal_request_status,
 )
 from app.siftarr.models.staged_torrent import StagedTorrent
@@ -1059,11 +1058,14 @@ async def get_download_status(
         for req_id, req_status in req_result.all():
             request_statuses[req_id] = req_status
 
+    # Approved torrents are active downloads in their own right.  TV requests
+    # with mixed episode states can derive back to PENDING/SEARCHING while a
+    # torrent is still downloading, so only drop rows for terminal requests.
     torrents = [
         torrent
         for torrent in torrents
         if torrent.request_id is None
-        or is_active_staging_workflow_status(request_statuses.get(torrent.request_id))
+        or not is_terminal_request_status(request_statuses.get(torrent.request_id))
     ]
 
     if not torrents:

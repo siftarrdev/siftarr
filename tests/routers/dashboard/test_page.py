@@ -896,17 +896,22 @@ async def test_dashboard_splits_staged_downloading_and_hides_stale_torrents(mock
 
     context = response.context
     assert context["staged_torrents"] == [staged_torrent]
-    assert context["downloading_torrents"] == [active_torrent]
+    # Approved torrents stay visible for any non-terminal request status; TV
+    # requests can derive back to PENDING while an episode is downloading.
+    assert context["downloading_torrents"] == [active_torrent, pending_torrent]
     assert context["stats"]["staged"] == 1
-    assert context["stats"]["downloading"] == 1
-    assert context["downloading_request_statuses"] == {100: RequestStatus.DOWNLOADING.value}
+    assert context["stats"]["downloading"] == 2
+    assert context["downloading_request_statuses"] == {
+        100: RequestStatus.DOWNLOADING.value,
+        102: RequestStatus.PENDING.value,
+    }
     body = response.body.decode()
     assert "Ready To Review" in body
     assert "content-downloading" in body
     assert "downloading-torrents-body" in body
     assert "Still Downloading" in body
     assert "Already Completed" not in body
-    assert "Still Pending" not in body
+    assert "Still Pending" in body
 
 
 @pytest.mark.asyncio
@@ -992,6 +997,71 @@ async def test_dashboard_keeps_tv_staged_approve_actions_after_one_episode_is_ap
     assert "postStagedAction('/staged/12/approve', '/?tab=staged')" in body
     assert "openReplaceModal(11" not in body
     assert "openReplaceModal(12" not in body
+
+
+@pytest.mark.asyncio
+async def test_dashboard_shows_approved_tv_torrent_when_request_derives_pending(
+    mock_db, monkeypatch
+):
+    """An approved TV episode torrent stays in Downloads while siblings are PENDING.
+
+    Regression test: with mixed episode statuses (one DOWNLOADING, others
+    PENDING) the request-level status derives to PENDING, which previously
+    hid the actively downloading approved torrent from the Downloads tab.
+    """
+    lifecycle_service = AsyncMock()
+    lifecycle_service.get_active_requests.return_value = []
+    lifecycle_service.get_requests_by_status.return_value = []
+    lifecycle_service.get_unreleased_requests.return_value = []
+    lifecycle_service.get_requests_stats.return_value = {"by_status": {}}
+    monkeypatch.setattr(dashboard, "LifecycleService", lambda db: lifecycle_service)
+
+    monkeypatch.setattr(
+        dashboard,
+        "get_settings",
+        lambda: MagicMock(
+            overseerr_url="http://overseerr.test",
+            staging_mode_enabled=True,
+            qbittorrent_url="http://qb.test",
+        ),
+    )
+
+    approved_torrent = MagicMock()
+    approved_torrent.id = 1
+    approved_torrent.request_id = 400
+    approved_torrent.title = "Example Show S01E01 1080p WEB-DL"
+    approved_torrent.status = "approved"
+    approved_torrent.size = 1024 * 1024 * 1024
+    approved_torrent.indexer = "Indexer"
+    approved_torrent.score = 90
+    approved_torrent.created_at = datetime(2026, 4, 1, 12, 0, tzinfo=UTC)
+    approved_torrent.replaced_by_id = None
+    approved_torrent.replacement_reason = None
+
+    staged_result = MagicMock(
+        scalars=MagicMock(return_value=MagicMock(all=MagicMock(return_value=[approved_torrent])))
+    )
+    request_status_result = MagicMock()
+    request_status_result.all.return_value = [
+        (400, RequestStatus.PENDING, MediaType.TV, "Example Show", 2026)
+    ]
+    denied_result = MagicMock(
+        scalars=MagicMock(return_value=MagicMock(all=MagicMock(return_value=[])))
+    )
+    mock_db.execute.side_effect = [
+        staged_result,
+        request_status_result,
+        denied_result,
+    ]
+
+    response = await dashboard.dashboard(MagicMock(), db=mock_db)
+
+    context = response.context
+    assert context["downloading_torrents"] == [approved_torrent]
+    assert context["downloading_request_statuses"] == {400: RequestStatus.PENDING.value}
+    assert context["stats"]["downloading"] == 1
+    body = response.body.decode()
+    assert "Example Show S01E01 1080p WEB-DL" in body
 
 
 @pytest.mark.asyncio

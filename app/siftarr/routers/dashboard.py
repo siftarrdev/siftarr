@@ -19,7 +19,7 @@ from app.siftarr.models.episode import Episode
 from app.siftarr.models.request import (
     MediaType,
     RequestStatus,
-    is_active_staging_workflow_status,
+    is_terminal_request_status,
 )
 from app.siftarr.models.request import Request as RequestModel
 from app.siftarr.models.season import Season
@@ -71,7 +71,11 @@ def _is_actionable_workflow_torrent(
     """Return whether a staged_torrent row should appear on active dashboard tabs."""
     if torrent.request_id is None or torrent.status == STAGED_STATUS_STAGED:
         return True
-    return is_active_staging_workflow_status(request_statuses.get(torrent.request_id))
+    # Approved torrents are active downloads in their own right.  TV requests
+    # with mixed episode states can derive back to PENDING/SEARCHING while a
+    # torrent is still downloading, so only hide approved rows once the request
+    # reaches a terminal state (completed/failed/denied).
+    return not is_terminal_request_status(request_statuses.get(torrent.request_id))
 
 
 def _match_qbit_torrents(
@@ -149,7 +153,7 @@ async def qbit_downloads_api(db: AsyncSession = Depends(get_db)):
         for torrent in candidates
         if torrent.status == STAGED_STATUS_APPROVED
         and torrent.request_id is not None
-        and is_active_staging_workflow_status(request_statuses.get(torrent.request_id))
+        and not is_terminal_request_status(request_statuses.get(torrent.request_id))
     ]
     matched = _match_qbit_torrents(qbit_torrents, managed)
     return {
@@ -208,8 +212,10 @@ async def dashboard(
     # Only hide request-linked torrents that are no longer actionable.  Staged
     # rows are themselves actionable even when a TV request is only partially
     # staged and therefore derives an aggregate request status like ``pending``.
-    # Approved rows, however, must still be scoped to active staged/downloading
-    # requests so completed TV history is not shown as still in qBittorrent.
+    # Approved rows stay visible for any non-terminal request status: TV
+    # requests with mixed episode states can derive back to ``pending`` while a
+    # torrent is still downloading, and terminal statuses (completed/failed/
+    # denied) still hide finished history.
     active_workflow_torrents = [
         t
         for t in active_workflow_torrents
@@ -221,7 +227,7 @@ async def dashboard(
         for t in active_workflow_torrents
         if t.status == STAGED_STATUS_APPROVED
         and t.request_id is not None
-        and is_active_staging_workflow_status(raw_staged_request_statuses.get(t.request_id))
+        and not is_terminal_request_status(raw_staged_request_statuses.get(t.request_id))
     ]
     downloading_request_statuses = {
         request_id: status

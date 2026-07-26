@@ -11,10 +11,10 @@ from sqlalchemy.orm import selectinload
 
 from app.siftarr.models.activity_log import ActivityLog, EventType
 from app.siftarr.models.request import (
-    ACTIVE_STAGING_WORKFLOW_STATUSES,
+    NON_TERMINAL_REQUEST_STATUSES,
     Request,
     RequestStatus,
-    is_active_staging_workflow_status,
+    is_terminal_request_status,
 )
 from app.siftarr.models.season import Season
 from app.siftarr.models.staged_torrent import StagedTorrent
@@ -95,7 +95,7 @@ class DownloadCompletionService:
         """Check all approved torrents and reconcile requests when downloads finish.
 
         Steps:
-        1. Query StagedTorrents with status=="approved" whose Request is DOWNLOADING.
+        1. Query StagedTorrents with status=="approved" whose Request is non-terminal.
         2. For each torrent determine qBit progress (via hash or name fragment).
         3. Mark torrents as qBit-done when progress >= 1.0 or not found in qBit.
         4. When ANY approved torrent for a request is qBit-done, check Plex.
@@ -104,20 +104,24 @@ class DownloadCompletionService:
         Returns:
             Number of requests reconciled this cycle.
         """
-        # 1. Fetch all approved torrents whose request is still actively staged or downloading.
+        # 1. Fetch all approved torrents whose request is not terminal.  An
+        # approved torrent is an active download in its own right: TV requests
+        # with mixed episode states can derive back to PENDING/SEARCHING while
+        # a torrent is still downloading, so gating on STAGED/DOWNLOADING would
+        # skip reconciliation for those torrents forever.
         stmt = (
             select(StagedTorrent, Request)
             .join(Request, Request.id == StagedTorrent.request_id)
             .where(
                 StagedTorrent.status == "approved",
-                Request.status.in_(ACTIVE_STAGING_WORKFLOW_STATUSES),
+                Request.status.in_(NON_TERMINAL_REQUEST_STATUSES),
             )
             .options(selectinload(Request.seasons).selectinload(Season.episodes))
         )
         rows = [
             (torrent, request)
             for torrent, request in list((await self.db.execute(stmt)).all())
-            if is_active_staging_workflow_status(request.status)
+            if not is_terminal_request_status(request.status)
         ]
 
         if not rows:

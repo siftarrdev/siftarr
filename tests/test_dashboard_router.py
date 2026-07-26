@@ -98,3 +98,71 @@ async def test_downloads_api_refreshes_unmanaged_queue_and_authorized_matches(mo
     assert [row["hash"] for row in payload["torrents"]] == ["abc123", "manual"]
     assert payload["torrents"][0]["managed"]["id"] == 7
     assert payload["torrents"][1]["managed"] is None
+
+
+def _downloads_api_db(managed, request_status):
+    db = MagicMock()
+    db.execute = AsyncMock(
+        side_effect=[
+            MagicMock(
+                scalars=MagicMock(return_value=MagicMock(all=MagicMock(return_value=[managed])))
+            ),
+            MagicMock(all=MagicMock(return_value=[(managed.request_id, request_status)])),
+        ]
+    )
+    return db
+
+
+def _patch_downloads_api_qbit(monkeypatch):
+    qbit_service = SimpleNamespace(
+        get_unfinished_torrents_or_raise=AsyncMock(
+            return_value=[{"hash": "abc123", "name": "Managed Release", "progress": 0.5}]
+        )
+    )
+    monkeypatch.setattr(
+        dashboard, "get_settings", lambda: SimpleNamespace(qbittorrent_url="http://qb")
+    )
+    monkeypatch.setattr(dashboard, "QbittorrentService", lambda settings: qbit_service)
+
+
+def _approved_torrent():
+    return SimpleNamespace(
+        id=7,
+        request_id=42,
+        status="approved",
+        info_hash="abc123",
+        title="Managed Release",
+        move_status="pending",
+        moved_path=None,
+    )
+
+
+@pytest.mark.asyncio
+async def test_downloads_api_keeps_approved_torrent_when_tv_request_derives_pending(monkeypatch):
+    """A single-episode approval derives the TV request back to PENDING, but the
+    approved torrent is still downloading and must stay visible."""
+    _patch_downloads_api_qbit(monkeypatch)
+    managed = _approved_torrent()
+
+    payload = await dashboard.qbit_downloads_api(
+        db=_downloads_api_db(managed, RequestStatus.PENDING)
+    )
+
+    assert payload["torrents"][0]["managed"] == {
+        "id": 7,
+        "request_id": 42,
+        "move_status": "pending",
+        "moved_path": None,
+    }
+
+
+@pytest.mark.asyncio
+async def test_downloads_api_drops_approved_torrent_for_terminal_request(monkeypatch):
+    _patch_downloads_api_qbit(monkeypatch)
+    managed = _approved_torrent()
+
+    payload = await dashboard.qbit_downloads_api(
+        db=_downloads_api_db(managed, RequestStatus.COMPLETED)
+    )
+
+    assert payload["torrents"][0]["managed"] is None
