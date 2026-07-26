@@ -591,7 +591,9 @@ def test_dashboard_template_staged_details_uses_row_card_clicks(dashboard_templa
         template = handle.read()
 
     staged_section = template[
-        template.index('id="content-staged"') : template.index("{# ═══════════════ TORRENT STATUS TAB")
+        template.index('id="content-staged"') : template.index(
+            "{# ═══════════════ TORRENT STATUS TAB"
+        )
     ]
     assert "openStagedRequestDetailsFromElement(this)" in staged_section
     assert "openRequestDetails({{ torrent.request_id }})" not in staged_section
@@ -868,12 +870,12 @@ def test_completed_torrents_table_is_column_resizable(dashboard_template_path):
         "uploaded",
         "ratio",
         "state",
-        "category",
         "actions",
     ):
         assert f'<col data-col-key="{key}"' in table
         assert f'data-col-key="{key}" style="position: relative;"' in table
-    assert table.count('<div class="resize-handle"></div>') == 8
+    assert 'data-col-key="category"' not in table
+    assert table.count('<div class="resize-handle"></div>') == 7
 
 
 def test_downloads_poll_guards_overlap_and_hidden_tabs():
@@ -895,7 +897,19 @@ def test_downloading_torrents_table_is_column_resizable(dashboard_template_path)
     table = template.split('id="downloading-torrents-table"')[1].split("</table>")[0]
 
     assert "<colgroup>" in table
-    for key in ("name", "progress", "state", "eta", "speed", "size", "category", "actions"):
+    for key in ("name", "progress", "state", "eta", "speed", "size", "actions"):
         assert f'<col data-col-key="{key}"' in table
         assert f'data-col-key="{key}" style="position: relative;"' in table
-    assert table.count('<div class="resize-handle"></div>') == 8
+    assert 'data-col-key="category"' not in table
+    assert table.count('<div class="resize-handle"></div>') == 7
+
+
+def test_group_collapse_state_ors_table_and_card_representations():
+    """Capturing must not let the untouched mobile <details> clobber the table row."""
+    js = _read_dashboard_js()
+
+    capture = js.split("function captureQbitGroupState(")[1].split("\nfunction ")[0]
+
+    assert "state[key] = !!state[key] || !!open;" in capture
+    assert "state[el.dataset.downloadGroup] = !!el.open;" not in capture
+    assert "document.querySelectorAll(`tr[data-download-group]" in capture

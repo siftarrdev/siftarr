@@ -132,13 +132,22 @@ function qbitGroupKey(group) {
 // Collapse state is keyed by request_id (via the group key) and captured/restored
 // around every re-render, mirroring the accordion pattern in releases.js. Without
 // it a 1s poll would slam every expanded group shut.
+//
+// The desktop table header row and the mobile <details> card share one group key,
+// so the two representations are OR-ed together: a group counts as expanded when
+// either is open. Overwriting instead of OR-ing collapsed every desktop group on
+// each poll, because the untouched mobile card always reported open === false.
 function captureQbitGroupState(prefix) {
     const state = {};
-    document.querySelectorAll(`[data-download-group][data-group-prefix="${prefix}"]`).forEach((el) => {
-        state[el.dataset.downloadGroup] = el.getAttribute('aria-expanded') === 'true';
+    const record = (key, open) => {
+        if (key === undefined) return;
+        state[key] = !!state[key] || !!open;
+    };
+    document.querySelectorAll(`tr[data-download-group][data-group-prefix="${prefix}"]`).forEach((el) => {
+        record(el.dataset.downloadGroup, el.getAttribute('aria-expanded') === 'true');
     });
     document.querySelectorAll(`details[data-download-group][data-group-prefix="${prefix}"]`).forEach((el) => {
-        state[el.dataset.downloadGroup] = !!el.open;
+        record(el.dataset.downloadGroup, el.open);
     });
     return state;
 }
@@ -176,6 +185,15 @@ function toggleQbitGroup(prefix, key) {
     );
     if (!header) return;
     setQbitGroupOpen(prefix, key, header.getAttribute('aria-expanded') !== 'true');
+}
+
+// Lower-confidence matches are labelled so a title-only grouping is never
+// mistaken for a torrent Siftarr actually staged.
+const QBIT_MATCH_LABELS = { staged: 'Staged match', title: 'Title match' };
+
+function qbitMatchBadge(match) {
+    const label = QBIT_MATCH_LABELS[match];
+    return label ? `<span class="badge badge-gray">${label}</span>` : '';
 }
 
 function qbitGroupTotalsText(totals, showSpeeds) {
@@ -220,7 +238,7 @@ function renderQbitGroups(groups, options) {
         const summary = escape(qbitGroupTotalsText(totals, showSpeeds));
         const count = Number(group.count) || torrents.length;
         tableChunks.push(
-            `<tr class="bg-surface-850/70 cursor-pointer" data-download-group="${escape(key)}" data-group-prefix="${prefix}" aria-expanded="false" onclick="toggleQbitGroup('${prefix}', '${escape(key)}')"><td colspan="${colspan}" class="px-5 py-3 text-sm"><div class="flex flex-wrap items-center gap-x-3 gap-y-1"><span class="text-gray-500" data-group-chevron>▸</span><span class="overflow-wrap-anywhere font-semibold text-white">${title}</span><span class="badge badge-gray">${count}</span><span class="ml-auto text-xs text-gray-400 tabular-nums">${summary}</span></div></td></tr>`,
+            `<tr class="bg-surface-850/70 cursor-pointer" data-download-group="${escape(key)}" data-group-prefix="${prefix}" aria-expanded="false" onclick="toggleQbitGroup('${prefix}', '${escape(key)}')"><td colspan="${colspan}" class="px-5 py-3 text-sm"><div class="flex flex-wrap items-center gap-x-3 gap-y-1"><span class="text-gray-500" data-group-chevron>▸</span><span class="overflow-wrap-anywhere font-semibold text-white">${title}</span><span class="badge badge-gray">${count}</span>${qbitMatchBadge(group.match)}<span class="ml-auto text-xs text-gray-400 tabular-nums">${summary}</span></div></td></tr>`,
         );
         torrents.forEach((torrent) => {
             tableChunks.push(
@@ -246,7 +264,6 @@ function renderQbitDownloads(groups) {
         const name = escape(torrent.name || torrent.hash || 'Unnamed torrent');
         const hash = escape(torrent.hash || '-');
         const state = escape(torrent.state || '-');
-        const category = escape(torrent.category || '-');
         const progress = qbitNumber(
             torrent.progress === null || torrent.progress === undefined ? null : Number(torrent.progress) * 100
         );
@@ -254,20 +271,20 @@ function renderQbitDownloads(groups) {
         const speed = `${qbitNumber(torrent.dlspeed, 1024 * 1024)} MB/s`;
         const size = `${qbitNumber(torrent.size, 1024 * 1024 * 1024, 2)} GB`;
         const managedData = torrent.managed ? ` data-torrent-id="${Number(torrent.managed.id)}"` : '';
-        return { name, hash, state, category, progress, eta, speed, size, managedData };
+        return { name, hash, state, progress, eta, speed, size, managedData };
     };
     const rowHtml = (torrent, groupAttrs, child = false) => {
-        const { name, hash, state, category, progress, eta, speed, size, managedData } = view(torrent);
+        const { name, hash, state, progress, eta, speed, size, managedData } = view(torrent);
         const rowClass = child ? 'hover:bg-surface-850/80 hidden' : 'hover:bg-surface-850/80';
-        return `<tr class="${rowClass}"${groupAttrs}${managedData}><td class="px-5 py-3.5 text-sm font-medium text-white max-w-sm"><div class="truncate" title="${name}">${name}</div><div class="mt-1 truncate text-xs text-gray-500" title="${hash}">${hash}</div></td><td class="px-5 py-3.5 text-sm text-gray-400 tabular-nums" data-download-progress>${progress}%</td><td class="px-5 py-3.5 text-sm text-gray-400">${state}</td><td class="px-5 py-3.5 text-sm text-gray-400 tabular-nums" data-download-eta>${eta}</td><td class="px-5 py-3.5 text-sm text-gray-400 tabular-nums">${speed}</td><td class="px-5 py-3.5 text-sm text-gray-400 tabular-nums">${size}</td><td class="px-5 py-3.5 text-sm text-gray-400">${category}</td><td class="px-5 py-3.5 text-sm"><div class="flex items-center gap-3">${qbitManagedActions(torrent.managed)}</div></td></tr>`;
+        return `<tr class="${rowClass}"${groupAttrs}${managedData}><td class="px-5 py-3.5 text-sm font-medium text-white max-w-sm"><div class="truncate" title="${name}">${name}</div><div class="mt-1 truncate text-xs text-gray-500" title="${hash}">${hash}</div></td><td class="px-5 py-3.5 text-sm text-gray-400 tabular-nums" data-download-progress>${progress}%</td><td class="px-5 py-3.5 text-sm text-gray-400">${state}</td><td class="px-5 py-3.5 text-sm text-gray-400 tabular-nums" data-download-eta>${eta}</td><td class="px-5 py-3.5 text-sm text-gray-400 tabular-nums">${speed}</td><td class="px-5 py-3.5 text-sm text-gray-400 tabular-nums">${size}</td><td class="px-5 py-3.5 text-sm"><div class="flex items-center gap-3">${qbitManagedActions(torrent.managed)}</div></td></tr>`;
     };
     const cardHtml = (torrent) => {
-        const { name, hash, state, category, progress, eta, size, managedData } = view(torrent);
-        return `<div class="rounded-xl border border-gray-700/60 bg-surface-850 p-3"${managedData}><div class="overflow-wrap-anywhere text-sm font-semibold text-white">${name}</div><div class="mt-2 grid grid-cols-2 gap-2 text-xs text-gray-400"><div><div class="text-gray-500">Progress</div><div>${progress}%</div></div><div><div class="text-gray-500">State</div><div>${state}</div></div><div><div class="text-gray-500">ETA</div><div>${eta}</div></div><div><div class="text-gray-500">Category</div><div>${category}</div></div><div><div class="text-gray-500">Size</div><div>${size}</div></div><div class="col-span-2"><div class="text-gray-500">Hash</div><div class="overflow-wrap-anywhere" title="${hash}">${hash}</div></div></div><div class="mt-3 grid grid-cols-3 gap-2">${qbitManagedActions(torrent.managed, true)}</div></div>`;
+        const { name, hash, state, progress, eta, size, managedData } = view(torrent);
+        return `<div class="rounded-xl border border-gray-700/60 bg-surface-850 p-3"${managedData}><div class="overflow-wrap-anywhere text-sm font-semibold text-white">${name}</div><div class="mt-2 grid grid-cols-2 gap-2 text-xs text-gray-400"><div><div class="text-gray-500">Progress</div><div>${progress}%</div></div><div><div class="text-gray-500">State</div><div>${state}</div></div><div><div class="text-gray-500">ETA</div><div>${eta}</div></div><div><div class="text-gray-500">Size</div><div>${size}</div></div><div class="col-span-2"><div class="text-gray-500">Hash</div><div class="overflow-wrap-anywhere" title="${hash}">${hash}</div></div></div><div class="mt-3 grid grid-cols-3 gap-2">${qbitManagedActions(torrent.managed, true)}</div></div>`;
     };
     renderQbitGroups(groups, {
         prefix: 'dl',
-        colspan: 8,
+        colspan: 7,
         showSpeeds: true,
         rowHtml,
         cardHtml,
@@ -289,7 +306,6 @@ function renderQbitCompleted(groups) {
         name: escape(torrent.name || torrent.hash || 'Unnamed torrent'),
         hash: escape(torrent.hash || '-'),
         state: escape(torrent.state || '-'),
-        category: escape(torrent.category || '-'),
         size: qbitBytes(torrent.size),
         downloaded: qbitBytes(torrent.downloaded),
         uploaded: qbitBytes(torrent.uploaded),
@@ -297,17 +313,17 @@ function renderQbitCompleted(groups) {
         managedData: torrent.managed ? ` data-torrent-id="${Number(torrent.managed.id)}"` : '',
     });
     const rowHtml = (torrent, groupAttrs, child = false) => {
-        const { name, hash, state, category, size, downloaded, uploaded, ratio, managedData } = view(torrent);
+        const { name, hash, state, size, downloaded, uploaded, ratio, managedData } = view(torrent);
         const rowClass = child ? 'hover:bg-surface-850/80 hidden' : 'hover:bg-surface-850/80';
-        return `<tr class="${rowClass}"${groupAttrs}${managedData}><td class="px-5 py-3.5 text-sm font-medium text-white max-w-sm"><div class="truncate" title="${name}">${name}</div><div class="mt-1 truncate text-xs text-gray-500" title="${hash}">${hash}</div></td><td class="px-5 py-3.5 text-sm text-gray-400 tabular-nums">${size}</td><td class="px-5 py-3.5 text-sm text-gray-400 tabular-nums">${downloaded}</td><td class="px-5 py-3.5 text-sm text-gray-400 tabular-nums">${uploaded}</td><td class="px-5 py-3.5 text-sm text-gray-400 tabular-nums">${ratio}</td><td class="px-5 py-3.5 text-sm text-gray-400">${state}</td><td class="px-5 py-3.5 text-sm text-gray-400">${category}</td><td class="px-5 py-3.5 text-sm"><div class="flex items-center gap-3">${qbitManagedActions(torrent.managed)}</div></td></tr>`;
+        return `<tr class="${rowClass}"${groupAttrs}${managedData}><td class="px-5 py-3.5 text-sm font-medium text-white max-w-sm"><div class="truncate" title="${name}">${name}</div><div class="mt-1 truncate text-xs text-gray-500" title="${hash}">${hash}</div></td><td class="px-5 py-3.5 text-sm text-gray-400 tabular-nums">${size}</td><td class="px-5 py-3.5 text-sm text-gray-400 tabular-nums">${downloaded}</td><td class="px-5 py-3.5 text-sm text-gray-400 tabular-nums">${uploaded}</td><td class="px-5 py-3.5 text-sm text-gray-400 tabular-nums">${ratio}</td><td class="px-5 py-3.5 text-sm text-gray-400">${state}</td><td class="px-5 py-3.5 text-sm"><div class="flex items-center gap-3">${qbitManagedActions(torrent.managed)}</div></td></tr>`;
     };
     const cardHtml = (torrent) => {
-        const { name, hash, state, category, size, downloaded, uploaded, ratio, managedData } = view(torrent);
-        return `<div class="rounded-xl border border-gray-700/60 bg-surface-850 p-3"${managedData}><div class="overflow-wrap-anywhere text-sm font-semibold text-white">${name}</div><div class="mt-2 grid grid-cols-2 gap-2 text-xs text-gray-400"><div><div class="text-gray-500">Size</div><div>${size}</div></div><div><div class="text-gray-500">Ratio</div><div>${ratio}</div></div><div><div class="text-gray-500">Downloaded</div><div>${downloaded}</div></div><div><div class="text-gray-500">Uploaded</div><div>${uploaded}</div></div><div><div class="text-gray-500">State</div><div>${state}</div></div><div><div class="text-gray-500">Category</div><div>${category}</div></div><div class="col-span-2"><div class="text-gray-500">Hash</div><div class="overflow-wrap-anywhere" title="${hash}">${hash}</div></div></div><div class="mt-3 grid grid-cols-3 gap-2">${qbitManagedActions(torrent.managed, true)}</div></div>`;
+        const { name, hash, state, size, downloaded, uploaded, ratio, managedData } = view(torrent);
+        return `<div class="rounded-xl border border-gray-700/60 bg-surface-850 p-3"${managedData}><div class="overflow-wrap-anywhere text-sm font-semibold text-white">${name}</div><div class="mt-2 grid grid-cols-2 gap-2 text-xs text-gray-400"><div><div class="text-gray-500">Size</div><div>${size}</div></div><div><div class="text-gray-500">Ratio</div><div>${ratio}</div></div><div><div class="text-gray-500">Downloaded</div><div>${downloaded}</div></div><div><div class="text-gray-500">Uploaded</div><div>${uploaded}</div></div><div><div class="text-gray-500">State</div><div>${state}</div></div><div class="col-span-2"><div class="text-gray-500">Hash</div><div class="overflow-wrap-anywhere" title="${hash}">${hash}</div></div></div><div class="mt-3 grid grid-cols-3 gap-2">${qbitManagedActions(torrent.managed, true)}</div></div>`;
     };
     renderQbitGroups(groups, {
         prefix: 'cp',
-        colspan: 8,
+        colspan: 7,
         showSpeeds: false,
         rowHtml,
         cardHtml,

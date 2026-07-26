@@ -298,6 +298,33 @@ def _is_complete_series_match(
     return len(season_numbers) != 1
 
 
+def parse_release_title_identity(release_title: str) -> str | None:
+    """Return the leading series/movie title of a release or torrent name.
+
+    TV releases are cut at the first season/episode marker; anything else falls
+    back to the movie title/year parser.  Returns ``None`` when nothing usable
+    remains.
+    """
+    if not release_title:
+        return None
+
+    starts = [
+        match.start()
+        for pattern in (
+            *_SEASON_EPISODE_PATTERNS,
+            *_SEASON_RANGE_PATTERNS,
+            *_SEASON_PACK_PATTERNS,
+        )
+        if (match := pattern.search(release_title)) is not None
+    ]
+    if starts:
+        prefix = release_title[: min(starts)].strip(" ._-[()]")
+        if prefix:
+            return prefix
+
+    return parse_movie_release_identity(release_title).title
+
+
 def parse_release_coverage(title: str) -> ParsedReleaseCoverage:
     """Parse season coverage and episode details from a release title."""
     if not title:

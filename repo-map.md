@@ -161,7 +161,7 @@ Business logic and integrations, organized into thematic subpackages:
 - `tv_details_service.py` — TV details and sync metadata helpers
 - `tv_enrichment_service.py` — TV season/episode enrichment (season data, coverage-based release grouping)
 - `search_service.py` — ad hoc release evaluation/selection, request search orchestration
-- `torrent_grouping.py` — shared qBit-to-staged-torrent matching, row serialization, and request-grouped payload building for the Torrent Status APIs (live qBit view only, no persisted history)
+- `torrent_grouping.py` — tiered qBit-to-request matching (hash → staged name → other staged statuses → parsed release title), row serialization, and request-grouped payload building for the Torrent Status APIs (live qBit view only, no persisted history)
 
 **`decisions/`** — Rule engine and decision pipeline
 - `rule_engine.py` — release filtering and scoring evaluation; module-level rule version cache (`_rule_version`)

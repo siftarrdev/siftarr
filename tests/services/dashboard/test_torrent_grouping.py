@@ -7,7 +7,11 @@ import pytest
 
 from app.siftarr.models.request import MediaType, RequestStatus
 from app.siftarr.routers import dashboard
-from app.siftarr.services.dashboard.torrent_grouping import group_matched_torrents
+from app.siftarr.services.dashboard.torrent_grouping import (
+    build_request_title_index,
+    group_matched_torrents,
+    match_qbit_torrents,
+)
 
 
 def _managed(request_id, *, torrent_id=1, info_hash="hash", title="Managed"):
@@ -148,3 +152,82 @@ async def test_downloads_endpoint_reports_qbit_unavailable(monkeypatch):
     payload = await dashboard.qbit_downloads_api(db=MagicMock())
 
     assert payload == {"groups": [], "qbit_unavailable": True}
+
+
+def _staged(request_id, *, torrent_id=9, info_hash=None, title="Staged", status="staged"):
+    return SimpleNamespace(
+        id=torrent_id,
+        request_id=request_id,
+        status=status,
+        info_hash=info_hash,
+        title=title,
+        move_status="pending",
+        moved_path=None,
+    )
+
+
+def test_title_index_ignores_ambiguous_and_tiny_titles():
+    index = build_request_title_index(
+        {
+            1: ("The Expanse", MediaType.TV),
+            2: ("the.expanse", MediaType.TV),
+            3: ("X", MediaType.MOVIE),
+            4: ("Severance", MediaType.TV),
+        }
+    )
+
+    assert index == {"the expanse": None, "severance": 4}
+
+
+def test_torrent_matched_only_by_parsed_title_groups_without_managed_actions():
+    matched = match_qbit_torrents(
+        [{"hash": "zz", "name": "Severance.S02E03.1080p.WEB-DL.x265"}],
+        [],
+        title_index={"severance": 4},
+    )
+
+    assert matched[0]["managed_torrent"] is None
+    assert matched[0]["match_type"] == "title"
+    assert matched[0]["matched_request_id"] == 4
+
+    groups = group_matched_torrents(matched, {4: ("Severance", MediaType.TV)})
+
+    assert groups[0]["title"] == "Severance"
+    assert groups[0]["match"] == "title"
+    assert groups[0]["torrents"][0]["managed"] is None
+    assert groups[0]["torrents"][0]["match"] == "title"
+
+
+def test_ambiguous_parsed_title_stays_unmanaged():
+    matched = match_qbit_torrents(
+        [{"hash": "zz", "name": "The.Expanse.S01.1080p.BluRay"}],
+        [],
+        title_index={"the expanse": None},
+    )
+
+    groups = group_matched_torrents(matched, {})
+
+    assert matched[0]["match_type"] is None
+    assert groups[0]["title"] == "Unmanaged"
+    assert groups[0]["match"] is None
+
+
+def test_hash_and_name_matches_win_over_lower_confidence_tiers():
+    approved_hash = _managed(1, torrent_id=1, info_hash="AAA", title="Irrelevant")
+    approved_name = _managed(2, torrent_id=2, info_hash=None, title="Severance S02E03 1080p")
+    other_staged = _staged(3, torrent_id=3, info_hash="CCC", title="Discarded Release")
+
+    matched = match_qbit_torrents(
+        [
+            {"hash": "aaa", "name": "Severance.S02E03.1080p"},
+            {"hash": "nohash", "name": "Severance.S02E03.1080p"},
+            {"hash": "ccc", "name": "Whatever"},
+        ],
+        [approved_hash, approved_name],
+        fallback_torrents=[other_staged],
+        title_index={"severance": 4},
+    )
+
+    assert [row["match_type"] for row in matched] == ["hash", "name", "staged"]
+    assert [row["matched_request_id"] for row in matched] == [1, 2, 3]
+    assert matched[2]["managed_torrent"] is other_staged
