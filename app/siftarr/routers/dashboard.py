@@ -32,7 +32,6 @@ from app.siftarr.models.staged_torrent import (
 from app.siftarr.services.dashboard.torrent_grouping import (
     build_grouped_torrent_payload,
     match_qbit_torrents,
-    serialize_qbit_download,
 )
 from app.siftarr.services.dashboard.tv_details_service import load_tv_seasons_with_episodes_bulk
 from app.siftarr.services.integrations.overseerr_service import OverseerrService
@@ -80,10 +79,6 @@ def _is_actionable_workflow_torrent(
     # torrent is still downloading, so only hide approved rows once the request
     # reaches a terminal state (completed/failed/denied).
     return not is_terminal_request_status(request_statuses.get(torrent.request_id))
-
-
-_match_qbit_torrents = match_qbit_torrents
-_serialize_qbit_download = serialize_qbit_download
 
 
 @router.get("/api/downloads")
@@ -450,7 +445,7 @@ async def dashboard(
             for torrent in managed_downloading_torrents
         ]
     else:
-        qbit_downloading_torrents = _match_qbit_torrents(
+        qbit_downloading_torrents = match_qbit_torrents(
             qbit_downloads, managed_downloading_torrents
         )
 

@@ -233,3 +233,32 @@ def test_hash_and_name_matches_win_over_lower_confidence_tiers():
     assert [row["match_type"] for row in matched] == ["hash", "name", "staged"]
     assert [row["matched_request_id"] for row in matched] == [1, 2, 3]
     assert matched[2]["managed_torrent"] is other_staged
+
+
+def test_group_match_tier_reports_weakest_tier_present():
+    """A group is only as trustworthy as its least-confident member."""
+    matched = [
+        {"hash": "a", "name": "A", "match_type": "hash", "matched_request_id": 1},
+        {"hash": "b", "name": "B", "match_type": "title", "matched_request_id": 1},
+        {"hash": "c", "name": "C", "match_type": "name", "matched_request_id": 1},
+    ]
+
+    groups = group_matched_torrents(matched, {1: ("Show", MediaType.TV)})
+
+    assert groups[0]["match"] == "title"
+
+
+def test_unknown_match_tier_ranks_as_weakest_not_strongest():
+    """An unrecognized tier must degrade confidence, never overstate it.
+
+    Guards the regression where unknown tiers mapped to index -1 and so won
+    the ``max()`` as though they were the strongest possible match.
+    """
+    matched = [
+        {"hash": "a", "name": "A", "match_type": "hash", "matched_request_id": 1},
+        {"hash": "b", "name": "B", "match_type": "speculative", "matched_request_id": 1},
+    ]
+
+    groups = group_matched_torrents(matched, {1: ("Show", MediaType.TV)})
+
+    assert groups[0]["match"] == "speculative"

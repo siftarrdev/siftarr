@@ -13,7 +13,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.siftarr.models.request import Request as RequestModel
 from app.siftarr.models.request import RequestStatus, is_terminal_request_status
 from app.siftarr.models.staged_torrent import (
-    ACTIVE_STAGED_STATUSES,
     STAGED_STATUS_APPROVED,
     StagedTorrent,
 )
@@ -172,12 +171,22 @@ def _empty_totals() -> dict[str, int | float]:
     return dict.fromkeys(_TOTAL_FIELDS, 0)
 
 
+def _tier_rank(tier: str) -> int:
+    """Rank a tier by confidence: lower is stronger.
+
+    Unrecognized tiers sort as weakest rather than strongest, so adding a tier
+    to the matcher without updating :data:`MATCH_TIERS` degrades a group's
+    reported confidence instead of silently overstating it.
+    """
+    return MATCH_TIERS.index(tier) if tier in MATCH_TIERS else len(MATCH_TIERS)
+
+
 def _group_match_tier(rows: list[dict]) -> str | None:
     """Weakest tier present in a group, so the UI can label its confidence."""
     tiers = [row.get("match") for row in rows if row.get("match")]
     if not tiers:
         return None
-    return max(tiers, key=lambda tier: MATCH_TIERS.index(tier) if tier in MATCH_TIERS else -1)
+    return max(tiers, key=_tier_rank)
 
 
 def group_matched_torrents(
@@ -237,35 +246,6 @@ def group_matched_torrents(
     return ordered
 
 
-async def load_managed_torrents(
-    db: AsyncSession, *, exclude_terminal_requests: bool
-) -> tuple[list[StagedTorrent], dict[int, RequestStatus]]:
-    """Return approved staged torrents eligible for qBit matching."""
-    result = await db.execute(
-        select(StagedTorrent).where(StagedTorrent.status.in_(ACTIVE_STAGED_STATUSES))
-    )
-    candidates = list(result.scalars().all())
-    request_ids = {torrent.request_id for torrent in candidates if torrent.request_id is not None}
-    request_statuses: dict[int, RequestStatus] = {}
-    if request_ids:
-        request_result = await db.execute(
-            select(RequestModel.id, RequestModel.status).where(RequestModel.id.in_(request_ids))
-        )
-        for request_id, status in request_result.all():
-            request_statuses[request_id] = status
-    managed = [
-        torrent
-        for torrent in candidates
-        if torrent.status == STAGED_STATUS_APPROVED
-        and torrent.request_id is not None
-        and (
-            not exclude_terminal_requests
-            or not is_terminal_request_status(request_statuses.get(torrent.request_id))
-        )
-    ]
-    return managed, request_statuses
-
-
 async def load_match_candidates(
     db: AsyncSession, *, exclude_terminal_requests: bool
 ) -> tuple[list[StagedTorrent], list[StagedTorrent]]:
@@ -304,20 +284,6 @@ async def load_match_candidates(
 async def load_all_request_info(db: AsyncSession) -> dict[int, tuple[str | None, Any]]:
     """Fetch display title and media type for every request in one query."""
     result = await db.execute(select(RequestModel.id, RequestModel.title, RequestModel.media_type))
-    return {row[0]: (row[1], row[2]) for row in result.all()}
-
-
-async def load_request_info(
-    db: AsyncSession, request_ids: set[int]
-) -> dict[int, tuple[str | None, Any]]:
-    """Fetch display title and media type for the given requests in one query."""
-    if not request_ids:
-        return {}
-    result = await db.execute(
-        select(RequestModel.id, RequestModel.title, RequestModel.media_type).where(
-            RequestModel.id.in_(request_ids)
-        )
-    )
     return {row[0]: (row[1], row[2]) for row in result.all()}
 
 
