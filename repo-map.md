@@ -124,7 +124,7 @@ Database entities and enums.
 HTTP route layer.
 
 - `auth_router.py` — Plex SSO auth endpoints (login page, first-login admin claim, initial Plex sync gate page/completion, same-admin token refresh, guarded full Plex sync kick-off after later successful admin sign-in, non-admin denial UX, logout, session info); included without global auth dependency
-- `dashboard.py` — main dashboard page routes; downloads list reflects all unfinished qBittorrent torrents, with lifecycle actions limited to matched Siftarr rows
+- `dashboard.py` — main dashboard page routes; `GET /api/downloads` (unfinished) and `GET /api/torrents/completed` (live completed) both return qBittorrent torrents grouped by owning Siftarr request with per-group totals, lifecycle actions limited to matched Siftarr rows
 - `dashboard_api.py` — dashboard JSON endpoints for details/search/history data, including validated detail-release filter/sort query controls
 - `dashboard_actions.py` — dashboard-triggered actions and mutations
 - `search_sse.py` — SSE streaming endpoints for live search progress; `/requests/{id}/search/stream` supports TV `search_mode=new|full`, while TV scope-specific streams remain compatibility/debug inspect paths
@@ -161,6 +161,7 @@ Business logic and integrations, organized into thematic subpackages:
 - `tv_details_service.py` — TV details and sync metadata helpers
 - `tv_enrichment_service.py` — TV season/episode enrichment (season data, coverage-based release grouping)
 - `search_service.py` — ad hoc release evaluation/selection, request search orchestration
+- `torrent_grouping.py` — tiered qBit-to-request matching (hash → staged name → other staged statuses → parsed release title), row serialization, and request-grouped payload building for the Torrent Status APIs (live qBit view only, no persisted history)
 
 **`decisions/`** — Rule engine and decision pipeline
 - `rule_engine.py` — release filtering and scoring evaluation; module-level rule version cache (`_rule_version`)

@@ -5,7 +5,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from app.siftarr.models import StagedTorrent
-from app.siftarr.models.request import RequestStatus
+from app.siftarr.models.request import MediaType, RequestStatus
 from app.siftarr.routers import dashboard
 from app.siftarr.routers.dashboard import (
     _is_actionable_workflow_torrent,
@@ -85,6 +85,7 @@ async def test_downloads_api_refreshes_unmanaged_queue_and_authorized_matches(mo
                 scalars=MagicMock(return_value=MagicMock(all=MagicMock(return_value=[managed])))
             ),
             MagicMock(all=MagicMock(return_value=[(42, RequestStatus.DOWNLOADING)])),
+            MagicMock(all=MagicMock(return_value=[(42, "Managed Show", MediaType.TV)])),
         ]
     )
     monkeypatch.setattr(
@@ -95,9 +96,11 @@ async def test_downloads_api_refreshes_unmanaged_queue_and_authorized_matches(mo
     payload = await dashboard.qbit_downloads_api(db=db)
 
     assert payload["qbit_unavailable"] is False
-    assert [row["hash"] for row in payload["torrents"]] == ["abc123", "manual"]
-    assert payload["torrents"][0]["managed"]["id"] == 7
-    assert payload["torrents"][1]["managed"] is None
+    groups = payload["groups"]
+    assert [group["title"] for group in groups] == ["Managed Show", "Unmanaged"]
+    assert groups[0]["torrents"][0]["managed"]["id"] == 7
+    assert groups[1]["unmanaged"] is True
+    assert groups[1]["torrents"][0]["managed"] is None
 
 
 def _downloads_api_db(managed, request_status):
@@ -108,6 +111,9 @@ def _downloads_api_db(managed, request_status):
                 scalars=MagicMock(return_value=MagicMock(all=MagicMock(return_value=[managed])))
             ),
             MagicMock(all=MagicMock(return_value=[(managed.request_id, request_status)])),
+            MagicMock(
+                all=MagicMock(return_value=[(managed.request_id, "Managed Show", MediaType.TV)])
+            ),
         ]
     )
     return db
@@ -148,7 +154,11 @@ async def test_downloads_api_keeps_approved_torrent_when_tv_request_derives_pend
         db=_downloads_api_db(managed, RequestStatus.PENDING)
     )
 
-    assert payload["torrents"][0]["managed"] == {
+    group = payload["groups"][0]
+    assert group["request_id"] == 42
+    assert group["title"] == "Managed Show"
+    assert group["media_type"] == "tv"
+    assert group["torrents"][0]["managed"] == {
         "id": 7,
         "request_id": 42,
         "move_status": "pending",
@@ -165,4 +175,6 @@ async def test_downloads_api_drops_approved_torrent_for_terminal_request(monkeyp
         db=_downloads_api_db(managed, RequestStatus.COMPLETED)
     )
 
-    assert payload["torrents"][0]["managed"] is None
+    group = payload["groups"][0]
+    assert group["unmanaged"] is True
+    assert group["torrents"][0]["managed"] is None

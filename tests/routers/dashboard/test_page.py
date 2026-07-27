@@ -36,8 +36,9 @@ def test_downloading_poll_uses_current_qbit_queue_endpoint(dashboard_template_pa
     js = js_path.read_text()
     template = dashboard_template_path.read_text()
 
-    assert "fetch('/api/downloads')" in js
-    assert "function renderQbitDownloads(torrents)" in js
+    assert "'/api/torrents/completed' : '/api/downloads'" in js
+    assert "function renderQbitDownloads(groups)" in js
+    assert "const groups = data.groups || [];" in js
     assert "Not managed by Siftarr" in js
     assert (
         '<th class="px-5 py-3 text-left text-xs font-medium uppercase tracking-wider'

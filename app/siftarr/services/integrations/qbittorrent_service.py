@@ -225,6 +225,9 @@ class QbittorrentService:
             "seeding_time": getattr(torrent, "seeding_time", None),
             "eta": getattr(torrent, "eta", None),
             "dlspeed": getattr(torrent, "dlspeed", None),
+            "upspeed": getattr(torrent, "upspeed", None),
+            "downloaded": getattr(torrent, "downloaded", None),
+            "uploaded": getattr(torrent, "uploaded", None),
         }
 
     async def authenticate(self) -> bool:
@@ -578,15 +581,24 @@ class QbittorrentService:
         return unfinished
 
     async def get_completed_torrents(self) -> list[dict]:
-        """Get completed torrents from qBittorrent."""
+        """Get completed torrents from qBittorrent, returning [] on failure."""
         try:
-            torrents = await asyncio.to_thread(
-                self.client.torrents_info,
-                status_filter="completed",
-            )
-            return [self._serialize_torrent(t) for t in torrents]
+            return await self.get_completed_torrents_or_raise()
         except Exception:
             return []
+
+    async def get_completed_torrents_or_raise(self) -> list[dict]:
+        """Return completed torrents, propagating qBittorrent failures.
+
+        Callers that must distinguish "qBittorrent is unreachable" from
+        "there are no completed torrents" need this variant; the swallowing
+        wrapper above reports both as an empty list.
+        """
+        torrents = await asyncio.to_thread(
+            self.client.torrents_info,
+            status_filter="completed",
+        )
+        return [self._serialize_torrent(t) for t in torrents]
 
     async def set_torrent_location(
         self,
