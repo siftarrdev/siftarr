@@ -183,7 +183,7 @@ def _tier_rank(tier: str) -> int:
 
 def _group_match_tier(rows: list[dict]) -> str | None:
     """Weakest tier present in a group, so the UI can label its confidence."""
-    tiers = [row.get("match") for row in rows if row.get("match")]
+    tiers: list[str] = [tier for row in rows if (tier := row.get("match"))]
     if not tiers:
         return None
     return max(tiers, key=_tier_rank)
