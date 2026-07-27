@@ -7,10 +7,10 @@ import pytest
 from app.siftarr.models import StagedTorrent
 from app.siftarr.models.request import MediaType, RequestStatus
 from app.siftarr.routers import dashboard
-from app.siftarr.routers.dashboard import (
-    _is_actionable_workflow_torrent,
-    _match_qbit_torrents,
-    _serialize_qbit_download,
+from app.siftarr.routers.dashboard import _is_actionable_workflow_torrent
+from app.siftarr.services.dashboard.torrent_grouping import (
+    match_qbit_torrents,
+    serialize_qbit_download,
 )
 
 
@@ -33,7 +33,7 @@ def test_qbit_torrents_include_unmanaged_and_match_unique_managed_hash():
         SimpleNamespace(id=7, title="Managed.Release", info_hash="ABC123"),
     )
 
-    rows = _match_qbit_torrents(
+    rows = match_qbit_torrents(
         [{"hash": "abc123", "name": "renamed"}, {"hash": "other", "name": "Manual"}],
         [managed],
     )
@@ -45,10 +45,10 @@ def test_qbit_torrents_include_unmanaged_and_match_unique_managed_hash():
 def test_qbit_download_payload_only_exposes_actions_for_managed_match():
     managed = SimpleNamespace(id=7, request_id=42, move_status=None, moved_path=None)
 
-    row = _serialize_qbit_download(
+    row = serialize_qbit_download(
         {"hash": "abc123", "name": "Managed", "progress": 0.5, "managed_torrent": managed}
     )
-    unmanaged = _serialize_qbit_download({"hash": "other", "name": "Manual"})
+    unmanaged = serialize_qbit_download({"hash": "other", "name": "Manual"})
 
     assert row["managed"] == {
         "id": 7,
