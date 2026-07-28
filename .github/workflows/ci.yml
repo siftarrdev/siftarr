@@ -4,7 +4,6 @@ on:
   push:
     branches: [main, develop]
   pull_request:
-    branches: [main, develop]
 
 jobs:
   quality:
@@ -69,3 +68,31 @@ jobs:
           push: false
           build-args: |
             SIFTARR_VERSION=0.0.0
+
+  commit-author:
+    name: Commit author policy
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: read
+    steps:
+      - name: Require commits attributed to siftarrdev
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          commit_count=$(gh api "repos/$REPOSITORY/pulls/$PR_NUMBER" --jq '.commits')
+          if [ "$commit_count" -gt 250 ]; then
+            echo "Cannot validate all $commit_count commits; split this PR into smaller PRs."
+            exit 1
+          fi
+
+          invalid_commits=$(gh api --paginate "repos/$REPOSITORY/pulls/$PR_NUMBER/commits" \
+            --jq '.[] | select(.author.login != "siftarrdev") | "\(.sha) \(.author.login // "unlinked GitHub identity")"')
+
+          if [ -n "$invalid_commits" ]; then
+            echo "Only commits attributed to siftarrdev are permitted."
+            echo "$invalid_commits"
+            exit 1
+          fi
