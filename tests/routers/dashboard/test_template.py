@@ -1022,3 +1022,29 @@ def test_tailwind_stylesheet_is_cache_busted():
 
     assert "/static/css/tailwind.css?v={{ asset_version() }}" in base
     assert 'href="/static/css/tailwind.css"' not in base
+
+
+def test_episode_release_cards_are_vertically_compact():
+    """Episode drawers list many candidates, so each row stays short."""
+    js = _read_dashboard_js()
+
+    # Bucket (per-episode/per-pack) cards: short padding, tight title/meta lines.
+    assert "px-3 py-2 flex flex-wrap items-start gap-3 lg:flex-nowrap" in js
+    assert "text-[13px] leading-snug text-white font-medium" in js
+    assert "text-[11px] leading-tight text-gray-400" in js
+    assert "space-y-1.5" in js
+    # The taller pre-compaction card padding is gone from the bucket card.
+    assert "py-3.5 flex flex-wrap items-start" not in js
+
+
+def test_tap_touch_target_floor_is_mobile_only():
+    """The 32px tap floor must not pad out compact desktop release rows."""
+    css_path = os.path.join(
+        os.path.dirname(__file__), "../../../app/siftarr/static/css/tailwind-input.css"
+    )
+    with open(css_path, encoding="utf-8") as handle:
+        css = handle.read()
+
+    tap_block = css[css.index("@media (max-width: 1023px)") :]
+    assert ".tap-primary {" in tap_block[:400]
+    assert ".tap {" in tap_block[:400]

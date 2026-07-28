@@ -131,7 +131,7 @@ function renderReleaseCard(release, requestId, options = {}) {
     // Long release titles get two wrapped lines at <lg (with a modest type
     // down-step) instead of a single truncated line, and truncate on desktop
     // where the row is wide enough.
-    const RELEASE_TITLE_CLASS = 'text-[13px] lg:text-sm text-white font-medium overflow-wrap-anywhere line-clamp-2 lg:line-clamp-none lg:truncate';
+    const RELEASE_TITLE_CLASS = 'text-[13px] leading-snug text-white font-medium overflow-wrap-anywhere line-clamp-2 lg:line-clamp-none lg:truncate';
     const titleHtml = stagedBadge
         ? '<div class="flex items-center gap-2 flex-wrap"><span class="' + RELEASE_TITLE_CLASS + '">' + titleText + '</span>' + stagedBadge + '</div>'
         : '<div class="' + RELEASE_TITLE_CLASS + '">' + titleText + '</div>';
@@ -139,7 +139,7 @@ function renderReleaseCard(release, requestId, options = {}) {
     let metaHtml;
     if (rejected) {
         const reason = release.rejection_reason ? ' · ' + window.escapeHtml(release.rejection_reason) : '';
-        metaHtml = '<div class="mt-0.5 text-xs text-red-300/80">Rejected' + reason + '</div>';
+        metaHtml = '<div class="text-[11px] leading-tight text-red-300/80">Rejected' + reason + '</div>';
     } else {
         const metaParts = [
             renderAnnotation(release.resolution, releaseAnnotationTone(release, 'resolution'), 'data-release-resolution="true"'),
@@ -149,7 +149,7 @@ function renderReleaseCard(release, requestId, options = {}) {
             release.files != null ? '<span data-release-files="true">' + window.escapeHtml(String(release.files)) + ' file' + (release.files === 1 ? '' : 's') + '</span>' : '',
             release.indexer ? renderAnnotation(release.indexer, 'text-gray-500', 'data-release-indexer="true"') : '',
         ].filter(Boolean);
-        metaHtml = metaParts.length ? '<div class="mt-0.5 text-[11px] lg:text-xs text-gray-400 flex items-center gap-1.5 lg:gap-2 flex-wrap">' + metaParts.join('<span>·</span>') + '</div>' : '';
+        metaHtml = metaParts.length ? '<div class="text-[11px] leading-tight text-gray-400 flex items-center gap-1.5 lg:gap-2 flex-wrap">' + metaParts.join('<span>·</span>') + '</div>' : '';
     }
 
     const coverageHtml = !rejected && options.coverageHtml ? options.coverageHtml : '';
@@ -213,7 +213,10 @@ function renderReleaseCard(release, requestId, options = {}) {
         const outerClass = activeSelectionMode
             ? 'rounded-xl bg-surface-950'
             : 'rounded-xl border border-gray-700/40 bg-surface-800';
-        return '<div class="' + outerClass + (rejected ? ' opacity-60' : '') + ' px-4 py-3.5 flex flex-wrap items-start gap-4 lg:flex-nowrap lg:items-center">' + scoreGutter + bodyHtml + actionHtml + '</div>';
+        // Compact rows: an episode drawer often lists a dozen candidates, so the
+        // card is padded just enough to stay readable (title + meta on two tight
+        // lines) without turning the drawer into a scroll marathon.
+        return '<div class="' + outerClass + (rejected ? ' opacity-60' : '') + ' px-3 py-2 flex flex-wrap items-start gap-3 lg:flex-nowrap lg:items-center lg:gap-3.5">' + scoreGutter + bodyHtml + actionHtml + '</div>';
     }
 
     const outerClass = activeSelectionMode
@@ -330,7 +333,7 @@ function renderSeasonPacksDrawer(requestId, season, seasonPacks) {
                 '<button type="button" onclick="searchSeasonPacks(' + requestId + ', ' + seasonNumber + '); event.preventDefault(); event.stopPropagation();" class="' + SEASON_PACK_SEARCH_BUTTON_CLASS + '">Search packs</button>' +
             '</div>' +
         '</summary>' +
-        '<div class="px-4 pb-4 pt-1 space-y-2.5" data-season-pack-results="' + requestId + '-' + seasonNumber + '">' +
+        '<div class="px-3 pb-3 pt-0.5 space-y-1.5" data-season-pack-results="' + requestId + '-' + seasonNumber + '">' +
             renderSeasonPackRows(seasonPacks, requestId, season) +
         '</div>' +
     '</details>';
@@ -590,7 +593,7 @@ function renderSeasonAccordion(data) {
                             : '') +
                     '</div>' +
                 '</summary>' +
-                '<div class="pl-8 pr-3 pb-4 pt-1 space-y-2.5">' + episodeBucketHtml + '</div>' +
+                '<div class="pl-8 pr-3 pb-3 pt-0.5 space-y-1.5">' + episodeBucketHtml + '</div>' +
             '</details>';
         }).join('');
         const episodeListHtml = episodeHtml
