@@ -507,10 +507,11 @@ def test_dashboard_js_uses_cyan_staged_release_indicators():
     js = _read_dashboard_js()
 
     assert "'staged': 'badge-cyan'" in js
-    # New score-first card: staged items keep cyan-tinted backgrounds/badges,
-    # but outlines stay in the muted gray border family.
-    assert "bg-cyan-950/20" in js
-    assert "border-gray-700/60 bg-cyan-950/20" in js
+    # Staged episode rows keep a cyan-tinted fill; the staged release card
+    # inside them is a borderless recessed dark box (its fill is the separation,
+    # so no outline is needed).
+    assert "bg-cyan-950/40" in js
+    assert "rounded-xl bg-surface-950" in js
     # Staged badge on the card title uses the inline cyan pill style.
     assert "bg-cyan-900/60 text-cyan-300" in js
 
@@ -1002,3 +1003,13 @@ def test_poster_box_keeps_the_2_by_3_aspect_ratio():
     assert 'id="request-details-poster" class="hidden w-14 aspect-[2/3]' in template
     assert 'id="request-details-poster-fallback" class="flex w-14 aspect-[2/3]' in template
     assert "lg:h-44" not in template
+
+
+def test_tailwind_stylesheet_is_cache_busted():
+    """An unversioned tailwind.css strands browsers on stale utility classes."""
+    base_path = os.path.join(os.path.dirname(__file__), "../../../app/siftarr/templates/base.html")
+    with open(base_path, encoding="utf-8") as handle:
+        base = handle.read()
+
+    assert "/static/css/tailwind.css?v={{ asset_version() }}" in base
+    assert 'href="/static/css/tailwind.css"' not in base

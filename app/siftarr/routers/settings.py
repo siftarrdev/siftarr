@@ -71,9 +71,10 @@ from app.siftarr.services.integrations.overseerr_service import OverseerrService
 from app.siftarr.services.integrations.plex_service import PlexService
 from app.siftarr.services.lifecycle.unreleased_service import evaluate_imported_request
 from app.siftarr.services.releases.release_storage import clear_release_search_cache
+from app.siftarr.templating import configure_templates
 
 router = APIRouter(prefix="/settings", tags=["settings"])
-templates = Jinja2Templates(directory="app/siftarr/templates")
+templates = configure_templates(Jinja2Templates(directory="app/siftarr/templates"))
 logger = logging.getLogger(__name__)
 
 

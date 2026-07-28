@@ -10,7 +10,10 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="/static/css/tailwind.css">
+    {# Cache-busted like every other asset: without ?v= browsers hang on to an
+       old tailwind.css, so utility classes added in a release never arrive and
+       the affected rows render unstyled (e.g. flex rows losing their gaps). #}
+    <link rel="stylesheet" href="/static/css/tailwind.css?v={{ asset_version() }}">
 </head>
 <body class="bg-surface-900 text-gray-200 min-h-screen flex flex-col">
     <nav class="sticky top-0 z-40 bg-surface-800/80 border-b border-gray-700/60 backdrop-blur-lg">

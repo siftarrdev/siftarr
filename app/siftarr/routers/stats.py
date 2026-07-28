@@ -8,9 +8,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.siftarr.config import get_static_version
 from app.siftarr.database import get_db
 from app.siftarr.services.stats_service import StatsRangeError, StatsService, build_stats_range
+from app.siftarr.templating import configure_templates
 
 router = APIRouter(prefix="/stats", tags=["stats"])
-templates = Jinja2Templates(directory="app/siftarr/templates")
+templates = configure_templates(Jinja2Templates(directory="app/siftarr/templates"))
 templates.env.cache = None
 
 

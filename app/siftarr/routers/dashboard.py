@@ -40,11 +40,12 @@ from app.siftarr.services.lifecycle.episode_derive import derive_tv_display_labe
 from app.siftarr.services.lifecycle.lifecycle_service import LifecycleService
 from app.siftarr.services.releases.release_parser import movie_release_identity_rejection_reason
 from app.siftarr.services.utils.http_client import get_shared_client
+from app.siftarr.templating import configure_templates
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["dashboard"])
-templates = Jinja2Templates(directory="app/siftarr/templates")
+templates = configure_templates(Jinja2Templates(directory="app/siftarr/templates"))
 
 
 def _download_completed_torrent_ids(details: str | None) -> set[int]:

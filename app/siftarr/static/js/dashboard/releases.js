@@ -207,8 +207,11 @@ function renderReleaseCard(release, requestId, options = {}) {
     }
 
     if (bucket) {
+        // Staged cards are a recessed dark box: the fill alone separates them
+        // from the row behind, so they carry no outline. Unstaged cards keep the
+        // quiet border because they sit on the same tone as their container.
         const outerClass = activeSelectionMode
-            ? 'rounded-xl border border-gray-700/60 bg-cyan-950/20'
+            ? 'rounded-xl bg-surface-950'
             : 'rounded-xl border border-gray-700/40 bg-surface-800';
         return '<div class="' + outerClass + (rejected ? ' opacity-60' : '') + ' px-4 py-3.5 flex flex-wrap items-start gap-4 lg:flex-nowrap lg:items-center">' + scoreGutter + bodyHtml + actionHtml + '</div>';
     }
@@ -574,7 +577,7 @@ function renderSeasonAccordion(data) {
             // Episodes read as divider-separated rows inside the season body
             // (see the wrapper's `divide-y`) rather than boxes nested in boxes;
             // only staged/open rows get a background tint.
-            return '<details id="' + episodeDetailsId + '" class="group rounded-xl ' + (isStaged ? 'bg-cyan-950/20' : 'open:bg-surface-900/60') + '" ontoggle="window.updateTvAccordionControls && window.updateTvAccordionControls()"' + (isOpen ? ' open' : '') + '>' +
+            return '<details id="' + episodeDetailsId + '" class="group rounded-xl ' + (isStaged ? 'bg-cyan-950/40' : 'open:bg-surface-900/60') + '" ontoggle="window.updateTvAccordionControls && window.updateTvAccordionControls()"' + (isOpen ? ' open' : '') + '>' +
                 '<summary class="flex flex-wrap items-center gap-3.5 lg:flex-nowrap cursor-pointer px-3 py-3 hover:bg-surface-850/60 transition-colors">' +
                     '<svg class="accordion-chevron w-3.5 h-3.5 text-gray-500 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>' +
                     '<span class="text-xs font-mono text-gray-500 shrink-0">S' + String(season.season_number).padStart(2, '0') + 'E' + String(ep.episode_number).padStart(2, '0') + '</span>' +

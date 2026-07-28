@@ -22,6 +22,7 @@ from app.siftarr.services.admin.settings_service import (
     pop_initial_plex_sync_completion,
 )
 from app.siftarr.services.auth.plex_oauth_service import PlexOAuthService
+from app.siftarr.templating import configure_templates
 
 logger = logging.getLogger(__name__)
 
@@ -34,7 +35,9 @@ def _get_templates() -> Jinja2Templates:
     """Return the lazily-initialized Jinja2Templates instance."""
     global _templates
     if _templates is None:
-        _templates = Jinja2Templates(directory=Path(__file__).parent.parent / "templates")
+        _templates = configure_templates(
+            Jinja2Templates(directory=Path(__file__).parent.parent / "templates")
+        )
     return _templates
 
 
