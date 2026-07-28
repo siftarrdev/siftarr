@@ -1082,14 +1082,15 @@ def test_staged_packs_are_visible_when_no_cached_pack_row_exists():
     assert "no cached result — awaiting approval" in js
 
 
-def test_episodes_explain_when_a_staged_pack_covers_them():
-    """ "Replace" on every candidate needs an on-screen explanation."""
+def test_episodes_label_staging_that_comes_from_a_pack():
+    """The status badge says when staging came from a pack, not this episode."""
     js = _read_dashboard_js()
 
-    assert "function renderCoveringPackNotice(staged)" in js
-    assert 'data-covering-pack-notice="true"' in js
-    assert "Covered by a staged " in js
+    assert "'staged via ' + stagedScopeTypeLabel(coveringPack)" in js
     assert "function stagedScopeTypeLabel(staged)" in js
     assert "'multi-season pack'" in js
-    # The notice only applies to pack-scoped staging, not an episode's own release.
+    # Only pack-scoped staging is relabelled, not an episode's own release.
     assert "(stagedTorrent.target_scope || {}).type !== 'single_episode'" in js
+    # The verbose inline notice this replaced is gone.
+    assert "renderCoveringPackNotice" not in js
+    assert "data-covering-pack-notice" not in js

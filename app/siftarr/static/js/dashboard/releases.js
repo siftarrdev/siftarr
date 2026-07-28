@@ -418,25 +418,6 @@ function renderStagedPackRow(staged, requestId) {
     '</div>';
 }
 
-// Inline explanation shown at the top of an episode drawer when the staged item
-// covering this episode is a pack. Without it, every cached candidate shows
-// "Replace" and nothing on screen says what would be replaced.
-function renderCoveringPackNotice(staged) {
-    const actions = staged.id
-        ? '<div class="ml-auto flex items-center gap-3.5 shrink-0">' +
-            '<button type="button" onclick="inlineStagedAction(\'/staged/' + staged.id + '/approve\', this); event.preventDefault(); event.stopPropagation();" class="rounded-lg bg-emerald-600 hover:bg-emerald-500 px-3 py-1 text-xs font-semibold text-white">Approve</button>' +
-            '<button type="button" onclick="inlineStagedAction(\'/staged/' + staged.id + '/discard\', this); event.preventDefault(); event.stopPropagation();" class="text-xs text-red-400 hover:text-red-300">Discard</button>' +
-          '</div>'
-        : '';
-    return '<div class="rounded-xl border border-cyan-800/40 bg-cyan-950/40 px-3 py-2 flex flex-wrap items-start gap-3 lg:flex-nowrap lg:items-center lg:gap-3.5" data-covering-pack-notice="true">' +
-        '<div class="min-w-0 flex-1 basis-[70%] lg:basis-auto">' +
-            '<div class="text-[11px] font-semibold uppercase tracking-wide text-cyan-300">Covered by a staged ' + window.escapeHtml(stagedScopeTypeLabel(staged)) + '</div>' +
-            '<div class="text-[13px] leading-snug text-white overflow-wrap-anywhere line-clamp-2 lg:line-clamp-none lg:truncate">' + window.escapeHtml(staged.title || 'Staged pack') + '</div>' +
-        '</div>' +
-        actions +
-    '</div>';
-}
-
 function renderStagedPackRows(stagedPacks, requestId) {
     return (stagedPacks || []).map(function(staged) { return renderStagedPackRow(staged, requestId); }).join('');
 }
@@ -713,13 +694,16 @@ function renderSeasonAccordion(data) {
                 ? stagedTorrentForEpisode(data.active_staged_torrents, season.season_number, ep.episode_number)
                 : null;
             // When the staged item is a pack rather than this episode's own
-            // release, say so inline. Otherwise the row shows "Replace" on every
-            // cached candidate with nothing on screen explaining what it would
-            // replace.
+            // release, the status badge says so ("staged via season pack").
+            // Otherwise the row shows "Replace" on every cached candidate with
+            // nothing on screen explaining what it would replace.
             const coveringPack = stagedTorrent && (stagedTorrent.target_scope || {}).type !== 'single_episode'
                 ? stagedTorrent
                 : null;
-            const episodeBucketHtml = (coveringPack ? renderCoveringPackNotice(coveringPack) : '') + cachedEpisodeRowsHtml;
+            const statusLabel = coveringPack
+                ? 'staged via ' + stagedScopeTypeLabel(coveringPack)
+                : (ep.status || 'unknown');
+            const episodeBucketHtml = cachedEpisodeRowsHtml;
             const showInlineActions = !isComplete;
 
             // Episodes read as divider-separated rows inside the season body
@@ -731,7 +715,7 @@ function renderSeasonAccordion(data) {
                     '<span class="text-xs font-mono text-gray-500 shrink-0">S' + String(season.season_number).padStart(2, '0') + 'E' + String(ep.episode_number).padStart(2, '0') + '</span>' +
                     '<span class="min-w-0 flex-1 basis-[55%] text-[13px] lg:text-sm text-white truncate lg:basis-auto">' + window.escapeHtml(ep.title || 'Untitled') + '</span>' +
                     '<div class="ml-auto flex flex-wrap items-center justify-end gap-3.5 shrink-0">' +
-                        '<span class="badge ' + badgeClass + '">' + window.escapeHtml(ep.status || 'unknown') + '</span>' +
+                        '<span class="badge ' + badgeClass + '">' + window.escapeHtml(statusLabel) + '</span>' +
                         (isStaged ? renderApproveTopEpisodeButton(stagedTorrent) : showInlineActions ? renderStageTopEpisodeButton(requestId, topRelease) : '') +
                         (showInlineActions
                             ? '<button type="button" onclick="markEpisodeAvailable(' + requestId + ', ' + ep.id + '); event.stopPropagation();" class="shrink-0 text-xs text-brand-400 hover:text-brand-300">Mark Available</button>'
