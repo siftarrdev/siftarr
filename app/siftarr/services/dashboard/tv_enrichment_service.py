@@ -77,13 +77,16 @@ class TVEnrichmentService:
                 1 for ep in season_episodes if ep.status == RequestStatus.COMPLETED
             )
             state_counts = count_season_episode_states(season_episodes)
-            season_staged = self._season_has_staged_scope(
-                season.season_number, staged_overlay_torrents, known_season_numbers
-            )
+            # Plex availability outranks the staging overlay. A staged
+            # season-pack / multi-season / complete-series torrent covers every
+            # episode in its scope, which otherwise repainted finished seasons as
+            # "staged" — staging cannot change what is already on Plex, so
+            # completed episodes keep their own status.
             staged_episode_numbers = {
                 ep.episode_number
                 for ep in season_episodes
-                if self._episode_has_staged_scope(
+                if ep.status != RequestStatus.COMPLETED
+                and self._episode_has_staged_scope(
                     season.season_number,
                     ep.episode_number,
                     staged_overlay_torrents,
@@ -91,6 +94,9 @@ class TVEnrichmentService:
                 )
             }
             staged_count = len(staged_episode_numbers)
+            season_staged = self._season_has_staged_scope(
+                season.season_number, staged_overlay_torrents, known_season_numbers
+            ) and (bool(staged_episode_numbers) or not season_episodes)
             pending_count = max(state_counts["pending"] - staged_count, 0)
             seasons_data.append(
                 {
