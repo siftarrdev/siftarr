@@ -149,7 +149,7 @@ function renderReleaseCard(release, requestId, options = {}) {
             release.files != null ? '<span data-release-files="true">' + window.escapeHtml(String(release.files)) + ' file' + (release.files === 1 ? '' : 's') + '</span>' : '',
             release.indexer ? renderAnnotation(release.indexer, 'text-gray-500', 'data-release-indexer="true"') : '',
         ].filter(Boolean);
-        metaHtml = metaParts.length ? '<div class="mt-0.5 text-[11px] lg:text-xs text-gray-400 flex items-center gap-x-1.5 gap-y-0.5 lg:gap-2 flex-wrap">' + metaParts.join('<span>·</span>') + '</div>' : '';
+        metaHtml = metaParts.length ? '<div class="mt-0.5 text-[11px] lg:text-xs text-gray-400 flex items-center gap-1.5 lg:gap-2 flex-wrap">' + metaParts.join('<span>·</span>') + '</div>' : '';
     }
 
     const coverageHtml = !rejected && options.coverageHtml ? options.coverageHtml : '';
@@ -210,13 +210,13 @@ function renderReleaseCard(release, requestId, options = {}) {
         const outerClass = activeSelectionMode
             ? 'rounded-xl border border-gray-700/60 bg-cyan-950/20'
             : 'rounded-xl border border-gray-700/40 bg-surface-800';
-        return '<div class="' + outerClass + (rejected ? ' opacity-60' : '') + ' px-4 py-3.5 flex flex-wrap items-start gap-x-4 gap-y-2 lg:flex-nowrap lg:items-center">' + scoreGutter + bodyHtml + actionHtml + '</div>';
+        return '<div class="' + outerClass + (rejected ? ' opacity-60' : '') + ' px-4 py-3.5 flex flex-wrap items-start gap-4 lg:flex-nowrap lg:items-center">' + scoreGutter + bodyHtml + actionHtml + '</div>';
     }
 
     const outerClass = activeSelectionMode
         ? 'bg-cyan-950/20 border-b border-gray-700/60'
         : 'hover:bg-surface-850/60';
-    return '<li class="flex flex-wrap items-start gap-x-3 gap-y-2 px-3 py-3 lg:flex-nowrap lg:items-center lg:gap-4 lg:px-4 ' + outerClass + (rejected ? ' opacity-60' : '') + '">' + scoreGutter + bodyHtml + actionHtml + '</li>';
+    return '<li class="flex flex-wrap items-start gap-3 px-3 py-3 lg:flex-nowrap lg:items-center lg:gap-4 lg:px-4 ' + outerClass + (rejected ? ' opacity-60' : '') + '">' + scoreGutter + bodyHtml + actionHtml + '</li>';
 }
 
 function renderCoverageBadge(release) {
@@ -317,8 +317,8 @@ function renderSeasonPackRows(releases, requestId, season) {
 // via captureDetailsAccordionState/restoreDetailsAccordionState.
 function renderSeasonPacksDrawer(requestId, season, seasonPacks) {
     const seasonNumber = season.season_number;
-    return '<details id="season-packs-details-' + requestId + '-' + seasonNumber + '" class="group rounded-xl border border-dashed border-brand-500/35 bg-brand-600/5" ontoggle="window.updateTvAccordionControls && window.updateTvAccordionControls()">' +
-        '<summary class="flex flex-wrap items-center gap-x-3.5 gap-y-2 lg:flex-nowrap cursor-pointer px-4 py-3.5 hover:bg-surface-850/60 transition-colors">' +
+    return '<details id="season-packs-details-' + requestId + '-' + seasonNumber + '" class="group rounded-xl border border-gray-700/60 bg-surface-900/60" ontoggle="window.updateTvAccordionControls && window.updateTvAccordionControls()">' +
+        '<summary class="flex flex-wrap items-center gap-3.5 lg:flex-nowrap cursor-pointer px-4 py-3.5 hover:bg-surface-850/60 transition-colors">' +
             '<svg class="accordion-chevron w-3.5 h-3.5 text-gray-500 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>' +
             SEASON_PACK_ICON_SVG +
             '<span class="text-sm text-white font-medium">Season packs</span>' +
@@ -345,7 +345,7 @@ function renderSeasonPackGroup(requestId, season, seasonPacks) {
         : 'no cached packs';
     const headerMeta = packCountText + ' · need ' + needed + ' of ' + total + ' episodes';
     return '<div class="rounded-xl border border-gray-700/60 bg-surface-850 overflow-hidden">' +
-        '<div class="flex flex-wrap items-center gap-x-3 gap-y-2 px-3 py-3 lg:flex-nowrap lg:px-4 border-b border-gray-700/40 bg-surface-900/40">' +
+        '<div class="flex flex-wrap items-center gap-3 px-3 py-3 lg:flex-nowrap lg:px-4 border-b border-gray-700/40 bg-surface-900/40">' +
             '<span class="text-white font-medium text-sm">Season ' + seasonNumber + '</span>' +
             '<span class="text-xs text-gray-500">' + window.escapeHtml(headerMeta) + '</span>' +
             '<div class="ml-auto flex items-center gap-2">' +
@@ -367,7 +367,7 @@ function renderMultiSeasonPackGroup(requestId, multiSeasonReleases) {
         ? multiSeasonReleases.map(function(r) { return renderPackRow(r, requestId, null); }).join('')
         : '<div class="text-gray-500 text-sm py-2">No cached multi-season pack results yet. Search to fetch fresh results from your indexers.</div>';
     return '<div class="rounded-xl border border-gray-700/60 bg-surface-850 overflow-hidden">' +
-        '<div class="flex flex-wrap items-center gap-x-3 gap-y-2 px-3 py-3 lg:flex-nowrap lg:px-4 border-b border-gray-700/40 bg-surface-900/40">' +
+        '<div class="flex flex-wrap items-center gap-3 px-3 py-3 lg:flex-nowrap lg:px-4 border-b border-gray-700/40 bg-surface-900/40">' +
             '<span class="text-white font-medium text-sm">Multi-season packs</span>' +
             '<span class="text-xs text-gray-500">' + window.escapeHtml(countText) + '</span>' +
             '<div class="ml-auto flex items-center gap-2">' +
@@ -542,7 +542,7 @@ function renderSeasonAccordion(data) {
         // Secondary season actions sit on their own quiet second line (indented
         // to clear the chevron) so the headline row only carries the season
         // name, progress summary, pack chip, and status badge.
-        const seasonLinks = '<div class="flex flex-wrap items-center gap-x-5 gap-y-1.5 pl-7 text-xs">' +
+        const seasonLinks = '<div class="flex flex-wrap items-center gap-5 pl-7 text-xs">' +
             (hasMarkable
                 ? '<button type="button" onclick="markSeasonAvailable(' + requestId + ', ' + season.id + '); event.stopPropagation();" class="text-brand-400 hover:text-brand-300">Mark all</button>'
                 : '') +
@@ -574,12 +574,12 @@ function renderSeasonAccordion(data) {
             // Episodes read as divider-separated rows inside the season body
             // (see the wrapper's `divide-y`) rather than boxes nested in boxes;
             // only staged/open rows get a background tint.
-            return '<details id="' + episodeDetailsId + '" class="group rounded-lg ' + (isStaged ? 'bg-cyan-950/10' : 'open:bg-surface-900/40') + '" ontoggle="window.updateTvAccordionControls && window.updateTvAccordionControls()"' + (isOpen ? ' open' : '') + '>' +
-                '<summary class="flex flex-wrap items-center gap-x-3.5 gap-y-1.5 lg:flex-nowrap cursor-pointer px-3 py-3 hover:bg-surface-850/60 transition-colors">' +
+            return '<details id="' + episodeDetailsId + '" class="group rounded-xl ' + (isStaged ? 'bg-cyan-950/20' : 'open:bg-surface-900/60') + '" ontoggle="window.updateTvAccordionControls && window.updateTvAccordionControls()"' + (isOpen ? ' open' : '') + '>' +
+                '<summary class="flex flex-wrap items-center gap-3.5 lg:flex-nowrap cursor-pointer px-3 py-3 hover:bg-surface-850/60 transition-colors">' +
                     '<svg class="accordion-chevron w-3.5 h-3.5 text-gray-500 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>' +
                     '<span class="text-xs font-mono text-gray-500 shrink-0">S' + String(season.season_number).padStart(2, '0') + 'E' + String(ep.episode_number).padStart(2, '0') + '</span>' +
                     '<span class="min-w-0 flex-1 basis-[55%] text-[13px] lg:text-sm text-white truncate lg:basis-auto">' + window.escapeHtml(ep.title || 'Untitled') + '</span>' +
-                    '<div class="ml-auto flex flex-wrap items-center justify-end gap-x-3.5 gap-y-2 shrink-0">' +
+                    '<div class="ml-auto flex flex-wrap items-center justify-end gap-3.5 shrink-0">' +
                         '<span class="badge ' + badgeClass + '">' + window.escapeHtml(ep.status || 'unknown') + '</span>' +
                         (isStaged ? renderApproveTopEpisodeButton(stagedTorrent) : showInlineActions ? renderStageTopEpisodeButton(requestId, topRelease) : '') +
                         (showInlineActions
@@ -596,7 +596,7 @@ function renderSeasonAccordion(data) {
 
         return '<details id="season-details-' + requestId + '-' + season.season_number + '" class="group rounded-xl border border-gray-700/60 bg-surface-850" ontoggle="window.updateTvAccordionControls && window.updateTvAccordionControls()"' + (seasonHasStaged ? ' open' : '') + '>' +
             '<summary class="flex flex-col gap-2 px-4 py-4 lg:px-5 cursor-pointer hover:bg-surface-800 transition-colors">' +
-                '<div class="flex flex-wrap items-center gap-x-3.5 gap-y-2 lg:flex-nowrap">' +
+                '<div class="flex flex-wrap items-center gap-3.5 lg:flex-nowrap">' +
                     '<svg class="accordion-chevron w-4 h-4 text-gray-500 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>' +
                     '<span class="text-white font-medium text-[15px]">Season ' + season.season_number + '</span>' +
                     '<span class="min-w-0 text-xs text-gray-500 truncate">' + window.escapeHtml(availableText) + '</span>' +

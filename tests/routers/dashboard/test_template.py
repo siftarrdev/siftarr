@@ -325,7 +325,7 @@ def test_dashboard_js_uses_collapsible_episode_results():
     assert "episode-details-" in js
     # Episode rows are divider-separated inside the season body (no per-row
     # border box), so only the rounded/tinted wrapper is asserted here.
-    assert '<details id="\' + episodeDetailsId + \'" class="group rounded-lg ' in js
+    assert '<details id="\' + episodeDetailsId + \'" class="group rounded-xl ' in js
     assert "divide-y divide-gray-700/40" in js
     assert "No cached episode results yet" in js
 
@@ -511,7 +511,6 @@ def test_dashboard_js_uses_cyan_staged_release_indicators():
     # but outlines stay in the muted gray border family.
     assert "bg-cyan-950/20" in js
     assert "border-gray-700/60 bg-cyan-950/20" in js
-    assert "bg-cyan-950/10" in js
     # Staged badge on the card title uses the inline cyan pill style.
     assert "bg-cyan-900/60 text-cyan-300" in js
 
@@ -968,4 +967,38 @@ def test_season_summary_splits_actions_onto_a_second_line():
     js = _read_dashboard_js()
 
     assert "flex flex-col gap-2 px-4 py-4 lg:px-5 cursor-pointer" in js
-    assert "flex flex-wrap items-center gap-x-5 gap-y-1.5 pl-7 text-xs" in js
+    assert "flex flex-wrap items-center gap-5 pl-7 text-xs" in js
+
+
+def test_release_rows_use_the_gap_shorthand_not_axis_longhands():
+    """Row spacing regression guard.
+
+    The season/episode/release summary rows previously used `gap-x-*`/`gap-y-*`
+    longhands and rendered with no space between labels ("Season 30/9
+    availabledenied", "S07E01Episode 1"). The `gap-*` shorthand is what worked
+    before, so the details rows must stay on it.
+    """
+    js_path = os.path.join(
+        os.path.dirname(__file__), "../../../app/siftarr/static/js/dashboard/releases.js"
+    )
+    with open(js_path, encoding="utf-8") as handle:
+        releases_js = handle.read()
+
+    assert "gap-x-" not in releases_js
+    assert "gap-y-" not in releases_js
+
+
+def test_season_packs_drawer_uses_a_dark_box_not_a_dashed_outline():
+    js = _read_dashboard_js()
+
+    assert "border-gray-700/60 bg-surface-900/60" in js
+    assert "border-dashed" not in js
+
+
+def test_poster_box_keeps_the_2_by_3_aspect_ratio():
+    """Portrait posters must not be cropped, and the rail must start level."""
+    template = _read_dashboard_template()
+
+    assert 'id="request-details-poster" class="hidden w-14 aspect-[2/3]' in template
+    assert 'id="request-details-poster-fallback" class="flex w-14 aspect-[2/3]' in template
+    assert "lg:h-44" not in template
