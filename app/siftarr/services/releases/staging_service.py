@@ -614,6 +614,15 @@ class StagingService:
         runtime_settings = get_settings()
         queue_service = PendingQueueService(self.db)
         usable_releases = [release for release in releases if release is not None]
+        if selection_source == "rule":
+            zero_seeder_releases = [release for release in usable_releases if release.seeders <= 0]
+            if zero_seeder_releases:
+                logger.warning(
+                    "Ignoring zero-seeder releases during automatic selection: request_id=%s titles=%s",
+                    request.id,
+                    [release.title for release in zero_seeder_releases],
+                )
+            usable_releases = [release for release in usable_releases if release.seeders > 0]
         if not usable_releases:
             raise RuntimeError("No stored releases were available to use.")
 

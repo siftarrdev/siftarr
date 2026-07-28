@@ -145,7 +145,7 @@ function renderReleaseCard(release, requestId, options = {}) {
             renderAnnotation(release.resolution, releaseAnnotationTone(release, 'resolution'), 'data-release-resolution="true"'),
             renderAnnotation(release.codec, releaseAnnotationTone(release, 'codec'), 'data-release-codec="true"'),
             renderAnnotation(release.size, releaseAnnotationTone(release, 'size'), 'data-release-size="true"'),
-            release.seeders != null ? '<span>' + window.escapeHtml(String(release.seeders)) + ' seeders</span>' : '',
+            release.seeders != null ? '<span class="' + (Number(release.seeders) === 0 ? 'font-bold text-red-400' : '') + '">' + window.escapeHtml(String(release.seeders)) + ' seeders</span>' : '',
             release.files != null ? '<span data-release-files="true">' + window.escapeHtml(String(release.files)) + ' file' + (release.files === 1 ? '' : 's') + '</span>' : '',
             release.indexer ? renderAnnotation(release.indexer, 'text-gray-500', 'data-release-indexer="true"') : '',
         ].filter(Boolean);

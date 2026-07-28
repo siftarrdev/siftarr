@@ -922,6 +922,8 @@ class TVDecisionService:
             all_evaluated_releases.extend(pack_evaluations)
             all_search_errors.extend(pack_errors)
             for evaluation in pack_passing:
+                if evaluation.release.seeders <= 0:
+                    continue
                 coverage = self._get_actionable_pack_coverage(
                     evaluation,
                     pack_eligible_season_set,
@@ -962,6 +964,8 @@ class TVDecisionService:
             all_search_errors.extend(exact_errors)
             episode_evaluations.extend(exact_candidates)
             for season, episode, evaluation in exact_candidates:
+                if evaluation.release.seeders <= 0:
+                    continue
                 key = (season, episode)
                 if key not in actionable_target_keys:
                     continue
@@ -992,6 +996,8 @@ class TVDecisionService:
             all_evaluated_releases.extend(pack_evaluations)
             all_search_errors.extend(pack_errors)
             for evaluation in pack_passing:
+                if evaluation.release.seeders <= 0:
+                    continue
                 coverage = self._get_actionable_pack_coverage(
                     evaluation,
                     pack_eligible_season_set,

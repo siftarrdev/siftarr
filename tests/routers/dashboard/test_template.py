@@ -83,6 +83,15 @@ def test_dashboard_js_uses_shared_search_loading_state():
     assert "Checking indexers now" in js
 
 
+def test_dashboard_js_highlights_zero_seeders():
+    """Zero-seeder warnings should be bold and red in release views."""
+    js = _read_dashboard_js()
+
+    assert js.count("font-bold text-red-400") >= 2
+    assert "Number(release.seeders) === 0" in js
+    assert "item.seeders != null && Number(item.seeders) === 0" in js
+
+
 def test_dashboard_tv_details_use_new_and_full_search_actions():
     """Dashboard TV search UI should expose Search for new and Full search actions."""
     with open(
