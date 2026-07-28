@@ -37,6 +37,9 @@ async def session_maker():
 def _clean_api_key_env(monkeypatch):
     monkeypatch.delenv("SIFTARR_API_KEY", raising=False)
     monkeypatch.delenv("PLEX_CLAIMED_ID", raising=False)
+    monkeypatch.delenv("OVERSEERR_URL", raising=False)
+    monkeypatch.delenv("OVERSEERR_API_KEY", raising=False)
+    monkeypatch.delenv("PROWLARR_URL", raising=False)
     monkeypatch.delenv("OVERSEERR_POLL_INTERVAL_MINUTES", raising=False)
     monkeypatch.delenv("QBITTORRENT_COMPLETION_POLL_INTERVAL_SECONDS", raising=False)
     monkeypatch.delenv("PLEX_FAST_SYNC_INTERVAL_MINUTES", raising=False)
@@ -56,6 +59,9 @@ def _clean_api_key_env(monkeypatch):
         "PLEX_USERNAME",
         "PLEX_THUMB",
         "PLEX_TOKEN",
+        "OVERSEERR_URL",
+        "OVERSEERR_API_KEY",
+        "PROWLARR_URL",
         "OVERSEERR_POLL_INTERVAL_MINUTES",
         "QBITTORRENT_COMPLETION_POLL_INTERVAL_SECONDS",
         "PLEX_FAST_SYNC_INTERVAL_MINUTES",
