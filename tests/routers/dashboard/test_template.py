@@ -1065,3 +1065,31 @@ def test_rejected_releases_keep_their_meta_line_with_a_short_verdict():
     # resolution/codec/size/seeders annotations survive a rejection.
     assert "rejected ? renderRejectionVerdict(release) : ''," in js
     assert "text-[11px] leading-tight text-red-300/80" not in js
+
+
+def test_staged_packs_are_visible_when_no_cached_pack_row_exists():
+    """A staged pack must be visible even after its cached release is purged."""
+    js = _read_dashboard_js()
+
+    assert "function stagedPacksForSeason(stagedTorrents, seasonNumber)" in js
+    assert "function stagedPacksMissingFromRows(stagedPacks, releases)" in js
+    assert "function renderStagedPackRow(staged, requestId)" in js
+    assert 'data-staged-pack-row="true"' in js
+    # Count label distinguishes staged from cached, and the drawer opens itself
+    # when there is a staged pack the user would otherwise not see.
+    assert "countParts.push(orphanStaged.length + ' staged');" in js
+    assert "const openAttr = orphanStaged.length ? ' open' : '';" in js
+    assert "no cached result — awaiting approval" in js
+
+
+def test_episodes_explain_when_a_staged_pack_covers_them():
+    """ "Replace" on every candidate needs an on-screen explanation."""
+    js = _read_dashboard_js()
+
+    assert "function renderCoveringPackNotice(staged)" in js
+    assert 'data-covering-pack-notice="true"' in js
+    assert "Covered by a staged " in js
+    assert "function stagedScopeTypeLabel(staged)" in js
+    assert "'multi-season pack'" in js
+    # The notice only applies to pack-scoped staging, not an episode's own release.
+    assert "(stagedTorrent.target_scope || {}).type !== 'single_episode'" in js
