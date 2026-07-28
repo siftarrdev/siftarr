@@ -305,6 +305,33 @@ class TestGroupTvReleasesForPackUI:
         assert by_season[1] == [multi_pack]
         assert by_episode[(1, 3)] == [episode_release]
 
+    def test_duplicate_rows_are_grouped_once(self) -> None:
+        """Pre-existing duplicate release rows must not render twice."""
+        from app.siftarr.services.dashboard.tv_enrichment_service import TVEnrichmentService
+
+        service = TVEnrichmentService(MagicMock())
+        first: dict[str, object] = {
+            "title": "Show.S01E03.1080p",
+            "info_hash": None,
+            "season_number": 1,
+            "episode_number": 3,
+        }
+        duplicate: dict[str, object] = dict(first)
+        hashed: dict[str, object] = {
+            "title": "Show.S01.1080p",
+            "info_hash": "abc123",
+            "season_number": 1,
+            "episode_number": None,
+        }
+        hashed_duplicate: dict[str, object] = {**hashed, "title": "Show.S01.1080p.PROPER"}
+
+        by_season, by_episode = service._group_tv_releases(
+            [first, duplicate, hashed, hashed_duplicate], [1]
+        )
+
+        assert by_episode[(1, 3)] == [first]
+        assert by_season[1] == [hashed]
+
 
 @pytest.mark.asyncio
 async def test_staged_overlay_does_not_repaint_completed_episodes(db_session):

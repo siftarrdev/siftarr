@@ -23,6 +23,7 @@ from app.siftarr.services.releases.release_serializers import (
     apply_release_size_per_season_metadata,
     scope_to_episode_set,
 )
+from app.siftarr.services.releases.release_storage import get_release_persistence_key
 from app.siftarr.services.utils.type_utils import coerce_int_list
 
 logger = logging.getLogger(__name__)
@@ -203,6 +204,24 @@ class TVEnrichmentService:
             )
             apply_release_size_per_season_metadata(release)
 
+    @staticmethod
+    def _dedupe_releases(releases: list[dict[str, object]]) -> list[dict[str, object]]:
+        """Drop duplicate releases so pre-existing duplicate rows render once."""
+        deduped: list[dict[str, object]] = []
+        seen: set[str] = set()
+        for release in releases:
+            info_hash = release.get("info_hash")
+            title = release.get("title")
+            key = get_release_persistence_key(
+                title=title if isinstance(title, str) else "",
+                info_hash=info_hash if isinstance(info_hash, str) and info_hash else None,
+            )
+            if key and key in seen:
+                continue
+            seen.add(key)
+            deduped.append(release)
+        return deduped
+
     def _group_tv_releases(
         self,
         releases: list[dict[str, object]],
@@ -211,7 +230,7 @@ class TVEnrichmentService:
         """Group releases by season and by episode for TV detail display."""
         releases_by_season: dict[int, list[dict[str, object]]] = {}
         releases_by_episode: dict[tuple[int, int], list[dict[str, object]]] = {}
-        for release in releases:
+        for release in self._dedupe_releases(releases):
             season_number = release.get("season_number")
             episode_number = release.get("episode_number")
             covered_seasons = coerce_int_list(release.get("covered_seasons"))

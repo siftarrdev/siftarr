@@ -90,12 +90,20 @@ async def store_search_results(
     """Upsert stored search results and purge stale rows within the same scope."""
     # 1. Load existing releases for this request
     existing_result = await db.execute(select(Release).where(Release.request_id == request_id))
+    all_records = list(existing_result.scalars().all())
+    # Scope/source filtering only governs which stale rows may be purged. The
+    # upsert itself must see every row for the request, otherwise a title stored
+    # under a different source or scope bucket is invisible and gets inserted a
+    # second time for the same request.
     existing_records = [
         record
-        for record in existing_result.scalars().all()
+        for record in all_records
         if _release_matches_source(record, source)
         and _release_matches_persistence_scope(record, scope)
     ]
+    # Primary keys, not object identity: every row here is already persistent,
+    # and pks survive any identity churn in the session.
+    purgeable_ids = {record.id for record in existing_records}
     logger.info(
         "Stored release cache loaded: request_id=%s scope=%s source=db search_source=%s count=%s",
         request_id,
@@ -107,12 +115,19 @@ async def store_search_results(
     # Build lookup keyed by persistence key, handle duplicate keys
     existing_by_key: dict[str, Release] = {}
     extra_records: list[Release] = []
-    for record in existing_records:
+    for record in all_records:
         key = get_release_persistence_key(title=record.title, info_hash=record.info_hash)
-        if key in existing_by_key:
-            extra_records.append(record)
-        else:
+        current = existing_by_key.get(key)
+        if current is None:
             existing_by_key[key] = record
+            continue
+        # Prefer the in-scope row as canonical so purge semantics stay unchanged;
+        # any remaining duplicate for the same key is dirty data and is removed.
+        if record.id in purgeable_ids and current.id not in purgeable_ids:
+            existing_by_key[key] = record
+            extra_records.append(current)
+        else:
+            extra_records.append(record)
 
     records_by_key: dict[str, Release] = {}
     seen_keys: set[str] = set()
@@ -199,15 +214,17 @@ async def store_search_results(
             matched_keys.add(dedupe_key)
 
     # Delete existing records not matched by any new evaluation
-    for key, record in existing_by_key.items():
-        if key not in matched_keys:
-            await db.delete(record)
+    stale_records = [
+        record
+        for key, record in existing_by_key.items()
+        if key not in matched_keys and record.id in purgeable_ids
+    ]
+    for record in stale_records:
+        await db.delete(record)
     for record in extra_records:
         await db.delete(record)
 
-    deleted_count = sum(1 for key in existing_by_key if key not in matched_keys) + len(
-        extra_records
-    )
+    deleted_count = len(stale_records) + len(extra_records)
     await db.commit()
     logger.info(
         "Stored search results saved: request_id=%s scope=%s search_source=%s evaluated=%s stored=%s deleted=%s source=db",
