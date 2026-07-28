@@ -2,6 +2,8 @@
 
 import asyncio
 import logging
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
@@ -29,6 +31,26 @@ async def _new_detached_session() -> AsyncSession:
         database.init_engine()
     assert database.async_session_maker is not None
     return database.async_session_maker()
+
+
+@asynccontextmanager
+async def _stream_session(fallback_db: AsyncSession) -> AsyncIterator[AsyncSession]:
+    """Yield a session that stays usable for the life of a streaming response.
+
+    A ``Depends(get_db)`` session is closed before the StreamingResponse body
+    runs, so any ORM work inside the generator fails with ``greenlet_spawn has
+    not been called``. Streams therefore run on their own detached session, and
+    only fall back to the request-scoped one when no session maker is
+    configured (unit tests injecting a session directly).
+    """
+    if database.async_session_maker is None:
+        yield fallback_db
+        return
+    async with await _new_detached_session() as db:
+        yield db
+        # Detached sessions are not committed by the request lifecycle, so any
+        # work the stream left pending would be rolled back on close.
+        await db.commit()
 
 
 async def _run_request_search_detached(
@@ -316,12 +338,13 @@ async def _tv_season_pack_generator(request_id: int, season_number: int, db: Asy
     """Compatibility/debug stream for inspecting cached/refreshed season-pack rows."""
     try:
         yield serialize_sse(build_sse_progress("starting", percent=5))
-        request = await load_request_or_404(db, request_id)
-        validate_tv_request(request)
-        yield serialize_sse(build_sse_progress("searching", percent=50))
-        service = SearchService(db)
-        data = await service.search_season_packs(request, season_number=season_number)
-        serialized = serialize_tv_search_response(data)
+        async with _stream_session(db) as session:
+            request = await load_request_or_404(session, request_id)
+            validate_tv_request(request)
+            yield serialize_sse(build_sse_progress("searching", percent=50))
+            service = SearchService(session)
+            data = await service.search_season_packs(request, season_number=season_number)
+            serialized = serialize_tv_search_response(data)
         yield serialize_sse(
             build_sse_progress(
                 "complete",
@@ -349,12 +372,13 @@ async def _tv_multi_season_generator(request_id: int, db: AsyncSession):
     """Compatibility/debug stream for inspecting cached/refreshed multi-season rows."""
     try:
         yield serialize_sse(build_sse_progress("starting", percent=5))
-        request = await load_request_or_404(db, request_id)
-        validate_tv_request(request)
-        yield serialize_sse(build_sse_progress("searching", percent=50))
-        service = SearchService(db)
-        data = await service.search_multi_season_packs(request, request_id=request_id)
-        serialized = serialize_tv_search_response(data)
+        async with _stream_session(db) as session:
+            request = await load_request_or_404(session, request_id)
+            validate_tv_request(request)
+            yield serialize_sse(build_sse_progress("searching", percent=50))
+            service = SearchService(session)
+            data = await service.search_multi_season_packs(request, request_id=request_id)
+            serialized = serialize_tv_search_response(data)
         yield serialize_sse(
             build_sse_progress(
                 "complete",
@@ -381,14 +405,15 @@ async def _tv_episode_generator(
     """Compatibility/debug stream for inspecting cached/refreshed episode rows."""
     try:
         yield serialize_sse(build_sse_progress("starting", percent=5))
-        request = await load_request_or_404(db, request_id)
-        validate_tv_request(request)
-        yield serialize_sse(build_sse_progress("searching", percent=50))
-        service = SearchService(db)
-        data = await service.search_episode(
-            request, season_number=season_number, episode_number=episode_number
-        )
-        serialized = serialize_tv_search_response(data)
+        async with _stream_session(db) as session:
+            request = await load_request_or_404(session, request_id)
+            validate_tv_request(request)
+            yield serialize_sse(build_sse_progress("searching", percent=50))
+            service = SearchService(session)
+            data = await service.search_episode(
+                request, season_number=season_number, episode_number=episode_number
+            )
+            serialized = serialize_tv_search_response(data)
         yield serialize_sse(
             build_sse_progress(
                 "complete",

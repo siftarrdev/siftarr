@@ -481,23 +481,43 @@ function renderSeasonPackGroup(requestId, season, seasonPacks, stagedPacks) {
     '</div>';
 }
 
+// Active staged torrents whose scope spans more than one season (multi-season
+// packs and complete-series packs). These are what the "Multi-season packs"
+// group has to let the user manage, not just per-season packs.
+function stagedMultiSeasonPacks(stagedTorrents) {
+    return (stagedTorrents || []).filter(function(torrent) {
+        if (torrent.status && torrent.status !== 'staged') return false;
+        const scope = torrent.target_scope || {};
+        if (scope.type === 'complete_series' || scope.type === 'multi_season_pack') return true;
+        return scope.type === 'season_pack' && Array.isArray(scope.season_numbers) && scope.season_numbers.length > 1;
+    });
+}
+
 // "Multi-season packs" group at the bottom of the "Season packs" scope tab.
-function renderMultiSeasonPackGroup(requestId, multiSeasonReleases) {
-    const countText = multiSeasonReleases.length
+// Carries its own search action plus any staged multi-season pack so the pack
+// can be approved or discarded without hunting through the season groups.
+function renderMultiSeasonPackGroup(requestId, multiSeasonReleases, stagedPacks) {
+    const orphanStaged = stagedPacksMissingFromRows(stagedPacks, multiSeasonReleases);
+    const countParts = [];
+    if (orphanStaged.length) countParts.push(orphanStaged.length + ' staged');
+    countParts.push(multiSeasonReleases.length
         ? multiSeasonReleases.length + ' pack' + (multiSeasonReleases.length === 1 ? '' : 's') + ' spanning multiple seasons'
-        : 'no cached multi-season packs';
+        : 'no cached multi-season packs');
     const rows = multiSeasonReleases.length
         ? multiSeasonReleases.map(function(r) { return renderPackRow(r, requestId, null); }).join('')
-        : '<div class="text-gray-500 text-sm py-2">No cached multi-season pack results yet. Search to fetch fresh results from your indexers.</div>';
+        : (orphanStaged.length ? '' : '<div class="text-gray-500 text-sm py-2">No cached multi-season pack results yet. Search to fetch fresh results from your indexers.</div>');
     return '<div class="rounded-xl border border-gray-700/60 bg-surface-850 overflow-hidden">' +
         '<div class="flex flex-wrap items-center gap-3 px-3 py-3 lg:flex-nowrap lg:px-4 border-b border-gray-700/40 bg-surface-900/40">' +
             '<span class="text-white font-medium text-sm">Multi-season packs</span>' +
-            '<span class="text-xs text-gray-500">' + window.escapeHtml(countText) + '</span>' +
+            '<span class="text-xs ' + (orphanStaged.length ? 'text-cyan-300' : 'text-gray-500') + '">' + window.escapeHtml(countParts.join(' · ')) + '</span>' +
             '<div class="ml-auto flex items-center gap-2">' +
                 '<button type="button" onclick="searchMultiSeasonPacks(' + requestId + ')" class="' + SEASON_PACK_SEARCH_BUTTON_CLASS + '">Search multi-season</button>' +
             '</div>' +
         '</div>' +
-        '<div class="p-2.5 space-y-2" data-multi-season-pack-results="' + requestId + '">' + rows + '</div>' +
+        '<div class="p-2.5 space-y-2" data-multi-season-pack-results="' + requestId + '">' +
+            renderStagedPackRows(orphanStaged, requestId) +
+            rows +
+        '</div>' +
     '</div>';
 }
 
@@ -623,6 +643,13 @@ function renderSeasonAccordion(data) {
         singleSeasonPackCount += packs.length;
     });
     const totalPackCount = singleSeasonPackCount + multiSeasonReleases.length;
+
+    // Staged packs that span seasons are managed in the multi-season group and
+    // (when they cover everything) in the complete-series tab.
+    const stagedMultiSeason = stagedMultiSeasonPacks(data.active_staged_torrents);
+    const stagedCompleteSeries = stagedMultiSeason.filter(function(staged) {
+        return (staged.target_scope || {}).type === 'complete_series';
+    });
 
     // Aggregate availability text from tv_info.aggregate_counts (e.g. "3 of 10 available").
     const aggregateCounts = tvInfo.aggregate_counts || {};
@@ -757,14 +784,22 @@ function renderSeasonAccordion(data) {
     const seasonPacksSection = '<div id="scope-season-packs-' + requestId + '" class="space-y-3"' + (scope === 'season_packs' ? '' : ' hidden') + '>' +
         packsHelperRow +
         seasonPackGroups +
-        renderMultiSeasonPackGroup(requestId, multiSeasonReleases) +
+        renderMultiSeasonPackGroup(requestId, multiSeasonReleases, stagedMultiSeason) +
     '</div>';
 
     // ── Section: Complete series (flat list of complete-series releases) ──
+    // Complete-series packs come back from the same broad multi-season query,
+    // so the tab exposes that search rather than sending the user elsewhere.
+    const completeSeriesHelperRow = '<div class="flex flex-wrap items-center justify-between gap-2">' +
+        '<span class="text-xs text-gray-500">Packs covering every season. Searching also refreshes the multi-season pack group.</span>' +
+        '<button type="button" onclick="searchMultiSeasonPacks(' + requestId + ')" class="rounded-md border border-gray-600/80 bg-surface-900/70 px-2.5 py-1 text-xs font-medium text-gray-200 transition-colors hover:border-brand-400/70 hover:bg-surface-800 hover:text-white">Search complete series</button>' +
+    '</div>';
     const completeSeriesSection = '<div id="scope-complete-series-' + requestId + '" class="space-y-2"' + (scope === 'complete_series' ? '' : ' hidden') + '>' +
+        completeSeriesHelperRow +
+        renderStagedPackRows(stagedPacksMissingFromRows(stagedCompleteSeries, completeSeriesReleases), requestId) +
         (completeSeriesReleases.length
             ? '<ul class="divide-y divide-gray-700/40 rounded-xl border border-gray-700/60 bg-surface-850">' + completeSeriesReleases.map(function(r) { return renderReleaseCard(r, requestId); }).join('') + '</ul>'
-            : '<div class="text-gray-500 text-sm py-2">No complete-series results yet. Full search refreshes all aired episode and pack results.</div>') +
+            : '<div class="text-gray-500 text-sm py-2">No complete-series results yet. Search complete series to fetch fresh results from your indexers.</div>') +
     '</div>';
 
     return '<div class="space-y-4">' + scopeChipBar + allSection + seasonPacksSection + completeSeriesSection + '</div>';
@@ -835,7 +870,9 @@ function searchMultiSeasonPacks(requestId) {
 }
 
 // "Search all seasons" in the Season packs tab: run the per-season pack
-// searches sequentially (each one streams progress and reloads the modal).
+// searches sequentially (each one streams progress and reloads the modal),
+// then the broad multi-season/complete-series query, which no per-season sweep
+// can surface.
 async function searchAllSeasonPacks(requestId, btn = null) {
     var data = window.currentDetailsData;
     var seasons = (data && data.tv_info && data.tv_info.seasons) || [];
@@ -849,6 +886,7 @@ async function searchAllSeasonPacks(requestId, btn = null) {
         for (var i = 0; i < seasons.length; i++) {
             await searchSeasonPacks(requestId, seasons[i].season_number);
         }
+        await searchMultiSeasonPacks(requestId);
     } finally {
         // The modal re-renders after each search, so the original button node is
         // usually gone; only restore it if it is still attached.
