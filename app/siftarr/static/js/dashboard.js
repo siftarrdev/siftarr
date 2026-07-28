@@ -200,6 +200,12 @@ function initDashboard() {
                 window.closeTvSearchScopeMenu();
                 return;
             }
+            // The Activity overlay is dismissed first so Escape does not close
+            // the whole modal out from under an open panel.
+            if (window.isActivityPanelOpen && window.isActivityPanelOpen()) {
+                window.closeActivityPanel();
+                return;
+            }
             window.closeRequestDetails();
         } else if (e.key === 'ArrowLeft') {
             e.preventDefault();

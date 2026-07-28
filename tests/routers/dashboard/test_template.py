@@ -323,7 +323,10 @@ def test_dashboard_js_uses_collapsible_episode_results():
     js = _read_dashboard_js()
 
     assert "episode-details-" in js
-    assert '<details id="\' + episodeDetailsId + \'" class="group rounded-lg border' in js
+    # Episode rows are divider-separated inside the season body (no per-row
+    # border box), so only the rounded/tinted wrapper is asserted here.
+    assert '<details id="\' + episodeDetailsId + \'" class="group rounded-lg ' in js
+    assert "divide-y divide-gray-700/40" in js
     assert "No cached episode results yet" in js
 
 
@@ -508,7 +511,7 @@ def test_dashboard_js_uses_cyan_staged_release_indicators():
     # but outlines stay in the muted gray border family.
     assert "bg-cyan-950/20" in js
     assert "border-gray-700/60 bg-cyan-950/20" in js
-    assert "border-gray-700/60 bg-cyan-950/10" in js
+    assert "bg-cyan-950/10" in js
     # Staged badge on the card title uses the inline cyan pill style.
     assert "bg-cyan-900/60 text-cyan-300" in js
 
@@ -913,3 +916,56 @@ def test_group_collapse_state_ors_table_and_card_representations():
     assert "state[key] = !!state[key] || !!open;" in capture
     assert "state[el.dataset.downloadGroup] = !!el.open;" not in capture
     assert "document.querySelectorAll(`tr[data-download-group]" in capture
+
+
+def _read_dashboard_template():
+    with open(
+        os.path.join(os.path.dirname(__file__), "../../../app/siftarr/templates/dashboard.html"),
+        encoding="utf-8",
+    ) as handle:
+        return handle.read()
+
+
+def test_activity_panel_is_a_header_triggered_overlay():
+    """Activity is an overlay over the right third of the modal, not a column."""
+    template = _read_dashboard_template()
+
+    # Header trigger replaces the old full-height collapse tab.
+    assert 'id="activity-toggle"' in template
+    assert 'onclick="toggleActivityPanel()"' in template
+    assert 'id="activity-show"' not in template
+    assert "collapseActivityPanel()" not in template
+
+    # Overlay panel: hidden by default, pinned to the right third on desktop.
+    assert 'id="activity-panel"' in template
+    assert 'id="activity-backdrop"' in template
+    assert "absolute inset-y-0 right-0" in template
+    assert "lg:w-1/3" in template
+    assert 'class="hidden absolute inset-y-0 right-0' in template
+
+
+def test_activity_panel_starts_closed_on_modal_open():
+    """A fresh details modal open always closes the Activity overlay."""
+    js = _read_dashboard_js()
+
+    assert "function setActivityPanelOpen(open)" in js
+    assert "window.toggleActivityPanel = toggleActivityPanel;" in js
+    assert "if (modal.classList.contains('hidden') && window.closeActivityPanel)" in js
+    # The count now lives on the header toggle button.
+    assert "activity-mobile-count" not in js
+    assert "getElementById('activity-count')" in js
+
+
+def test_escape_closes_activity_overlay_before_the_details_modal():
+    entry_js = _read_dashboard_entry_js()
+
+    assert "window.isActivityPanelOpen && window.isActivityPanelOpen()" in entry_js
+    assert "window.closeActivityPanel();" in entry_js
+
+
+def test_season_summary_splits_actions_onto_a_second_line():
+    """Season headline row carries status only; actions drop to a quiet line."""
+    js = _read_dashboard_js()
+
+    assert "flex flex-col gap-2 px-4 py-4 lg:px-5 cursor-pointer" in js
+    assert "flex flex-wrap items-center gap-x-5 gap-y-1.5 pl-7 text-xs" in js

@@ -1,0 +1,245 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Mockup 3 — Breathing room</title>
+<link rel="stylesheet" href="_shared.css">
+<style>
+  /* Tweak 3: attacks the "squashed" feeling directly.
+     - Center column gets the space: rails narrow slightly and the modal is
+       allowed to run wider.
+     - Secondary season actions collapse into a quiet second line, so the
+       header line only carries name / progress / status.
+     - Larger line-height, taller rows, softer separators instead of boxes. */
+  .modal { max-width: 1400px; }
+  .cols { grid-template-columns: 248px minmax(0, 1fr) 300px; min-height: 740px; }
+  .modal-header { padding: 16px 24px; }
+  .rail { padding: 22px 18px; display: flex; flex-direction: column; gap: 18px; }
+  .rail .btn { width: 100%; }
+  .rail .actions { display: flex; flex-direction: column; gap: 9px; }
+  .stats { display: grid; grid-template-columns: 1fr auto; gap: 11px 16px; border-top: 1px solid var(--line-soft); padding-top: 18px; font-size: 12.5px; }
+
+  .center { display: flex; flex-direction: column; min-width: 0; }
+  .center-head { padding: 22px 28px 18px; display: flex; flex-direction: column; gap: 7px; }
+  .toolbar { display: grid; grid-template-columns: minmax(0,1.8fr) 1fr 1fr auto; gap: 16px; align-items: end; padding: 0 28px 20px; }
+  .field { display: flex; flex-direction: column; gap: 7px; min-width: 0; }
+  .field-actions { display: flex; gap: 8px; }
+  .scopebar { display: flex; align-items: center; gap: 10px; padding: 14px 28px; border-top: 1px solid var(--line-soft); border-bottom: 1px solid var(--line-soft); background: rgba(255,255,255,0.012); }
+  .scopebar .spacer { margin-left: auto; }
+  .results { padding: 20px 28px 28px; display: flex; flex-direction: column; gap: 14px; }
+
+  .season > summary, .episode > summary { list-style: none; cursor: pointer; }
+  .season > summary::-webkit-details-marker, .episode > summary::-webkit-details-marker { display: none; }
+
+  .season { border-radius: 14px; }
+  .season > summary { padding: 16px 20px; display: flex; flex-direction: column; gap: 9px; }
+  .season .line1 { display: flex; align-items: center; gap: 14px; }
+  .season .line1 .name { font-size: 15px; font-weight: 650; }
+  .season .line1 .status { margin-left: auto; }
+  /* Secondary actions live on a quiet second line — the header line no longer
+     has to fit three links plus a badge. */
+  .season .line2 { display: flex; align-items: center; gap: 18px; padding-left: 28px; }
+
+  .season-body { border-top: 1px solid var(--line-soft); padding: 14px 20px 18px; display: flex; flex-direction: column; gap: 10px; }
+
+  .packs { display: flex; align-items: center; gap: 14px; border: 1px dashed rgba(96,165,250,0.35); background: rgba(37,99,235,0.05); border-radius: 12px; padding: 14px 18px; }
+  .packs .btn { margin-left: auto; }
+
+  /* Episodes as separated rows rather than nested boxes — less visual weight,
+     more air. */
+  .episode + .episode { border-top: 1px solid var(--line-soft); }
+  .episode > summary { padding: 14px 6px; display: flex; align-items: center; gap: 14px; }
+  .episode .title { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .episode .right { margin-left: auto; display: flex; align-items: center; gap: 14px; }
+  .episode-body { padding: 2px 6px 16px 34px; display: flex; flex-direction: column; gap: 10px; }
+  .episode[open] { background: rgba(255,255,255,0.015); border-radius: 12px; }
+
+  .release { display: flex; align-items: center; gap: 16px; padding: 14px 16px; border: 1px solid var(--line-soft); border-radius: 12px; background: var(--surface-900); }
+  .release .score { font-size: 17px; font-weight: 700; color: #34d399; font-variant-numeric: tabular-nums; min-width: 36px; text-align: right; }
+  .release .body { min-width: 0; flex: 1; display: flex; flex-direction: column; gap: 6px; }
+  .release .meta { display: flex; gap: 9px; flex-wrap: wrap; }
+  .release .cta { display: flex; align-items: center; gap: 14px; }
+
+  .activity { padding: 20px 16px; display: flex; flex-direction: column; gap: 18px; }
+  .activity .entry { display: flex; flex-direction: column; gap: 11px; padding: 14px; }
+  .activity .hit { border: 1px solid var(--line-soft); border-radius: 8px; padding: 11px; display: flex; flex-direction: column; gap: 5px; }
+</style>
+</head>
+<body>
+<div class="mockup-note"><b>Mockup 3 — Breathing room.</b> Targets the "squashed" feel: wider modal with narrower side rails, generous 20–28px center padding, taller rows, and season actions moved to a quiet second line. Episodes lose their nested boxes and become divider-separated rows so the list reads as one calm column.</div>
+
+<div class="modal">
+  <div class="modal-header">
+    <h1>Top Gear</h1>
+    <span class="badge badge-gray">TV</span>
+    <span class="badge badge-yellow">pending</span>
+    <span class="small muted">Release: 2002-10-20</span>
+    <div class="header-right">
+      <button class="btn btn-quiet btn-sm">← Prev</button>
+      <button class="btn btn-quiet btn-sm">Next →</button>
+      <span class="small muted-2">4 of 12</span>
+      <button class="btn btn-quiet btn-sm">✕</button>
+    </div>
+  </div>
+
+  <div class="cols">
+    <aside class="rail">
+      <div class="poster"></div>
+      <div class="actions">
+        <button class="btn btn-primary">↻ Refresh search</button>
+        <button class="btn btn-primary">↻ Search for new</button>
+        <button class="btn">⌕ Full search</button>
+        <button class="btn">Open in Overseerr ↗</button>
+        <button class="btn">Refresh Plex</button>
+        <button class="btn btn-quiet link-danger">Deny</button>
+      </div>
+      <div class="stats">
+        <span class="muted">Cached results</span><span>260</span>
+        <span class="muted">Passed</span><span style="color:#34d399">59</span>
+        <span class="muted">Rejected</span><span style="color:#f87171">41</span>
+        <span class="muted">Staged</span><span style="color:#67e8f9">80</span>
+        <span class="muted">Last search</span><span class="muted">9 hours ago</span>
+      </div>
+      <div class="small muted" style="border-top:1px solid var(--line-soft); padding-top:18px;">› Synopsis</div>
+    </aside>
+
+    <main class="center">
+      <div class="center-head">
+        <div class="label">Search results</div>
+        <div class="small muted">Ranked from highest rule score to lowest, including rejected candidates so you can tune your filters.</div>
+      </div>
+
+      <div class="toolbar">
+        <div class="field"><span class="label">Title filter</span><input type="text" placeholder="Filter results by title…"></div>
+        <div class="field"><span class="label">Resolution</span><select><option>All</option></select></div>
+        <div class="field"><span class="label">Sort</span><select><option>Score</option></select></div>
+        <div class="field field-actions"><button class="btn btn-sm">Desc</button><button class="btn btn-sm btn-quiet">Clear</button></div>
+      </div>
+
+      <div class="scopebar">
+        <span class="xsmall muted-2">Show:</span>
+        <button class="chip active">All results <span class="count">230</span></button>
+        <button class="chip">Season packs <span class="count">0</span></button>
+        <button class="chip">Complete series <span class="count">0</span></button>
+        <span class="small muted-2 spacer">148 of 230 available</span>
+      </div>
+
+      <div class="results">
+        <div style="display:flex; justify-content:flex-end;"><button class="btn btn-quiet btn-sm">Expand all</button></div>
+
+        <details class="card season"><summary>
+          <div class="line1">
+            <span class="chev">›</span><span class="name">Season 1</span>
+            <span class="small muted">10/10 available</span>
+            <span class="status"><span class="badge badge-green">completed</span></span>
+          </div>
+          <div class="line2"><a class="link">Stage individual episodes</a><a class="link">Search season</a></div>
+        </summary></details>
+
+        <details class="card season"><summary>
+          <div class="line1">
+            <span class="chev">›</span><span class="name">Season 3</span>
+            <span class="small muted">3/9 available · 6 pending</span>
+            <span class="status"><span class="badge badge-yellow">pending</span></span>
+          </div>
+          <div class="line2"><a class="link">Mark all</a><a class="link">Stage individual episodes</a><a class="link">Search season</a></div>
+        </summary></details>
+
+        <details class="card season" open>
+          <summary>
+            <div class="line1">
+              <span class="chev">⌄</span><span class="name">Season 7</span>
+              <span class="small muted">1/7 available · 5 pending</span>
+              <span class="status"><span class="badge badge-cyan">staged</span></span>
+            </div>
+            <div class="line2"><a class="link">Mark all</a><a class="link">Stage individual episodes</a><a class="link">Search season</a></div>
+          </summary>
+          <div class="season-body">
+            <div class="packs">
+              <span class="chev">›</span>
+              <span style="font-weight:600; font-size:13px;">Season packs</span>
+              <span class="xsmall muted-2">0 cached</span>
+              <button class="btn btn-primary btn-sm">Search packs</button>
+            </div>
+
+            <div>
+              <details class="episode" open>
+                <summary>
+                  <span class="chev">⌄</span>
+                  <span class="mono xsmall muted-2">S07E01</span>
+                  <span class="title">Episode 1 — Rubicon Trail</span>
+                  <span class="right">
+                    <span class="badge badge-cyan">staged</span>
+                    <button class="btn btn-success btn-sm">Approve</button>
+                    <a class="link">Mark available</a>
+                  </span>
+                </summary>
+                <div class="episode-body">
+                  <div class="release">
+                    <span class="score">230</span>
+                    <div class="body">
+                      <div style="display:flex; align-items:center; gap:10px; min-width:0;">
+                        <span style="font-weight:600; font-size:13.5px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">Top Gear US S07E01 Rubicon Trail 720p HEVC x265-MeGusta</span>
+                        <span class="badge badge-cyan">Staged</span>
+                      </div>
+                      <div class="meta xsmall muted">
+                        <span>720p</span><span class="muted-2">·</span><span>x265</span><span class="muted-2">·</span>
+                        <span>0.79 GB</span><span class="muted-2">·</span><span>0 seeders</span><span class="muted-2">·</span>
+                        <span>7 files</span><span class="muted-2">·</span><span class="muted-2">IPTorrents</span>
+                      </div>
+                    </div>
+                    <div class="cta"><button class="btn btn-success btn-sm">Approve</button><a class="link link-danger">Discard</a></div>
+                  </div>
+                </div>
+              </details>
+
+              <details class="episode"><summary>
+                <span class="chev">›</span><span class="mono xsmall muted-2">S07E02</span>
+                <span class="title">Episode 2</span>
+                <span class="right"><span class="badge badge-yellow">pending</span><a class="link">Mark available</a></span>
+              </summary></details>
+
+              <details class="episode"><summary>
+                <span class="chev">›</span><span class="mono xsmall muted-2">S07E03</span>
+                <span class="title">Episode 3</span>
+                <span class="right"><span class="badge badge-blue">downloading</span><button class="btn btn-primary btn-sm">Stage top</button><a class="link">Mark available</a></span>
+              </summary></details>
+
+              <details class="episode"><summary>
+                <span class="chev">›</span><span class="mono xsmall muted-2">S07E04</span>
+                <span class="title">Episode 4</span>
+                <span class="right"><span class="badge badge-green">completed</span></span>
+              </summary></details>
+            </div>
+          </div>
+        </details>
+      </div>
+    </main>
+
+    <aside class="activity">
+      <div style="display:flex; align-items:center; gap:10px;">
+        <span style="font-weight:600">Activity</span><span class="muted-2" style="margin-left:auto">»</span>
+      </div>
+      <div>
+        <div class="label" style="margin-bottom:9px;">Timeline</div>
+        <div class="card" style="display:flex; align-items:center; gap:12px; padding:13px;">
+          <span class="chev">⌄</span><span class="small">Activity timeline</span>
+          <span class="xsmall muted-2" style="margin-left:auto">200 events</span>
+        </div>
+      </div>
+      <div class="card entry">
+        <div style="display:flex; align-items:center; gap:12px;">
+          <div><div class="small" style="font-weight:600">Search history</div><div class="xsmall muted">Winners, failures, rule evidence.</div></div>
+          <button class="btn btn-sm" style="margin-left:auto">Reload</button>
+        </div>
+        <div style="display:flex; gap:8px;"><span class="badge badge-green">completed</span><span class="badge badge-cyan">staged</span></div>
+        <div class="xsmall muted-2">2026-07-28 04:18:45 · prowlarr · new</div>
+        <div class="xsmall muted">Total 253 · Passed 79 · Rejected 174 · Staged 13</div>
+        <div class="hit"><div class="small">Top Gear UK S14E06 1080p HEVC x265-MeGusta</div><div class="xsmall muted">Score <span style="color:#34d399">330</span> · passed</div></div>
+        <div class="hit"><div class="small">Top Gear UK S14E05 1080p HEVC x265-MeGusta</div><div class="xsmall muted">Score <span style="color:#34d399">330</span> · passed</div></div>
+      </div>
+    </aside>
+  </div>
+</div>
+</body>
+</html>

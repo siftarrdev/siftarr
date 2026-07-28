@@ -258,12 +258,11 @@ async function openRequestDetails(requestId, explicitIndex = null, options = {})
         window.resetDetailsControls(requestId, { updateInputs: true });
         delete window.detailsAutoSearchStarted[requestId];
     }
-    // Reset the Activity panel to its default (open) state on a fresh modal
-    // open. Collapse state does not persist across modal reopens, and we only
-    // reset when the modal was previously closed (prev/next navigation reuses
-    // an already-visible modal and should not force the panel back open).
-    if (modal.classList.contains('hidden') && window.expandActivityPanel) {
-        window.expandActivityPanel();
+    // The Activity overlay always starts closed on a fresh modal open. Open
+    // state does not persist across reopens, but prev/next navigation reuses an
+    // already-visible modal and should not close a panel the user just opened.
+    if (modal.classList.contains('hidden') && window.closeActivityPanel) {
+        window.closeActivityPanel();
     }
     modal.classList.remove('hidden');
 
@@ -468,7 +467,7 @@ async function loadSearchHistory() {
         runsCount = runs.length;
         if (!runs.length) {
             container.innerHTML = '<div class="text-gray-500">No search history yet.</div>';
-            updateActivityMobileCount(null, runsCount);
+            updateActivityCount(null, runsCount);
             return;
         }
         container.innerHTML = runs.map(run => {
@@ -479,15 +478,15 @@ async function loadSearchHistory() {
     } catch (err) {
         container.innerHTML = `<div class="text-red-400">Failed to load search history: ${window.escapeHtml(err.message || 'Unknown error')}</div>`;
     }
-    updateActivityMobileCount(null, runsCount);
+    updateActivityCount(null, runsCount);
 }
 
-// Update the mobile "Activity · N" count shown on the collapsed <details> summary.
+// Update the "Activity · N" count shown on the modal-header toggle button.
 // `renderTimeline` and `loadSearchHistory` each contribute their segment count;
-// the running total is cached on the dataset of #activity-mobile-count so
+// the running total is cached on the dataset of #activity-count so
 // independent loaders can collaborate without one clobbering the other.
-function updateActivityMobileCount(timelineDelta, runsDelta) {
-    const el = document.getElementById('activity-mobile-count');
+function updateActivityCount(timelineDelta, runsDelta) {
+    const el = document.getElementById('activity-count');
     if (!el) return;
     if (timelineDelta != null) el.dataset.timeline = String(timelineDelta);
     if (runsDelta != null) el.dataset.runs = String(runsDelta);
@@ -603,13 +602,13 @@ function renderTimeline(timelineData, options = {}) {
         container.classList.add('hidden');
         container.open = false;
         if (count) count.textContent = '';
-        updateActivityMobileCount(timelineLength);
+        updateActivityCount(timelineLength);
         return;
     }
     container.classList.remove('hidden');
     container.open = !!options.open;
     if (count) count.textContent = timelineLength + ' event' + (timelineLength === 1 ? '' : 's');
-    updateActivityMobileCount(timelineLength);
+    updateActivityCount(timelineLength);
     const colorMap = {
         search_started: 'bg-blue-500',
         search_completed: 'bg-blue-500',
@@ -704,86 +703,50 @@ function renderTimeline(timelineData, options = {}) {
     }).join('');
 }
 
-// Activity panel collapse/expand toggle.
-// The panel is a single <details id="activity-panel"> shared by both
-// breakpoints: it is the desktop right panel (lg:flex lg:flex-col) and the
-// mobile collapsed "Activity · N" feed (<lg). Because the element is a
-// <details>, its content visibility is governed by the `open` attribute, not
-// by classes — so on desktop we force `open=true` whenever the panel is
-// visible (lg:flex present), and on mobile we leave `open` user-controlled
-// (collapsed by default).
-//
-// Desktop collapse toggles `lg:flex` (remove) + `lg:hidden` (add) so the
-// panel actually disappears on lg+ even though the base class is no longer
-// `hidden` (the base must stay visible so the mobile <details> summary shows).
-// A MutationObserver mirrors the panel state onto the expand tab
-// (#activity-show) by toggling its `lg:flex` class.
-const ACTIVITY_DESKTOP_MQL = window.matchMedia ? window.matchMedia('(min-width: 1024px)') : null;
-
-function initActivityPanelToggle() {
+// Activity panel: an overlay popup pinned to the right third of the details
+// modal body (full width <lg), opened from the "Activity · N" button in the
+// modal header. It is closed on every breakpoint by default and on every fresh
+// modal open; `#activity-backdrop` dims the rest of the body and closes the
+// panel on click.
+function isActivityPanelOpen() {
     const panel = document.getElementById('activity-panel');
-    const showBtn = document.getElementById('activity-show');
-    if (!panel || !showBtn) return;
-
-    const isDesktop = () => ACTIVITY_DESKTOP_MQL ? ACTIVITY_DESKTOP_MQL.matches : true;
-
-    // On desktop the <details> must always be open when the panel is visible
-    // so the timeline + search history render. On mobile it stays collapsed
-    // until the user taps the summary.
-    const syncOpenAttr = () => {
-        if (isDesktop() && panel.classList.contains('lg:flex')) {
-            panel.open = true;
-        }
-    };
-
-    const syncExpandTab = () => {
-        if (panel.classList.contains('lg:flex')) {
-            // Panel open on desktop -> hide the expand tab.
-            showBtn.classList.remove('lg:flex');
-        } else {
-            // Panel collapsed -> show the expand tab on desktop.
-            showBtn.classList.add('lg:flex');
-        }
-    };
-
-    const observer = new MutationObserver(syncExpandTab);
-    observer.observe(panel, { attributes: true, attributeFilter: ['class'] });
-
-    window.collapseActivityPanel = () => {
-        panel.classList.remove('lg:flex');
-        panel.classList.add('lg:hidden');
-    };
-    window.expandActivityPanel = () => {
-        panel.classList.remove('lg:hidden');
-        panel.classList.add('lg:flex');
-        if (isDesktop()) {
-            panel.open = true;
-        } else {
-            // Mobile: the <details> is always visible, but its content should
-            // start collapsed ("Activity · N") on a fresh modal open.
-            panel.open = false;
-        }
-    };
-
-    // Keep `open` in sync when crossing the lg breakpoint. On desktop the
-    // <details> must always be open when visible; on mobile it defaults to
-    // collapsed ("Activity · N") so a resize from desktop (where open is
-    // forced true) back to mobile re-collapses the feed.
-    if (ACTIVITY_DESKTOP_MQL) {
-        ACTIVITY_DESKTOP_MQL.addEventListener('change', () => {
-            if (isDesktop() && panel.classList.contains('lg:flex')) {
-                panel.open = true;
-            } else if (!isDesktop()) {
-                panel.open = false;
-            }
-        });
-    }
-
-    syncOpenAttr();
-    syncExpandTab();
+    return !!panel && !panel.classList.contains('hidden');
 }
 
-initActivityPanelToggle();
+function setActivityPanelOpen(open) {
+    const panel = document.getElementById('activity-panel');
+    const backdrop = document.getElementById('activity-backdrop');
+    const toggle = document.getElementById('activity-toggle');
+    if (!panel) return;
+    const wasOpen = !panel.classList.contains('hidden');
+    panel.classList.toggle('hidden', !open);
+    if (backdrop) backdrop.classList.toggle('hidden', !open);
+    if (toggle) toggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+    // Move focus into the overlay on open and hand it back to the header
+    // trigger on close, so keyboard users are not left on hidden content.
+    if (open && !wasOpen) {
+        panel.querySelector('button')?.focus();
+    } else if (!open && wasOpen && toggle) {
+        toggle.focus();
+    }
+}
+
+function openActivityPanel() {
+    setActivityPanelOpen(true);
+}
+
+function closeActivityPanel() {
+    setActivityPanelOpen(false);
+}
+
+function toggleActivityPanel() {
+    setActivityPanelOpen(!isActivityPanelOpen());
+}
+
+window.isActivityPanelOpen = isActivityPanelOpen;
+window.openActivityPanel = openActivityPanel;
+window.closeActivityPanel = closeActivityPanel;
+window.toggleActivityPanel = toggleActivityPanel;
 
 // Mobile filter chip toggle: expands/collapses #release-controls on <lg.
 // #release-controls is `hidden lg:flex` in the template, so toggling `hidden`
