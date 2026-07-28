@@ -1,6 +1,7 @@
 """Tests for ActivityLogService."""
 
 import json
+import logging
 import sys
 from unittest.mock import AsyncMock, MagicMock
 
@@ -109,7 +110,11 @@ class TestActivityLogService:
         """log() swallows a flush exception, logs it, and returns None."""
         mock_db.flush.side_effect = RuntimeError("db down")
 
-        result = await service.log(EventType.SEARCH_STARTED, request_id=99)
+        with caplog.at_level(
+            logging.ERROR,
+            logger="app.siftarr.services.lifecycle.activity_log_service",
+        ):
+            result = await service.log(EventType.SEARCH_STARTED, request_id=99)
 
         assert result is None
         mock_db.flush.assert_awaited_once()

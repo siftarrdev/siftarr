@@ -21,6 +21,7 @@ dev = [
     "pytest>=9.0.3",
     "pytest-asyncio>=1.3.0",
     "pytest-cov>=7.1.0",
+    "pytest-xdist>=3.8.0",
 ]
 
 [build-system]
@@ -44,6 +45,8 @@ addopts = [
   "--tb=short",
   "--disable-warnings",
   "--no-header",
+  "-n=4",
+  "--dist=loadfile",
 ]
 
 [tool.ruff]
