@@ -98,13 +98,16 @@
     }
 
     /* Compact mobile touch targets: 36px primary, 32px secondary.
-       Used by the details modal header card / bottom bar / release cards
-       at <lg so nothing exceeds the mockups' calmer sizing. */
-    .tap-primary {
-        min-height: 2.25rem;
-    }
-    .tap {
-        min-height: 2rem;
+       Used by the details modal header card / bottom bar / release cards.
+       Only enforced below lg: on desktop these floors were padding out the
+       compact per-episode release rows for no benefit. */
+    @media (max-width: 1023px) {
+        .tap-primary {
+            min-height: 2.25rem;
+        }
+        .tap {
+            min-height: 2rem;
+        }
     }
     .hide-scrollbar::-webkit-scrollbar {
         display: none;

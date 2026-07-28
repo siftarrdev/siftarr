@@ -14,9 +14,10 @@ from app.siftarr.models.rule import RuleType, TVTarget
 from app.siftarr.services.decisions.rule_engine import RuleEngine
 from app.siftarr.services.decisions.rule_service import RuleService
 from app.siftarr.services.integrations.prowlarr_service import ProwlarrRelease
+from app.siftarr.templating import configure_templates
 
 router = APIRouter(prefix="/rules", tags=["rules"])
-templates = Jinja2Templates(directory="app/siftarr/templates")
+templates = configure_templates(Jinja2Templates(directory="app/siftarr/templates"))
 
 
 async def _resolve_import_payload(

@@ -5,6 +5,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from app.siftarr.models.release import Release
 from app.siftarr.models.request import MediaType, Request
 from app.siftarr.models.staged_torrent import StagedTorrent
 from app.siftarr.services.integrations.prowlarr_service import ProwlarrRelease
@@ -74,6 +75,19 @@ class TestStagingServiceUnit:
         """Test staging enabled check."""
         result = StagingService.is_staging_enabled(MagicMock())
         assert result is False
+
+    @pytest.mark.asyncio
+    async def test_rule_selection_rejects_zero_seeder_release(self, mock_db):
+        """Automatic selections must never hand off torrents with no seeders."""
+        request = MagicMock(spec=Request, id=42)
+        release = MagicMock(spec=Release, title="Dead.Torrent", seeders=0)
+
+        with pytest.raises(RuntimeError, match="No stored releases"):
+            await StagingService(mock_db).use_releases(
+                request,
+                [release],
+                selection_source="rule",
+            )
 
 
 class TestStagingServiceIntegration:

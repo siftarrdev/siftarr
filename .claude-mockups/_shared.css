@@ -1,0 +1,155 @@
+/* Shared base styling for the request-details modal mockups.
+   Approximates the current Tailwind theme so each mockup only has to express
+   its own layout tweaks. */
+:root {
+  --surface-900: #0f1115;
+  --surface-850: #161a21;
+  --surface-800: #1b2029;
+  --line: rgba(148, 163, 184, 0.16);
+  --line-soft: rgba(148, 163, 184, 0.10);
+  --text: #e6e9ee;
+  --muted: #9aa3b2;
+  --muted-2: #6b7481;
+  --brand: #2563eb;
+  --brand-400: #60a5fa;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: #0a0c10;
+  color: var(--text);
+  font: 14px/1.45 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  padding: 24px;
+}
+
+.modal {
+  max-width: 1280px;
+  margin: 0 auto;
+  background: var(--surface-900);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  overflow: hidden;
+}
+
+.modal-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  border-bottom: 1px solid var(--line);
+  background: var(--surface-850);
+}
+
+.modal-header h1 { font-size: 17px; margin: 0; font-weight: 650; }
+.header-right { margin-left: auto; display: flex; align-items: center; gap: 10px; }
+
+.cols { display: grid; }
+
+.rail, .activity { border-color: var(--line); }
+.rail { border-right: 1px solid var(--line); }
+.activity { border-left: 1px solid var(--line); background: var(--surface-850); }
+
+.poster {
+  width: 100%;
+  aspect-ratio: 2 / 3;
+  border-radius: 10px;
+  background: linear-gradient(160deg, #2b3444, #131820);
+  border: 1px solid var(--line);
+}
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  border-radius: 8px;
+  border: 1px solid transparent;
+  background: var(--surface-800);
+  color: var(--text);
+  font-size: 12.5px;
+  font-weight: 600;
+  padding: 7px 12px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.btn-primary { background: var(--brand); color: #fff; }
+.btn-success { background: #059669; color: #fff; }
+.btn-quiet { background: transparent; border-color: var(--line); color: var(--muted); }
+.btn-sm { padding: 4px 10px; font-size: 11.5px; }
+.link { color: var(--brand-400); font-size: 12px; text-decoration: none; cursor: pointer; white-space: nowrap; }
+.link-danger { color: #f87171; }
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  padding: 2px 9px;
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.badge-green { background: rgba(5, 150, 105, 0.18); color: #6ee7b7; }
+.badge-yellow { background: rgba(202, 138, 4, 0.20); color: #fcd34d; }
+.badge-blue { background: rgba(37, 99, 235, 0.22); color: #93c5fd; }
+.badge-cyan { background: rgba(8, 145, 178, 0.22); color: #67e8f9; }
+.badge-gray { background: rgba(148, 163, 184, 0.14); color: var(--muted); }
+
+.label {
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted-2);
+  font-weight: 600;
+}
+
+.muted { color: var(--muted); }
+.muted-2 { color: var(--muted-2); }
+.mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+.small { font-size: 12px; }
+.xsmall { font-size: 11px; }
+
+input[type="text"], select {
+  width: 100%;
+  background: var(--surface-800);
+  border: 1px solid var(--line);
+  color: var(--text);
+  border-radius: 8px;
+  padding: 8px 10px;
+  font-size: 13px;
+}
+
+.card {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--surface-850);
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border-radius: 999px;
+  padding: 5px 12px;
+  font-size: 12px;
+  font-weight: 600;
+  border: 1px solid var(--line);
+  color: var(--muted);
+  background: transparent;
+  cursor: pointer;
+}
+.chip.active { background: var(--brand); color: #fff; border-color: transparent; }
+.chip .count { opacity: 0.65; font-weight: 500; }
+
+.chev { color: var(--muted-2); font-size: 11px; }
+
+.mockup-note {
+  max-width: 1280px;
+  margin: 0 auto 16px;
+  color: var(--muted);
+  font-size: 13px;
+  border-left: 3px solid var(--brand);
+  padding: 6px 12px;
+  background: rgba(37, 99, 235, 0.07);
+}
+.mockup-note b { color: var(--text); }

@@ -1,0 +1,245 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Mockup 1 — Spacing rhythm</title>
+<link rel="stylesheet" href="_shared.css">
+<style>
+  /* Tweak 1: consistent inline gaps + an 8px vertical rhythm.
+     Nothing is restructured — rows keep the current flex layout, they just get
+     a real gap, a bit more padding, and separated label groups. */
+  .cols { grid-template-columns: 264px minmax(0, 1fr) 320px; min-height: 720px; }
+  .modal-header { padding: 14px 20px; }
+  .rail { padding: 20px 18px; display: flex; flex-direction: column; gap: 16px; }
+  .rail .actions { display: flex; flex-direction: column; gap: 8px; }
+  .rail .actions .btn { width: 100%; }
+  .rail .actions .row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .stats { display: flex; flex-direction: column; gap: 8px; border-top: 1px solid var(--line-soft); padding-top: 14px; }
+  .stats .row { display: flex; justify-content: space-between; gap: 16px; font-size: 12.5px; }
+
+  .center { display: flex; flex-direction: column; min-width: 0; }
+  .center-head { padding: 18px 20px 16px; border-bottom: 1px solid var(--line-soft); display: flex; flex-direction: column; gap: 6px; }
+  .filters { display: grid; grid-template-columns: minmax(0,1.6fr) 1fr 1fr auto; gap: 12px; align-items: end; padding: 16px 20px; border-bottom: 1px solid var(--line-soft); }
+  .field { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+  .filters .field-actions { display: flex; gap: 8px; }
+
+  .scopebar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 14px 20px; border-bottom: 1px solid var(--line-soft); }
+  .scopebar .spacer { margin-left: auto; }
+
+  .results { padding: 16px 20px 22px; display: flex; flex-direction: column; gap: 12px; }
+
+  /* Season summary: gap-driven, so labels can never collide. */
+  .season > summary,
+  .episode > summary { list-style: none; cursor: pointer; display: flex; align-items: center; gap: 12px; }
+  .season > summary::-webkit-details-marker,
+  .episode > summary::-webkit-details-marker { display: none; }
+  .season > summary { padding: 14px 16px; }
+  .season-actions { margin-left: auto; display: flex; align-items: center; gap: 14px; }
+
+  .season-body { padding: 4px 16px 16px; display: flex; flex-direction: column; gap: 8px; border-top: 1px solid var(--line-soft); }
+
+  .episode { border: 1px solid var(--line-soft); border-radius: 10px; background: rgba(255,255,255,0.015); }
+  .episode > summary { padding: 11px 14px; }
+  .episode .title { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .episode-actions { margin-left: auto; display: flex; align-items: center; gap: 12px; }
+  .episode-body { padding: 4px 14px 14px; display: flex; flex-direction: column; gap: 8px; }
+
+  .packs { border: 1px solid rgba(37,99,235,0.28); background: rgba(37,99,235,0.06); border-radius: 10px; padding: 12px 14px; display: flex; align-items: center; gap: 12px; }
+  .packs .btn { margin-left: auto; }
+
+  .release { display: flex; align-items: center; gap: 14px; padding: 12px 14px; border: 1px solid var(--line-soft); border-radius: 10px; background: var(--surface-900); }
+  .release .score { font-size: 16px; font-weight: 700; color: #34d399; font-variant-numeric: tabular-nums; min-width: 34px; text-align: right; }
+  .release .body { min-width: 0; flex: 1; display: flex; flex-direction: column; gap: 4px; }
+  .release .meta { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .release .cta { display: flex; align-items: center; gap: 12px; }
+
+  .activity { padding: 18px 16px; display: flex; flex-direction: column; gap: 16px; }
+  .activity .entry { display: flex; flex-direction: column; gap: 8px; padding: 12px; }
+  .activity .entry .tags { display: flex; gap: 8px; }
+  .activity .hit { display: flex; flex-direction: column; gap: 4px; border: 1px solid var(--line-soft); border-radius: 8px; padding: 10px; }
+</style>
+</head>
+<body>
+<div class="mockup-note"><b>Mockup 1 — Spacing rhythm.</b> Same structure as today. Every inline row becomes a real <code>gap</code> flex row (no more <em>"Season 1"</em>/<em>"10/10 available"</em> or <em>"Stage individual episodes"</em>/<em>"Search season"</em> touching), padding steps up from 8/12 to 12/16/20, and the filter bar becomes a labelled grid.</div>
+
+<div class="modal">
+  <div class="modal-header">
+    <h1>Top Gear</h1>
+    <span class="badge badge-gray">TV</span>
+    <span class="badge badge-yellow">pending</span>
+    <span class="small muted">Release: 2002-10-20</span>
+    <div class="header-right">
+      <button class="btn btn-quiet btn-sm">← Prev</button>
+      <button class="btn btn-quiet btn-sm">Next →</button>
+      <span class="small muted-2">4 of 12</span>
+      <button class="btn btn-quiet btn-sm">✕</button>
+    </div>
+  </div>
+
+  <div class="cols">
+    <aside class="rail">
+      <div class="poster"></div>
+      <div class="actions">
+        <button class="btn btn-primary">↻ Refresh search</button>
+        <button class="btn btn-primary">↻ Search for new</button>
+        <div class="row2">
+          <button class="btn">Open in Overseerr</button>
+          <button class="btn">⌕ Full search</button>
+        </div>
+        <div class="row2">
+          <button class="btn">Refresh Plex</button>
+          <button class="btn btn-quiet link-danger">Deny</button>
+        </div>
+      </div>
+      <div class="stats">
+        <div class="row"><span class="muted">Cached results</span><span>260</span></div>
+        <div class="row"><span class="muted">Passed</span><span style="color:#34d399">59</span></div>
+        <div class="row"><span class="muted">Rejected</span><span style="color:#f87171">41</span></div>
+        <div class="row"><span class="muted">Staged</span><span style="color:#67e8f9">80</span></div>
+        <div class="row"><span class="muted">Last search</span><span class="muted">9 hours ago</span></div>
+      </div>
+      <div class="small muted" style="border-top:1px solid var(--line-soft); padding-top:14px;">› Synopsis</div>
+    </aside>
+
+    <main class="center">
+      <div class="center-head">
+        <div class="label">Search results</div>
+        <div class="small muted">Ranked from highest rule score to lowest, including rejected candidates so you can tune your filters.</div>
+      </div>
+
+      <div class="filters">
+        <div class="field"><span class="label">Title filter</span><input type="text" placeholder="Filter results by title…"></div>
+        <div class="field"><span class="label">Resolution</span><select><option>All</option></select></div>
+        <div class="field"><span class="label">Sort</span><select><option>Score</option></select></div>
+        <div class="field field-actions"><button class="btn btn-sm">Desc</button><button class="btn btn-sm btn-quiet">Clear</button></div>
+      </div>
+
+      <div class="scopebar">
+        <span class="xsmall muted-2">Show:</span>
+        <button class="chip active">All results <span class="count">230</span></button>
+        <button class="chip">Season packs <span class="count">0</span></button>
+        <button class="chip">Complete series <span class="count">0</span></button>
+        <span class="small muted-2 spacer">148 of 230 available</span>
+      </div>
+
+      <div class="results">
+        <div style="display:flex; justify-content:flex-end;"><button class="btn btn-quiet btn-sm">Expand all</button></div>
+
+        <details class="card season"><summary>
+          <span class="chev">›</span>
+          <span style="font-weight:600">Season 1</span>
+          <span class="small muted">10/10 available</span>
+          <span class="badge badge-green">completed</span>
+          <span class="season-actions"><a class="link">Stage individual episodes</a><a class="link">Search season</a></span>
+        </summary></details>
+
+        <details class="card season"><summary>
+          <span class="chev">›</span>
+          <span style="font-weight:600">Season 3</span>
+          <span class="small muted">3/9 available · 6 pending</span>
+          <span class="badge badge-yellow">pending</span>
+          <span class="season-actions"><a class="link">Mark all</a><a class="link">Stage individual episodes</a><a class="link">Search season</a></span>
+        </summary></details>
+
+        <details class="card season" open>
+          <summary>
+            <span class="chev">⌄</span>
+            <span style="font-weight:600">Season 7</span>
+            <span class="small muted">1/7 available · 5 pending</span>
+            <span class="badge badge-cyan">staged</span>
+            <span class="season-actions"><a class="link">Mark all</a><a class="link">Stage individual episodes</a><a class="link">Search season</a></span>
+          </summary>
+          <div class="season-body">
+            <div class="packs">
+              <span class="chev">›</span>
+              <span style="font-weight:600; font-size:13px;">Season packs</span>
+              <span class="xsmall muted-2">0 cached</span>
+              <button class="btn btn-primary btn-sm">Search packs</button>
+            </div>
+
+            <details class="episode" open>
+              <summary>
+                <span class="chev">⌄</span>
+                <span class="mono xsmall muted-2">S07E01</span>
+                <span class="title">Episode 1 — Rubicon Trail</span>
+                <span class="episode-actions">
+                  <span class="badge badge-cyan">staged</span>
+                  <button class="btn btn-success btn-sm">Approve</button>
+                  <a class="link">Mark available</a>
+                </span>
+              </summary>
+              <div class="episode-body">
+                <div class="release">
+                  <span class="score">230</span>
+                  <div class="body">
+                    <div style="display:flex; align-items:center; gap:10px; min-width:0;">
+                      <span style="font-weight:600; font-size:13px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">Top Gear US S07E01 Rubicon Trail 720p HEVC x265-MeGusta</span>
+                      <span class="badge badge-cyan">Staged</span>
+                    </div>
+                    <div class="meta xsmall muted">
+                      <span>720p</span><span class="muted-2">·</span><span>x265</span><span class="muted-2">·</span>
+                      <span>0.79 GB</span><span class="muted-2">·</span><span>0 seeders</span><span class="muted-2">·</span>
+                      <span>7 files</span><span class="muted-2">·</span><span class="muted-2">IPTorrents</span>
+                    </div>
+                  </div>
+                  <div class="cta"><button class="btn btn-success btn-sm">Approve</button><a class="link link-danger">Discard</a></div>
+                </div>
+              </div>
+            </details>
+
+            <details class="episode">
+              <summary>
+                <span class="chev">›</span>
+                <span class="mono xsmall muted-2">S07E02</span>
+                <span class="title">Episode 2</span>
+                <span class="episode-actions"><span class="badge badge-yellow">pending</span><a class="link">Mark available</a></span>
+              </summary>
+            </details>
+
+            <details class="episode">
+              <summary>
+                <span class="chev">›</span>
+                <span class="mono xsmall muted-2">S07E03</span>
+                <span class="title">Episode 3</span>
+                <span class="episode-actions"><span class="badge badge-blue">downloading</span><button class="btn btn-primary btn-sm">Stage top</button><a class="link">Mark available</a></span>
+              </summary>
+            </details>
+          </div>
+        </details>
+      </div>
+    </main>
+
+    <aside class="activity">
+      <div style="display:flex; align-items:center; gap:10px;">
+        <span style="font-weight:600">Activity</span>
+        <span class="muted-2" style="margin-left:auto">»</span>
+      </div>
+      <div>
+        <div class="label" style="margin-bottom:8px;">Timeline</div>
+        <div class="card" style="display:flex; align-items:center; gap:12px; padding:12px;">
+          <span class="chev">⌄</span><span class="small">Activity timeline</span>
+          <span class="xsmall muted-2" style="margin-left:auto">200 events</span>
+        </div>
+      </div>
+      <div class="card entry">
+        <div style="display:flex; align-items:center; gap:12px;">
+          <div><div class="small" style="font-weight:600">Search history</div><div class="xsmall muted">Past searches, winners, failures.</div></div>
+          <button class="btn btn-sm" style="margin-left:auto">Reload</button>
+        </div>
+        <div class="tags"><span class="badge badge-green">completed</span><span class="badge badge-cyan">staged</span></div>
+        <div class="xsmall muted-2">2026-07-28 04:18:45 · prowlarr · new</div>
+        <div class="xsmall muted">Total 253 · Passed 79 · Rejected 174 · Staged 13 · Sent 0</div>
+        <div class="hit">
+          <div class="small">Top Gear UK S14E06 1080p HEVC x265-MeGusta</div>
+          <div class="xsmall muted">Score <span style="color:#34d399">330</span> · passed</div>
+        </div>
+        <div class="hit">
+          <div class="small">Top Gear UK S14E05 1080p HEVC x265-MeGusta</div>
+          <div class="xsmall muted">Score <span style="color:#34d399">330</span> · passed</div>
+        </div>
+      </div>
+    </aside>
+  </div>
+</div>
+</body>
+</html>

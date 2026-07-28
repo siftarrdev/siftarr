@@ -83,6 +83,15 @@ def test_dashboard_js_uses_shared_search_loading_state():
     assert "Checking indexers now" in js
 
 
+def test_dashboard_js_highlights_zero_seeders():
+    """Zero-seeder warnings should be bold and red in release views."""
+    js = _read_dashboard_js()
+
+    assert js.count("font-bold text-red-400") >= 2
+    assert "Number(release.seeders) === 0" in js
+    assert "item.seeders != null && Number(item.seeders) === 0" in js
+
+
 def test_dashboard_tv_details_use_new_and_full_search_actions():
     """Dashboard TV search UI should expose Search for new and Full search actions."""
     with open(
@@ -323,7 +332,10 @@ def test_dashboard_js_uses_collapsible_episode_results():
     js = _read_dashboard_js()
 
     assert "episode-details-" in js
-    assert '<details id="\' + episodeDetailsId + \'" class="group rounded-lg border' in js
+    # Episode rows are divider-separated inside the season body (no per-row
+    # border box), so only the rounded/tinted wrapper is asserted here.
+    assert '<details id="\' + episodeDetailsId + \'" class="group rounded-xl ' in js
+    assert "divide-y divide-gray-700/40" in js
     assert "No cached episode results yet" in js
 
 
@@ -504,11 +516,11 @@ def test_dashboard_js_uses_cyan_staged_release_indicators():
     js = _read_dashboard_js()
 
     assert "'staged': 'badge-cyan'" in js
-    # New score-first card: staged items keep cyan-tinted backgrounds/badges,
-    # but outlines stay in the muted gray border family.
-    assert "bg-cyan-950/20" in js
-    assert "border-gray-700/60 bg-cyan-950/20" in js
-    assert "border-gray-700/60 bg-cyan-950/10" in js
+    # Staged episode rows keep a cyan-tinted fill; the staged release card
+    # inside them is a borderless recessed dark box (its fill is the separation,
+    # so no outline is needed).
+    assert "bg-cyan-950/40" in js
+    assert "rounded-xl bg-surface-950" in js
     # Staged badge on the card title uses the inline cyan pill style.
     assert "bg-cyan-900/60 text-cyan-300" in js
 
@@ -913,3 +925,172 @@ def test_group_collapse_state_ors_table_and_card_representations():
     assert "state[key] = !!state[key] || !!open;" in capture
     assert "state[el.dataset.downloadGroup] = !!el.open;" not in capture
     assert "document.querySelectorAll(`tr[data-download-group]" in capture
+
+
+def _read_dashboard_template():
+    with open(
+        os.path.join(os.path.dirname(__file__), "../../../app/siftarr/templates/dashboard.html"),
+        encoding="utf-8",
+    ) as handle:
+        return handle.read()
+
+
+def test_activity_panel_is_a_header_triggered_overlay():
+    """Activity is an overlay over the right third of the modal, not a column."""
+    template = _read_dashboard_template()
+
+    # Header trigger replaces the old full-height collapse tab.
+    assert 'id="activity-toggle"' in template
+    assert 'onclick="toggleActivityPanel()"' in template
+    assert 'id="activity-show"' not in template
+    assert "collapseActivityPanel()" not in template
+
+    # Overlay panel: hidden by default, pinned to the right third on desktop.
+    assert 'id="activity-panel"' in template
+    assert 'id="activity-backdrop"' in template
+    assert "absolute inset-y-0 right-0" in template
+    assert "lg:w-1/3" in template
+    assert 'class="hidden absolute inset-y-0 right-0' in template
+
+
+def test_activity_panel_starts_closed_on_modal_open():
+    """A fresh details modal open always closes the Activity overlay."""
+    js = _read_dashboard_js()
+
+    assert "function setActivityPanelOpen(open)" in js
+    assert "window.toggleActivityPanel = toggleActivityPanel;" in js
+    assert "if (modal.classList.contains('hidden') && window.closeActivityPanel)" in js
+    # The count now lives on the header toggle button.
+    assert "activity-mobile-count" not in js
+    assert "getElementById('activity-count')" in js
+
+
+def test_escape_closes_activity_overlay_before_the_details_modal():
+    entry_js = _read_dashboard_entry_js()
+
+    assert "window.isActivityPanelOpen && window.isActivityPanelOpen()" in entry_js
+    assert "window.closeActivityPanel();" in entry_js
+
+
+def test_season_summary_splits_actions_onto_a_second_line():
+    """Season headline row carries status only; actions drop to a quiet line."""
+    js = _read_dashboard_js()
+
+    assert "flex flex-col gap-2 px-4 py-4 lg:px-5 cursor-pointer" in js
+    assert "flex flex-wrap items-center gap-5 pl-7 text-xs" in js
+
+
+def test_release_rows_use_the_gap_shorthand_not_axis_longhands():
+    """Row spacing regression guard.
+
+    The season/episode/release summary rows previously used `gap-x-*`/`gap-y-*`
+    longhands and rendered with no space between labels ("Season 30/9
+    availabledenied", "S07E01Episode 1"). The `gap-*` shorthand is what worked
+    before, so the details rows must stay on it.
+    """
+    js_path = os.path.join(
+        os.path.dirname(__file__), "../../../app/siftarr/static/js/dashboard/releases.js"
+    )
+    with open(js_path, encoding="utf-8") as handle:
+        releases_js = handle.read()
+
+    assert "gap-x-" not in releases_js
+    assert "gap-y-" not in releases_js
+
+
+def test_season_packs_drawer_uses_a_dark_box_not_a_dashed_outline():
+    js = _read_dashboard_js()
+
+    assert "border-gray-700/60 bg-surface-900/60" in js
+    assert "border-dashed" not in js
+
+
+def test_poster_box_keeps_the_2_by_3_aspect_ratio():
+    """Portrait posters must not be cropped, and the rail must start level."""
+    template = _read_dashboard_template()
+
+    assert 'id="request-details-poster" class="hidden w-14 aspect-[2/3]' in template
+    assert 'id="request-details-poster-fallback" class="flex w-14 aspect-[2/3]' in template
+    assert "lg:h-44" not in template
+
+
+def test_tailwind_stylesheet_is_cache_busted():
+    """An unversioned tailwind.css strands browsers on stale utility classes."""
+    base_path = os.path.join(os.path.dirname(__file__), "../../../app/siftarr/templates/base.html")
+    with open(base_path, encoding="utf-8") as handle:
+        base = handle.read()
+
+    assert "/static/css/tailwind.css?v={{ asset_version() }}" in base
+    assert 'href="/static/css/tailwind.css"' not in base
+
+
+def test_episode_release_cards_are_vertically_compact():
+    """Episode drawers list many candidates, so each row stays short."""
+    js = _read_dashboard_js()
+
+    # Bucket (per-episode/per-pack) cards: short padding, tight title/meta lines.
+    assert "px-3 py-2 flex flex-wrap items-start gap-3 lg:flex-nowrap" in js
+    assert "text-[13px] leading-snug text-white font-medium" in js
+    assert "text-[11px] leading-tight text-gray-400" in js
+    assert "space-y-1.5" in js
+    # The taller pre-compaction card padding is gone from the bucket card.
+    assert "py-3.5 flex flex-wrap items-start" not in js
+
+
+def test_tap_touch_target_floor_is_mobile_only():
+    """The 32px tap floor must not pad out compact desktop release rows."""
+    css_path = os.path.join(
+        os.path.dirname(__file__), "../../../app/siftarr/static/css/tailwind-input.css"
+    )
+    with open(css_path, encoding="utf-8") as handle:
+        css = handle.read()
+
+    tap_block = css[css.index("@media (max-width: 1023px)") :]
+    assert ".tap-primary {" in tap_block[:400]
+    assert ".tap {" in tap_block[:400]
+
+
+def test_rejected_releases_keep_their_meta_line_with_a_short_verdict():
+    """Rejections annotate the meta line instead of replacing it."""
+    js = _read_dashboard_js()
+
+    assert "function summarizeRejectionReason(reason)" in js
+    assert "function renderRejectionVerdict(release)" in js
+    assert "'size over $1'" in js
+    assert "'size under $1'" in js
+    assert "'excluded by $1'" in js
+    assert "'no required match'" in js
+    assert 'data-release-rejection="true"' in js
+    # The meta line is built once for passed and rejected releases alike, so the
+    # resolution/codec/size/seeders annotations survive a rejection.
+    assert "rejected ? renderRejectionVerdict(release) : ''," in js
+    assert "text-[11px] leading-tight text-red-300/80" not in js
+
+
+def test_staged_packs_are_visible_when_no_cached_pack_row_exists():
+    """A staged pack must be visible even after its cached release is purged."""
+    js = _read_dashboard_js()
+
+    assert "function stagedPacksForSeason(stagedTorrents, seasonNumber)" in js
+    assert "function stagedPacksMissingFromRows(stagedPacks, releases)" in js
+    assert "function renderStagedPackRow(staged, requestId)" in js
+    assert 'data-staged-pack-row="true"' in js
+    # Count label distinguishes staged from cached, and the drawer opens itself
+    # when there is a staged pack the user would otherwise not see.
+    assert "countParts.push(orphanStaged.length + ' staged');" in js
+    assert "const openAttr = orphanStaged.length ? ' open' : '';" in js
+    assert "no cached result — awaiting approval" in js
+
+
+def test_episodes_label_staging_that_comes_from_a_pack():
+    """The status badge says when staging came from a pack, not this episode."""
+    js = _read_dashboard_js()
+
+    assert "'staged via ' + stagedScopeTypeLabel(coveringPack)" in js
+    assert "function stagedScopeTypeLabel(staged)" in js
+    assert "'multi-season pack'" in js
+    # Only pack-scoped staging is relabelled, not an episode's own release.
+    assert "(stagedTorrent.target_scope || {}).type !== 'single_episode'" in js
+    # The verbose inline notice this replaced is gone.
+    assert "renderCoveringPackNotice" not in js
+    assert "data-covering-pack-notice" not in js

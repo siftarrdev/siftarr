@@ -212,7 +212,9 @@ class MovieDecisionService:
         )
         await self.db.commit()
 
-        best = get_best_passing(all_evaluated)
+        best = get_best_passing(
+            [evaluation for evaluation in all_evaluated if evaluation.release.seeders > 0]
+        )
 
         logger.info(
             "Movie rule evaluation: request_id=%s evaluated=%s passed=%s",

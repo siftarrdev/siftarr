@@ -225,7 +225,7 @@ Static assets.
 - `css/dashboard.css` — supplemental UI styling
 - `css/tailwind.css` — built Tailwind CSS output (generated, committed)
 - `css/tailwind-input.css` — Tailwind CSS v4 input with CSS-based theme configuration and custom component classes
-- `js/dashboard*.js` and `js/dashboard/` — dashboard client-side behavior for the redesigned details modal (score-first release cards with inline staged Approve/Discard/Replace, client-only TV scope chips, per-season "Season packs" drawers plus a grouped Season packs tab with per-season/multi-season pack searches, collapsible Activity panel, responsive mobile reflow), filters, staged actions and alternative review modal, TV “Search for new”/“Full search” controls, movie release search UX, and SSE progress panel; polls move status fields in download-status endpoint and shows badges/paths
+- `js/dashboard*.js` and `js/dashboard/` — dashboard client-side behavior for the redesigned details modal (score-first release cards with inline staged Approve/Discard/Replace, client-only TV scope chips, per-season "Season packs" drawers plus a grouped Season packs tab with per-season/multi-season pack searches, Activity overlay opened from the details header and pinned over the right third of the modal, responsive mobile reflow), filters, staged actions and alternative review modal, TV “Search for new”/“Full search” controls, movie release search UX, and SSE progress panel; polls move status fields in download-status endpoint and shows badges/paths
 - `js/staging_decision_log.js` — client-side fetching, URL-backed filters, pagination, and raw JSON expansion for the Rules decision-log page
 - `js/stats.js` — Stats API fetch/range handling and lightweight bar/time-series chart rendering
 - favicon assets

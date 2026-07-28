@@ -304,3 +304,85 @@ class TestGroupTvReleasesForPackUI:
         assert by_season[2] == [single_pack, multi_pack]
         assert by_season[1] == [multi_pack]
         assert by_episode[(1, 3)] == [episode_release]
+
+    def test_duplicate_rows_are_grouped_once(self) -> None:
+        """Pre-existing duplicate release rows must not render twice."""
+        from app.siftarr.services.dashboard.tv_enrichment_service import TVEnrichmentService
+
+        service = TVEnrichmentService(MagicMock())
+        first: dict[str, object] = {
+            "title": "Show.S01E03.1080p",
+            "info_hash": None,
+            "season_number": 1,
+            "episode_number": 3,
+        }
+        duplicate: dict[str, object] = dict(first)
+        hashed: dict[str, object] = {
+            "title": "Show.S01.1080p",
+            "info_hash": "abc123",
+            "season_number": 1,
+            "episode_number": None,
+        }
+        hashed_duplicate: dict[str, object] = {**hashed, "title": "Show.S01.1080p.PROPER"}
+
+        by_season, by_episode = service._group_tv_releases(
+            [first, duplicate, hashed, hashed_duplicate], [1]
+        )
+
+        assert by_episode[(1, 3)] == [first]
+        assert by_season[1] == [hashed]
+
+
+@pytest.mark.asyncio
+async def test_staged_overlay_does_not_repaint_completed_episodes(db_session):
+    """A staged pack must not turn already-available seasons into "staged".
+
+    A staged season-pack/multi-season/complete-series torrent covers every
+    episode in its scope, which previously repainted finished seasons as
+    "staged" in the details modal even though the episodes were on Plex.
+    """
+    request = Request(
+        external_id="tv-completed-staged-overlay",
+        media_type=MediaType.TV,
+        title="Show",
+        status=RequestStatus.COMPLETED,
+    )
+    db_session.add(request)
+    await db_session.flush()
+    done_season = Season(request_id=request.id, season_number=1, status=RequestStatus.COMPLETED)
+    open_season = Season(request_id=request.id, season_number=2, status=RequestStatus.PENDING)
+    db_session.add_all([done_season, open_season])
+    await db_session.flush()
+    db_session.add_all(
+        [
+            Episode(season_id=done_season.id, episode_number=1, status=RequestStatus.COMPLETED),
+            Episode(season_id=done_season.id, episode_number=2, status=RequestStatus.COMPLETED),
+            Episode(season_id=open_season.id, episode_number=1, status=RequestStatus.COMPLETED),
+            Episode(season_id=open_season.id, episode_number=2, status=RequestStatus.PENDING),
+        ]
+    )
+    await db_session.commit()
+
+    tv_info = await TVEnrichmentService(db_session).load_tv_info(
+        request_id=request.id,
+        background_tasks=None,
+        releases=[],
+        active_staged_torrents=[
+            {"status": "staged", "target_scope": {"type": "complete_series"}},
+        ],
+    )
+
+    finished, partial = tv_info.seasons
+
+    # Fully available season keeps its completed badge and stages nothing.
+    assert finished["status"] == "completed"
+    assert finished["staged_count"] == 0
+    finished_episodes = cast("list[dict[str, object]]", finished["episodes"])
+    assert [episode["status"] for episode in finished_episodes] == ["completed", "completed"]
+
+    # The season with outstanding work still shows the staging overlay, but only
+    # on the episode that is actually missing.
+    assert partial["status"] == "staged"
+    assert partial["staged_count"] == 1
+    partial_episodes = cast("list[dict[str, object]]", partial["episodes"])
+    assert [episode["status"] for episode in partial_episodes] == ["completed", "staged"]

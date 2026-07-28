@@ -23,6 +23,7 @@ from app.siftarr.services.releases.release_serializers import (
     apply_release_size_per_season_metadata,
     scope_to_episode_set,
 )
+from app.siftarr.services.releases.release_storage import get_release_persistence_key
 from app.siftarr.services.utils.type_utils import coerce_int_list
 
 logger = logging.getLogger(__name__)
@@ -77,13 +78,16 @@ class TVEnrichmentService:
                 1 for ep in season_episodes if ep.status == RequestStatus.COMPLETED
             )
             state_counts = count_season_episode_states(season_episodes)
-            season_staged = self._season_has_staged_scope(
-                season.season_number, staged_overlay_torrents, known_season_numbers
-            )
+            # Plex availability outranks the staging overlay. A staged
+            # season-pack / multi-season / complete-series torrent covers every
+            # episode in its scope, which otherwise repainted finished seasons as
+            # "staged" — staging cannot change what is already on Plex, so
+            # completed episodes keep their own status.
             staged_episode_numbers = {
                 ep.episode_number
                 for ep in season_episodes
-                if self._episode_has_staged_scope(
+                if ep.status != RequestStatus.COMPLETED
+                and self._episode_has_staged_scope(
                     season.season_number,
                     ep.episode_number,
                     staged_overlay_torrents,
@@ -91,6 +95,9 @@ class TVEnrichmentService:
                 )
             }
             staged_count = len(staged_episode_numbers)
+            season_staged = self._season_has_staged_scope(
+                season.season_number, staged_overlay_torrents, known_season_numbers
+            ) and (bool(staged_episode_numbers) or not season_episodes)
             pending_count = max(state_counts["pending"] - staged_count, 0)
             seasons_data.append(
                 {
@@ -197,6 +204,24 @@ class TVEnrichmentService:
             )
             apply_release_size_per_season_metadata(release)
 
+    @staticmethod
+    def _dedupe_releases(releases: list[dict[str, object]]) -> list[dict[str, object]]:
+        """Drop duplicate releases so pre-existing duplicate rows render once."""
+        deduped: list[dict[str, object]] = []
+        seen: set[str] = set()
+        for release in releases:
+            info_hash = release.get("info_hash")
+            title = release.get("title")
+            key = get_release_persistence_key(
+                title=title if isinstance(title, str) else "",
+                info_hash=info_hash if isinstance(info_hash, str) and info_hash else None,
+            )
+            if key and key in seen:
+                continue
+            seen.add(key)
+            deduped.append(release)
+        return deduped
+
     def _group_tv_releases(
         self,
         releases: list[dict[str, object]],
@@ -205,7 +230,7 @@ class TVEnrichmentService:
         """Group releases by season and by episode for TV detail display."""
         releases_by_season: dict[int, list[dict[str, object]]] = {}
         releases_by_episode: dict[tuple[int, int], list[dict[str, object]]] = {}
-        for release in releases:
+        for release in self._dedupe_releases(releases):
             season_number = release.get("season_number")
             episode_number = release.get("episode_number")
             covered_seasons = coerce_int_list(release.get("covered_seasons"))

@@ -2,8 +2,12 @@
 FROM node:20-slim AS tailwind-builder
 WORKDIR /build
 COPY package.json ./
-COPY app/siftarr/static/css/tailwind-input.css ./app/siftarr/static/css/tailwind-input.css
-COPY app/siftarr/templates/ ./app/siftarr/templates/
+# The whole app tree must be present: Tailwind only emits utilities it finds in
+# scanned sources, and the dashboard builds most of the request-details markup in
+# app/siftarr/static/js/. Copying just the templates silently dropped every
+# JS-only class (e.g. the `gap-*` on season/episode rows, which then rendered
+# with no spacing at all in the container while looking fine locally).
+COPY app/ ./app/
 RUN --mount=type=cache,target=/root/.npm \
     npm install && \
     npx @tailwindcss/cli -i ./app/siftarr/static/css/tailwind-input.css -o ./app/siftarr/static/css/tailwind.css --minify

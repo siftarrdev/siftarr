@@ -85,7 +85,7 @@ function setPoster(posterUrl, titleText) {
         poster.src = posterUrl;
         poster.alt = titleText;
         // Only toggle visibility + src/alt so the responsive classes authored in
-        // the template (h-20 w-14 ... lg:h-44 lg:w-full) survive across both the
+        // the template (w-14 aspect-[2/3] ... lg:w-full) survive across both the
         // mobile header-card and the desktop rail. Resetting className would
         // clobber the responsive breakpoints.
         poster.classList.remove('hidden');
