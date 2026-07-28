@@ -1,9 +1,8 @@
 """Tests for ActivityLogService."""
 
 import json
-import logging
 import sys
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -106,16 +105,15 @@ class TestActivityLogService:
         assert logs == []
 
     @pytest.mark.asyncio
-    async def test_log_swallows_flush_exception(self, mock_db, service, caplog):
+    async def test_log_swallows_flush_exception(self, mock_db, service):
         """log() swallows a flush exception, logs it, and returns None."""
         mock_db.flush.side_effect = RuntimeError("db down")
 
-        with caplog.at_level(
-            logging.ERROR,
-            logger="app.siftarr.services.lifecycle.activity_log_service",
-        ):
+        with patch(
+            "app.siftarr.services.lifecycle.activity_log_service.logger.exception"
+        ) as mock_log_exception:
             result = await service.log(EventType.SEARCH_STARTED, request_id=99)
 
         assert result is None
         mock_db.flush.assert_awaited_once()
-        assert "Failed to log activity for request_id=99" in caplog.text
+        mock_log_exception.assert_called_once_with("Failed to log activity for request_id=%s", 99)
