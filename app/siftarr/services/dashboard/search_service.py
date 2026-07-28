@@ -479,7 +479,9 @@ class SearchService:
         candidates = [
             release
             for release in releases
-            if release.passed_rules and self._stored_release_matches_display_scope(release, scope)
+            if release.passed_rules
+            and release.seeders > 0
+            and self._stored_release_matches_display_scope(release, scope)
         ]
         if not candidates:
             return
