@@ -1,0 +1,25 @@
+# Version control and local tooling
+.git
+.github
+.venv
+.vscode
+.idea
+
+# Python build and test artifacts
+**/__pycache__
+**/*.py[cod]
+**/.pytest_cache
+**/.ruff_cache
+**/.mypy_cache
+**/.coverage
+
+# Local configuration and runtime data
+.env
+.env.*
+data
+
+# Files not needed by the image build
+node_modules
+tests
+docs
+Screenshot*.png

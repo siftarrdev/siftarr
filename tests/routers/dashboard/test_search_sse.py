@@ -454,3 +454,63 @@ async def test_stream_tv_episode_search(mock_db, monkeypatch):
     assert '"phase": "complete"' in body
     assert '"title": "Episode"' in body
     assert '"type": "single_episode"' in body
+
+
+@pytest.mark.asyncio
+async def test_tv_pack_streams_use_a_detached_session(mock_db, monkeypatch):
+    """StreamingResponse bodies run after ``Depends(get_db)`` closes its session.
+
+    Using that session inside the generator raises ``greenlet_spawn has not
+    been called``, so the TV pack/episode streams must open their own session.
+    """
+    request_record = MagicMock()
+    request_record.media_type = MediaType.TV
+    request_record.tvdb_id = 999
+    request_record.title = "Show"
+
+    detached_session = MagicMock(name="detached-session")
+    detached_session.commit = AsyncMock()
+    detached_session.__aenter__ = AsyncMock(return_value=detached_session)
+    detached_session.__aexit__ = AsyncMock(return_value=False)
+    monkeypatch.setattr(
+        search_sse.database, "async_session_maker", MagicMock(return_value=detached_session)
+    )
+
+    used_sessions = []
+
+    async def fake_load(db, req_id):
+        used_sessions.append(db)
+        return request_record
+
+    monkeypatch.setattr(search_sse, "load_request_or_404", fake_load)
+
+    fake_service = MagicMock()
+    fake_service.search_multi_season_packs = AsyncMock(return_value=MagicMock())
+    fake_service.search_season_packs = AsyncMock(return_value=MagicMock())
+    fake_service.search_episode = AsyncMock(return_value=MagicMock())
+
+    def capture_service(db):
+        used_sessions.append(db)
+        return fake_service
+
+    monkeypatch.setattr(search_sse, "SearchService", capture_service)
+    monkeypatch.setattr(
+        search_sse,
+        "serialize_tv_search_response",
+        lambda data: {"releases": [], "scope": {"type": "multi_season_packs"}},
+    )
+
+    streams = [
+        await search_sse.stream_tv_multi_season_search(request_id=1, db=mock_db),
+        await search_sse.stream_tv_season_pack_search(request_id=1, season_number=2, db=mock_db),
+        await search_sse.stream_tv_episode_search(
+            request_id=1, season_number=2, episode_number=3, db=mock_db
+        ),
+    ]
+    for response in streams:
+        body = "".join([chunk async for chunk in response.body_iterator])
+        assert '"phase": "complete"' in body
+
+    assert used_sessions
+    assert all(session is detached_session for session in used_sessions)
+    assert mock_db not in used_sessions
