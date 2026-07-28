@@ -1048,3 +1048,20 @@ def test_tap_touch_target_floor_is_mobile_only():
     tap_block = css[css.index("@media (max-width: 1023px)") :]
     assert ".tap-primary {" in tap_block[:400]
     assert ".tap {" in tap_block[:400]
+
+
+def test_rejected_releases_keep_their_meta_line_with_a_short_verdict():
+    """Rejections annotate the meta line instead of replacing it."""
+    js = _read_dashboard_js()
+
+    assert "function summarizeRejectionReason(reason)" in js
+    assert "function renderRejectionVerdict(release)" in js
+    assert "'size over $1'" in js
+    assert "'size under $1'" in js
+    assert "'excluded by $1'" in js
+    assert "'no required match'" in js
+    assert 'data-release-rejection="true"' in js
+    # The meta line is built once for passed and rejected releases alike, so the
+    # resolution/codec/size/seeders annotations survive a rejection.
+    assert "rejected ? renderRejectionVerdict(release) : ''," in js
+    assert "text-[11px] leading-tight text-red-300/80" not in js

@@ -99,6 +99,38 @@ function formatRelativePublishAge(publishDate) {
     return years === 1 ? '1 year ago' : `${years} years ago`;
 }
 
+// Condense a backend rejection reason into a few words for the end of the meta
+// line. The offending value itself is already highlighted red in that line, so
+// the verdict only needs to name the limit that was breached.
+function summarizeRejectionReason(reason) {
+    const text = String(reason || '').trim();
+    if (!text) return 'rejected';
+
+    const patterns = [
+        [/^Size\s+\S+\s+\S+\s+above maximum\s+(.+)$/i, 'size over $1'],
+        [/^Size\s+\S+\s+\S+\s+below minimum\s+(.+)$/i, 'size under $1'],
+        [/^Matched exclusion pattern:\s*(.+)$/i, 'excluded by $1'],
+        [/^No requirement patterns matched$/i, 'no required match'],
+    ];
+    for (const [pattern, replacement] of patterns) {
+        if (pattern.test(text)) {
+            return 'rejected: ' + text.replace(pattern, replacement);
+        }
+    }
+
+    // Unknown reason: keep it, lower-cased and clipped so one long sentence
+    // cannot push the rest of the meta line off the row.
+    const compact = text.charAt(0).toLowerCase() + text.slice(1);
+    return 'rejected: ' + (compact.length > 48 ? compact.slice(0, 47).trimEnd() + '…' : compact);
+}
+
+function renderRejectionVerdict(release) {
+    const summary = summarizeRejectionReason(release.rejection_reason);
+    const fullReason = release.rejection_reason ? window.escapeHtml(release.rejection_reason) : '';
+    const titleAttr = fullReason ? ' title="' + fullReason + '"' : '';
+    return '<span class="font-semibold text-red-400 whitespace-nowrap"' + titleAttr + ' data-release-rejection="true">' + window.escapeHtml(summary) + '</span>';
+}
+
 // Render a release card in the calm, score-first layout. Movie list items wrap
 // the row in `<li>`; TV episode buckets (Phase 3) pass `{ bucket: true }` to
 // render a bordered `<div>` variant with tighter spacing. Both variants share
@@ -136,21 +168,22 @@ function renderReleaseCard(release, requestId, options = {}) {
         ? '<div class="flex items-center gap-2 flex-wrap"><span class="' + RELEASE_TITLE_CLASS + '">' + titleText + '</span>' + stagedBadge + '</div>'
         : '<div class="' + RELEASE_TITLE_CLASS + '">' + titleText + '</div>';
 
-    let metaHtml;
-    if (rejected) {
-        const reason = release.rejection_reason ? ' · ' + window.escapeHtml(release.rejection_reason) : '';
-        metaHtml = '<div class="text-[11px] leading-tight text-red-300/80">Rejected' + reason + '</div>';
-    } else {
-        const metaParts = [
-            renderAnnotation(release.resolution, releaseAnnotationTone(release, 'resolution'), 'data-release-resolution="true"'),
-            renderAnnotation(release.codec, releaseAnnotationTone(release, 'codec'), 'data-release-codec="true"'),
-            renderAnnotation(release.size, releaseAnnotationTone(release, 'size'), 'data-release-size="true"'),
-            release.seeders != null ? '<span class="' + (Number(release.seeders) === 0 ? 'font-bold text-red-400' : '') + '">' + window.escapeHtml(String(release.seeders)) + ' seeders</span>' : '',
-            release.files != null ? '<span data-release-files="true">' + window.escapeHtml(String(release.files)) + ' file' + (release.files === 1 ? '' : 's') + '</span>' : '',
-            release.indexer ? renderAnnotation(release.indexer, 'text-gray-500', 'data-release-indexer="true"') : '',
-        ].filter(Boolean);
-        metaHtml = metaParts.length ? '<div class="text-[11px] leading-tight text-gray-400 flex items-center gap-1.5 lg:gap-2 flex-wrap">' + metaParts.join('<span>·</span>') + '</div>' : '';
-    }
+    // Rejected releases keep their full meta line — the annotation tones already
+    // turn the offending value red (see `releaseAnnotationTone`), so the line
+    // stays useful for comparison — and gain a short red verdict at the end.
+    // The untrimmed reason lives in the `title` for the full detail.
+    const metaParts = [
+        renderAnnotation(release.resolution, releaseAnnotationTone(release, 'resolution'), 'data-release-resolution="true"'),
+        renderAnnotation(release.codec, releaseAnnotationTone(release, 'codec'), 'data-release-codec="true"'),
+        renderAnnotation(release.size, releaseAnnotationTone(release, 'size'), 'data-release-size="true"'),
+        release.seeders != null ? '<span class="' + (Number(release.seeders) === 0 ? 'font-bold text-red-400' : '') + '">' + window.escapeHtml(String(release.seeders)) + ' seeders</span>' : '',
+        release.files != null ? '<span data-release-files="true">' + window.escapeHtml(String(release.files)) + ' file' + (release.files === 1 ? '' : 's') + '</span>' : '',
+        release.indexer ? renderAnnotation(release.indexer, 'text-gray-500', 'data-release-indexer="true"') : '',
+        rejected ? renderRejectionVerdict(release) : '',
+    ].filter(Boolean);
+    const metaHtml = metaParts.length
+        ? '<div class="text-[11px] leading-tight text-gray-400 flex items-center gap-1 lg:gap-1.5 flex-wrap">' + metaParts.join('<span class="text-gray-600">·</span>') + '</div>'
+        : '';
 
     const coverageHtml = !rejected && options.coverageHtml ? options.coverageHtml : '';
     // `basis-[70%]` lets the action button reflow onto its own line at narrow
