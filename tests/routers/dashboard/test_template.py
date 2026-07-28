@@ -123,7 +123,7 @@ def test_dashboard_js_includes_read_only_tv_buckets():
     assert "setDetailsScope" in js
     assert "scope-season-packs-" in js
     assert "scope-complete-series-" in js
-    assert "Full search refreshes all aired episode and pack results." in js
+    assert "Search complete series to fetch fresh results from your indexers." in js
     assert "No cached episode results yet" in js
 
 
@@ -159,6 +159,12 @@ def test_dashboard_js_includes_tv_details_expand_collapse_controls():
     assert "data-multi-season-pack-results=" in js
     assert "function searchAllSeasonPacks(requestId" in js
     assert "multi-season-packs/search/stream" in js
+    # Multi-season packs are searchable and manageable from the pack tabs.
+    assert "function stagedMultiSeasonPacks(stagedTorrents)" in js
+    assert "renderMultiSeasonPackGroup(requestId, multiSeasonReleases, stagedMultiSeason)" in js
+    assert ">Search multi-season</button>" in js
+    assert ">Search complete series</button>" in js
+    assert "await searchMultiSeasonPacks(requestId);" in js
     # Season-row quiet links: Mark all / Stage individual episodes / Search season.
     assert "Mark all" in js
     assert "Stage individual episodes" in js

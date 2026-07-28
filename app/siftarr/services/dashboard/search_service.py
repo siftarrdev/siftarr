@@ -185,7 +185,13 @@ class SearchService:
         )
 
     async def search_multi_season_packs(self, request: Any, *, request_id: int) -> TVSearchData:
-        """Search for multi-season packs covering 2+ seasons or complete series."""
+        """Search for multi-season packs covering 2+ seasons or complete series.
+
+        Per-season sweeps query ``"<title> Sxx"``, which most indexers will not
+        match against ``"<title> S01-S05"`` or ``"<title> Complete Series"``
+        titles, so a broad title-only pack query runs alongside them. Without it
+        the multi-season bucket stays empty no matter how many packs exist.
+        """
         tv_enrichment = TVEnrichmentService(self.db)
         known_total_seasons = await tv_enrichment.known_total_seasons(request_id)
         season_numbers = await self._requested_season_numbers(request)
@@ -195,6 +201,9 @@ class SearchService:
             await self._search_tv_season_sweep(request, season_number=season)
             for season in season_numbers
         ]
+        broad_result = await self._search_tv_packs_broad(request)
+        if broad_result is not None:
+            results.append(broad_result)
         result = self._combine_tv_results(results)
         if result.error:
             return TVSearchData(
@@ -204,11 +213,20 @@ class SearchService:
                 error=result.error,
             )
 
+        scope_for_persist: dict[str, object] = {"type": "multi_season_packs"}
         stored_rows: list[Release] = []
         for season in season_numbers:
             stored_rows.extend(
                 await self._persist_tv_season_sweep(
                     request.id, result.releases, season_number=season
+                )
+            )
+        if not season_numbers:
+            # No known/requested seasons: persist the broad sweep directly so
+            # complete-series packs are still cached and stageable.
+            stored_rows.extend(
+                await self._persist_tv_evaluations(
+                    request.id, result.releases, scope=scope_for_persist
                 )
             )
         stored_rows = self._dedupe_stored_releases(stored_rows)
@@ -632,6 +650,35 @@ class SearchService:
             cacheable=False,
             request_id=getattr(request, "id", None),
         )
+
+    async def _search_tv_packs_broad(self, request: Any) -> Any | None:
+        """Run one broad title-only pack query for multi-season/series packs.
+
+        Returns ``None`` when the query fails or the client cannot serve it, so
+        the caller can still fall back to the per-season sweep results.
+        """
+        runtime_settings = get_settings()
+        prowlarr = ProwlarrService(settings=runtime_settings)
+        search = getattr(prowlarr, "search_tv_packs_broad", None)
+        if search is None:
+            return None
+        try:
+            result = await search(
+                title=request.title,
+                cacheable=False,
+                request_id=getattr(request, "id", None),
+            )
+        except Exception:
+            logger.warning(
+                "Broad TV pack search failed for request_id=%s",
+                getattr(request, "id", None),
+                exc_info=True,
+            )
+            return None
+        releases = getattr(result, "releases", None)
+        if not isinstance(releases, list):
+            return None
+        return result
 
     async def _load_imdb_id(self, request: Any) -> str | None:
         tmdb_id = getattr(request, "tmdb_id", None)

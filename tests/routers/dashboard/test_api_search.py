@@ -909,6 +909,111 @@ async def test_search_episode_orders_by_score_then_size(mock_db, monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_search_multi_season_packs_includes_broad_pack_query(mock_db, monkeypatch):
+    """Per-season sweeps cannot match "S01-S03"/"Complete" titles, so the broad
+    title-only pack query must run and its results must reach the response."""
+    request_record = MagicMock()
+    request_record.id = 12
+    request_record.media_type = MediaType.TV
+    request_record.tvdb_id = 999
+    request_record.title = "Foundation"
+    request_record.year = 2023
+
+    season_one = MagicMock(season_number=1)
+    season_two = MagicMock(season_number=2)
+
+    request_result = MagicMock()
+    request_result.scalar_one_or_none.return_value = request_record
+    seasons_result = MagicMock()
+    seasons_result.scalars.return_value.all.return_value = [season_one, season_two]
+    rules_result = MagicMock()
+    rules_result.scalars.return_value.all.return_value = []
+    mock_db.execute.side_effect = [request_result, seasons_result, rules_result]
+
+    broad_pack = ProwlarrRelease(
+        title="Foundation.S01-S02.1080p.WEB-DL",
+        size=20 * 1024 * 1024 * 1024,
+        indexer="IndexerBroad",
+        download_url="https://example.test/broad-only",
+        seeders=60,
+        leechers=3,
+    )
+
+    prowlarr_service = AsyncMock()
+    # Season sweeps find nothing: only the broad query can surface the pack.
+    prowlarr_service.search_tv_season_sweep.return_value = ProwlarrSearchResult(
+        releases=[], query_time_ms=1
+    )
+    prowlarr_service.search_tv_packs_broad.return_value = ProwlarrSearchResult(
+        releases=[broad_pack], query_time_ms=2
+    )
+    monkeypatch.setattr(search_service, "ProwlarrService", lambda settings: prowlarr_service)
+
+    fake_evaluation = MagicMock(total_score=10.0, passed=True)
+    monkeypatch.setattr(
+        search_service.RuleEngine,
+        "from_db_rules",
+        MagicMock(return_value=MagicMock(evaluate=MagicMock(return_value=fake_evaluation))),
+    )
+
+    response = await dashboard_api.search_multi_season_packs(request_id=12, db=mock_db)
+
+    prowlarr_service.search_tv_packs_broad.assert_awaited_once()
+    assert prowlarr_service.search_tv_packs_broad.await_args.kwargs["title"] == "Foundation"
+    body = json.loads(cast(bytes, response.body))
+    assert [release["title"] for release in body["releases"]] == ["Foundation.S01-S02.1080p.WEB-DL"]
+
+
+@pytest.mark.asyncio
+async def test_search_multi_season_packs_survives_broad_query_failure(mock_db, monkeypatch):
+    """A failing broad query must not lose the per-season sweep results."""
+    request_record = MagicMock()
+    request_record.id = 12
+    request_record.media_type = MediaType.TV
+    request_record.tvdb_id = 999
+    request_record.title = "Foundation"
+    request_record.year = 2023
+
+    request_result = MagicMock()
+    request_result.scalar_one_or_none.return_value = request_record
+    seasons_result = MagicMock()
+    seasons_result.scalars.return_value.all.return_value = [MagicMock(season_number=1)]
+    rules_result = MagicMock()
+    rules_result.scalars.return_value.all.return_value = []
+    mock_db.execute.side_effect = [request_result, seasons_result, rules_result]
+
+    sweep_pack = ProwlarrRelease(
+        title="Foundation.Complete.1080p.BluRay",
+        size=40 * 1024 * 1024 * 1024,
+        indexer="IndexerA",
+        download_url="https://example.test/complete",
+        seeders=20,
+        leechers=1,
+    )
+
+    prowlarr_service = AsyncMock()
+    prowlarr_service.search_tv_season_sweep.return_value = ProwlarrSearchResult(
+        releases=[sweep_pack], query_time_ms=1
+    )
+    prowlarr_service.search_tv_packs_broad.side_effect = RuntimeError("indexer down")
+    monkeypatch.setattr(search_service, "ProwlarrService", lambda settings: prowlarr_service)
+
+    fake_evaluation = MagicMock(total_score=10.0, passed=True)
+    monkeypatch.setattr(
+        search_service.RuleEngine,
+        "from_db_rules",
+        MagicMock(return_value=MagicMock(evaluate=MagicMock(return_value=fake_evaluation))),
+    )
+
+    response = await dashboard_api.search_multi_season_packs(request_id=12, db=mock_db)
+
+    body = json.loads(cast(bytes, response.body))
+    assert [release["title"] for release in body["releases"]] == [
+        "Foundation.Complete.1080p.BluRay"
+    ]
+
+
+@pytest.mark.asyncio
 async def test_search_multi_season_packs_rejects_non_tv_requests(mock_db):
     """Multi-season endpoint should reject non-TV requests."""
     request_record = MagicMock()
