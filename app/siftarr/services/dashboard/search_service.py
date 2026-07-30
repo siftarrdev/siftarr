@@ -719,17 +719,20 @@ class SearchService:
         return extract_imdb_id(details if isinstance(details, dict) else None)
 
     async def _requested_season_numbers(self, request: Any) -> list[int]:
+        seasons_load_failed = False
         try:
             seasons = getattr(request, "seasons", None) or []
         except Exception:
             seasons = []
-        if type(seasons).__module__.startswith("unittest.mock"):
+            seasons_load_failed = True
+        seasons_are_mocked = type(seasons).__module__.startswith("unittest.mock")
+        if seasons_are_mocked:
             seasons = []
         values = [getattr(season, "season_number", None) for season in seasons]
         season_numbers = sorted({season for season in values if isinstance(season, int)})
         if season_numbers:
             return season_numbers
-        if type(getattr(request, "seasons", None)).__module__.startswith("unittest.mock"):
+        if not seasons_load_failed and seasons_are_mocked:
             return []
         request_id = getattr(request, "id", None)
         if request_id is None:
