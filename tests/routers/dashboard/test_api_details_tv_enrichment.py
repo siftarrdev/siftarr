@@ -104,6 +104,7 @@ async def test_request_details_serializes_unreleased_and_pending_tv_counts(
         RequestStatus.COMPLETED.value,
         RequestStatus.UNRELEASED.value,
     ]
+    assert season_payload["episodes"][1]["air_date"] == future_episode.air_date.isoformat()
 
 
 @pytest.mark.asyncio

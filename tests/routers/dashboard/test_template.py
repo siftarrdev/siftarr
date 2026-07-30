@@ -43,6 +43,40 @@ def test_dashboard_template_loads_external_assets(dashboard_template_path):
     assert 'type="module"' in template
 
 
+def test_torrent_status_shows_live_download_totals(dashboard_template_path):
+    """The active queue displays aggregate transfer metrics from the poll payload."""
+    with open(dashboard_template_path, encoding="utf-8") as handle:
+        template = handle.read()
+
+    assert 'id="qbit-download-summary"' in template
+    assert 'aria-live="polite"' in template
+
+    js_path = os.path.join(
+        os.path.dirname(__file__), "../../../app/siftarr/static/js/dashboard/staged.js"
+    )
+    script = textwrap.dedent(
+        f"""
+        const fs = require('fs');
+        const summary = {{innerHTML: '', classList: {{toggle: () => {{}}}}}};
+        global.document = {{
+          addEventListener: () => {{}},
+          getElementById: (id) => id === 'qbit-download-summary' ? summary : null,
+        }};
+        global.window = {{}};
+        eval(fs.readFileSync({js_path!r}, 'utf8'));
+        renderQbitDownloadSummary([
+          {{count: 2, totals: {{dlspeed: 3 * 1024 * 1024, upspeed: 1024 * 1024, downloaded: 2 * 1024 * 1024 * 1024, size: 5 * 1024 * 1024 * 1024}}}},
+          {{count: 1, totals: {{dlspeed: 0, upspeed: 0, downloaded: 0, size: 1024 * 1024 * 1024}}}},
+        ]);
+        for (const expected of ['Active', '3 torrents', 'Total download', '3.0 MB/s', 'Total upload', '1.0 MB/s', 'Downloaded', '2.00 GB / 6.00 GB']) {{
+          if (!summary.innerHTML.includes(expected)) throw new Error(`missing ${{expected}}`);
+        }}
+        """
+    )
+
+    subprocess.run(["node", "-e", script], check=True)
+
+
 def test_dashboard_entry_cache_busts_imported_modules():
     """ES module children need their own version query, not just the entry file."""
     js = _read_dashboard_entry_js()
@@ -188,7 +222,7 @@ def test_dashboard_js_includes_tv_details_expand_collapse_controls():
 
 
 def test_dashboard_details_auto_search_and_reload_hooks():
-    """Details modal should auto-search empty caches and reload after SSE completion."""
+    """Details modal should retain TV details while auto-searching empty caches."""
     js = _read_dashboard_js()
 
     assert "window.detailsAutoSearchStarted = window.detailsAutoSearchStarted || {};" in js
@@ -196,6 +230,10 @@ def test_dashboard_details_auto_search_and_reload_hooks():
     assert "if (data.auto_search_eligible && !window.detailsAutoSearchStarted[requestId])" in js
     assert "window.searchTvRequestNew({ auto: true });" in js
     assert "window.searchRequestFromDetails({ auto: true });" in js
+    assert (
+        "releases.innerHTML = '<div class=\"text-gray-500 text-sm\">Searching indexers for new TV results...</div>';"
+        not in js
+    )
     assert "if (!data || data.reload_details !== false)" in js
     assert (
         "await window.openRequestDetails(window.currentRequestId, window.currentDetailsIndex, { preserveUiState: true });"
@@ -595,7 +633,7 @@ def test_dashboard_js_uses_matching_episode_stage_for_approve_and_collapses_it()
           ],
           tv_info: {{
             seasons: [{{id: 1, season_number: 1, status: 'staged', available_count: 0, total_count: 2, staged_count: 1, pending_count: 1, unreleased_count: 0, episodes: [
-              {{id: 2, episode_number: 2, title: 'Two', status: 'staged'}},
+              {{id: 2, episode_number: 2, title: 'Two', air_date: '2026-08-14', status: 'staged'}},
               {{id: 3, episode_number: 3, title: 'Three', status: 'pending'}},
             ]}}],
             releases_by_episode: {{'1-2': [{{id: 200, passed: true, download_url: 'https://example.test/torrent'}}]}},
@@ -604,6 +642,9 @@ def test_dashboard_js_uses_matching_episode_stage_for_approve_and_collapses_it()
         }});
         if (!html.includes("/staged/72/approve") || html.includes("stageTopEpisodeRelease(this, 9, 200)")) {{
           throw new Error('staged episode did not render its matching Approve action');
+        }}
+        if (!html.includes('Airs: 2026-08-14')) {{
+          throw new Error('episode air date did not render');
         }}
         global.fetch = async () => ({{ok: true, json: async () => ({{}})}});
         inlineStagedAction('/staged/72/approve', {{
