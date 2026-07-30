@@ -74,7 +74,7 @@ async def test_load_stored_releases_sorts_by_size_and_reports_filtered_total(db_
 
 
 @pytest.mark.asyncio
-async def test_tv_detail_pagination_enriches_only_paginated_releases(db_session, monkeypatch):
+async def test_tv_detail_pagination_enriches_all_filtered_releases(db_session, monkeypatch):
     request = Request(
         external_id="tv-paginated-detail",
         media_type=MediaType.TV,
@@ -138,7 +138,12 @@ async def test_tv_detail_pagination_enriches_only_paginated_releases(db_session,
 
     assert details.filtered_total_releases == 3
     assert len(details.releases) == 1
-    assert serialized_titles == ["Show.S01E01.1080p"]
+    assert serialized_titles[0] == "Show.S01E01.1080p"
+    assert set(serialized_titles[1:]) == {
+        "Show.S01E01.1080p",
+        "Show.S01E02.1080p",
+        "Show.S01E03.1080p",
+    }
     assert details.tv_info is not None
 
 

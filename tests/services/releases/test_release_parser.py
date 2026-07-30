@@ -12,6 +12,7 @@ from app.siftarr.services.releases.release_parser import (
     parse_movie_release_identity,
     parse_release_coverage,
     parse_season_episode,
+    tv_release_identity_rejection_reason,
 )
 from app.siftarr.services.releases.release_serializers import serialize_target_scope
 
@@ -20,6 +21,37 @@ class TestParseSeasonEpisode:
     def test_s01e05_extracts_season_and_episode(self):
         result = parse_season_episode(".S01E05.")
         assert result == ParsedSeasonEpisode(season_number=1, episode_number=5)
+
+
+class TestTVReleaseIdentity:
+    def test_accepts_matching_title_without_explicit_year(self):
+        assert (
+            tv_release_identity_rejection_reason(
+                request_title="Parenthood",
+                request_year=2010,
+                release_title="Parenthood.S01E01.1080p.WEB-DL",
+            )
+            is None
+        )
+
+    def test_rejects_episode_title_containing_requested_show_name(self):
+        reason = tv_release_identity_rejection_reason(
+            request_title="Parenthood",
+            request_year=2010,
+            release_title="Evil.S03E08.The.Demon.of.Parenthood.1080p",
+        )
+        assert reason is not None
+        assert reason.startswith("TV identity mismatch")
+
+    def test_rejects_matching_title_with_wrong_year(self):
+        assert (
+            tv_release_identity_rejection_reason(
+                request_title="Parenthood",
+                request_year=2010,
+                release_title="Parenthood.2025.S01.1080p",
+            )
+            == "TV identity mismatch: release year 2025 does not match request year 2010"
+        )
 
     def test_s02e12_extracts_season_and_episode(self):
         result = parse_season_episode(".S02E12.")

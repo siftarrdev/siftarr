@@ -638,6 +638,8 @@ async def test_georgie_sweep_episode_rows_persist_without_exact_fallbacks(
                 for bucket in details.tv_info.releases_by_episode.values()
                 for release in bucket
             }
-            assert visible_bucket_titles <= visible_release_titles
+            # TV buckets use the complete filtered result set, not the generic
+            # paginated release page, so season/pack rows remain visible.
+            assert visible_release_titles <= visible_bucket_titles
     finally:
         await engine.dispose()
