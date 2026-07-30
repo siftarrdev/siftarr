@@ -718,12 +718,20 @@ async def test_search_episode_exact_fallback_when_cached_sweep_misses_episode(mo
             seeders=10,
             leechers=1,
         )
+        wrong_show = ProwlarrRelease(
+            title="Evil.S02E01.Georgie.And.Mandys.First.Marriage.1080p.WEB-DL",
+            size=2 * 1024 * 1024 * 1024,
+            indexer="IndexerC",
+            download_url="https://example.test/wrong-show",
+            seeders=99,
+            leechers=1,
+        )
         prowlarr_service = AsyncMock()
         prowlarr_service.search_tv_season_sweep.return_value = ProwlarrSearchResult(
             releases=[later_episode], query_time_ms=5
         )
         prowlarr_service.search_by_tvdbid.return_value = ProwlarrSearchResult(
-            releases=[exact_episode], query_time_ms=5
+            releases=[wrong_show, exact_episode], query_time_ms=5
         )
         monkeypatch.setattr(search_service, "ProwlarrService", lambda settings: prowlarr_service)
 
@@ -736,6 +744,8 @@ async def test_search_episode_exact_fallback_when_cached_sweep_misses_episode(mo
         assert [release["title"] for release in result.releases] == [exact_episode.title]
         prowlarr_service.search_tv_season_sweep.assert_awaited_once()
         prowlarr_service.search_by_tvdbid.assert_awaited_once()
+        stored_titles = (await session.execute(select(Release.title))).scalars().all()
+        assert wrong_show.title not in stored_titles
 
     await engine.dispose()
 

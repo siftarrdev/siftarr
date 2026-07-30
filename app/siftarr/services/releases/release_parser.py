@@ -152,7 +152,7 @@ def normalize_movie_title_identity(title: str | None) -> str:
     """Normalize a movie title for release/request identity comparisons."""
     if not title:
         return ""
-    normalized = re.sub(r"[\W_]+", " ", title.casefold())
+    normalized = re.sub(r"[\W_]+", " ", title.casefold().replace("'", ""))
     return " ".join(normalized.split())
 
 
@@ -239,6 +239,30 @@ def movie_release_identity_rejection_reason(
             f"{parsed.year} does not match request year {request_year}"
         )
 
+    return None
+
+
+def tv_release_identity_rejection_reason(
+    *, request_title: str | None, request_year: int | None, release_title: str
+) -> str | None:
+    """Reject TV results whose leading show title or explicit year is wrong."""
+    # Release names spell an ampersand as ``and`` (for example, ``Georgie And
+    # Mandys...``), while request metadata commonly retains ``&``.
+    expected_tokens = normalize_movie_title_identity(
+        (request_title or "").replace("&", " and ")
+    ).split()
+    release_tokens = normalize_movie_title_identity(release_title).split()
+    if not expected_tokens or release_tokens[: len(expected_tokens)] != expected_tokens:
+        return f"TV identity mismatch: release does not begin with request title '{request_title}'"
+
+    remaining_tokens = release_tokens[len(expected_tokens) :]
+    if request_year is not None and remaining_tokens:
+        release_year = _movie_year_token(remaining_tokens[0])
+        if release_year is not None and release_year != request_year:
+            return (
+                "TV identity mismatch: release year "
+                f"{release_year} does not match request year {request_year}"
+            )
     return None
 
 

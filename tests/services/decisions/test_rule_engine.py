@@ -383,8 +383,8 @@ class TestRuleEngine:
         assert result.rejection_reason is not None
         assert "above maximum" in result.rejection_reason
 
-    def test_evaluate_tv_targeted_season_pack_rule_uses_raw_release_size(self):
-        """Season-pack-targeted size rules should still compare the raw release size."""
+    def test_evaluate_tv_targeted_multi_season_pack_rule_uses_per_season_size(self):
+        """Season-pack limits compare multi-season packs by their covered seasons."""
         engine = RuleEngine(
             size_limit_rules=[
                 SizeLimitRule(
@@ -409,7 +409,30 @@ class TestRuleEngine:
         result = engine.evaluate(release)
 
         assert result.passed is False
-        assert result.rejection_reason == "Size 4.00 GB below minimum 5.00 GB"
+        assert result.rejection_reason == "Size 1.33 GB below minimum 5.00 GB"
+
+    def test_evaluate_multi_season_pack_can_pass_total_size_limit(self):
+        engine = RuleEngine(
+            size_limit_rules=[
+                SizeLimitRule(
+                    rule_id=1,
+                    rule_name="TV Pack Size",
+                    min_size_bytes=None,
+                    max_size_bytes=15 * 1024 * 1024 * 1024,
+                    tv_target=TVTarget.SEASON_PACK,
+                )
+            ]
+        )
+        release = ProwlarrRelease(
+            title="Show.S01-S06.480p",
+            size=50 * 1024 * 1024 * 1024,
+            seeders=10,
+            leechers=2,
+            download_url="http://example.com",
+            indexer="test",
+        )
+
+        assert engine.evaluate(release).passed is True
 
     def test_evaluate_tv_targeted_episode_rule_uses_raw_release_size(self):
         """Episode-targeted size rules should still compare the raw release size."""

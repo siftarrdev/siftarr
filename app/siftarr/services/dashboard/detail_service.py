@@ -153,7 +153,20 @@ class DetailService:
 
         tv_info = None
         if request.media_type == MediaType.TV:
+            # Packs are grouped after loading.  Using only the current generic
+            # release page silently hides packs which sort beyond that page.
             tv_releases = releases
+            if filtered_total_releases > len(releases):
+                tv_releases, _, _ = await self._load_serialized_stored_releases(
+                    request_id,
+                    media_type=request.media_type,
+                    offset=0,
+                    limit=filtered_total_releases,
+                    controls=controls,
+                )
+                apply_active_selection_metadata(
+                    tv_releases, active_staged_torrents, media_type=request.media_type
+                )
             tv_enrichment = TVEnrichmentService(self.db)
             tv_info = await tv_enrichment.load_tv_info(
                 request_id=request_id,

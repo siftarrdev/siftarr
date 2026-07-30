@@ -56,6 +56,7 @@ from app.siftarr.services.releases.release_parser import (
     cached_parse_release_coverage,
     is_exact_single_episode_release,
     is_multi_episode_release,
+    tv_release_identity_rejection_reason,
 )
 from app.siftarr.services.releases.release_storage import (
     get_release_persistence_key,
@@ -97,6 +98,17 @@ class TVDecisionService:
         self.prowlarr = prowlarr
         self.qbittorrent = qbittorrent
         self._settings = get_settings()
+
+    @staticmethod
+    def _matches_request_identity(request: Request, release: ProwlarrRelease) -> bool:
+        return (
+            tv_release_identity_rejection_reason(
+                request_title=request.title,
+                request_year=request.year,
+                release_title=release.title,
+            )
+            is None
+        )
 
     async def _get_rule_engine(self) -> RuleEngine:
         """Get configured rule engine from database rules (cached per media type)."""
@@ -496,6 +508,8 @@ class TVDecisionService:
             )
 
             for release in search_result.releases:
+                if not self._matches_request_identity(request, release):
+                    continue
                 dedup_key = self._release_dedup_key(release)
                 if dedup_key in seen_keys:
                     continue
@@ -601,6 +615,8 @@ class TVDecisionService:
                 continue
 
             for release in search_result.releases:
+                if not self._matches_request_identity(request, release):
+                    continue
                 dedup_key = self._release_dedup_key(release)
                 is_exact_target_match = is_exact_single_episode_release(
                     release.title,
@@ -657,6 +673,8 @@ class TVDecisionService:
         evaluated_releases: list[ReleaseEvaluation] = []
         passing_releases: list[ReleaseEvaluation] = []
         for release in search_result.releases:
+            if not self._matches_request_identity(request, release):
+                continue
             dedup_key = self._release_dedup_key(release)
             if dedup_key in seen_keys:
                 continue

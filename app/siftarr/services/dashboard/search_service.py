@@ -35,6 +35,7 @@ from app.siftarr.services.releases.release_parser import (
     cached_parse_release_coverage,
     is_exact_single_episode_release,
     serialize_release_coverage,
+    tv_release_identity_rejection_reason,
 )
 from app.siftarr.services.releases.release_serializers import (
     apply_release_size_per_season_metadata,
@@ -63,6 +64,24 @@ class SearchService:
 
     def __init__(self, db: AsyncSession) -> None:
         self.db = db
+
+    @staticmethod
+    def _filter_tv_identity(request: Any, result: Any) -> Any:
+        """Discard broad-indexer matches for a different show before caching them."""
+        releases = getattr(result, "releases", None)
+        if not isinstance(releases, list):
+            return result
+        result.releases = [
+            release
+            for release in releases
+            if tv_release_identity_rejection_reason(
+                request_title=getattr(request, "title", None),
+                request_year=getattr(request, "year", None),
+                release_title=release.title,
+            )
+            is None
+        ]
+        return result
 
     async def evaluate_manual_release(
         self,
@@ -619,7 +638,7 @@ class SearchService:
         tvdb_id = ensure_tvdb_id(request)
         runtime_settings = get_settings()
         prowlarr = ProwlarrService(settings=runtime_settings)
-        return await prowlarr.search_by_tvdbid(
+        result = await prowlarr.search_by_tvdbid(
             tvdbid=tvdb_id,
             title=request.title,
             season=season,
@@ -627,6 +646,7 @@ class SearchService:
             year=request.year,
             cacheable=cacheable,
         )
+        return self._filter_tv_identity(request, result)
 
     async def _search_tv_season_sweep(self, request: Any, *, season_number: int) -> Any:
         """Run an explicit-refresh paginated season sweep for ad hoc TV searches."""
@@ -642,7 +662,7 @@ class SearchService:
             request.title,
             season_number,
         )
-        return await prowlarr.search_tv_season_sweep(
+        result = await prowlarr.search_tv_season_sweep(
             title=request.title,
             season=season_number,
             imdbid=imdb_id,
@@ -650,6 +670,7 @@ class SearchService:
             cacheable=False,
             request_id=getattr(request, "id", None),
         )
+        return self._filter_tv_identity(request, result)
 
     async def _search_tv_packs_broad(self, request: Any) -> Any | None:
         """Run one broad title-only pack query for multi-season/series packs.
@@ -678,7 +699,7 @@ class SearchService:
         releases = getattr(result, "releases", None)
         if not isinstance(releases, list):
             return None
-        return result
+        return self._filter_tv_identity(request, result)
 
     async def _load_imdb_id(self, request: Any) -> str | None:
         tmdb_id = getattr(request, "tmdb_id", None)

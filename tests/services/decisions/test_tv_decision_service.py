@@ -34,7 +34,7 @@ def _make_request(**overrides):
     request.media_type = overrides.get("media_type", MediaType.TV)
     request.tvdb_id = overrides.get("tvdb_id", 12345)
     request.tmdb_id = overrides.get("tmdb_id")
-    request.title = overrides.get("title", "Test Show")
+    request.title = overrides.get("title", "Show")
     request.year = overrides.get("year", 2024)
     request.status = overrides.get("status", RequestStatus.PENDING)
 
@@ -144,7 +144,7 @@ class TestProcessRequest:
             await service._search_season_sweeps_and_evaluate(request, engine, [1])
 
         service.prowlarr.search_tv_season_sweep.assert_awaited_once_with(
-            title="Test Show",
+            title="Show",
             season=1,
             imdbid="tt1234567",
             tvdbid=12345,
@@ -155,7 +155,9 @@ class TestProcessRequest:
     async def test_season_sweep_preserves_order_collects_exceptions_and_bounds_concurrency(
         self, service
     ):
-        request = _make_request(seasons=list(range(1, MAX_CONCURRENT_SEARCHES + 4)))
+        request = _make_request(
+            title="Test Show", seasons=list(range(1, MAX_CONCURRENT_SEARCHES + 4))
+        )
         active = 0
         max_active = 0
         started: list[int] = []
@@ -268,7 +270,7 @@ class TestProcessRequest:
             result = await service.process_request(1)
 
         service.prowlarr.search_tv_episode_exact.assert_awaited_once_with(
-            title="Test Show", season=1, episode=2, request_id=1
+            title="Show", season=1, episode=2, request_id=1
         )
         service.prowlarr.search_tv_season_sweep.assert_awaited_once()
         assert store_mock.await_args is not None
@@ -380,8 +382,8 @@ class TestProcessRequest:
         assert [
             call.kwargs for call in service.prowlarr.search_tv_episode_exact.await_args_list
         ] == [
-            {"title": "Test Show", "season": 1, "episode": 1, "request_id": 1},
-            {"title": "Test Show", "season": 1, "episode": 2, "request_id": 1},
+            {"title": "Show", "season": 1, "episode": 1, "request_id": 1},
+            {"title": "Show", "season": 1, "episode": 2, "request_id": 1},
         ]
         assert store_mock.await_args is not None
         assert [e.release.title for e in store_mock.await_args.args[2]] == [
@@ -479,7 +481,7 @@ class TestProcessRequest:
             result = await service.process_request(1)
 
         service.prowlarr.search_tv_episode_exact.assert_awaited_once_with(
-            title="Test Show", season=2, episode=1, request_id=1
+            title="Show", season=2, episode=1, request_id=1
         )
         assert [r["title"] for r in result["selected_releases"]] == [
             "Show.S01.1080p",

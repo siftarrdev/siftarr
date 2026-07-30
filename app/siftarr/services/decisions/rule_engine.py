@@ -241,6 +241,14 @@ class RuleEngine:
             )
         return True
 
+    @staticmethod
+    def _size_for_rule(rule: SizeLimitRule, release: ProwlarrRelease) -> int:
+        """Normalize multi-season pack sizes to a per-season value."""
+        if RuleEngine._normalize_tv_target(rule.tv_target) != TVTarget.SEASON_PACK:
+            return release.size
+        season_count = len(cached_parse_release_coverage(release.title).season_numbers)
+        return int(round(release.size / season_count)) if season_count > 1 else release.size
+
     @classmethod
     def from_db_rules(
         cls,
@@ -345,10 +353,11 @@ class RuleEngine:
 
             min_size_bytes = rule.min_size_bytes
             max_size_bytes = rule.max_size_bytes
-            if min_size_bytes is not None and release.size < min_size_bytes:
+            comparable_size = self._size_for_rule(rule, release)
+            if min_size_bytes is not None and comparable_size < min_size_bytes:
                 passed = False
                 rejection_reason = (
-                    f"Size {self._format_size_gb(release.size)} below minimum "
+                    f"Size {self._format_size_gb(comparable_size)} below minimum "
                     f"{self._format_size_gb(min_size_bytes)}"
                 )
                 matches.append(
@@ -361,10 +370,10 @@ class RuleEngine:
                     )
                 )
                 break
-            if max_size_bytes is not None and release.size > max_size_bytes:
+            if max_size_bytes is not None and comparable_size > max_size_bytes:
                 passed = False
                 rejection_reason = (
-                    f"Size {self._format_size_gb(release.size)} above maximum "
+                    f"Size {self._format_size_gb(comparable_size)} above maximum "
                     f"{self._format_size_gb(max_size_bytes)}"
                 )
                 matches.append(
