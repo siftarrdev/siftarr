@@ -777,6 +777,31 @@ class TVDecisionService:
 
         request.status = derive_request_status_from_episodes(all_episodes)
 
+    async def _publish_result_batch(
+        self,
+        request_id: int,
+        evaluations: Sequence[ReleaseEvaluation],
+        changed_count: int,
+        progress_callback: ProgressCallback | None,
+    ) -> None:
+        """Make a discovered batch visible before notifying an SSE consumer.
+
+        Selection and history bookkeeping still run against the complete result
+        set below.  This early persistence is intentionally limited to the
+        cache rows, whose upsert semantics preserve final deduplication.
+        """
+        if not changed_count:
+            return
+        await store_search_results(self.db, request_id, list(evaluations), purge_stale=False)
+        if progress_callback is not None:
+            await progress_callback(
+                {
+                    "phase": "results_updated",
+                    "request_id": request_id,
+                    "changed_count": changed_count,
+                }
+            )
+
     async def process_request(
         self,
         request_id: int,
@@ -939,6 +964,9 @@ class TVDecisionService:
             )
             all_evaluated_releases.extend(pack_evaluations)
             all_search_errors.extend(pack_errors)
+            await self._publish_result_batch(
+                request.id, all_evaluated_releases, len(pack_evaluations), progress_callback
+            )
             for evaluation in pack_passing:
                 if evaluation.release.seeders <= 0:
                     continue
@@ -980,6 +1008,9 @@ class TVDecisionService:
             )
             all_evaluated_releases.extend(exact_evaluations)
             all_search_errors.extend(exact_errors)
+            await self._publish_result_batch(
+                request.id, all_evaluated_releases, len(exact_evaluations), progress_callback
+            )
             episode_evaluations.extend(exact_candidates)
             for season, episode, evaluation in exact_candidates:
                 if evaluation.release.seeders <= 0:
@@ -1013,6 +1044,9 @@ class TVDecisionService:
             )
             all_evaluated_releases.extend(pack_evaluations)
             all_search_errors.extend(pack_errors)
+            await self._publish_result_batch(
+                request.id, all_evaluated_releases, len(pack_evaluations), progress_callback
+            )
             for evaluation in pack_passing:
                 if evaluation.release.seeders <= 0:
                     continue

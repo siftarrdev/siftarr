@@ -844,7 +844,7 @@ function searchSeasonPacks(requestId, seasonNumber) {
                 ? releases.map(function(r) { return renderPackRow(r, requestId, season); }).join('')
                 : '<div class="text-gray-500 text-sm py-2">No season pack results found.</div>';
             containers.forEach(function(c) { c.innerHTML = rows; });
-            await window.openRequestDetails(requestId, window.currentDetailsIndex, { preserveUiState: true });
+            await window.reloadOpenDetailsIfActive(requestId);
             resolve();
         }, function() { resolve(); });
     });
@@ -863,7 +863,7 @@ function searchMultiSeasonPacks(requestId) {
                 ? releases.map(function(r) { return renderPackRow(r, requestId, null); }).join('')
                 : '<div class="text-gray-500 text-sm py-2">No multi-season or complete-series results found.</div>';
             containers.forEach(function(c) { c.innerHTML = rows; });
-            await window.openRequestDetails(requestId, window.currentDetailsIndex, { preserveUiState: true });
+            await window.reloadOpenDetailsIfActive(requestId);
             resolve();
         }, function() { resolve(); });
     });
@@ -913,7 +913,7 @@ async function searchEpisode(requestId, seasonNumber, episodeNumber) {
     window.startTvSearchProgress('/requests/' + requestId + '/seasons/' + seasonNumber + '/episodes/' + episodeNumber + '/search/stream', episodeLabel, async function(data) {
         container.innerHTML = (data.releases || []).map(function(r) { return renderReleaseCard(r, requestId); }).join('') || '<div class="text-gray-500 text-sm py-2">No results found for this episode.</div>';
         // Refresh the details modal to update episode status badge, season counts, and active stage banner
-        await window.openRequestDetails(requestId, window.currentDetailsIndex, { preserveUiState: true });
+        await window.reloadOpenDetailsIfActive(requestId);
     });
 }
 

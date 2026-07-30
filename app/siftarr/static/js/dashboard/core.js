@@ -203,6 +203,9 @@ function navigateDetails(direction) {
 }
 
 function closeRequestDetails() {
+    if (window.cancelLiveDetailsRefresh) window.cancelLiveDetailsRefresh();
+    window.activeDetailsRequestId = null;
+    window.detailsLoadToken = (window.detailsLoadToken || 0) + 1;
     document.getElementById('request-details-modal').classList.add('hidden');
 }
 

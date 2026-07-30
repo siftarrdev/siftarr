@@ -5,6 +5,48 @@ window.detailsControlState = window.detailsControlState || {};
 window.detailsControlHandlersReady = false;
 window.detailsControlDebounce = null;
 window.detailsAutoSearchStarted = window.detailsAutoSearchStarted || {};
+window.liveDetailsRefresh = window.liveDetailsRefresh || { timer: null, inFlight: false, pending: false, requestId: null };
+
+function cancelLiveDetailsRefresh(requestId = null) {
+    const state = window.liveDetailsRefresh;
+    if (requestId !== null && state.requestId !== requestId) return;
+    clearTimeout(state.timer);
+    state.timer = null;
+    state.pending = false;
+    state.requestId = null;
+}
+
+// SSE can report several committed result batches in quick succession.  Keep
+// the DB-backed details render responsive without replacing the modal DOM for
+// every batch.
+function scheduleLiveDetailsRefresh(requestId) {
+    const modal = document.getElementById('request-details-modal');
+    if (!modal || modal.classList.contains('hidden') || window.activeDetailsRequestId !== requestId) return;
+    const state = window.liveDetailsRefresh;
+    state.requestId = requestId;
+    state.pending = true;
+    if (state.timer || state.inFlight) return;
+    state.timer = setTimeout(async function() {
+        state.timer = null;
+        if (!state.pending || modal.classList.contains('hidden') || window.activeDetailsRequestId !== requestId) return;
+        state.pending = false;
+        state.inFlight = true;
+        const scrollTop = modal.scrollTop;
+        try {
+            await window.openRequestDetails(requestId, window.currentDetailsIndex, { preserveUiState: true });
+            if (!modal.classList.contains('hidden') && window.activeDetailsRequestId === requestId) modal.scrollTop = scrollTop;
+        } finally {
+            state.inFlight = false;
+            if (state.pending) scheduleLiveDetailsRefresh(requestId);
+        }
+    }, 1250);
+}
+
+async function reloadOpenDetailsIfActive(requestId) {
+    if (window.activeDetailsRequestId !== requestId) return;
+    cancelLiveDetailsRefresh(requestId);
+    await window.openRequestDetails(requestId, window.currentDetailsIndex, { preserveUiState: true });
+}
 
 function defaultDetailsControls() {
     // `scope` is client-only (TV accordion: 'all' | 'season_packs' | 'complete_series').
@@ -179,6 +221,12 @@ function ensureDetailsControlHandlers() {
 }
 
 async function openRequestDetails(requestId, explicitIndex = null, options = {}) {
+    if (window.activeDetailsRequestId && window.activeDetailsRequestId !== requestId) {
+        cancelLiveDetailsRefresh(window.activeDetailsRequestId);
+    }
+    window.activeDetailsRequestId = requestId;
+    const loadToken = (window.detailsLoadToken || 0) + 1;
+    window.detailsLoadToken = loadToken;
     const preserveUiState = !!options.preserveUiState;
     const focusTvScope = options.focusTvScope || null;
     const modal = document.getElementById('request-details-modal');
@@ -272,6 +320,8 @@ async function openRequestDetails(requestId, explicitIndex = null, options = {})
             throw new Error(`Server error: ${response.status}`);
         }
         const data = await response.json();
+        // A navigation or a newer live-refresh request won the race.
+        if (window.detailsLoadToken !== loadToken) return;
 
         title.textContent = data.request.title;
         // Mobile subtitle in the header card: a compact "year · type · status"
@@ -379,6 +429,7 @@ async function openRequestDetails(requestId, explicitIndex = null, options = {})
             }
         }
     } catch (err) {
+        if (window.detailsLoadToken !== loadToken) return;
         title.textContent = 'Error loading details';
         meta.textContent = err.message || 'Unknown error';
         overview.textContent = '';
@@ -386,6 +437,10 @@ async function openRequestDetails(requestId, explicitIndex = null, options = {})
         releases.innerHTML = '<div class="text-red-400 text-sm">Failed to load request details. Check that Overseerr is reachable.</div>';
     }
 }
+
+window.scheduleLiveDetailsRefresh = scheduleLiveDetailsRefresh;
+window.cancelLiveDetailsRefresh = cancelLiveDetailsRefresh;
+window.reloadOpenDetailsIfActive = reloadOpenDetailsIfActive;
 
 // Render the desktop left-rail stat list (`#request-details-stats`):
 // Cached results / Passed / Rejected / Staged / Last search. Desktop-only
@@ -501,6 +556,7 @@ window.renderDetailsStats = renderDetailsStats;
 
 async function searchTvRequest(mode = 'new') {
     if (!window.currentRequestId) return;
+    const requestId = window.currentRequestId;
     const fullSearch = mode === 'full';
     const btn = document.getElementById(fullSearch ? 'request-details-tv-full-search-btn' : 'request-details-tv-search-btn');
     const otherBtn = document.getElementById(fullSearch ? 'request-details-tv-search-btn' : 'request-details-tv-full-search-btn');
@@ -513,10 +569,12 @@ async function searchTvRequest(mode = 'new') {
     const modeLabel = fullSearch ? 'Full search' : 'Search for new';
     const fallbackLabel = fullSearch ? 'Full search' : 'Search for new';
     const detailsTitle = document.getElementById('request-details-title')?.textContent?.trim() || modeLabel;
-    const streamUrl = '/requests/' + window.currentRequestId + '/search/stream?search_mode=' + encodeURIComponent(fullSearch ? 'full' : 'new');
+    const streamUrl = '/requests/' + requestId + '/search/stream?search_mode=' + encodeURIComponent(fullSearch ? 'full' : 'new');
     window.startTvSearchProgress(streamUrl, modeLabel + ': ' + detailsTitle, async function(data) {
         if (!data || data.reload_details !== false) {
-            await window.openRequestDetails(window.currentRequestId, window.currentDetailsIndex, { preserveUiState: true });
+            if (window.activeDetailsRequestId === requestId) {
+                await reloadOpenDetailsIfActive(requestId);
+            }
         }
         if (btn) {
             btn.disabled = false;

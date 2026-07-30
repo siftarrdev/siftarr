@@ -37,7 +37,7 @@ Primary flow:
 4. Search runs and compact rule evidence are persisted for request history and staging review
 5. Winning releases are staged or sent to qBittorrent
 6. Background services track retries, lifecycle state, Plex polling, and completion
-7. Dashboard, Stats, and settings UI expose control and visibility; request details can filter/sort stored release results, show search history, and compare staged alternatives
+7. Dashboard, Stats, and settings UI expose control and visibility; request details can filter/sort stored release results, show search history, compare staged alternatives, and coalesce SSE-triggered DB-backed live result refreshes without losing modal state
 
 ## Top-level repository layout
 
@@ -127,7 +127,7 @@ HTTP route layer.
 - `dashboard.py` — main dashboard page routes; `GET /api/downloads` (unfinished) and `GET /api/torrents/completed` (live completed) both return qBittorrent torrents grouped by owning Siftarr request with per-group totals, lifecycle actions limited to matched Siftarr rows
 - `dashboard_api.py` — dashboard JSON endpoints for details/search/history data, including validated detail-release filter/sort query controls
 - `dashboard_actions.py` — dashboard-triggered actions and mutations
-- `search_sse.py` — SSE streaming endpoints for live search progress; `/requests/{id}/search/stream` supports TV `search_mode=new|full`, while TV scope-specific streams remain compatibility/debug inspect paths
+- `search_sse.py` — SSE streaming endpoints for live search progress and post-commit `results_updated` notifications; `/requests/{id}/search/stream` supports TV `search_mode=new|full`, while TV scope-specific streams remain compatibility/debug inspect paths
 - `rules.py` — rule management UI/API, including unified rule listing, multi-title testing, modal create/edit actions, export, import preview/apply flows that merge explicit keep selections from existing and imported rules, and the Rules-area staging decision-log page for rule tuning
 - `settings.py` — settings UI (connection test/save/reset, scheduler interval save/reset, staging toggle, Plex rescan, Overseerr sync, cache/reseed actions, SSE progress streams, API key management, Plex SSO status, non-secret settings backup preview/restore, qBit mover enable/paths/retention settings and manual trigger, and Settings-hosted background job status/manual triggers), uses SettingsStore for DB-backed persistence and keeps the SSO-managed Plex token out of connection saves/resets/backups
 - `stats.py` — protected Stats page and JSON data endpoint for all-time, preset, and custom date ranges, including chart-ready time-series payloads
@@ -160,7 +160,7 @@ Business logic and integrations, organized into thematic subpackages:
 - `detail_service.py` — request detail loading (releases, timeline, TV enrichment integration) plus stored-release title/resolution filtering, sorting, pagination counts, and applied-control metadata
 - `tv_details_service.py` — TV details and sync metadata helpers
 - `tv_enrichment_service.py` — TV season/episode enrichment (season data, coverage-based release grouping)
-- `search_service.py` — ad hoc release evaluation/selection, request search orchestration
+- `search_service.py` — ad hoc release evaluation/selection, request search orchestration, and committed ad-hoc TV result update notifications
 - `torrent_grouping.py` — tiered qBit-to-request matching (hash → staged name → other staged statuses → parsed release title), row serialization, and request-grouped payload building for the Torrent Status APIs (live qBit view only, no persisted history)
 
 **`decisions/`** — Rule engine and decision pipeline
@@ -168,7 +168,7 @@ Business logic and integrations, organized into thematic subpackages:
 - `rule_engine_provider.py` — shared cached rule-engine loading from database rules
 - `rule_service.py` — CRUD/order logic for rules, export/import validation, existing-vs-imported diff preview and selected merge/replace application, and empty-database default-rule seeding from configured `rules.json`
 - `decision_pipeline.py` — shared decision pipeline helpers (activity logging, pending queue, best-release selection)
-- `tv_decision_service.py` — TV-specific decision logic (Search-for-new season-pack-first selection with exact episode fallback, Full-search broad pack evaluation, actionable staged selection)
+- `tv_decision_service.py` — TV-specific decision logic (Search-for-new season-pack-first selection with exact episode fallback, Full-search broad pack evaluation, actionable staged selection) and incremental committed result-cache snapshots for SSE details refreshes
 - `movie_decision_service.py` — movie-specific decision logic
 
 **`integrations/`** — External service adapters
