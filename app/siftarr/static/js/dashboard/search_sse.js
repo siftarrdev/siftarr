@@ -147,6 +147,11 @@ function startSearchProgress(requestId, title, onComplete, onError) {
         if (data.phase) {
             if (bar) setPhaseStyles(bar, data.phase);
             switch (data.phase) {
+                case 'results_updated':
+                    if (window.scheduleLiveDetailsRefresh) {
+                        window.scheduleLiveDetailsRefresh(data.request_id || requestId);
+                    }
+                    break;
                 case 'complete':
                     finished = true;
                     if (bar) {
@@ -342,6 +347,11 @@ function startTvSearchProgress(streamUrl, title, onComplete, onError) {
 
         if (data.phase) {
             switch (data.phase) {
+                case 'results_updated':
+                    if (window.scheduleLiveDetailsRefresh) {
+                        window.scheduleLiveDetailsRefresh(data.request_id);
+                    }
+                    break;
                 case 'complete':
                     finished = true;
                     if (bar) {

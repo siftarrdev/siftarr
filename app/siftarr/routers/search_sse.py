@@ -337,14 +337,23 @@ async def _bulk_search_generator(
 async def _tv_season_pack_generator(request_id: int, season_number: int, db: AsyncSession):
     """Compatibility/debug stream for inspecting cached/refreshed season-pack rows."""
     try:
+        progress_queue: asyncio.Queue[dict] = asyncio.Queue()
+
+        async def progress_callback(payload: dict) -> None:
+            await progress_queue.put(payload)
+
         yield serialize_sse(build_sse_progress("starting", percent=5))
         async with _stream_session(db) as session:
             request = await load_request_or_404(session, request_id)
             validate_tv_request(request)
             yield serialize_sse(build_sse_progress("searching", percent=50))
             service = SearchService(session)
-            data = await service.search_season_packs(request, season_number=season_number)
+            data = await service.search_season_packs(
+                request, season_number=season_number, progress_callback=progress_callback
+            )
             serialized = serialize_tv_search_response(data)
+        while not progress_queue.empty():
+            yield serialize_sse(progress_queue.get_nowait())
         yield serialize_sse(
             build_sse_progress(
                 "complete",
@@ -371,14 +380,23 @@ async def _tv_season_pack_generator(request_id: int, season_number: int, db: Asy
 async def _tv_multi_season_generator(request_id: int, db: AsyncSession):
     """Compatibility/debug stream for inspecting cached/refreshed multi-season rows."""
     try:
+        progress_queue: asyncio.Queue[dict] = asyncio.Queue()
+
+        async def progress_callback(payload: dict) -> None:
+            await progress_queue.put(payload)
+
         yield serialize_sse(build_sse_progress("starting", percent=5))
         async with _stream_session(db) as session:
             request = await load_request_or_404(session, request_id)
             validate_tv_request(request)
             yield serialize_sse(build_sse_progress("searching", percent=50))
             service = SearchService(session)
-            data = await service.search_multi_season_packs(request, request_id=request_id)
+            data = await service.search_multi_season_packs(
+                request, request_id=request_id, progress_callback=progress_callback
+            )
             serialized = serialize_tv_search_response(data)
+        while not progress_queue.empty():
+            yield serialize_sse(progress_queue.get_nowait())
         yield serialize_sse(
             build_sse_progress(
                 "complete",
@@ -404,6 +422,11 @@ async def _tv_episode_generator(
 ):
     """Compatibility/debug stream for inspecting cached/refreshed episode rows."""
     try:
+        progress_queue: asyncio.Queue[dict] = asyncio.Queue()
+
+        async def progress_callback(payload: dict) -> None:
+            await progress_queue.put(payload)
+
         yield serialize_sse(build_sse_progress("starting", percent=5))
         async with _stream_session(db) as session:
             request = await load_request_or_404(session, request_id)
@@ -411,9 +434,14 @@ async def _tv_episode_generator(
             yield serialize_sse(build_sse_progress("searching", percent=50))
             service = SearchService(session)
             data = await service.search_episode(
-                request, season_number=season_number, episode_number=episode_number
+                request,
+                season_number=season_number,
+                episode_number=episode_number,
+                progress_callback=progress_callback,
             )
             serialized = serialize_tv_search_response(data)
+        while not progress_queue.empty():
+            yield serialize_sse(progress_queue.get_nowait())
         yield serialize_sse(
             build_sse_progress(
                 "complete",

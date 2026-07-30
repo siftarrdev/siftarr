@@ -183,7 +183,13 @@ class SearchService:
 
         return result
 
-    async def search_season_packs(self, request: Any, *, season_number: int) -> TVSearchData:
+    async def search_season_packs(
+        self,
+        request: Any,
+        *,
+        season_number: int,
+        progress_callback: SearchProgressCallback | None = None,
+    ) -> TVSearchData:
         """Search for season packs covering exactly one season."""
         result = await self._search_tv_season_sweep(request, season_number=season_number)
         if result.error:
@@ -196,6 +202,7 @@ class SearchService:
         stored_rows = await self._persist_tv_season_sweep(
             request.id, result.releases, season_number=season_number
         )
+        await self._commit_result_update(request.id, len(stored_rows), progress_callback)
         scope: dict[str, object] = {"type": "season_packs", "season_number": season_number}
         releases = self._filter_serialize_stored_tv_releases(stored_rows, scope=scope)
         return TVSearchData(
@@ -203,7 +210,13 @@ class SearchService:
             scope=scope,
         )
 
-    async def search_multi_season_packs(self, request: Any, *, request_id: int) -> TVSearchData:
+    async def search_multi_season_packs(
+        self,
+        request: Any,
+        *,
+        request_id: int,
+        progress_callback: SearchProgressCallback | None = None,
+    ) -> TVSearchData:
         """Search for multi-season packs covering 2+ seasons or complete series.
 
         Per-season sweeps query ``"<title> Sxx"``, which most indexers will not
@@ -249,6 +262,7 @@ class SearchService:
                 )
             )
         stored_rows = self._dedupe_stored_releases(stored_rows)
+        await self._commit_result_update(request.id, len(stored_rows), progress_callback)
         scope: dict[str, object] = {"type": "multi_season_packs"}
         releases = self._filter_serialize_stored_tv_releases(
             stored_rows, scope=scope, known_total_seasons=known_total_seasons
@@ -265,6 +279,7 @@ class SearchService:
         *,
         season_number: int,
         episode_number: int,
+        progress_callback: SearchProgressCallback | None = None,
     ) -> TVSearchData:
         """Search for a specific single-episode release.
 
@@ -297,6 +312,7 @@ class SearchService:
         stored_rows = await self._persist_tv_season_sweep(
             request.id, result.releases, season_number=season_number
         )
+        await self._commit_result_update(request.id, len(stored_rows), progress_callback)
         releases = self._filter_serialize_stored_tv_releases(stored_rows, scope=scope)
 
         if not releases:
@@ -311,6 +327,7 @@ class SearchService:
                 getattr(episode_result, "releases", []),
                 scope=scope,
             )
+            await self._commit_result_update(request.id, len(exact_rows), progress_callback)
             stored_rows = self._dedupe_stored_releases([*stored_rows, *exact_rows])
             releases = self._filter_serialize_stored_tv_releases(exact_rows, scope=scope)
 
@@ -321,6 +338,25 @@ class SearchService:
             releases=finalize_releases(releases),
             scope=scope,
         )
+
+    async def _commit_result_update(
+        self,
+        request_id: int,
+        changed_count: int,
+        progress_callback: SearchProgressCallback | None,
+    ) -> None:
+        """Commit cache rows before announcing them to detached SSE readers."""
+        if not changed_count:
+            return
+        await self.db.commit()
+        if progress_callback is not None:
+            await progress_callback(
+                {
+                    "phase": "results_updated",
+                    "request_id": request_id,
+                    "changed_count": changed_count,
+                }
+            )
 
     async def _load_cached_tv_releases(
         self, request_id: int, *, season_number: int | None = None

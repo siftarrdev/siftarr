@@ -203,6 +203,20 @@ def test_dashboard_details_auto_search_and_reload_hooks():
     )
 
 
+def test_dashboard_live_result_refresh_is_debounced_and_modal_safe():
+    """SSE result batches reuse the details API, rather than polling or rendering payloads."""
+    js = _read_dashboard_js()
+
+    assert "function scheduleLiveDetailsRefresh(requestId)" in js
+    assert "setTimeout(async function()" in js
+    assert "}, 1250);" in js
+    assert "if (state.timer || state.inFlight) return;" in js
+    assert "window.activeDetailsRequestId !== requestId" in js
+    assert "window.cancelLiveDetailsRefresh = cancelLiveDetailsRefresh;" in js
+    assert "case 'results_updated':" in js
+    assert "window.scheduleLiveDetailsRefresh(data.request_id);" in js
+
+
 def test_dashboard_details_search_sets_progress_and_restores_button():
     """Movie details searches should show progress and restore controls."""
     js = _read_dashboard_js()

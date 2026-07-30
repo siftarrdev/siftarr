@@ -86,8 +86,9 @@ async def store_search_results(
     *,
     scope: dict[str, object] | None = None,
     source: str = "automatic",
+    purge_stale: bool = True,
 ) -> dict[str, Release]:
-    """Upsert stored search results and purge stale rows within the same scope."""
+    """Upsert stored search results and optionally purge stale rows in scope."""
     # 1. Load existing releases for this request
     existing_result = await db.execute(select(Release).where(Release.request_id == request_id))
     all_records = list(existing_result.scalars().all())
@@ -103,7 +104,7 @@ async def store_search_results(
     ]
     # Primary keys, not object identity: every row here is already persistent,
     # and pks survive any identity churn in the session.
-    purgeable_ids = {record.id for record in existing_records}
+    purgeable_ids = {record.id for record in existing_records} if purge_stale else set()
     logger.info(
         "Stored release cache loaded: request_id=%s scope=%s source=db search_source=%s count=%s",
         request_id,
