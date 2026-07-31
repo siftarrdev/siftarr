@@ -741,6 +741,7 @@ function renderSeasonAccordion(data) {
                     '<svg class="accordion-chevron w-3.5 h-3.5 text-gray-500 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>' +
                     '<span class="text-xs font-mono text-gray-500 shrink-0">S' + String(season.season_number).padStart(2, '0') + 'E' + String(ep.episode_number).padStart(2, '0') + '</span>' +
                     '<span class="min-w-0 flex-1 basis-[55%] text-[13px] lg:text-sm text-white truncate lg:basis-auto">' + window.escapeHtml(ep.title || 'Untitled') + '</span>' +
+                    (ep.air_date ? '<span class="text-xs text-gray-500 shrink-0">Airs: ' + window.escapeHtml(ep.air_date) + '</span>' : '') +
                     '<div class="ml-auto flex flex-wrap items-center justify-end gap-3.5 shrink-0">' +
                         '<span class="badge ' + badgeClass + '">' + window.escapeHtml(statusLabel) + '</span>' +
                         (isStaged ? renderApproveTopEpisodeButton(stagedTorrent) : showInlineActions ? renderStageTopEpisodeButton(requestId, topRelease) : '') +

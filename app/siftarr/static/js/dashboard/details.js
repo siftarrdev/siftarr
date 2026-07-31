@@ -421,7 +421,9 @@ async function openRequestDetails(requestId, explicitIndex = null, options = {})
         if (data.auto_search_eligible && !window.detailsAutoSearchStarted[requestId]) {
             window.detailsAutoSearchStarted[requestId] = true;
             if (data.request.media_type === 'tv') {
-                releases.innerHTML = '<div class="text-gray-500 text-sm">Searching indexers for new TV results...</div>';
+                // The season accordion is useful before the first result arrives:
+                // it exposes episode names, air dates, and status while the SSE
+                // progress toast reports the search state. Do not replace it.
                 window.searchTvRequestNew({ auto: true });
             } else {
                 releases.innerHTML = window.renderMovieSearchLoadingState();

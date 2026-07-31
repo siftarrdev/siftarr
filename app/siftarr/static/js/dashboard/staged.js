@@ -40,6 +40,8 @@ function showQbitView(view) {
     completed.classList.toggle('hidden', !showCompleted);
     const downloadingButton = document.getElementById('qbit-subtab-downloading');
     const completedButton = document.getElementById('qbit-subtab-completed');
+    const downloadSummary = document.getElementById('qbit-download-summary');
+    if (downloadSummary) downloadSummary.classList.toggle('hidden', showCompleted);
     if (downloadingButton) {
         downloadingButton.className = showCompleted
             ? 'btn-ghost btn-sm tap'
@@ -87,7 +89,11 @@ async function _patchStagedDownloadStatus() {
         const response = await fetch(completedView ? '/api/torrents/completed' : '/api/downloads');
         if (!response.ok) return;
         const data = await response.json();
-        if (data.qbit_unavailable) return;
+        if (data.qbit_unavailable) {
+            const summary = document.getElementById('qbit-download-summary');
+            if (summary) summary.textContent = 'qBittorrent unavailable';
+            return;
+        }
         const groups = data.groups || [];
         if (completedView) renderQbitCompleted(groups);
         else renderQbitDownloads(groups);
@@ -121,6 +127,27 @@ function qbitBytes(value) {
 
 function qbitSpeed(value) {
     return `${qbitNumber(value, 1024 * 1024)} MB/s`;
+}
+
+function qbitAggregateDownloadTotals(groups) {
+    return (groups || []).reduce((totals, group) => {
+        const groupTotals = group.totals || {};
+        const number = (value) => Number.isFinite(Number(value)) ? Number(value) : 0;
+        totals.count += number(group.count ?? (group.torrents || []).length);
+        totals.dlspeed += number(groupTotals.dlspeed);
+        totals.upspeed += number(groupTotals.upspeed);
+        totals.downloaded += number(groupTotals.downloaded);
+        totals.size += number(groupTotals.size);
+        return totals;
+    }, { count: 0, dlspeed: 0, upspeed: 0, downloaded: 0, size: 0 });
+}
+
+function renderQbitDownloadSummary(groups) {
+    const summary = document.getElementById('qbit-download-summary');
+    if (!summary) return;
+    const totals = qbitAggregateDownloadTotals(groups);
+    const torrentLabel = totals.count === 1 ? 'torrent' : 'torrents';
+    summary.innerHTML = `<span><span class="text-gray-500">Active</span> ${totals.count} ${torrentLabel}</span><span><span class="text-gray-500">Total download</span> ↓ ${qbitSpeed(totals.dlspeed)}</span><span><span class="text-gray-500">Total upload</span> ↑ ${qbitSpeed(totals.upspeed)}</span><span><span class="text-gray-500">Downloaded</span> ${qbitBytes(totals.downloaded)} / ${qbitBytes(totals.size)}</span>`;
 }
 
 function qbitGroupKey(group) {
@@ -306,6 +333,7 @@ function renderQbitDownloads(groups) {
         cards,
         body,
     });
+    renderQbitDownloadSummary(groups);
     if (window.reinitColumnResizer) window.reinitColumnResizer();
 }
 
