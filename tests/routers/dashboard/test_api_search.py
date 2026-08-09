@@ -453,22 +453,6 @@ async def test_search_episode_excludes_packs_and_multi_season_results(mock_db, m
         seeders=55,
         leechers=4,
     )
-    season_pack = ProwlarrRelease(
-        title="Foundation.S01.2160p.WEB-DL",
-        size=30 * 1024 * 1024 * 1024,
-        indexer="IndexerB",
-        download_url="https://example.test/season-1",
-        seeders=77,
-        leechers=2,
-    )
-    multi_season = ProwlarrRelease(
-        title="Foundation.S01-S03.2160p.WEB-DL",
-        size=42 * 1024 * 1024 * 1024,
-        indexer="IndexerC",
-        download_url="https://example.test/seasons-1-3",
-        seeders=88,
-        leechers=1,
-    )
     wrong_episode = ProwlarrRelease(
         title="Foundation.S01E02.1080p.WEB-DL",
         size=2 * 1024 * 1024 * 1024,
@@ -493,35 +477,9 @@ async def test_search_episode_excludes_packs_and_multi_season_results(mock_db, m
         seeders=12,
         leechers=2,
     )
-    complete_single_season = ProwlarrRelease(
-        title="Foundation.Complete.S01.1080p.BluRay",
-        size=15 * 1024 * 1024 * 1024,
-        indexer="IndexerSeason",
-        download_url="https://example.test/complete-s01",
-        seeders=18,
-        leechers=2,
-    )
-    complete_series = ProwlarrRelease(
-        title="Foundation.Complete.Series.1080p.BluRay",
-        size=55 * 1024 * 1024 * 1024,
-        indexer="IndexerG",
-        download_url="https://example.test/complete-series",
-        seeders=66,
-        leechers=3,
-    )
-
     prowlarr_service = AsyncMock()
-    prowlarr_service.search_tv_season_sweep.return_value = ProwlarrSearchResult(
-        releases=[
-            exact_episode,
-            season_pack,
-            multi_season,
-            wrong_episode,
-            grouped_episode_compact,
-            grouped_episode_ranged,
-            complete_single_season,
-            complete_series,
-        ],
+    prowlarr_service.search_tv_episode_exact.return_value = ProwlarrSearchResult(
+        releases=[exact_episode, wrong_episode, grouped_episode_compact, grouped_episode_ranged],
         query_time_ms=5,
     )
     monkeypatch.setattr(search_service, "ProwlarrService", lambda settings: prowlarr_service)
@@ -564,14 +522,6 @@ async def test_search_episode_falls_back_to_exact_episode_when_sweep_misses_it(
     rules_result.scalars.return_value.all.return_value = []
     mock_db.execute.side_effect = [request_result, rules_result]
 
-    later_episode = ProwlarrRelease(
-        title="Georgie.and.Mandys.First.Marriage.S02E18.1080p.WEB-DL",
-        size=2 * 1024 * 1024 * 1024,
-        indexer="IndexerA",
-        download_url="https://example.test/s02e18",
-        seeders=55,
-        leechers=4,
-    )
     exact_episode = ProwlarrRelease(
         title="Georgie.And.Mandys.First.Marriage.S02E01.1080p.WEB-DL",
         size=2 * 1024 * 1024 * 1024,
@@ -582,10 +532,7 @@ async def test_search_episode_falls_back_to_exact_episode_when_sweep_misses_it(
     )
 
     prowlarr_service = AsyncMock()
-    prowlarr_service.search_tv_season_sweep.return_value = ProwlarrSearchResult(
-        releases=[later_episode], query_time_ms=5
-    )
-    prowlarr_service.search_by_tvdbid.return_value = ProwlarrSearchResult(
+    prowlarr_service.search_tv_episode_exact.return_value = ProwlarrSearchResult(
         releases=[exact_episode], query_time_ms=5
     )
     monkeypatch.setattr(search_service, "ProwlarrService", lambda settings: prowlarr_service)
@@ -608,20 +555,19 @@ async def test_search_episode_falls_back_to_exact_episode_when_sweep_misses_it(
     body = json.loads(cast(bytes, response.body))
     assert body["scope"] == {"type": "single_episode", "season_number": 2, "episode_number": 1}
     assert [release["title"] for release in body["releases"]] == [exact_episode.title]
-    prowlarr_service.search_tv_season_sweep.assert_awaited_once()
-    prowlarr_service.search_by_tvdbid.assert_awaited_once_with(
-        tvdbid=999,
+    prowlarr_service.search_tv_season_sweep.assert_not_awaited()
+    prowlarr_service.search_tv_episode_exact.assert_awaited_once_with(
         title="Georgie & Mandy's First Marriage",
         season=2,
         episode=1,
-        year=2024,
         cacheable=False,
+        request_id=12,
     )
 
 
 @pytest.mark.asyncio
-async def test_search_episode_reuses_cached_sweep_exact_without_prowlarr(monkeypatch):
-    """A prior broad sweep should be the source for later exact episode searches."""
+async def test_search_episode_refreshes_exact_results_after_cached_sweep(monkeypatch):
+    """A manual episode search must refresh exact results even with a cached match."""
     engine = create_async_engine("sqlite+aiosqlite:///:memory:")
     session_maker = async_sessionmaker(engine, expire_on_commit=False)
     async with engine.begin() as conn:
@@ -664,22 +610,65 @@ async def test_search_episode_reuses_cached_sweep_exact_without_prowlarr(monkeyp
         service = SearchService(session)
         await service.search_season_packs(request, season_number=2)
         prowlarr_service.reset_mock()
+        refreshed_episode = ProwlarrRelease(
+            title="Georgie.And.Mandys.First.Marriage.S02E01.REPACK.1080p.WEB-DL",
+            size=2 * 1024 * 1024 * 1024,
+            indexer="IndexerC",
+            download_url="https://example.test/s02e01-repack",
+            seeders=30,
+            leechers=1,
+        )
+        prowlarr_service.search_tv_episode_exact.return_value = ProwlarrSearchResult(
+            releases=[refreshed_episode], query_time_ms=5
+        )
 
         result = await service.search_episode(request, season_number=2, episode_number=1)
 
-        assert [release["title"] for release in result.releases] == [exact_episode.title]
+        assert [release["title"] for release in result.releases] == [refreshed_episode.title]
         assert result.releases[0]["stored_release_id"] is not None
         prowlarr_service.search_tv_season_sweep.assert_not_awaited()
-        prowlarr_service.search_by_tvdbid.assert_not_awaited()
+        prowlarr_service.search_tv_episode_exact.assert_awaited_once()
         stored_titles = (
             (await session.execute(select(Release.title).where(Release.request_id == request.id)))
             .scalars()
             .all()
         )
-        assert exact_episode.title in stored_titles
+        assert exact_episode.title not in stored_titles
         assert rejected_episode.title in stored_titles
+        assert refreshed_episode.title in stored_titles
 
     await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_search_episode_returns_exact_provider_error(mock_db, monkeypatch):
+    request_record = MagicMock(
+        id=12,
+        media_type=MediaType.TV,
+        title="Sterling Point",
+        tvdb_id=459552,
+        year=2026,
+    )
+    request_result = MagicMock()
+    request_result.scalar_one_or_none.return_value = request_record
+    mock_db.execute.return_value = request_result
+
+    prowlarr_service = AsyncMock()
+    prowlarr_service.search_tv_episode_exact.return_value = ProwlarrSearchResult(
+        releases=[], query_time_ms=5, error="HTTP 503"
+    )
+    monkeypatch.setattr(search_service, "ProwlarrService", lambda settings: prowlarr_service)
+
+    response = await dashboard_api.search_episode(
+        request_id=12,
+        season_number=1,
+        episode_number=1,
+        db=mock_db,
+    )
+
+    body = json.loads(cast(bytes, response.body))
+    assert body["releases"] == []
+    assert body["error"] == "HTTP 503"
 
 
 @pytest.mark.asyncio
@@ -702,14 +691,6 @@ async def test_search_episode_exact_fallback_when_cached_sweep_misses_episode(mo
         session.add(request)
         await session.commit()
 
-        later_episode = ProwlarrRelease(
-            title="Georgie.And.Mandys.First.Marriage.S02E18.1080p.WEB-DL",
-            size=2 * 1024 * 1024 * 1024,
-            indexer="IndexerA",
-            download_url="https://example.test/s02e18",
-            seeders=20,
-            leechers=2,
-        )
         exact_episode = ProwlarrRelease(
             title="Georgie.And.Mandys.First.Marriage.S02E01.1080p.WEB-DL",
             size=2 * 1024 * 1024 * 1024,
@@ -727,10 +708,7 @@ async def test_search_episode_exact_fallback_when_cached_sweep_misses_episode(mo
             leechers=1,
         )
         prowlarr_service = AsyncMock()
-        prowlarr_service.search_tv_season_sweep.return_value = ProwlarrSearchResult(
-            releases=[later_episode], query_time_ms=5
-        )
-        prowlarr_service.search_by_tvdbid.return_value = ProwlarrSearchResult(
+        prowlarr_service.search_tv_episode_exact.return_value = ProwlarrSearchResult(
             releases=[wrong_show, exact_episode], query_time_ms=5
         )
         monkeypatch.setattr(search_service, "ProwlarrService", lambda settings: prowlarr_service)
@@ -742,8 +720,8 @@ async def test_search_episode_exact_fallback_when_cached_sweep_misses_episode(mo
         result = await service.search_episode(request, season_number=2, episode_number=1)
 
         assert [release["title"] for release in result.releases] == [exact_episode.title]
-        prowlarr_service.search_tv_season_sweep.assert_awaited_once()
-        prowlarr_service.search_by_tvdbid.assert_awaited_once()
+        prowlarr_service.search_tv_season_sweep.assert_not_awaited()
+        prowlarr_service.search_tv_episode_exact.assert_awaited_once()
         stored_titles = (await session.execute(select(Release.title))).scalars().all()
         assert wrong_show.title not in stored_titles
 
@@ -877,7 +855,7 @@ async def test_search_episode_orders_by_score_then_size(mock_db, monkeypatch):
     )
 
     prowlarr_service = AsyncMock()
-    prowlarr_service.search_tv_season_sweep.return_value = ProwlarrSearchResult(
+    prowlarr_service.search_tv_episode_exact.return_value = ProwlarrSearchResult(
         releases=[larger_high_score, lower_score, smaller_high_score],
         query_time_ms=5,
     )

@@ -291,48 +291,23 @@ class SearchService:
             "season_number": season_number,
             "episode_number": episode_number,
         }
-        cached_releases = await self._load_cached_tv_releases(
-            request.id, season_number=season_number
+        episode_result = await self._search_tv_episode_exact(
+            request,
+            season=season_number,
+            episode=episode_number,
         )
-        cached_episode_releases = self._filter_serialize_stored_tv_releases(
-            cached_releases, scope=scope
+        if episode_result.error:
+            return TVSearchData(releases=[], scope=scope, error=episode_result.error)
+        exact_rows = await self._persist_tv_evaluations(
+            request.id,
+            getattr(episode_result, "releases", []),
+            scope=scope,
         )
-        if cached_episode_releases:
-            await self._auto_stage_best_stored_episode(request, cached_releases, scope=scope)
-            return TVSearchData(releases=finalize_releases(cached_episode_releases), scope=scope)
-
-        result = await self._search_tv_season_sweep(request, season_number=season_number)
-        if result.error:
-            return TVSearchData(
-                releases=[],
-                scope=scope,
-                error=result.error,
-            )
-
-        stored_rows = await self._persist_tv_season_sweep(
-            request.id, result.releases, season_number=season_number
-        )
-        await self._commit_result_update(request.id, len(stored_rows), progress_callback)
-        releases = self._filter_serialize_stored_tv_releases(stored_rows, scope=scope)
-
-        if not releases:
-            episode_result = await self._search_tv(
-                request,
-                season=season_number,
-                episode=episode_number,
-                cacheable=False,
-            )
-            exact_rows = await self._persist_tv_evaluations(
-                request.id,
-                getattr(episode_result, "releases", []),
-                scope=scope,
-            )
-            await self._commit_result_update(request.id, len(exact_rows), progress_callback)
-            stored_rows = self._dedupe_stored_releases([*stored_rows, *exact_rows])
-            releases = self._filter_serialize_stored_tv_releases(exact_rows, scope=scope)
+        await self._commit_result_update(request.id, len(exact_rows), progress_callback)
+        releases = self._filter_serialize_stored_tv_releases(exact_rows, scope=scope)
 
         # ── Auto-stage the best passing release ────────────────────────
-        await self._auto_stage_best_stored_episode(request, stored_rows, scope=scope)
+        await self._auto_stage_best_stored_episode(request, exact_rows, scope=scope)
 
         return TVSearchData(
             releases=finalize_releases(releases),
@@ -681,6 +656,31 @@ class SearchService:
             episode=episode,
             year=request.year,
             cacheable=cacheable,
+        )
+        return self._filter_tv_identity(request, result)
+
+    async def _search_tv_episode_exact(
+        self,
+        request: Any,
+        *,
+        season: int,
+        episode: int,
+    ) -> Any:
+        """Run a fresh title + SxxEyy search for an individual episode.
+
+        A metadata ``tvsearch`` may return broad show results and suppress its
+        title-query fallback even when none of those results cover the requested
+        episode.  Individual searches must use the dedicated exact query so an
+        indexer such as IPTorrents receives the same normalized term that works
+        in its own search UI.
+        """
+        prowlarr = ProwlarrService(settings=get_settings())
+        result = await prowlarr.search_tv_episode_exact(
+            title=request.title,
+            season=season,
+            episode=episode,
+            cacheable=False,
+            request_id=getattr(request, "id", None),
         )
         return self._filter_tv_identity(request, result)
 
