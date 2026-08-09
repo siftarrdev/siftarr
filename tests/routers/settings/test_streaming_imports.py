@@ -1094,8 +1094,8 @@ async def test_sync_overseerr_prefetches_with_bounded_parallelism(monkeypatch, b
 
 
 @pytest.mark.asyncio
-async def test_sync_overseerr_keeps_duplicate_skipping_behavior(monkeypatch, base_context):
-    """Overseerr sync should still skip already-imported actionable requests."""
+async def test_sync_overseerr_uses_request_id_when_external_id_collides(monkeypatch, base_context):
+    """A new Seerr request must not disappear behind an ambiguous external ID."""
 
     class FakeDB:
         def __init__(self):
@@ -1112,8 +1112,9 @@ async def test_sync_overseerr_keeps_duplicate_skipping_behavior(monkeypatch, bas
             self.added.append(obj)
 
         async def flush(self):
-            msg = "flush should not run when all requests are skipped"
-            raise AssertionError(msg)
+            for item in self.added:
+                if item.id is None:
+                    item.id = 1
 
     mock_db = FakeDB()
     context = base_context()
@@ -1165,19 +1166,19 @@ async def test_sync_overseerr_keeps_duplicate_skipping_behavior(monkeypatch, bas
             return None
 
     monkeypatch.setattr(settings, "OverseerrService", FakeOverseerrService)
-    evaluate_mock = AsyncMock()
+    evaluate_mock = AsyncMock(return_value=None)
     monkeypatch.setattr(settings, "evaluate_imported_request", evaluate_mock)
 
     response = await settings.sync_overseerr(MagicMock(), db=cast(Any, mock_db))
     response_context = cast(dict, getattr(response, "context", None))
 
     assert response_context["message_type"] == "success"
-    assert response_context["message"] == (
-        "No new actionable requests to sync (2 already existed or were already available)"
-    )
-    assert mock_db.added == []
+    assert response_context["message"] == "Synced 1 new request(s) from Overseerr"
+    assert len(mock_db.added) == 1
+    assert mock_db.added[0].overseerr_request_id == 201
+    assert mock_db.added[0].external_id == "1-201"
     mock_db.commit.assert_awaited_once()
-    evaluate_mock.assert_not_awaited()
+    evaluate_mock.assert_awaited_once()
 
 
 @pytest.mark.asyncio

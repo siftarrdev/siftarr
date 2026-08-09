@@ -13,6 +13,9 @@ let _downloadStatusPatchInFlight = false;
 let _stagedStatusPollWanted = false;
 // Which sub-view of the Torrent Status tab is visible: 'downloading' | 'completed'.
 let _torrentStatusView = 'downloading';
+// Shared by both Torrent Status sub-views so changing views or polling does not
+// reset the user's selected ordering.
+let _torrentStatusSort = 'added-desc';
 
 function _currentPollIntervalMs() {
     return _torrentStatusView === 'completed'
@@ -52,7 +55,20 @@ function showQbitView(view) {
             ? 'btn-primary btn-sm tap-primary'
             : 'btn-ghost btn-sm tap';
     }
+    syncQbitSortControl();
     if (_stagedStatusPollWanted) _startStagedStatusPoll();
+}
+
+function syncQbitSortControl() {
+    const control = document.getElementById('qbit-torrent-sort');
+    if (control) control.value = _torrentStatusSort;
+}
+
+function setQbitTorrentSort(sort) {
+    if (!['added-desc', 'eta-asc', 'added-asc'].includes(sort)) return;
+    _torrentStatusSort = sort;
+    syncQbitSortControl();
+    _patchStagedDownloadStatus();
 }
 
 function _stopPollTimer() {
@@ -249,6 +265,39 @@ function qbitGroupTotalsText(totals, showSpeeds) {
     return parts.join(' · ');
 }
 
+function qbitTorrentSortValue(torrent) {
+    if (_torrentStatusSort === 'eta-asc') {
+        const rawEta = torrent.eta;
+        if (rawEta === null || rawEta === undefined || rawEta === '') return Infinity;
+        const eta = Number(rawEta);
+        // qBittorrent uses negative values and 8,640,000 seconds for an
+        // unavailable/infinite ETA. Both belong after real ETAs.
+        return Number.isFinite(eta) && eta >= 0 && eta < 8640000 ? eta : Infinity;
+    }
+    const rawAddedOn = torrent.added_on;
+    if (rawAddedOn === null || rawAddedOn === undefined || rawAddedOn === '') return Infinity;
+    const addedOn = Number(rawAddedOn);
+    if (!Number.isFinite(addedOn)) return Infinity;
+    return _torrentStatusSort === 'added-desc' ? -addedOn : addedOn;
+}
+
+function sortQbitGroups(groups) {
+    const tieBreak = (left, right) => String(left.name || left.hash || '')
+        .localeCompare(String(right.name || right.hash || ''));
+    const sorted = (groups || []).map((group) => ({
+        ...group,
+        torrents: [...(group.torrents || [])].sort((left, right) => {
+            const difference = qbitTorrentSortValue(left) - qbitTorrentSortValue(right);
+            return difference || tieBreak(left, right);
+        }),
+    }));
+    return sorted.sort((left, right) => {
+        const difference = qbitTorrentSortValue(left.torrents[0] || {})
+            - qbitTorrentSortValue(right.torrents[0] || {});
+        return difference || String(left.title || '').localeCompare(String(right.title || ''));
+    });
+}
+
 // Shared grouped renderer for both sub-views. Groups with a single torrent are
 // rendered as a flat row/card (no needless expand click); everything else gets a
 // collapsible header carrying the aggregate totals.
@@ -257,6 +306,7 @@ function renderQbitGroups(groups, options) {
     if (!cards || !body) return;
     const escape = window.escapeHtml;
     const state = captureQbitGroupState(prefix);
+    groups = sortQbitGroups(groups);
 
     if (!groups.length) {
         cards.innerHTML = `<p class="text-sm text-gray-500">${escape(emptyText)}</p>`;
@@ -591,6 +641,7 @@ window.refreshStagedTabData = refreshStagedTabData;
 window.refreshDownloadingTabData = refreshDownloadingTabData;
 window.bindStagedSelectionHandlers = bindStagedSelectionHandlers;
 window.showQbitView = showQbitView;
+window.setQbitTorrentSort = setQbitTorrentSort;
 window.toggleQbitGroup = toggleQbitGroup;
 window.syncQbitGroupFromCard = syncQbitGroupFromCard;
 window._startStagedStatusPoll = _startStagedStatusPoll;
