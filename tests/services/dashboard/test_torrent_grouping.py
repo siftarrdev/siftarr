@@ -11,6 +11,7 @@ from app.siftarr.services.dashboard.torrent_grouping import (
     build_request_title_index,
     group_matched_torrents,
     match_qbit_torrents,
+    serialize_qbit_download,
 )
 
 
@@ -57,6 +58,25 @@ def test_unmanaged_torrents_group_last():
     assert groups[-1]["unmanaged"] is True
     assert groups[-1]["request_id"] is None
     assert groups[-1]["count"] == 2
+
+
+def test_groups_and_torrents_sort_by_added_on_newest_first_including_unmanaged():
+    groups = group_matched_torrents(
+        [
+            {"hash": "old", "name": "Old", "added_on": 10, "managed_torrent": _managed(1)},
+            {"hash": "new", "name": "New", "added_on": 30, "managed_torrent": _managed(1)},
+            {"hash": "manual", "name": "Manual", "added_on": 40, "managed_torrent": None},
+            {"hash": "middle", "name": "Middle", "added_on": 20, "managed_torrent": _managed(2)},
+        ],
+        {1: ("First request", MediaType.TV), 2: ("Second request", MediaType.MOVIE)},
+    )
+
+    assert [group["title"] for group in groups] == ["Unmanaged", "First request", "Second request"]
+    assert [row["hash"] for row in groups[1]["torrents"]] == ["new", "old"]
+
+
+def test_serialized_qbit_download_includes_added_on():
+    assert serialize_qbit_download({"hash": "abc", "added_on": 123})["added_on"] == 123
 
 
 def test_totals_treat_missing_and_none_values_as_zero():

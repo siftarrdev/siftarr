@@ -146,6 +146,7 @@ def serialize_qbit_download(torrent: dict) -> dict:
             "upspeed",
             "downloaded",
             "uploaded",
+            "added_on",
         )
     }
     if managed is not None:
@@ -196,7 +197,8 @@ def group_matched_torrents(
     """Group matched qBit torrents by owning request id.
 
     Torrents with no managed match (or a managed row without a request) collapse
-    into a single trailing ``Unmanaged`` group.
+    into a single ``Unmanaged`` group.  Rows and groups default to qBittorrent's
+    newest-added-first order, including the unmanaged group.
     """
     grouped_rows: dict[int, list[dict]] = {}
     unmanaged_rows: list[dict] = []
@@ -230,6 +232,24 @@ def group_matched_torrents(
             "match": _group_match_tier(rows),
         }
 
+    def _added_on_sort_value(row: dict) -> float:
+        value = row.get("added_on")
+        if isinstance(value, bool) or not isinstance(value, int | float):
+            return float("inf")
+        return -value
+
+    def _sort_rows(rows: list[dict]) -> None:
+        rows.sort(
+            key=lambda row: (
+                _added_on_sort_value(row),
+                str(row.get("name") or row.get("hash") or "").casefold(),
+            )
+        )
+
+    for rows in grouped_rows.values():
+        _sort_rows(rows)
+    _sort_rows(unmanaged_rows)
+
     ordered = [
         _build(
             request_id,
@@ -239,9 +259,22 @@ def group_matched_torrents(
         )
         for request_id, rows in grouped_rows.items()
     ]
-    ordered.sort(key=lambda group: str(group["title"]).casefold())
+    # A group's first torrent is its best sort key, which keeps grouping from
+    # defeating the global newest-first ordering.
+    ordered.sort(
+        key=lambda group: (
+            _added_on_sort_value(group["torrents"][0]),
+            str(group["title"]).casefold(),
+        )
+    )
     if unmanaged_rows:
         ordered.append(_build(None, UNMANAGED_GROUP_TITLE, None, unmanaged_rows))
+        ordered.sort(
+            key=lambda group: (
+                _added_on_sort_value(group["torrents"][0]),
+                str(group["title"]).casefold(),
+            )
+        )
 
     return ordered
 

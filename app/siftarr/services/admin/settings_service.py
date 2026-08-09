@@ -1429,15 +1429,24 @@ async def import_overseerr_requests(
                         message=f"Importing {prepared.title or 'request'}...",
                     )
                 )
-                if (
-                    prepared.external_id in existing_external_ids
-                    or prepared.overseerr_request_id in existing_request_ids
+                # A Seerr request ID is the canonical import identity. External IDs
+                # are not globally unique: movie TMDB IDs and TVDB IDs share the
+                # same string namespace, and the same title may be requested again
+                # after an earlier request was denied. Treating either collision as
+                # "already imported" silently drops a real Seerr request.
+                if prepared.overseerr_request_id in existing_request_ids or (
+                    prepared.overseerr_request_id is None
+                    and prepared.external_id in existing_external_ids
                 ):
                     skipped_count += 1
                     continue
 
+                external_id = prepared.external_id
+                if external_id in existing_external_ids:
+                    external_id = f"{external_id}-{prepared.overseerr_request_id}"
+
                 new_request = RequestModel(
-                    external_id=prepared.external_id,
+                    external_id=external_id,
                     media_type=prepared.media_type,
                     tmdb_id=prepared.tmdb_id,
                     tvdb_id=prepared.tvdb_id,
@@ -1461,7 +1470,7 @@ async def import_overseerr_requests(
                 )
                 if prepared.media_type == MediaType.TV:
                     new_tv_requests.append(new_request)
-                existing_external_ids.add(prepared.external_id)
+                existing_external_ids.add(external_id)
                 if prepared.overseerr_request_id is not None:
                     existing_request_ids.add(prepared.overseerr_request_id)
                 synced_count += 1

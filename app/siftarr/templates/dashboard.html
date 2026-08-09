@@ -377,6 +377,12 @@
                     <div id="qbit-download-summary" class="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-gray-400 tabular-nums" role="status" aria-live="polite">Loading live download totals…</div>
                 </div>
                 <div class="flex flex-wrap items-center gap-2">
+                    <label for="qbit-torrent-sort" class="sr-only">Sort torrents</label>
+                    <select id="qbit-torrent-sort" class="form-input py-1.5 text-sm" onchange="setQbitTorrentSort(this.value)">
+                        <option value="added-desc">Date added (newest first)</option>
+                        <option value="eta-asc">ETA</option>
+                        <option value="added-asc">Date added (oldest first)</option>
+                    </select>
                     <button type="button" id="qbit-subtab-downloading" class="btn-primary btn-sm tap-primary" onclick="showQbitView('downloading')">Downloading</button>
                     <button type="button" id="qbit-subtab-completed" class="btn-ghost btn-sm tap" onclick="showQbitView('completed')">Completed</button>
                     {% if qbittorrent_url %}
