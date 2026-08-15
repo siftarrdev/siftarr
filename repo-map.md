@@ -49,6 +49,7 @@ Primary flow:
 - `data/` — locally created runtime data directory for SQLite and staging artifacts; gitignored and not committed
 - `icons/` — branding assets used by docs/UI
 - `mockups/` — exploratory UI mockups, organized by design iteration/name
+- `.github/workflows/` — GitHub Actions quality checks, including enforced Prettier and ESLint validation for frontend JavaScript
 - `README.md` — user-facing overview and Docker Compose quick start
 - `CONTRIBUTING.md` — developer setup, workflow, quality gates, and PR expectations
 - `AGENTS.md` — repository-specific agent/development rules
@@ -56,7 +57,8 @@ Primary flow:
 - `pyproject.toml` — Python 3.14 project metadata, dependencies, hatchling/hatch-vcs build backend, pytest, and Ruff config
 - `ty.toml` — static type checker configuration (Python version target)
 - `uv.lock` — locked dependency graph for `uv`
-- `package.json` — Tailwind CSS build script and npm dev dependencies (`@tailwindcss/cli`, `tailwindcss`)
+- `package.json` — Tailwind CSS build plus Prettier/ESLint formatting and lint scripts and npm development dependencies
+- `eslint.config.mjs` / `.prettierrc.json` — JavaScript linting and formatting policy for browser code under `app/siftarr/static/js/`
 - `node_modules/` — JavaScript dependencies (gitignored)
 
 ## Documentation map
