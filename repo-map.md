@@ -33,7 +33,7 @@ Primary flow:
 
 1. Overseerr webhook or manual action creates/syncs a request
 2. Browser access is gated by Plex SSO; the first Plex login claims the instance as the sole admin and must finish an initial full Plex sync before reaching protected pages, while API-key auth remains for webhooks/integrations
-3. Search and decision services query Prowlarr and evaluate releases (TV dashboard “Search for new” checks actionable season-pack candidates before targeted exact `SxxEyy` fallback; “Full search” refreshes all aired episode results and runs one broad TV pack query; the details “Season packs” tab can search per-season packs and multi-season/complete-series packs, the latter combining per-season sweeps with a broad title-only pack query)
+3. Search and decision services query Prowlarr and evaluate releases (TV dashboard “Search for new” checks eligible whole-season packs before targeted exact `SxxEyy` fallback; “Full search” refreshes all aired episode results and conditionally runs one broad TV pack query; whole-show searches warn at five unavailable seasons and can cooperatively cancel future queries while retaining completed work; targeted episode and eligible-season searches remain available)
 4. Search runs and compact rule evidence are persisted for request history and staging review
 5. Winning releases are staged or sent to qBittorrent
 6. Background services track retries, lifecycle state, Plex polling, and completion

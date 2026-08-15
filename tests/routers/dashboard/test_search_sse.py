@@ -62,9 +62,12 @@ async def test_stream_search_request_tv_search_for_new_reload_signal(mock_db, mo
 
     monkeypatch.setattr(search_sse, "load_request_or_404", fake_load)
 
-    async def fake_process(request, progress_callback=None, search_mode="new"):
+    async def fake_process(
+        request, progress_callback=None, search_mode="new", cancellation_check=None
+    ):
         assert progress_callback is not None
         assert search_mode == "new"
+        assert callable(cancellation_check)
         await progress_callback(
             {
                 "phase": "starting",
@@ -106,9 +109,12 @@ async def test_stream_search_request_tv_full_search_mode(mock_db, monkeypatch):
     async def fake_load(db, req_id):
         return request_record
 
-    async def fake_process(request, progress_callback=None, search_mode="new"):
+    async def fake_process(
+        request, progress_callback=None, search_mode="new", cancellation_check=None
+    ):
         assert progress_callback is not None
         assert search_mode == "full"
+        assert callable(cancellation_check)
         await progress_callback(
             {
                 "phase": "broad_tv_pack_search_starting",
@@ -181,10 +187,13 @@ async def test_stream_search_request_tv_streams_progress_callback_events(mock_db
     async def fake_load(db, req_id):
         return request_record
 
-    async def fake_process(request, progress_callback=None, search_mode="new"):
+    async def fake_process(
+        request, progress_callback=None, search_mode="new", cancellation_check=None
+    ):
         assert request is request_record
         assert progress_callback is not None
         assert search_mode == "new"
+        assert callable(cancellation_check)
         await progress_callback(
             {
                 "phase": "season_query",
@@ -223,6 +232,64 @@ async def test_stream_search_request_tv_streams_progress_callback_events(mock_db
     assert '"phase": "season_stop"' in body
     assert '"detail": "100 unique release(s) kept."' in body
     assert '"phase": "complete"' in body
+
+
+@pytest.mark.asyncio
+async def test_cancel_search_request_sets_active_search_event():
+    cancel_event = asyncio.Event()
+    search_sse._tv_search_cancel_events[42] = cancel_event
+    try:
+        result = await search_sse.cancel_search_request(42)
+    finally:
+        search_sse._tv_search_cancel_events.pop(42, None)
+
+    assert result["cancelled"] is True
+    assert cancel_event.is_set()
+
+
+@pytest.mark.asyncio
+async def test_cancel_search_request_rejects_when_search_is_not_active():
+    with pytest.raises(search_sse.HTTPException) as exc_info:
+        await search_sse.cancel_search_request(999)
+
+    assert exc_info.value.status_code == 409
+
+
+@pytest.mark.asyncio
+async def test_closing_tv_stream_cancels_detached_search(mock_db, monkeypatch):
+    request_record = MagicMock(title="Test Show", media_type=MediaType.TV)
+
+    async def fake_load(db, req_id):
+        return request_record
+
+    search_stopped = asyncio.Event()
+
+    async def fake_process(
+        request, progress_callback=None, search_mode="new", cancellation_check=None
+    ):
+        assert progress_callback is not None
+        assert cancellation_check is not None
+        await progress_callback({"phase": "searching", "percent": 10, "message": "Searching"})
+        while not cancellation_check():
+            await asyncio.sleep(0)
+        search_stopped.set()
+        return {"status": "pending", "cancelled": True}
+
+    monkeypatch.setattr(search_sse, "load_request_or_404", fake_load)
+    monkeypatch.setattr(
+        search_service_mod.SearchService,
+        "process_request_search",
+        AsyncMock(side_effect=fake_process),
+    )
+
+    generator = search_sse._search_request_generator(77, mock_db)
+    first_chunk = await generator.__anext__()
+    assert '"phase": "searching"' in first_chunk
+    await generator.aclose()
+    await asyncio.wait_for(search_stopped.wait(), timeout=1)
+    await asyncio.sleep(0)
+
+    assert 77 not in search_sse._tv_search_cancel_events
 
 
 @pytest.mark.asyncio

@@ -101,6 +101,34 @@ class TestProcessRequest:
         qbittorrent = AsyncMock()
         return TVDecisionService(mock_db, prowlarr, qbittorrent)
 
+    def test_pack_eligibility_rejects_unreleased_or_future_episodes(self, service):
+        today = date.today()
+        unreleased = MagicMock(status=RequestStatus.UNRELEASED, air_date=today + timedelta(days=1))
+        future = MagicMock(status=RequestStatus.PENDING, air_date=today + timedelta(days=1))
+        aired = MagicMock(status=RequestStatus.PENDING, air_date=today - timedelta(days=1))
+
+        assert not service.is_season_pack_eligible([aired, unreleased])
+        assert not service.is_season_pack_eligible([aired, future])
+        assert service.is_season_pack_eligible([aired])
+
+    @pytest.mark.asyncio
+    async def test_cancelled_search_does_not_start_waiting_episode_queries(self, service):
+        request = _make_request(seasons=[1], episodes={1: [1, 2, 3, 4]})
+        service.prowlarr.search_tv_episode_exact = AsyncMock()
+
+        evaluated, passing, errors = await service._search_exact_episode_fallbacks_and_evaluate(
+            request,
+            MagicMock(),
+            [(1, 1), (1, 2), (1, 3), (1, 4)],
+            set(),
+            cancellation_check=lambda: True,
+        )
+
+        assert evaluated == []
+        assert passing == []
+        assert errors == []
+        service.prowlarr.search_tv_episode_exact.assert_not_awaited()
+
     @pytest.mark.asyncio
     async def test_no_tvdb_id_returns_error(self, service, mock_db):
         request = _make_request(tvdb_id=None)
@@ -221,9 +249,7 @@ class TestProcessRequest:
         assert "not TV" in result["message"]
 
     @pytest.mark.asyncio
-    async def test_default_search_checks_pack_then_exact_actionable_episodes(
-        self, service, mock_db
-    ):
+    async def test_default_search_skips_pack_for_partly_available_season(self, service, mock_db):
         request = _make_request(seasons=[1], episodes={1: [1, 2]})
         today = date.today()
         request.seasons[0].episodes[0].status = RequestStatus.COMPLETED
@@ -238,16 +264,10 @@ class TestProcessRequest:
         service.prowlarr.search_tv_episode_exact = AsyncMock(
             return_value=ProwlarrSearchResult(releases=[ep2], query_time_ms=10)
         )
-        pack = _make_release(title="Show.S01.1080p", info_hash="s01pack")
-        service.prowlarr.search_tv_season_sweep = AsyncMock(
-            return_value=ProwlarrSearchResult(releases=[pack], query_time_ms=10)
-        )
+        service.prowlarr.search_tv_season_sweep = AsyncMock()
 
         rule_engine = MagicMock()
-        rule_engine.evaluate.side_effect = [
-            _passing_eval(pack, score=80),
-            _passing_eval(ep2, score=60),
-        ]
+        rule_engine.evaluate.side_effect = [_passing_eval(ep2, score=60)]
         stored_ep2 = MagicMock(title="Show.S01E02.1080p")
         mock_staging = _mock_staging()
 
@@ -272,10 +292,9 @@ class TestProcessRequest:
         service.prowlarr.search_tv_episode_exact.assert_awaited_once_with(
             title="Show", season=1, episode=2, request_id=1
         )
-        service.prowlarr.search_tv_season_sweep.assert_awaited_once()
+        service.prowlarr.search_tv_season_sweep.assert_not_awaited()
         assert store_mock.await_args is not None
         assert [e.release.title for e in store_mock.await_args.args[2]] == [
-            "Show.S01.1080p",
             "Show.S01E02.1080p",
         ]
         assert [r["title"] for r in result["selected_releases"]] == ["Show.S01E02.1080p"]
@@ -544,7 +563,7 @@ class TestProcessRequest:
             result = await service.process_request(1, search_mode="full")
 
         assert service.prowlarr.search_tv_episode_exact.await_count == 2
-        service.prowlarr.search_tv_packs_broad.assert_awaited_once()
+        service.prowlarr.search_tv_packs_broad.assert_not_awaited()
         assert store_mock.await_args is not None
         stored_titles = [e.release.title for e in store_mock.await_args.args[2]]
         assert stored_titles == ["Show.S01E01.1080p", "Show.S01E02.1080p"]

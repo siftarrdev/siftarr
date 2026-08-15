@@ -556,9 +556,35 @@ window.loadSearchHistory = loadSearchHistory;
 window.renderRuleEvidence = renderRuleEvidence;
 window.renderDetailsStats = renderDetailsStats;
 
-async function searchTvRequest(mode = 'new') {
+function countUnavailableTvSeasons(data = window.currentDetailsData) {
+    const seasons = data?.tv_info?.seasons || [];
+    return seasons.filter(function(season) {
+        return (season.episodes || []).some(function(episode) {
+            return !window.isEpisodeComplete(episode);
+        });
+    }).length;
+}
+
+async function confirmLargeTvSearch(requestId = window.currentRequestId) {
+    let data = window.currentDetailsData;
+    if (!data || data.request?.id !== requestId) {
+        const response = await fetch(window.buildDetailsUrl(requestId));
+        if (!response.ok) throw new Error('Could not inspect TV seasons: HTTP ' + response.status);
+        data = await response.json();
+    }
+    const unavailableSeasonCount = countUnavailableTvSeasons(data);
+    if (unavailableSeasonCount < 5) return true;
+    return window.confirm(
+        unavailableSeasonCount + ' seasons still have unavailable episodes. ' +
+        'This whole-show search may take a while. Continue?\n\n' +
+        'You can cancel after it starts or use the per-season and per-episode searches instead.'
+    );
+}
+
+async function searchTvRequest(mode = 'new', options = {}) {
     if (!window.currentRequestId) return;
     const requestId = window.currentRequestId;
+    if (!(await confirmLargeTvSearch(requestId))) return;
     const fullSearch = mode === 'full';
     const btn = document.getElementById(fullSearch ? 'request-details-tv-full-search-btn' : 'request-details-tv-search-btn');
     const otherBtn = document.getElementById(fullSearch ? 'request-details-tv-search-btn' : 'request-details-tv-full-search-btn');
@@ -589,15 +615,15 @@ async function searchTvRequest(mode = 'new') {
             btn.innerHTML = originalText || fallbackLabel;
         }
         if (otherBtn) otherBtn.disabled = false;
-    });
+    }, '/requests/' + requestId + '/search/cancel');
 }
 
-async function searchTvRequestNew() {
-    return searchTvRequest('new');
+async function searchTvRequestNew(options = {}) {
+    return searchTvRequest('new', options);
 }
 
-async function searchTvRequestFull() {
-    return searchTvRequest('full');
+async function searchTvRequestFull(options = {}) {
+    return searchTvRequest('full', options);
 }
 
 async function searchTvRequestAll() {
@@ -835,4 +861,5 @@ window.searchRequestFromDetails = searchRequestFromDetails;
 window.searchTvRequest = searchTvRequest;
 window.searchTvRequestNew = searchTvRequestNew;
 window.searchTvRequestFull = searchTvRequestFull;
+window.confirmLargeTvSearch = confirmLargeTvSearch;
 window.searchTvRequestAll = searchTvRequestAll;

@@ -197,9 +197,11 @@ async def test_search_season_packs_excludes_multi_season_results(mock_db, monkey
 
     request_result = MagicMock()
     request_result.scalar_one_or_none.return_value = request_record
+    episodes_result = MagicMock()
+    episodes_result.scalars.return_value.all.return_value = []
     rules_result = MagicMock()
     rules_result.scalars.return_value.all.return_value = []
-    mock_db.execute.side_effect = [request_result, rules_result]
+    mock_db.execute.side_effect = [request_result, episodes_result, rules_result]
 
     exact_season = ProwlarrRelease(
         title="Foundation.S01.2160p.WEB-DL",
@@ -274,6 +276,33 @@ async def test_search_season_packs_excludes_multi_season_results(mock_db, monkey
 
 
 @pytest.mark.asyncio
+async def test_search_season_packs_skips_partly_available_season(mock_db, monkeypatch):
+    request_record = MagicMock(
+        id=12,
+        media_type=MediaType.TV,
+        tvdb_id=999,
+        title="Foundation",
+        year=2023,
+    )
+    request_result = MagicMock()
+    request_result.scalar_one_or_none.return_value = request_record
+    episodes_result = MagicMock()
+    episodes_result.scalars.return_value.all.return_value = [
+        MagicMock(status=RequestStatus.COMPLETED, air_date=None)
+    ]
+    mock_db.execute.side_effect = [request_result, episodes_result]
+    prowlarr_service = AsyncMock()
+    monkeypatch.setattr(search_service, "ProwlarrService", lambda settings: prowlarr_service)
+
+    response = await dashboard_api.search_season_packs(request_id=12, season_number=1, db=mock_db)
+
+    body = json.loads(cast(bytes, response.body))
+    assert body["releases"] == []
+    assert "skipped" in body["error"]
+    prowlarr_service.search_tv_season_sweep.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_search_season_packs_orders_by_score_then_size(mock_db, monkeypatch):
     """Season search results should prefer higher score, then smaller size."""
     request_record = MagicMock()
@@ -285,9 +314,11 @@ async def test_search_season_packs_orders_by_score_then_size(mock_db, monkeypatc
 
     request_result = MagicMock()
     request_result.scalar_one_or_none.return_value = request_record
+    episodes_result = MagicMock()
+    episodes_result.scalars.return_value.all.return_value = []
     rules_result = MagicMock()
     rules_result.scalars.return_value.all.return_value = []
-    mock_db.execute.side_effect = [request_result, rules_result]
+    mock_db.execute.side_effect = [request_result, episodes_result, rules_result]
 
     larger_high_score = ProwlarrRelease(
         title="Foundation.S01.2160p.WEB-DL",
@@ -363,9 +394,11 @@ async def test_search_season_packs_prioritizes_size_limit_passes(mock_db, monkey
 
     request_result = MagicMock()
     request_result.scalar_one_or_none.return_value = request_record
+    episodes_result = MagicMock()
+    episodes_result.scalars.return_value.all.return_value = []
     rules_result = MagicMock()
     rules_result.scalars.return_value.all.return_value = []
-    mock_db.execute.side_effect = [request_result, rules_result]
+    mock_db.execute.side_effect = [request_result, episodes_result, rules_result]
 
     passing_size_but_other_rule_fail = ProwlarrRelease(
         title="Foundation.S01.1080p.WEB-DL.BADTAG",

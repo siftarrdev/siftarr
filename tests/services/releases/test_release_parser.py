@@ -34,6 +34,16 @@ class TestTVReleaseIdentity:
             is None
         )
 
+    def test_accepts_release_without_metadata_unicode_apostrophe(self):
+        assert (
+            tv_release_identity_rejection_reason(
+                request_title="Let’s",
+                request_year=2026,
+                release_title="Lets.S01E01.1080p.WEB-DL",
+            )
+            is None
+        )
+
     def test_rejects_episode_title_containing_requested_show_name(self):
         reason = tv_release_identity_rejection_reason(
             request_title="Parenthood",

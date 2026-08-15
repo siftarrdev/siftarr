@@ -125,6 +125,7 @@ class FakeCappedEpisodeGapProwlarr(ProwlarrService):
         cacheable: bool = True,
         request_id: int | None = None,
         progress_callback=None,
+        cancellation_check=None,
     ) -> ProwlarrSearchResult:
         self.swept_seasons.append(season)
         return ProwlarrSearchResult(
@@ -166,6 +167,7 @@ class FakePartialSeasonPackProwlarr(ProwlarrService):
         cacheable: bool = True,
         request_id: int | None = None,
         progress_callback=None,
+        cancellation_check=None,
     ) -> ProwlarrSearchResult:
         self.swept_seasons.append(season)
         return ProwlarrSearchResult(
@@ -206,6 +208,7 @@ class FakeCappedGeorgieProwlarr(ProwlarrService):
         cacheable: bool = True,
         request_id: int | None = None,
         progress_callback=None,
+        cancellation_check=None,
     ) -> ProwlarrSearchResult:
         self.swept_seasons.append(season)
         if season == 1:
@@ -351,7 +354,7 @@ async def test_tv_request_season_sweep_persists_buckets_and_statuses(monkeypatch
 
 
 @pytest.mark.asyncio
-async def test_partial_season_pack_persisted_but_exact_missing_episode_selected(
+async def test_partly_available_season_skips_pack_and_selects_missing_episode(
     monkeypatch,
 ) -> None:
     engine = create_async_engine("sqlite+aiosqlite:///:memory:")
@@ -410,11 +413,11 @@ async def test_partial_season_pack_persisted_but_exact_missing_episode_selected(
             assert [release["title"] for release in result["selected_releases"]] == [
                 "Show.S01E02.1080p"
             ]
-            assert prowlarr.swept_seasons == [1]
+            assert prowlarr.swept_seasons == []
             assert prowlarr.exact_episode_calls == [(1, 2)]
 
             stored = (await db.execute(select(Release))).scalars().all()
-            assert {release.title for release in stored} == {"Show.S01.1080p", "Show.S01E02.1080p"}
+            assert {release.title for release in stored} == {"Show.S01E02.1080p"}
 
             episodes = (await db.execute(select(Episode))).scalars().all()
             statuses = {episode.episode_number: episode.status for episode in episodes}

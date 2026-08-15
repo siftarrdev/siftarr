@@ -177,7 +177,7 @@ function showBulkSearchStatus(form, searchAll = false) {
     panel.classList.remove('hidden');
 }
 
-function postToAction(action, redirectTo, trigger = null, scope = null) {
+async function postToAction(action, redirectTo, trigger = null, scope = null) {
     const row = scope || (trigger ? trigger.closest('tr') || trigger.closest('[data-request-id]') : null);
     const title = getRequestTitleFromRow(row);
     if (trigger && trigger.dataset.searchAction === 'true') {
@@ -190,14 +190,44 @@ function postToAction(action, redirectTo, trigger = null, scope = null) {
                 trigger.disabled = false;
                 trigger.innerHTML = trigger.dataset.originalText || trigger.textContent;
                 trigger.removeAttribute('aria-busy');
+                if (row) {
+                    row.querySelectorAll('[data-search-action="true"], [data-search-submit-control="true"]').forEach(control => {
+                        control.disabled = false;
+                    });
+                }
             }
-            window.startSearchProgress(requestId, title, function(data) {
+            const isTv = String(row?.dataset.type || '').toLowerCase() === 'tv';
+            if (isTv) {
+                try {
+                    if (!(await window.confirmLargeTvSearch(requestId))) {
+                        resetTrigger();
+                        return;
+                    }
+                } catch (error) {
+                    resetTrigger();
+                    window.showToast('Could not prepare TV search: ' + error.message);
+                    return;
+                }
+            }
+            const onComplete = function(data) {
                 window.updateRequestRow(requestId, data.result);
                 resetTrigger();
                 window.refreshCurrentTabContent();
-            }, function() {
+            };
+            const onError = function() {
                 resetTrigger();
-            });
+            };
+            if (isTv) {
+                window.startTvSearchProgress(
+                    '/requests/' + requestId + '/search/stream',
+                    'Search for new: ' + title,
+                    onComplete,
+                    onError,
+                    '/requests/' + requestId + '/search/cancel'
+                );
+            } else {
+                window.startSearchProgress(requestId, title, onComplete, onError);
+            }
         }
         return;
     }

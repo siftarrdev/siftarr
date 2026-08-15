@@ -50,6 +50,7 @@ class FakePackProwlarr(ProwlarrService):
         cacheable: bool = True,
         request_id=None,
         progress_callback=None,
+        cancellation_check=None,
     ) -> ProwlarrSearchResult:
         self.swept_seasons.append(season)
         return ProwlarrSearchResult(

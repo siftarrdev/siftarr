@@ -25,6 +25,8 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/requests", tags=["search-sse"])
 
+_tv_search_cancel_events: dict[int, asyncio.Event] = {}
+
 
 async def _new_detached_session() -> AsyncSession:
     if database.async_session_maker is None:
@@ -58,13 +60,17 @@ async def _run_request_search_detached(
     fallback_db: AsyncSession | None = None,
     progress_callback=None,
     search_mode: str = "new",
+    cancellation_check=None,
 ) -> dict:
     if database.async_session_maker is None and fallback_db is not None:
         request = await load_request_or_404(fallback_db, request_id)
         service = SearchService(fallback_db)
         if request.media_type == MediaType.TV:
             result = await service.process_request_search(
-                request, progress_callback=progress_callback, search_mode=search_mode
+                request,
+                progress_callback=progress_callback,
+                search_mode=search_mode,
+                cancellation_check=cancellation_check,
             )
         else:
             result = await service.process_request_search(
@@ -82,7 +88,10 @@ async def _run_request_search_detached(
         service = SearchService(db)
         if request.media_type == MediaType.TV:
             result = await service.process_request_search(
-                request, progress_callback=progress_callback, search_mode=search_mode
+                request,
+                progress_callback=progress_callback,
+                search_mode=search_mode,
+                cancellation_check=cancellation_check,
             )
         else:
             result = await service.process_request_search(
@@ -166,6 +175,12 @@ def _tv_search_mode_label(search_mode: str) -> str:
 
 
 async def _search_request_generator(request_id: int, db: AsyncSession, *, search_mode: str = "new"):
+    cancel_event = asyncio.Event()
+    search_task: asyncio.Task | None = None
+    previous_event = _tv_search_cancel_events.get(request_id)
+    if previous_event is not None:
+        previous_event.set()
+    _tv_search_cancel_events[request_id] = cancel_event
     try:
         request = await load_request_or_404(db, request_id)
         progress_queue: asyncio.Queue[dict] = asyncio.Queue()
@@ -179,6 +194,7 @@ async def _search_request_generator(request_id: int, db: AsyncSession, *, search
                 db,
                 progress_callback=progress_callback if request.media_type == MediaType.TV else None,
                 search_mode=search_mode,
+                cancellation_check=cancel_event.is_set,
             )
         )
         if request.media_type == MediaType.TV:
@@ -231,8 +247,12 @@ async def _search_request_generator(request_id: int, db: AsyncSession, *, search
         if request.media_type == MediaType.TV:
             mode_label = _tv_search_mode_label(search_mode)
             complete_message = (
-                f"TV {mode_label} complete: evaluated releases, applied auto-stage/select rules "
-                "for actionable episodes, and refreshed DB-backed buckets."
+                result.get("message")
+                if result.get("cancelled")
+                else (
+                    f"TV {mode_label} complete: evaluated releases, applied auto-stage/select rules "
+                    "for actionable episodes, and refreshed DB-backed buckets."
+                )
             )
             logger.info(
                 "TV %s stream done: request_id=%s title=%s status=%s source=prowlarr",
@@ -272,6 +292,17 @@ async def _search_request_generator(request_id: int, db: AsyncSession, *, search
                 message=str(exc),
             )
         )
+    finally:
+        cancel_event.set()
+
+        def remove_cancel_event(_task=None) -> None:
+            if _tv_search_cancel_events.get(request_id) is cancel_event:
+                _tv_search_cancel_events.pop(request_id, None)
+
+        if search_task is not None and not search_task.done():
+            search_task.add_done_callback(remove_cancel_event)
+        else:
+            remove_cancel_event()
 
 
 async def _bulk_search_generator(
@@ -501,6 +532,16 @@ async def stream_search_request(
             "X-Accel-Buffering": "no",
         },
     )
+
+
+@router.post("/{request_id}/search/cancel")
+async def cancel_search_request(request_id: int) -> dict[str, object]:
+    """Ask an active whole-request TV search to stop scheduling new queries."""
+    cancel_event = _tv_search_cancel_events.get(request_id)
+    if cancel_event is None:
+        raise HTTPException(status_code=409, detail="No active TV search found.")
+    cancel_event.set()
+    return {"cancelled": True, "message": "Cancellation requested."}
 
 
 @router.get("/{request_id}/seasons/{season_number}/season-packs/search/stream")

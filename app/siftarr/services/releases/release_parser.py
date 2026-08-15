@@ -147,12 +147,14 @@ _MOVIE_QUALITY_IDENTITY_TOKENS = {
     "av1",
 }
 
+_APOSTROPHE_TRANSLATION = str.maketrans("", "", "'`´‘’‛ʻʼʹ′＇ꞌ")
+
 
 def normalize_movie_title_identity(title: str | None) -> str:
     """Normalize a movie title for release/request identity comparisons."""
     if not title:
         return ""
-    normalized = re.sub(r"[\W_]+", " ", title.casefold().replace("'", ""))
+    normalized = re.sub(r"[\W_]+", " ", title.casefold().translate(_APOSTROPHE_TRANSLATION))
     return " ".join(normalized.split())
 
 
