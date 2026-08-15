@@ -98,6 +98,8 @@ class SearchService:
         self,
         request: RequestModel,
         release: ProwlarrRelease,
+        *,
+        force_download: bool = False,
     ) -> dict[str, object]:
         """Persist and use a manual-search release through the normal selection path."""
         evaluation = await self.evaluate_manual_release(request, release)
@@ -111,8 +113,18 @@ class SearchService:
             },
         )
         await self.db.commit()
-        return await StagingService(self.db).use_releases(
-            request, [stored_release], selection_source="manual"
+        staging_service = StagingService(self.db)
+        if force_download:
+            return await staging_service.use_releases(
+                request,
+                [stored_release],
+                selection_source="manual",
+                force_download=True,
+            )
+        return await staging_service.use_releases(
+            request,
+            [stored_release],
+            selection_source="manual",
         )
 
     async def process_request_search(

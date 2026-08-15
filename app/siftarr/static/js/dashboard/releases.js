@@ -131,6 +131,26 @@ function renderRejectionVerdict(release) {
     return '<span class="font-semibold text-red-400 whitespace-nowrap"' + titleAttr + ' data-release-rejection="true">' + window.escapeHtml(summary) + '</span>';
 }
 
+const RELEASE_ACTION_ICONS = {
+    stage: '<svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 14h4l2 3h4l2-3h4v5H4zM12 4v9m-4-4 4 4 4-4"/></svg>',
+    approve: '<svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v11m-4-4 4 4 4-4M5 19h14"/></svg>',
+    reject: '<svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 6l12 12M18 6 6 18"/></svg>',
+    search: '<svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5" stroke-width="2"/><path stroke-linecap="round" stroke-width="2" d="m15.5 15.5 4 4"/></svg>',
+};
+
+const RELEASE_ACTION_CLASSES = {
+    stage: 'border-blue-500/60 bg-blue-950/40 text-blue-300 hover:border-blue-400 hover:bg-blue-600 hover:text-white',
+    approve: 'border-emerald-500/60 bg-emerald-950/40 text-emerald-300 hover:border-emerald-400 hover:bg-emerald-600 hover:text-white',
+    reject: 'border-red-500/60 bg-red-950/40 text-red-300 hover:border-red-400 hover:bg-red-700 hover:text-white',
+    search: 'border-violet-500/60 bg-violet-950/40 text-violet-300 hover:border-violet-400 hover:bg-violet-700 hover:text-white',
+};
+
+function renderIconAction(kind, label, attrs = '', disabled = false) {
+    const disabledAttrs = disabled ? ' disabled aria-disabled="true"' : '';
+    const disabledClasses = disabled ? ' opacity-35 cursor-not-allowed' : '';
+    return '<button type="button" aria-label="' + window.escapeHtml(label) + '" title="' + window.escapeHtml(label) + '" class="tap inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border transition-colors ' + RELEASE_ACTION_CLASSES[kind] + disabledClasses + '"' + disabledAttrs + attrs + '>' + RELEASE_ACTION_ICONS[kind] + '</button>';
+}
+
 // Render a release card in the calm, score-first layout. Movie list items wrap
 // the row in `<li>`; TV episode buckets (Phase 3) pass `{ bucket: true }` to
 // render a bordered `<div>` variant with tighter spacing. Both variants share
@@ -219,24 +239,27 @@ function renderReleaseCard(release, requestId, options = {}) {
         : 'Send this torrent to qBittorrent.';
 
     let actionHtml;
+    const releaseUseAttrs = ' data-stage-url="' + window.escapeHtml(formAction) + '" data-stage-fields="' + manualDataJson + '" data-stage-scope="' + stageScopeJson + '"';
     if (activeSelectionMode && activeStagedTorrent && activeStagedTorrent.id) {
         const stagedId = activeStagedTorrent.id;
-        actionHtml = '<div class="ml-auto flex items-center gap-2 shrink-0">' +
-            '<button type="button" onclick="inlineStagedAction(\'/staged/' + stagedId + '/approve\', this)" class="tap rounded-lg bg-emerald-600 hover:bg-emerald-500 px-3 py-1.5 text-xs font-semibold text-white">Approve</button>' +
-            '<button type="button" onclick="inlineStagedAction(\'/staged/' + stagedId + '/discard\', this)" class="tap rounded-lg text-xs px-3 py-1.5 text-red-400 hover:text-red-300 hover:bg-red-950/40">Discard</button>' +
+        actionHtml = '<div class="ml-auto flex items-center gap-1.5 shrink-0">' +
+            renderIconAction('stage', 'Already staged for review', '', true) +
+            renderIconAction('approve', 'Approve and download now', ' onclick="inlineStagedAction(\'/staged/' + stagedId + '/approve\', this)"') +
+            renderIconAction('reject', 'Reject staged release', ' onclick="inlineStagedAction(\'/staged/' + stagedId + '/discard\', this)"') +
         '</div>';
     } else {
-        const disabledAttr = disableAction ? ' disabled' : '';
-        const stageAttrs = ' title="' + window.escapeHtml(disableAction ? 'No download source available' : actionTitle) + '" data-stage-url="' + window.escapeHtml(formAction) + '" data-stage-fields="' + manualDataJson + '" data-stage-scope="' + stageScopeJson + '" onclick="stageRelease(this)"';
-        if (hasActiveStagedSelection && !isActiveSelection) {
-            actionHtml = '<button type="button" class="ml-auto rounded-lg border border-gray-700 px-3 py-1.5 text-xs text-gray-400 hover:text-white shrink-0 tap"' + disabledAttr + stageAttrs + '>Replace</button>';
-        } else if (!window.siftarrStagingModeEnabled) {
-            actionHtml = '<button type="button" class="' + (rejected ? 'ml-auto rounded-lg border border-gray-700 px-3 py-1.5 text-xs text-gray-500 hover:text-white' : 'ml-auto rounded-lg bg-brand-600 hover:bg-brand-500 px-3 py-1.5 text-xs font-semibold text-white') + ' shrink-0 tap"' + disabledAttr + stageAttrs + '>' + (rejected ? 'Force Download' : 'Download') + '</button>';
-        } else if (rejected) {
-            actionHtml = '<button type="button" class="ml-auto rounded-lg border border-gray-700 px-3 py-1.5 text-xs text-gray-500 hover:text-white shrink-0 tap"' + disabledAttr + stageAttrs + '>Force</button>';
-        } else {
-            actionHtml = '<button type="button" class="ml-auto rounded-lg bg-brand-600 hover:bg-brand-500 px-3 py-1.5 text-xs font-semibold text-white shrink-0 tap"' + disabledAttr + stageAttrs + '>Stage</button>';
-        }
+        const stageLabel = !window.siftarrStagingModeEnabled
+            ? 'Staging mode is disabled'
+            : disableAction
+                ? 'No download source available'
+                : actionTitle;
+        const rejectDisabled = !storedReleaseId || rejected;
+        const rejectLabel = rejected ? 'Release is rejected' : storedReleaseId ? 'Reject this release' : 'Only stored releases can be rejected';
+        actionHtml = '<div class="ml-auto flex items-center gap-1.5 shrink-0">' +
+            renderIconAction('stage', stageLabel, releaseUseAttrs + ' onclick="stageRelease(this)"', disableAction || !window.siftarrStagingModeEnabled) +
+            renderIconAction('approve', disableAction ? 'No download source available' : 'Approve and download now', releaseUseAttrs + ' onclick="approveRelease(this)"', disableAction) +
+            renderIconAction('reject', rejectLabel, rejectDisabled ? '' : ' onclick="rejectRelease(this, ' + requestId + ', ' + storedReleaseId + ')"', rejectDisabled) +
+        '</div>';
     }
 
     if (bucket) {
@@ -415,9 +438,10 @@ function stagedScopeLabel(staged) {
 // recessed dark staged card, minus the score/meta the cache would have carried.
 function renderStagedPackRow(staged, requestId) {
     const actions = staged.id
-        ? '<div class="ml-auto flex items-center gap-3.5 shrink-0">' +
-            '<button type="button" onclick="inlineStagedAction(\'/staged/' + staged.id + '/approve\', this); event.preventDefault(); event.stopPropagation();" class="rounded-lg bg-emerald-600 hover:bg-emerald-500 px-3 py-1 text-xs font-semibold text-white">Approve</button>' +
-            '<button type="button" onclick="inlineStagedAction(\'/staged/' + staged.id + '/discard\', this); event.preventDefault(); event.stopPropagation();" class="text-xs text-red-400 hover:text-red-300">Discard</button>' +
+        ? '<div class="ml-auto flex items-center gap-1.5 shrink-0">' +
+            renderIconAction('stage', 'Already staged for review', '', true) +
+            renderIconAction('approve', 'Approve and download now', ' onclick="inlineStagedAction(\'/staged/' + staged.id + '/approve\', this); event.preventDefault(); event.stopPropagation();"') +
+            renderIconAction('reject', 'Reject staged release', ' onclick="inlineStagedAction(\'/staged/' + staged.id + '/discard\', this); event.preventDefault(); event.stopPropagation();"') +
           '</div>'
         : '';
     return '<div class="rounded-xl bg-surface-950 px-3 py-2 flex flex-wrap items-start gap-3 lg:flex-nowrap lg:items-center lg:gap-3.5" data-staged-pack-row="true">' +
@@ -539,16 +563,6 @@ function renderMultiSeasonPackGroup(requestId, multiSeasonReleases, stagedPacks)
     '</div>';
 }
 
-function isUsableCachedRelease(release) {
-    return !!release && !!(release.stored_release_id || release.id) && !!(release.download_url || release.magnet_url) && release.passed !== false;
-}
-
-function renderStageTopEpisodeButton(requestId, release) {
-    if (!isUsableCachedRelease(release)) return '';
-    const storedReleaseId = release.stored_release_id || release.id;
-    return '<button type="button" onclick="stageTopEpisodeRelease(this, ' + requestId + ', ' + storedReleaseId + '); event.preventDefault(); event.stopPropagation();" class="shrink-0 rounded-lg bg-brand-600 hover:bg-brand-500 px-2.5 py-1 text-[11px] font-semibold text-white">Stage top</button>';
-}
-
 function stagedTorrentForEpisode(stagedTorrents, seasonNumber, episodeNumber) {
     return (stagedTorrents || []).find(function(torrent) {
         const scope = torrent.target_scope || {};
@@ -560,11 +574,6 @@ function stagedTorrentForEpisode(stagedTorrents, seasonNumber, episodeNumber) {
         }
         return scope.type === 'complete_series';
     }) || null;
-}
-
-function renderApproveTopEpisodeButton(stagedTorrent) {
-    if (!stagedTorrent || !stagedTorrent.id) return '';
-    return '<button type="button" onclick="inlineStagedAction(\'/staged/' + stagedTorrent.id + '/approve\', this); event.preventDefault(); event.stopPropagation();" class="shrink-0 rounded-lg bg-emerald-600 hover:bg-emerald-500 px-2.5 py-1 text-[11px] font-semibold text-white">Approve</button>';
 }
 
 const TV_ACCORDION_TOGGLE_CLASS = 'tv-accordion-toggle inline-flex items-center justify-center rounded-md border border-gray-600/80 bg-surface-900/70 px-2.5 py-1 text-xs font-medium leading-4 text-gray-200 shadow-sm transition-colors hover:border-brand-400/70 hover:bg-surface-800 hover:text-white focus:outline-none focus:ring-2 focus:ring-brand-400/60 focus:ring-offset-2 focus:ring-offset-surface-900';
@@ -716,9 +725,6 @@ function renderSeasonAccordion(data) {
                 ? '<button type="button" onclick="markSeasonAvailable(' + requestId + ', ' + season.id + '); event.stopPropagation();" class="text-brand-400 hover:text-brand-300">Mark all</button>'
                 : '') +
             '<button type="button" onclick="stageIndividualEpisodes(this, ' + requestId + ', ' + season.season_number + '); event.preventDefault(); event.stopPropagation();" class="text-brand-400 hover:text-brand-300">Stage individual episodes</button>' +
-            (isSeasonPackEligible(season)
-                ? '<button type="button" onclick="searchSeasonPacks(' + requestId + ', ' + season.season_number + '); event.preventDefault(); event.stopPropagation();" class="text-brand-400 hover:text-brand-300">Search season</button>'
-                : '') +
         '</div>';
 
         const episodeHtml = (season.episodes || []).map(function(ep) {
@@ -736,7 +742,6 @@ function renderSeasonAccordion(data) {
             const cachedEpisodeRowsHtml = episodeReleases.length
                 ? episodeReleases.map(function(r) { return renderReleaseCard(r, requestId, { bucket: true }); }).join('')
                 : '<div class="text-gray-500 text-sm py-2">No cached episode results yet. Search for new checks missing aired episodes; Full search refreshes all aired episode results.</div>';
-            const topRelease = episodeReleases.find(isUsableCachedRelease);
             const stagedTorrent = isStaged
                 ? stagedTorrentForEpisode(data.active_staged_torrents, season.season_number, ep.episode_number)
                 : null;
@@ -764,10 +769,10 @@ function renderSeasonAccordion(data) {
                     (ep.air_date ? '<span class="text-xs text-gray-500 shrink-0">Airs: ' + window.escapeHtml(ep.air_date) + '</span>' : '') +
                     '<div class="ml-auto flex flex-wrap items-center justify-end gap-3.5 shrink-0">' +
                         '<span class="badge ' + badgeClass + '">' + window.escapeHtml(statusLabel) + '</span>' +
-                        (isStaged ? renderApproveTopEpisodeButton(stagedTorrent) : showInlineActions ? renderStageTopEpisodeButton(requestId, topRelease) : '') +
+                        renderIconAction('search', 'Search S' + String(season.season_number).padStart(2, '0') + 'E' + String(ep.episode_number).padStart(2, '0') + ' again', ' onclick="searchEpisode(' + requestId + ', ' + season.season_number + ', ' + ep.episode_number + '); event.preventDefault(); event.stopPropagation();"') +
                         (showInlineActions
                             ? '<button type="button" onclick="markEpisodeAvailable(' + requestId + ', ' + ep.id + '); event.stopPropagation();" class="shrink-0 text-xs text-brand-400 hover:text-brand-300">Mark Available</button>'
-                            : '<button type="button" onclick="searchEpisode(' + requestId + ', ' + season.season_number + ', ' + ep.episode_number + '); event.preventDefault(); event.stopPropagation();" class="shrink-0 text-xs text-brand-400 hover:text-brand-300">Search again</button>') +
+                            : '') +
                     '</div>' +
                 '</summary>' +
                 '<div id="episode-search-' + requestId + '-' + season.season_number + '-' + ep.episode_number + '" class="pl-8 pr-3 pb-3 pt-0.5 space-y-1.5">' + episodeBucketHtml + '</div>' +
@@ -783,8 +788,9 @@ function renderSeasonAccordion(data) {
                     '<svg class="accordion-chevron w-4 h-4 text-gray-500 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>' +
                     '<span class="text-white font-medium text-[15px]">Season ' + season.season_number + '</span>' +
                     '<span class="min-w-0 text-xs text-gray-500 truncate">' + window.escapeHtml(availableText) + '</span>' +
-                    packsChip +
+                     packsChip +
                     '<span class="lg:ml-auto shrink-0"><span class="badge ' + seasonBadgeClass + '">' + window.escapeHtml(season.status || 'unknown') + '</span></span>' +
+                    renderIconAction('search', 'Search Season ' + season.season_number + ' again', ' onclick="searchSeasonPacks(' + requestId + ', ' + season.season_number + '); event.preventDefault(); event.stopPropagation();"') +
                 '</div>' +
                 seasonLinks +
             '</summary>' +
@@ -938,18 +944,19 @@ async function searchEpisode(requestId, seasonNumber, episodeNumber) {
     });
 }
 
-async function stageRelease(btn) {
+async function submitReleaseAction(btn, approveNow = false) {
     const url = btn.dataset.stageUrl;
     const fields = JSON.parse(btn.dataset.stageFields || '{}');
     const stagedScope = JSON.parse(btn.dataset.stageScope || '{}');
-    const originalText = btn.textContent;
     btn.disabled = true;
-    btn.textContent = window.siftarrStagingModeEnabled ? 'Updating…' : 'Sending…';
+    btn.setAttribute('aria-busy', 'true');
+    btn.classList.add('opacity-50');
     try {
         const formData = new FormData();
         for (const [key, value] of Object.entries(fields)) {
             formData.append(key, String(value));
         }
+        if (approveNow) formData.append('approve_now', 'true');
         const resp = await fetch(url, {
             method: 'POST',
             headers: { 'Accept': 'application/json' },
@@ -960,45 +967,50 @@ async function stageRelease(btn) {
             throw new Error(errData?.detail || errData?.message || `HTTP ${resp.status}`);
         }
         const payload = await resp.json().catch(() => ({}));
-        btn.textContent = window.siftarrStagingModeEnabled ? 'Active ✓' : 'Sent ✓';
-        btn.classList.remove('btn-primary');
-        btn.classList.add('btn-disabled');
-        window.showToast(payload.message || (window.siftarrStagingModeEnabled ? 'Active staged selection updated' : 'Torrent sent successfully'));
+        window.showToast(payload.message || (approveNow ? 'Release approved and sent' : 'Active staged selection updated'));
         window.refreshStagedTabData();
-        if (window.siftarrStagingModeEnabled && window.currentRequestId) {
+        if (window.currentRequestId) {
             await window.openRequestDetails(window.currentRequestId, window.currentDetailsIndex, {
                 preserveUiState: true,
-                focusTvScope: stagedScope,
+                focusTvScope: approveNow ? null : stagedScope,
             });
         }
     } catch (err) {
         btn.disabled = false;
-        btn.textContent = originalText;
+        btn.removeAttribute('aria-busy');
+        btn.classList.remove('opacity-50');
         window.showToast('Error: ' + err.message);
     }
 }
 
-async function stageTopEpisodeRelease(btn, requestId, releaseId) {
-    const originalText = btn.textContent;
+async function stageRelease(btn) {
+    return submitReleaseAction(btn, false);
+}
+
+async function approveRelease(btn) {
+    return submitReleaseAction(btn, true);
+}
+
+async function rejectRelease(btn, requestId, releaseId) {
     btn.disabled = true;
-    btn.textContent = 'Staging…';
+    btn.setAttribute('aria-busy', 'true');
+    btn.classList.add('opacity-50');
     try {
-        const resp = await fetch('/requests/' + requestId + '/releases/' + releaseId + '/use', {
+        const response = await fetch('/requests/' + requestId + '/releases/' + releaseId + '/reject', {
             method: 'POST',
             headers: { 'Accept': 'application/json' },
-            body: new FormData(),
         });
-        if (!resp.ok) {
-            const errData = await resp.json().catch(() => null);
-            throw new Error(errData?.detail || `HTTP ${resp.status}`);
+        if (!response.ok) {
+            const errorData = await response.json().catch(() => null);
+            throw new Error(errorData?.detail || errorData?.message || `HTTP ${response.status}`);
         }
-        const payload = await resp.json().catch(() => ({}));
-        window.showToast(payload.message || 'Top episode release staged');
-        window.refreshStagedTabData();
+        const payload = await response.json().catch(() => ({}));
+        window.showToast(payload.message || 'Release rejected');
         await window.openRequestDetails(requestId, window.currentDetailsIndex, { preserveUiState: true });
     } catch (err) {
         btn.disabled = false;
-        btn.textContent = originalText;
+        btn.removeAttribute('aria-busy');
+        btn.classList.remove('opacity-50');
         window.showToast('Error: ' + err.message);
     }
 }
@@ -1033,13 +1045,14 @@ async function stageIndividualEpisodes(btn, requestId, seasonNumber) {
 // the new staged state. Disables the clicked button and shows "…" while in
 // flight.
 async function inlineStagedAction(actionUrl, btn = null) {
-    const originalText = btn ? btn.textContent : '';
+    const originalContent = btn ? btn.innerHTML : '';
     const approvedEpisodeDetailsId = actionUrl.endsWith('/approve')
         ? btn?.closest?.('details[id^="episode-details-"]')?.id || null
         : null;
     if (btn) {
         btn.disabled = true;
-        btn.textContent = '…';
+        btn.setAttribute?.('aria-busy', 'true');
+        btn.innerHTML = '<span aria-hidden="true">…</span>';
     }
     try {
         const formData = new FormData();
@@ -1067,7 +1080,8 @@ async function inlineStagedAction(actionUrl, btn = null) {
     } catch (err) {
         if (btn) {
             btn.disabled = false;
-            btn.textContent = originalText;
+            btn.removeAttribute?.('aria-busy');
+            btn.innerHTML = originalContent;
         }
         window.showToast('Error: ' + err.message);
     }
@@ -1179,7 +1193,8 @@ window.searchMultiSeasonPacks = searchMultiSeasonPacks;
 window.searchAllSeasonPacks = searchAllSeasonPacks;
 window.searchEpisode = searchEpisode;
 window.stageRelease = stageRelease;
-window.stageTopEpisodeRelease = stageTopEpisodeRelease;
+window.approveRelease = approveRelease;
+window.rejectRelease = rejectRelease;
 window.stageIndividualEpisodes = stageIndividualEpisodes;
 window.inlineStagedAction = inlineStagedAction;
 window.focusTvEpisode = focusTvEpisode;

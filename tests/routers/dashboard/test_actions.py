@@ -391,6 +391,55 @@ async def test_use_request_release_redirects_pending_requests_to_pending_tab(moc
 
 
 @pytest.mark.asyncio
+async def test_use_request_release_approve_now_bypasses_staging(mock_db, monkeypatch):
+    request_record = MagicMock(id=21, status=RequestStatus.PENDING)
+    release_record = MagicMock(id=99)
+    request_result = MagicMock()
+    request_result.scalar_one_or_none.return_value = request_record
+    release_result = MagicMock()
+    release_result.scalar_one_or_none.return_value = release_record
+    mock_db.execute.side_effect = [request_result, release_result]
+
+    staging_instance = AsyncMock()
+    staging_instance.use_releases = AsyncMock(return_value={"status": "downloading"})
+    monkeypatch.setattr(dashboard_actions, "StagingService", lambda db: staging_instance)
+
+    await dashboard_actions.use_request_release(
+        request_id=21,
+        release_id=99,
+        http_request=MagicMock(headers={"accept": "application/json"}),
+        redirect_to=None,
+        approve_now=True,
+        db=mock_db,
+    )
+
+    staging_instance.use_releases.assert_awaited_once_with(
+        request_record,
+        [release_record],
+        selection_source="manual",
+        force_download=True,
+    )
+
+
+@pytest.mark.asyncio
+async def test_reject_request_release_marks_candidate_rejected(mock_db):
+    request_record = MagicMock(id=21)
+    release_record = MagicMock(id=99, passed_rules=True, rejection_reason=None)
+    request_result = MagicMock()
+    request_result.scalar_one_or_none.return_value = request_record
+    release_result = MagicMock()
+    release_result.scalar_one_or_none.return_value = release_record
+    mock_db.execute.side_effect = [request_result, release_result]
+
+    response = await dashboard_actions.reject_request_release(21, 99, db=mock_db)
+
+    assert response.status_code == 200
+    assert release_record.passed_rules is False
+    assert release_record.rejection_reason == "Manually rejected"
+    mock_db.commit.assert_awaited_once()
+
+
+@pytest.mark.asyncio
 async def test_use_manual_release_persists_then_uses_release(mock_db, monkeypatch):
     """Ad hoc manual-search releases should persist then use the normal release flow."""
     request_record = MagicMock()

@@ -199,10 +199,10 @@ def test_dashboard_js_includes_tv_details_expand_collapse_controls():
     assert ">Search multi-season</button>" in js
     assert ">Search complete series</button>" in js
     assert "await searchMultiSeasonPacks(requestId);" in js
-    # Season-row quiet links: Mark all / Stage individual episodes / Search season.
+    # Season-row controls: quiet management links plus a scoped icon search.
     assert "Mark all" in js
     assert "Stage individual episodes" in js
-    assert "Search season" in js
+    assert "Search Season ' + season.season_number + ' again" in js
     assert "searchSeasonPacks(' + requestId + ', ' + season.season_number + ')" in js
     # Scope chips switch client-side without a backend reload.
     assert "function setDetailsScope(requestId, scope)" in js
@@ -545,14 +545,15 @@ def test_dashboard_js_includes_active_stage_replacement_copy():
     assert "Selecting another result will replace it." not in js
     assert "updateActiveStageBanner" not in js
     assert "currentActiveStagedTorrent" not in js
-    # Inline Approve/Discard/Replace live on the staged release card itself.
+    # Inline icon actions live on the release card itself.
     assert "inlineStagedAction" in js
     assert "/approve" in js
     assert "/discard" in js
-    assert ">Approve</button>" in js
-    assert ">Discard</button>" in js
-    assert ">Replace</button>" in js
-    assert ">Stage</button>" in js
+    assert "Approve and download now" in js
+    assert "Reject staged release" in js
+    assert "renderIconAction('stage'" in js
+    assert "renderIconAction('approve'" in js
+    assert "renderIconAction('reject'" in js
     assert "Stage this torrent for review and approval." in js
     assert "Replace the active staged torrent with this selection." in js
     assert "text-emerald-400" in js
@@ -583,13 +584,27 @@ def test_dashboard_js_uses_cyan_staged_release_indicators():
     assert "bg-cyan-900/60 text-cyan-300" in js
 
 
+def test_dashboard_js_uses_icon_actions_for_synthetic_staged_pack_rows():
+    js = _read_dashboard_js()
+    staged_pack_renderer = js[
+        js.index("function renderStagedPackRow") : js.index("function renderStagedPackRows")
+    ]
+
+    assert "renderIconAction('stage'" in staged_pack_renderer
+    assert "renderIconAction('approve'" in staged_pack_renderer
+    assert "renderIconAction('reject'" in staged_pack_renderer
+    assert ">Approve</button>" not in staged_pack_renderer
+    assert ">Discard</button>" not in staged_pack_renderer
+
+
 def test_dashboard_js_skips_ineligible_pack_searches_and_can_research_completed_episodes():
     js = _read_dashboard_js()
 
     assert "function isSeasonPackEligible(season)" in js
     assert "airDate && airDate > today" in js
     assert "Pack search skipped: season is incomplete or partly available" in js
-    assert ">Search again</button>" in js
+    assert "renderIconAction('search'" in js
+    assert "Search S' + String(season.season_number)" in js
     assert 'id="episode-search-' in js
 
 
@@ -615,7 +630,7 @@ def test_dashboard_js_focuses_staged_tv_episode_after_reload():
     js = _read_dashboard_js()
 
     assert "data-stage-scope" in js
-    assert "focusTvScope: stagedScope" in js
+    assert "focusTvScope: approveNow ? null : stagedScope" in js
     assert "function captureDetailsAccordionState()" in js
     assert "function restoreDetailsAccordionState(state)" in js
     assert "function focusTvEpisode(requestId, seasonNumber, episodeNumber)" in js
@@ -627,8 +642,8 @@ def test_dashboard_js_focuses_staged_tv_episode_after_reload():
     assert "collapseStagedTvScope" not in js
 
 
-def test_dashboard_js_uses_matching_episode_stage_for_approve_and_collapses_it():
-    """A staged episode approves its own torrent, then only its drawer closes."""
+def test_dashboard_js_keeps_search_available_for_staged_and_pending_episodes():
+    """Episode headers always expose scoped search, without top-release actions."""
     js_path = os.path.join(
         os.path.dirname(__file__), "../../../app/siftarr/static/js/dashboard/releases.js"
     )
@@ -667,19 +682,15 @@ def test_dashboard_js_uses_matching_episode_stage_for_approve_and_collapses_it()
             releases_by_season: {{}}, aggregate_counts: {{available: 0, total: 2}},
           }},
         }});
-        if (!html.includes("/staged/72/approve") || html.includes("stageTopEpisodeRelease(this, 9, 200)")) {{
-          throw new Error('staged episode did not render its matching Approve action');
+        if (!html.includes('Search S01E02 again') || !html.includes('Search S01E03 again')) {{
+          throw new Error('episode search was not rendered for every status');
         }}
         if (!html.includes('Airs: 2026-08-14')) {{
           throw new Error('episode air date did not render');
         }}
-        global.fetch = async () => ({{ok: true, json: async () => ({{}})}});
-        inlineStagedAction('/staged/72/approve', {{
-          textContent: 'Approve', disabled: false,
-          closest: () => ({{id: approved.id}}),
-        }}).then(() => {{
-          if (approved.open || !sibling.open) throw new Error('approval collapsed the wrong drawer');
-        }}).catch((error) => {{ console.error(error); process.exit(1); }});
+        if (html.includes('stageTopEpisodeRelease')) {{
+          throw new Error('episode header still rendered a top-release action');
+        }}
         """
     )
 
