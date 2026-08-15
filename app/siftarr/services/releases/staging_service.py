@@ -593,6 +593,7 @@ class StagingService:
         releases: list[Release],
         *,
         selection_source: str = "manual",
+        force_download: bool = False,
     ) -> dict[str, object]:
         """Stage or send one or more stored releases for a request.
 
@@ -600,6 +601,7 @@ class StagingService:
             request: The request to associate releases with.
             releases: Stored Release records to stage or send.
             selection_source: ``"rule"`` or ``"manual"``.
+            force_download: Send directly to qBittorrent even when staging mode is enabled.
 
         Returns:
             Dict with status, action, message, and relevant IDs.
@@ -626,7 +628,7 @@ class StagingService:
         if not usable_releases:
             raise RuntimeError("No stored releases were available to use.")
 
-        if runtime_settings.staging_mode_enabled:
+        if runtime_settings.staging_mode_enabled and not force_download:
             staged_ids: list[int] = []
             replaced_active_selection = False
             deleted_superseded = False
@@ -759,6 +761,23 @@ class StagingService:
                 torrent_hash,
                 _get_media_category(request).value,
             )
+
+        if force_download:
+            active_staged = await _get_active_staged_torrents(self.db, request.id)
+            superseded_by_id: dict[int, StagedTorrent] = {}
+            for release in usable_releases:
+                for staged in _filter_active_staged_torrents_for_release(
+                    request,
+                    release,
+                    active_staged,
+                ):
+                    superseded_by_id[staged.id] = staged
+            if superseded_by_id:
+                await _delete_superseded_staged_torrents(
+                    self.db,
+                    self,
+                    list(superseded_by_id.values()),
+                )
 
         await self.db.commit()
         if request.media_type == MediaType.TV:

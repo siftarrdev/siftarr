@@ -52,6 +52,8 @@ uv run alembic upgrade head
 ## Quality Gates (in order)
 
 ```bash
+npm run format:js
+npm run lint:js
 uv run ruff format .
 uv run ruff check .
 uv run ty check

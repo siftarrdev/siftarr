@@ -189,6 +189,7 @@ async def use_request_release(
     release_id: int,
     http_request: FastAPIRequest,
     redirect_to: str | None = Form(default=None),
+    approve_now: bool = Form(default=False),
     db: AsyncSession = Depends(get_db),
 ) -> RedirectResponse | JSONResponse:
     """Stage or send a selected stored release for a request."""
@@ -201,7 +202,20 @@ async def use_request_release(
     if not release:
         raise HTTPException(status_code=404, detail="Release not found")
 
-    result = await StagingService(db).use_releases(request, [release], selection_source="manual")
+    staging_service = StagingService(db)
+    if approve_now is True:
+        result = await staging_service.use_releases(
+            request,
+            [release],
+            selection_source="manual",
+            force_download=True,
+        )
+    else:
+        result = await staging_service.use_releases(
+            request,
+            [release],
+            selection_source="manual",
+        )
     if "application/json" in http_request.headers.get("accept", ""):
         return JSONResponse(
             {
@@ -284,6 +298,27 @@ async def stage_individual_episode_releases(
     )
 
 
+@router.post("/{request_id}/releases/{release_id}/reject")
+async def reject_request_release(
+    request_id: int,
+    release_id: int,
+    db: AsyncSession = Depends(get_db),
+) -> JSONResponse:
+    """Mark one stored candidate as manually rejected in the details view."""
+    await load_request_or_404(db, request_id)
+    result = await db.execute(
+        select(Release).where(Release.id == release_id, Release.request_id == request_id)
+    )
+    release = result.scalar_one_or_none()
+    if not release:
+        raise HTTPException(status_code=404, detail="Release not found")
+
+    release.passed_rules = False
+    release.rejection_reason = "Manually rejected"
+    await db.commit()
+    return JSONResponse({"status": "ok", "message": "Release rejected"})
+
+
 @router.post("/{request_id}/manual-release/use", response_model=None)
 async def use_manual_release(
     request_id: int,
@@ -302,6 +337,7 @@ async def use_manual_release(
     release_group: str | None = Form(default=None),
     uploaded_by: str | None = Form(default=None),
     redirect_to: str | None = Form(default=None),
+    approve_now: bool = Form(default=False),
     db: AsyncSession = Depends(get_db),
 ) -> RedirectResponse | JSONResponse:
     """Persist and use an ad hoc manual-search release for a request."""
@@ -331,7 +367,10 @@ async def use_manual_release(
     )
 
     service = SearchService(db)
-    result = await service.select_manual_release(request, release)
+    if approve_now is True:
+        result = await service.select_manual_release(request, release, force_download=True)
+    else:
+        result = await service.select_manual_release(request, release)
     if "application/json" in http_request.headers.get("accept", ""):
         return JSONResponse(
             {

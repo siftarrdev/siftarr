@@ -2,10 +2,18 @@
   "name": "siftarr",
   "private": true,
   "devDependencies": {
+    "@eslint/js": "^10.0.1",
     "@tailwindcss/cli": "^4.0.0",
+    "eslint": "^10.8.1",
+    "globals": "^17.11.0",
+    "prettier": "^3.9.6",
     "tailwindcss": "^4.3.0"
   },
   "scripts": {
-    "build:css": "npx @tailwindcss/cli -i ./app/siftarr/static/css/tailwind-input.css -o ./app/siftarr/static/css/tailwind.css --minify"
+    "build:css": "npx @tailwindcss/cli -i ./app/siftarr/static/css/tailwind-input.css -o ./app/siftarr/static/css/tailwind.css --minify",
+    "format:js": "prettier --write \"app/siftarr/static/js/**/*.js\" eslint.config.mjs",
+    "format:js:check": "prettier --check \"app/siftarr/static/js/**/*.js\" eslint.config.mjs",
+    "lint:js": "eslint \"app/siftarr/static/js/**/*.js\"",
+    "check:js": "npm run format:js:check && npm run lint:js"
   }
 }

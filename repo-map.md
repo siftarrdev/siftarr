@@ -37,7 +37,7 @@ Primary flow:
 4. Search runs and compact rule evidence are persisted for request history and staging review
 5. Winning releases are staged or sent to qBittorrent
 6. Background services track retries, lifecycle state, Plex polling, and completion
-7. Dashboard, Stats, and settings UI expose control and visibility; request details can filter/sort stored release results, show search history, compare staged alternatives, and coalesce SSE-triggered DB-backed live result refreshes without losing modal state
+7. Dashboard, Stats, and settings UI expose control and visibility; request details can filter/sort stored release results, stage or directly approve releases, manually reject candidates, rerun request/season/episode searches, show search history, compare staged alternatives, and coalesce SSE-triggered DB-backed live result refreshes without losing modal state
 
 ## Top-level repository layout
 
@@ -48,6 +48,8 @@ Primary flow:
 - `docs/` — cross-cutting documentation index; detailed component docs live beside code
 - `data/` — locally created runtime data directory for SQLite and staging artifacts; gitignored and not committed
 - `icons/` — branding assets used by docs/UI
+- `mockups/` — exploratory UI mockups, organized by design iteration/name
+- `.github/workflows/` — GitHub Actions quality checks, including enforced Prettier and ESLint validation for frontend JavaScript
 - `README.md` — user-facing overview and Docker Compose quick start
 - `CONTRIBUTING.md` — developer setup, workflow, quality gates, and PR expectations
 - `AGENTS.md` — repository-specific agent/development rules
@@ -55,7 +57,8 @@ Primary flow:
 - `pyproject.toml` — Python 3.14 project metadata, dependencies, hatchling/hatch-vcs build backend, pytest, and Ruff config
 - `ty.toml` — static type checker configuration (Python version target)
 - `uv.lock` — locked dependency graph for `uv`
-- `package.json` — Tailwind CSS build script and npm dev dependencies (`@tailwindcss/cli`, `tailwindcss`)
+- `package.json` — Tailwind CSS build plus Prettier/ESLint formatting and lint scripts and npm development dependencies
+- `eslint.config.mjs` / `.prettierrc.json` — JavaScript linting and formatting policy for browser code under `app/siftarr/static/js/`
 - `node_modules/` — JavaScript dependencies (gitignored)
 
 ## Documentation map
@@ -126,7 +129,7 @@ HTTP route layer.
 - `auth_router.py` — Plex SSO auth endpoints (login page, first-login admin claim, initial Plex sync gate page/completion, same-admin token refresh, guarded full Plex sync kick-off after later successful admin sign-in, non-admin denial UX, logout, session info); included without global auth dependency
 - `dashboard.py` — main dashboard page routes; `GET /api/downloads` (unfinished) and `GET /api/torrents/completed` (live completed) both return qBittorrent torrents grouped by owning Siftarr request with per-group totals, lifecycle actions limited to matched Siftarr rows
 - `dashboard_api.py` — dashboard JSON endpoints for details/search/history data, including validated detail-release filter/sort query controls
-- `dashboard_actions.py` — dashboard-triggered actions and mutations
+- `dashboard_actions.py` — dashboard-triggered actions and mutations, including per-release staging, direct approval, and manual candidate rejection
 - `search_sse.py` — SSE streaming endpoints for live search progress and post-commit `results_updated` notifications; `/requests/{id}/search/stream` supports TV `search_mode=new|full`, while TV scope-specific streams remain compatibility/debug inspect paths
 - `rules.py` — rule management UI/API, including unified rule listing, multi-title testing, modal create/edit actions, export, import preview/apply flows that merge explicit keep selections from existing and imported rules, and the Rules-area staging decision-log page for rule tuning
 - `settings.py` — settings UI (connection test/save/reset, scheduler interval save/reset, staging toggle, Plex rescan, Overseerr sync, cache/reseed actions, SSE progress streams, API key management, Plex SSO status, non-secret settings backup preview/restore, qBit mover enable/paths/retention settings and manual trigger, and Settings-hosted background job status/manual triggers); Overseerr reconciliation keys imports by request ID so repeat requests and cross-provider media-ID collisions remain distinct, uses SettingsStore for DB-backed persistence, and keeps the SSO-managed Plex token out of connection saves/resets/backups

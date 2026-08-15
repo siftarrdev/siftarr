@@ -96,6 +96,8 @@ Prefer focused tests while iterating, then run the full quality gates before ope
 Run all gates in this order before merge:
 
 ```bash
+npm run format:js
+npm run lint:js
 uv run ruff format .
 uv run ruff check .
 uv run ty check

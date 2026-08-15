@@ -17,6 +17,11 @@ def _read_dashboard_js():
     return content
 
 
+def _compact_js(content: str) -> str:
+    """Normalize formatter-only whitespace for source-level behavior assertions."""
+    return " ".join(content.split())
+
+
 def _read_dashboard_css():
     """Read dashboard CSS file."""
     css_path = os.path.join(
@@ -199,11 +204,11 @@ def test_dashboard_js_includes_tv_details_expand_collapse_controls():
     assert ">Search multi-season</button>" in js
     assert ">Search complete series</button>" in js
     assert "await searchMultiSeasonPacks(requestId);" in js
-    # Season-row quiet links: Mark all / Stage individual episodes / Search season.
+    # Season-row controls: quiet management links plus a scoped icon search.
     assert "Mark all" in js
     assert "Stage individual episodes" in js
-    assert "Search season" in js
-    assert "searchSeasonPacks(' + requestId + ', ' + season.season_number + ')" in js
+    assert "Search Season " in js
+    assert "searchSeasonPacks(" in js
     # Scope chips switch client-side without a backend reload.
     assert "function setDetailsScope(requestId, scope)" in js
     assert "window.setDetailsScope = setDetailsScope;" in js
@@ -211,7 +216,8 @@ def test_dashboard_js_includes_tv_details_expand_collapse_controls():
     assert "function searchTvRequestNew(options = {})" in js
     assert "function searchTvRequestFull(options = {})" in js
     assert "search/stream?search_mode=' + encodeURIComponent(fullSearch ? 'full' : 'new')" in js
-    assert "window.startTvSearchProgress(streamUrl, modeLabel + ': ' + detailsTitle" in js
+    assert "window.startTvSearchProgress(" in js
+    assert "streamUrl" in js and "modeLabel + ': ' + detailsTitle" in js
     assert "function searchRequestFromDetails()" in js
     assert (
         "window.openRequestDetails(window.currentRequestId, window.currentDetailsIndex, { preserveUiState: true })"
@@ -246,7 +252,7 @@ def test_dashboard_live_result_refresh_is_debounced_and_modal_safe():
     js = _read_dashboard_js()
 
     assert "function scheduleLiveDetailsRefresh(requestId)" in js
-    assert "setTimeout(async function()" in js
+    assert "setTimeout(async function ()" in js
     assert "}, 1250);" in js
     assert "if (state.timer || state.inFlight) return;" in js
     assert "window.activeDetailsRequestId !== requestId" in js
@@ -278,7 +284,8 @@ def test_dashboard_details_search_sets_progress_and_restores_button():
     assert "btn.innerHTML = originalText || 'Refresh Search';" in js
     assert "cacheInd.classList.add('hidden');" in js
     assert (
-        "window.startSearchProgress(window.currentRequestId, detailsTitle, async function()" in js
+        "window.startSearchProgress(window.currentRequestId, detailsTitle, async function ()"
+        in _compact_js(js)
     )
 
 
@@ -287,10 +294,11 @@ def test_dashboard_details_sort_controls_reorder_locally_without_reload():
     js = _read_dashboard_js()
 
     assert "function applyLocalReleaseSort()" in js
-    assert "controls.sort = sortSelect.value;\n        applyLocalReleaseSort();" in js
-    assert "applyDetailsControls(controls);\n        applyLocalReleaseSort();" in js
-    assert "controls.sort = sortSelect.value;\n        reloadDetailsWithControls();" not in js
-    assert "applyDetailsControls(controls);\n        reloadDetailsWithControls();" not in js
+    compact_js = _compact_js(js)
+    assert "controls.sort = sortSelect.value; applyLocalReleaseSort();" in compact_js
+    assert "applyDetailsControls(controls); applyLocalReleaseSort();" in compact_js
+    assert "controls.sort = sortSelect.value; reloadDetailsWithControls();" not in compact_js
+    assert "applyDetailsControls(controls); reloadDetailsWithControls();" not in compact_js
 
 
 def test_dashboard_template_search_actions_use_progress_helpers(dashboard_template_path):
@@ -327,7 +335,7 @@ def test_dashboard_template_search_actions_use_progress_helpers(dashboard_templa
     assert "disableSearchControls(form);" in js
     assert "function getDedupedCheckedBulkCheckboxes" in js
     assert "formData.delete('request_ids');" in js
-    assert "ids.forEach(id => formData.append('request_ids', id));" in js
+    assert "ids.forEach((id) => formData.append('request_ids', id));" in js
     assert "getDedupedCheckedBulkCheckboxes(form);" in js
     assert "disableSearchControls(row);" in js
 
@@ -379,7 +387,7 @@ def test_dashboard_modals_exports_inline_handler_names():
     for name in ("openDenyModal", "submitDenyRequest", "closeDenyModal"):
         assert f"function {name}(" in js
         assert f"window.{name} = {name};" in js
-    assert "headers: { 'Accept': 'application/json' }" in js
+    assert "Accept: 'application/json'" in js
     assert "await window.refreshCurrentTabContent();" in js
     assert "window.bindDenyModalHandlers = bindDenyModalHandlers;" in js
     assert "toggle.dataset.selectAllBound === 'true'" in js
@@ -392,7 +400,8 @@ def test_dashboard_js_uses_collapsible_episode_results():
     assert "episode-details-" in js
     # Episode rows are divider-separated inside the season body (no per-row
     # border box), so only the rounded/tinted wrapper is asserted here.
-    assert '<details id="\' + episodeDetailsId + \'" class="group rounded-xl ' in js
+    assert "episodeDetailsId" in js
+    assert 'class="group rounded-xl ' in js
     assert "divide-y divide-gray-700/40" in js
     assert "No cached episode results yet" in js
 
@@ -545,14 +554,15 @@ def test_dashboard_js_includes_active_stage_replacement_copy():
     assert "Selecting another result will replace it." not in js
     assert "updateActiveStageBanner" not in js
     assert "currentActiveStagedTorrent" not in js
-    # Inline Approve/Discard/Replace live on the staged release card itself.
+    # Inline icon actions live on the release card itself.
     assert "inlineStagedAction" in js
     assert "/approve" in js
     assert "/discard" in js
-    assert ">Approve</button>" in js
-    assert ">Discard</button>" in js
-    assert ">Replace</button>" in js
-    assert ">Stage</button>" in js
+    assert "Approve and download now" in js
+    assert "Reject staged release" in js
+    assert "Already staged for review" in js
+    assert "Approve and download now" in js
+    assert "Reject staged release" in js
     assert "Stage this torrent for review and approval." in js
     assert "Replace the active staged torrent with this selection." in js
     assert "text-emerald-400" in js
@@ -573,7 +583,7 @@ def test_dashboard_js_uses_cyan_staged_release_indicators():
     """Staged releases and TV status badges should use cyan styling."""
     js = _read_dashboard_js()
 
-    assert "'staged': 'badge-cyan'" in js
+    assert "staged: 'badge-cyan'" in js
     # Staged episode rows keep a cyan-tinted fill; the staged release card
     # inside them is a borderless recessed dark box (its fill is the separation,
     # so no outline is needed).
@@ -583,13 +593,28 @@ def test_dashboard_js_uses_cyan_staged_release_indicators():
     assert "bg-cyan-900/60 text-cyan-300" in js
 
 
+def test_dashboard_js_uses_icon_actions_for_synthetic_staged_pack_rows():
+    js = _read_dashboard_js()
+    staged_pack_renderer = js[
+        js.index("function renderStagedPackRow") : js.index("function renderStagedPackRows")
+    ]
+
+    assert "Already staged for review" in staged_pack_renderer
+    assert "Approve and download now" in staged_pack_renderer
+    assert "Reject staged release" in staged_pack_renderer
+    assert ">Approve</button>" not in staged_pack_renderer
+    assert ">Discard</button>" not in staged_pack_renderer
+
+
 def test_dashboard_js_skips_ineligible_pack_searches_and_can_research_completed_episodes():
     js = _read_dashboard_js()
 
     assert "function isSeasonPackEligible(season)" in js
     assert "airDate && airDate > today" in js
     assert "Pack search skipped: season is incomplete or partly available" in js
-    assert ">Search again</button>" in js
+    assert "const RELEASE_ACTION_ICONS" in js
+    assert "search:" in js
+    assert "Search S" in js
     assert 'id="episode-search-' in js
 
 
@@ -615,7 +640,7 @@ def test_dashboard_js_focuses_staged_tv_episode_after_reload():
     js = _read_dashboard_js()
 
     assert "data-stage-scope" in js
-    assert "focusTvScope: stagedScope" in js
+    assert "focusTvScope: approveNow ? null : stagedScope" in js
     assert "function captureDetailsAccordionState()" in js
     assert "function restoreDetailsAccordionState(state)" in js
     assert "function focusTvEpisode(requestId, seasonNumber, episodeNumber)" in js
@@ -627,8 +652,8 @@ def test_dashboard_js_focuses_staged_tv_episode_after_reload():
     assert "collapseStagedTvScope" not in js
 
 
-def test_dashboard_js_uses_matching_episode_stage_for_approve_and_collapses_it():
-    """A staged episode approves its own torrent, then only its drawer closes."""
+def test_dashboard_js_keeps_search_available_for_staged_and_pending_episodes():
+    """Episode headers always expose scoped search, without top-release actions."""
     js_path = os.path.join(
         os.path.dirname(__file__), "../../../app/siftarr/static/js/dashboard/releases.js"
     )
@@ -667,19 +692,15 @@ def test_dashboard_js_uses_matching_episode_stage_for_approve_and_collapses_it()
             releases_by_season: {{}}, aggregate_counts: {{available: 0, total: 2}},
           }},
         }});
-        if (!html.includes("/staged/72/approve") || html.includes("stageTopEpisodeRelease(this, 9, 200)")) {{
-          throw new Error('staged episode did not render its matching Approve action');
+        if (!html.includes('Search S01E02 again') || !html.includes('Search S01E03 again')) {{
+          throw new Error('episode search was not rendered for every status');
         }}
         if (!html.includes('Airs: 2026-08-14')) {{
           throw new Error('episode air date did not render');
         }}
-        global.fetch = async () => ({{ok: true, json: async () => ({{}})}});
-        inlineStagedAction('/staged/72/approve', {{
-          textContent: 'Approve', disabled: false,
-          closest: () => ({{id: approved.id}}),
-        }}).then(() => {{
-          if (approved.open || !sibling.open) throw new Error('approval collapsed the wrong drawer');
-        }}).catch((error) => {{ console.error(error); process.exit(1); }});
+        if (html.includes('stageTopEpisodeRelease')) {{
+          throw new Error('episode header still rendered a top-release action');
+        }}
         """
     )
 
@@ -714,10 +735,11 @@ def test_dashboard_js_removes_scope_menu_helpers():
     assert "function closeTvSearchScopeMenu()" not in js
     assert "function populateTvSearchScopeMenu()" not in js
     assert "tv-search-dropdown" not in js
+    compact_js = _compact_js(js)
     assert (
-        "!isScopedEpisodeRelease && hasActiveStagedSelection && activeStagedTorrent && release.title === activeStagedTorrent.title"
-        in js
+        "!isScopedEpisodeRelease && hasActiveStagedSelection && activeStagedTorrent" in compact_js
     )
+    assert "release.title === activeStagedTorrent.title" in compact_js
 
 
 def test_dashboard_js_refreshes_full_staged_content():
@@ -812,7 +834,7 @@ def test_dashboard_mobile_card_sort_controls(dashboard_template_path):
     assert "function sortDashboardCards(tableName, encodedSort)" in js
     assert "sortTable(tableName, sortKey, true, direction === 'desc' ? 'desc' : 'asc');" in js
     assert "forcedDirection = null" in js
-    assert "rows.forEach(row => tbody.appendChild(row));" in js
+    assert "rows.forEach((row) => tbody.appendChild(row));" in js
     assert "if (card) cardContainer.appendChild(card);" in js
 
 
@@ -886,7 +908,7 @@ def test_dashboard_details_navigation_uses_visible_filtered_rows():
     assert "element.style.display === 'none'" in js
     assert "function refreshDetailsNavigationContext()" in js
     assert "window.visibleRequests = window.getVisibleRequests();" in js
-    assert "findIndex(r => r.id === window.currentRequestId)" in js
+    assert "findIndex((r) => r.id === window.currentRequestId)" in js
     assert "window.refreshDetailsNavigationContext();" in js
 
 
@@ -903,9 +925,9 @@ def test_dashboard_active_unreleased_toggle_removed_and_filters_refresh_navigati
     assert "toggleShowUnreleased" not in js
     assert "showUnreleasedActive" not in js
     assert "unreleasedMatch" not in js
-    assert "row.style.display = (textMatch && mediaMatch) ? '' : 'none';" in js
+    assert "row.style.display = textMatch && mediaMatch ? '' : 'none';" in js
     assert "window.refreshDetailsNavigationContext();" in js
-    assert "rows.forEach(row => tbody.appendChild(row));" in js
+    assert "rows.forEach((row) => tbody.appendChild(row));" in js
     assert "if (card) cardContainer.appendChild(card);" in js
 
 
@@ -1161,7 +1183,7 @@ def test_staged_packs_are_visible_when_no_cached_pack_row_exists():
 
     assert "function stagedPacksForSeason(stagedTorrents, seasonNumber)" in js
     assert "function stagedPacksMissingFromRows(stagedPacks, releases)" in js
-    assert "function renderStagedPackRow(staged, requestId)" in js
+    assert "function renderStagedPackRow(staged, _requestId)" in js
     assert 'data-staged-pack-row="true"' in js
     # Count label distinguishes staged from cached, and the drawer opens itself
     # when there is a staged pack the user would otherwise not see.

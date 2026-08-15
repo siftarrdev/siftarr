@@ -107,6 +107,35 @@ async def test_use_releases_sends_direct_when_staging_disabled(
     queue_service.remove_from_queue.assert_awaited_once_with(request_record.id)
 
 
+@patch.object(svc, "QbittorrentService")
+@patch.object(svc, "PendingQueueService")
+@patch.object(svc, "get_settings")
+@pytest.mark.asyncio
+async def test_use_releases_force_download_bypasses_enabled_staging(
+    mock_get_settings, mock_pq_cls, mock_qb_cls, mock_db, request_record, selected_release
+):
+    mock_get_settings.return_value = MagicMock(staging_mode_enabled=True)
+    mock_pq_cls.return_value = AsyncMock()
+    qbittorrent_service = AsyncMock()
+    qbittorrent_service.add_torrent.return_value = "abc123"
+    mock_qb_cls.return_value = qbittorrent_service
+    mock_db.execute.return_value = MagicMock(
+        scalars=MagicMock(return_value=MagicMock(all=MagicMock(return_value=[])))
+    )
+
+    with patch.object(StagingService, "save_release", new_callable=AsyncMock) as save_release:
+        result = await StagingService(mock_db).use_releases(
+            request_record,
+            [selected_release],
+            selection_source="manual",
+            force_download=True,
+        )
+
+    assert result["status"] == "downloading"
+    save_release.assert_not_awaited()
+    qbittorrent_service.add_torrent.assert_awaited_once()
+
+
 @patch.object(svc, "PendingQueueService")
 @patch.object(svc, "get_settings")
 @pytest.mark.asyncio
