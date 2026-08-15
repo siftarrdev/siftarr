@@ -299,11 +299,29 @@ function isEpisodeComplete(episode) {
     const status = episode && episode.status;
     return status === 'available' || status === 'completed';
 }
+window.isEpisodeComplete = isEpisodeComplete;
 
 function seasonNeededCount(season) {
     return (season && season.episodes ? season.episodes : []).filter(function(ep) {
         return !isEpisodeComplete(ep);
     }).length;
+}
+
+function isSeasonPackEligible(season) {
+    const episodes = (season && season.episodes) || [];
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    return !episodes.some(function(ep) {
+        const airDate = ep.air_date ? new Date(ep.air_date + 'T00:00:00') : null;
+        return isEpisodeComplete(ep) || ep.status === 'unreleased' || (airDate && airDate > today);
+    });
+}
+
+function renderSeasonPackSearchButton(requestId, season) {
+    if (!isSeasonPackEligible(season)) {
+        return '<span class="text-[11px] text-gray-500">Pack search skipped: season is incomplete or partly available</span>';
+    }
+    return '<button type="button" onclick="searchSeasonPacks(' + requestId + ', ' + season.season_number + '); event.preventDefault(); event.stopPropagation();" class="' + SEASON_PACK_SEARCH_BUTTON_CLASS + '">Search packs</button>';
 }
 
 function findDetailsSeason(requestId, seasonNumber) {
@@ -441,7 +459,7 @@ function renderSeasonPacksDrawer(requestId, season, seasonPacks, stagedPacks) {
             '<span class="text-sm text-white font-medium">Season packs</span>' +
             '<span class="text-xs ' + (orphanStaged.length ? 'text-cyan-300' : 'text-gray-500') + '">' + window.escapeHtml(countParts.join(' · ')) + '</span>' +
             '<div class="ml-auto flex items-center gap-2 shrink-0">' +
-                '<button type="button" onclick="searchSeasonPacks(' + requestId + ', ' + seasonNumber + '); event.preventDefault(); event.stopPropagation();" class="' + SEASON_PACK_SEARCH_BUTTON_CLASS + '">Search packs</button>' +
+                renderSeasonPackSearchButton(requestId, season) +
             '</div>' +
         '</summary>' +
         '<div class="px-3 pb-3 pt-0.5 space-y-1.5" data-season-pack-results="' + requestId + '-' + seasonNumber + '">' +
@@ -471,7 +489,7 @@ function renderSeasonPackGroup(requestId, season, seasonPacks, stagedPacks) {
             '<span class="text-white font-medium text-sm">Season ' + seasonNumber + '</span>' +
             '<span class="text-xs text-gray-500">' + window.escapeHtml(headerMeta) + '</span>' +
             '<div class="ml-auto flex items-center gap-2">' +
-                '<button type="button" onclick="searchSeasonPacks(' + requestId + ', ' + seasonNumber + ')" class="' + SEASON_PACK_SEARCH_BUTTON_CLASS + '">Search packs</button>' +
+                renderSeasonPackSearchButton(requestId, season) +
             '</div>' +
         '</div>' +
         '<div class="p-2.5 space-y-1.5" data-season-pack-results="' + requestId + '-' + seasonNumber + '">' +
@@ -698,7 +716,9 @@ function renderSeasonAccordion(data) {
                 ? '<button type="button" onclick="markSeasonAvailable(' + requestId + ', ' + season.id + '); event.stopPropagation();" class="text-brand-400 hover:text-brand-300">Mark all</button>'
                 : '') +
             '<button type="button" onclick="stageIndividualEpisodes(this, ' + requestId + ', ' + season.season_number + '); event.preventDefault(); event.stopPropagation();" class="text-brand-400 hover:text-brand-300">Stage individual episodes</button>' +
-            '<button type="button" onclick="searchSeasonPacks(' + requestId + ', ' + season.season_number + '); event.preventDefault(); event.stopPropagation();" class="text-brand-400 hover:text-brand-300">Search season</button>' +
+            (isSeasonPackEligible(season)
+                ? '<button type="button" onclick="searchSeasonPacks(' + requestId + ', ' + season.season_number + '); event.preventDefault(); event.stopPropagation();" class="text-brand-400 hover:text-brand-300">Search season</button>'
+                : '') +
         '</div>';
 
         const episodeHtml = (season.episodes || []).map(function(ep) {
@@ -747,10 +767,10 @@ function renderSeasonAccordion(data) {
                         (isStaged ? renderApproveTopEpisodeButton(stagedTorrent) : showInlineActions ? renderStageTopEpisodeButton(requestId, topRelease) : '') +
                         (showInlineActions
                             ? '<button type="button" onclick="markEpisodeAvailable(' + requestId + ', ' + ep.id + '); event.stopPropagation();" class="shrink-0 text-xs text-brand-400 hover:text-brand-300">Mark Available</button>'
-                            : '') +
+                            : '<button type="button" onclick="searchEpisode(' + requestId + ', ' + season.season_number + ', ' + ep.episode_number + '); event.preventDefault(); event.stopPropagation();" class="shrink-0 text-xs text-brand-400 hover:text-brand-300">Search again</button>') +
                     '</div>' +
                 '</summary>' +
-                '<div class="pl-8 pr-3 pb-3 pt-0.5 space-y-1.5">' + episodeBucketHtml + '</div>' +
+                '<div id="episode-search-' + requestId + '-' + season.season_number + '-' + ep.episode_number + '" class="pl-8 pr-3 pb-3 pt-0.5 space-y-1.5">' + episodeBucketHtml + '</div>' +
             '</details>';
         }).join('');
         const episodeListHtml = episodeHtml
@@ -876,7 +896,7 @@ function searchMultiSeasonPacks(requestId) {
 // can surface.
 async function searchAllSeasonPacks(requestId, btn = null) {
     var data = window.currentDetailsData;
-    var seasons = (data && data.tv_info && data.tv_info.seasons) || [];
+    var seasons = ((data && data.tv_info && data.tv_info.seasons) || []).filter(isSeasonPackEligible);
     if (!seasons.length) return;
     var originalText = btn ? btn.textContent : '';
     if (btn) {

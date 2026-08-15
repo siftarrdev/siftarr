@@ -3,6 +3,7 @@
 // Reusable SSE-based search progress panel for the dashboard.
 
 let activeSearchEventSource = null;
+let activeTvSearchCancelUrl = null;
 
 function getProgressBar() {
     return document.getElementById('search-progress-bar');
@@ -39,6 +40,7 @@ function resetProgressPanel() {
     const subtitle = getProgressSubtitle();
     const activeWrap = getProgressActiveWrap();
     const activeList = getProgressActiveList();
+    const cancelButton = document.getElementById('search-progress-cancel');
 
     if (bar) {
         bar.style.width = '0%';
@@ -50,6 +52,11 @@ function resetProgressPanel() {
     if (subtitle) subtitle.textContent = 'Initializing…';
     if (activeWrap) activeWrap.classList.add('hidden');
     if (activeList) activeList.innerHTML = '';
+    if (cancelButton) {
+        cancelButton.classList.add('hidden');
+        cancelButton.disabled = false;
+        cancelButton.textContent = 'Cancel search';
+    }
 }
 
 function closeSearchProgress() {
@@ -57,6 +64,7 @@ function closeSearchProgress() {
         activeSearchEventSource.close();
         activeSearchEventSource = null;
     }
+    activeTvSearchCancelUrl = null;
     const panel = getProgressPanel();
     if (panel) panel.classList.add('hidden');
     resetProgressPanel();
@@ -86,6 +94,7 @@ async function _invokeCallback(cb, data) {
 
 async function _finishSearchEventSource(es, cb, data) {
     if (activeSearchEventSource === es) activeSearchEventSource = null;
+    activeTvSearchCancelUrl = null;
     es.close();
     await _invokeCallback(cb, data);
 }
@@ -312,7 +321,28 @@ function startBulkSearchProgress(requestIds, titles, onComplete, onError, option
     };
 }
 
-function startTvSearchProgress(streamUrl, title, onComplete, onError) {
+async function cancelActiveTvSearch() {
+    if (!activeTvSearchCancelUrl) return;
+    const button = document.getElementById('search-progress-cancel');
+    if (button) {
+        button.disabled = true;
+        button.textContent = 'Cancelling…';
+    }
+    const status = getProgressStatus();
+    if (status) status.textContent = 'Stopping new search queries…';
+    try {
+        const response = await fetch(activeTvSearchCancelUrl, { method: 'POST' });
+        if (!response.ok) throw new Error('HTTP ' + response.status);
+    } catch (error) {
+        if (button) {
+            button.disabled = false;
+            button.textContent = 'Cancel search';
+        }
+        if (status) status.textContent = 'Could not cancel search: ' + error.message;
+    }
+}
+
+function startTvSearchProgress(streamUrl, title, onComplete, onError, cancelUrl = null) {
     closeSearchProgress();
     resetProgressPanel();
 
@@ -321,6 +351,9 @@ function startTvSearchProgress(streamUrl, title, onComplete, onError) {
 
     const titleEl = getProgressTitle();
     if (titleEl && title) titleEl.textContent = title;
+    activeTvSearchCancelUrl = cancelUrl;
+    const cancelButton = document.getElementById('search-progress-cancel');
+    if (cancelButton && cancelUrl) cancelButton.classList.remove('hidden');
 
     let finished = false;
 
@@ -430,6 +463,7 @@ function updateRequestRow(requestId, result) {
 }
 
 window.closeSearchProgress = closeSearchProgress;
+window.cancelActiveTvSearch = cancelActiveTvSearch;
 window.startSearchProgress = startSearchProgress;
 window.startBulkSearchProgress = startBulkSearchProgress;
 window.startTvSearchProgress = startTvSearchProgress;

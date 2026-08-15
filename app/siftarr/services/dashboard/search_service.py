@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.siftarr.config import get_settings
 from app.siftarr.models import EventType
+from app.siftarr.models.episode import Episode
 from app.siftarr.models.release import Release
 from app.siftarr.models.request import MediaType
 from app.siftarr.models.request import Request as RequestModel
@@ -57,6 +58,7 @@ from app.siftarr.services.utils.media_helpers import extract_media_title_and_yea
 logger = logging.getLogger(__name__)
 
 SearchProgressCallback = Callable[[dict[str, Any]], Awaitable[None]]
+SearchCancellationCheck = Callable[[], bool]
 
 
 class SearchService:
@@ -118,6 +120,7 @@ class SearchService:
         request: RequestModel,
         progress_callback: SearchProgressCallback | None = None,
         search_mode: str = "new",
+        cancellation_check: SearchCancellationCheck | None = None,
     ) -> dict:
         """Run torrent search for a request and clean up queue state on success."""
         activity_log = ActivityLogService(self.db)
@@ -165,6 +168,7 @@ class SearchService:
                 search_episodes=True,
                 progress_callback=progress_callback,
                 search_mode=search_mode,
+                cancellation_check=cancellation_check,
             )
 
         activity_log = ActivityLogService(self.db)
@@ -191,11 +195,28 @@ class SearchService:
         progress_callback: SearchProgressCallback | None = None,
     ) -> TVSearchData:
         """Search for season packs covering exactly one season."""
+        scope: dict[str, object] = {"type": "season_packs", "season_number": season_number}
+        episode_result = await self.db.execute(
+            select(Episode)
+            .join(Season, Episode.season_id == Season.id)
+            .where(
+                Season.request_id == request.id,
+                Season.season_number == season_number,
+            )
+        )
+        episodes = list(episode_result.scalars().all())
+        if not TVDecisionService.is_season_pack_eligible(episodes):
+            return TVSearchData(
+                releases=[],
+                scope=scope,
+                error="Season pack search skipped because the season has unreleased or available episodes.",
+            )
+
         result = await self._search_tv_season_sweep(request, season_number=season_number)
         if result.error:
             return TVSearchData(
                 releases=[],
-                scope={"type": "season_packs", "season_number": season_number},
+                scope=scope,
                 error=result.error,
             )
 
@@ -203,7 +224,6 @@ class SearchService:
             request.id, result.releases, season_number=season_number
         )
         await self._commit_result_update(request.id, len(stored_rows), progress_callback)
-        scope: dict[str, object] = {"type": "season_packs", "season_number": season_number}
         releases = self._filter_serialize_stored_tv_releases(stored_rows, scope=scope)
         return TVSearchData(
             releases=finalize_releases(releases, sort_key=season_pack_release_sort_key),

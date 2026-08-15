@@ -4,8 +4,8 @@ Episode status is the sole ground truth.  Season and Request statuses are
 derived upward from episodes and written as a cached summary after any
 episode mutation.
 
-Workflow (Parallel Search):
-1. Search for season packs AND individual episodes in parallel
+Workflow:
+1. Search eligible whole seasons for packs, then uncovered individual episodes
 2. Evaluate all releases through RuleEngine
 3. Prefer season packs over episode releases when both pass
 4. Send best matches to qBit (or staging)
@@ -73,6 +73,7 @@ logger = logging.getLogger(__name__)
 MAX_CONCURRENT_SEARCHES = 5
 MAX_CONCURRENT_EXACT_EPISODE_SEARCHES = 3
 ProgressCallback = Callable[[dict[str, Any]], Awaitable[None]]
+CancellationCheck = Callable[[], bool]
 ACTIONABLE_EXCLUDED_STATUSES = {
     RequestStatus.COMPLETED,
     RequestStatus.DOWNLOADING,
@@ -175,17 +176,24 @@ class TVDecisionService:
 
     @staticmethod
     def _get_pack_eligible_seasons(request: Request) -> list[int]:
-        """Return requested seasons with no already-resolved episode rows."""
+        """Return complete, wholly missing seasons that are safe to fill with a pack."""
         eligible: list[int] = []
         for season in request.seasons:
             episodes = list(getattr(season, "episodes", []) or [])
-            if any(
-                getattr(episode, "status", RequestStatus.PENDING) in ACTIONABLE_EXCLUDED_STATUSES
-                for episode in episodes
-            ):
+            if not TVDecisionService.is_season_pack_eligible(episodes):
                 continue
             eligible.append(season.season_number)
         return sorted(eligible)
+
+    @staticmethod
+    def is_season_pack_eligible(episodes: Sequence[Episode]) -> bool:
+        """Return whether every known episode is aired and still needs a release."""
+        return not any(
+            getattr(episode, "status", RequestStatus.PENDING)
+            in ACTIONABLE_EXCLUDED_STATUSES | {RequestStatus.UNRELEASED}
+            or not TVDecisionService._episode_is_aired(episode)
+            for episode in episodes
+        )
 
     @staticmethod
     def _get_sweep_seasons(
@@ -409,6 +417,7 @@ class TVDecisionService:
         rule_engine: RuleEngine,
         seasons: Sequence[int],
         progress_callback: ProgressCallback | None = None,
+        cancellation_check: CancellationCheck | None = None,
     ) -> tuple[list[ReleaseEvaluation], list[ReleaseEvaluation], list[str], set[str]]:
         """Run one logical paginated season sweep per requested season and dedupe results."""
         if not seasons:
@@ -445,22 +454,20 @@ class TVDecisionService:
             await progress_callback(payload)
 
         async def run_season_sweep(season: int) -> ProwlarrSearchResult:
+            if cancellation_check is not None and cancellation_check():
+                return ProwlarrSearchResult(releases=[], query_time_ms=0)
+            search_kwargs: dict[str, Any] = {
+                "title": request.title,
+                "season": season,
+                "imdbid": imdb_id,
+                "tvdbid": request.tvdb_id,
+                "request_id": request.id,
+            }
             if progress_callback:
-                return await self.prowlarr.search_tv_season_sweep(
-                    title=request.title,
-                    season=season,
-                    imdbid=imdb_id,
-                    tvdbid=request.tvdb_id,
-                    request_id=request.id,
-                    progress_callback=season_progress,
-                )
-            return await self.prowlarr.search_tv_season_sweep(
-                title=request.title,
-                season=season,
-                imdbid=imdb_id,
-                tvdbid=request.tvdb_id,
-                request_id=request.id,
-            )
+                search_kwargs["progress_callback"] = season_progress
+            if cancellation_check is not None:
+                search_kwargs["cancellation_check"] = cancellation_check
+            return await self.prowlarr.search_tv_season_sweep(**search_kwargs)
 
         search_results = await gather_limited(
             seasons,
@@ -539,6 +546,7 @@ class TVDecisionService:
         targets: Sequence[tuple[int, int]],
         seen_keys: set[str],
         progress_callback: ProgressCallback | None = None,
+        cancellation_check: CancellationCheck | None = None,
     ) -> tuple[list[ReleaseEvaluation], list[tuple[int, int, ReleaseEvaluation]], list[str]]:
         if not targets:
             return [], [], []
@@ -571,6 +579,8 @@ class TVDecisionService:
 
         async def run_search(season: int, episode: int) -> ProwlarrSearchResult:
             async with semaphore:
+                if cancellation_check is not None and cancellation_check():
+                    return ProwlarrSearchResult(releases=[], query_time_ms=0)
                 if progress_callback:
                     return await self.prowlarr.search_tv_episode_exact(
                         title=request.title,
@@ -808,6 +818,7 @@ class TVDecisionService:
         search_episodes: bool = True,
         progress_callback: ProgressCallback | None = None,
         search_mode: str = "new",
+        cancellation_check: CancellationCheck | None = None,
     ) -> dict:
         """
         Process a TV request search.
@@ -933,11 +944,12 @@ class TVDecisionService:
         if search_episodes:
             for season in requested_seasons:
                 targets = requested_episodes.get(season)
-                if not targets:
+                if targets is None:
                     targets = await self._get_db_episode_targets_for_season(
                         request.id, season, actionable_only=not full_search
                     )
-                requested_episode_targets[season] = targets[: self._settings.max_episode_discovery]
+                    targets = targets[: self._settings.max_episode_discovery]
+                requested_episode_targets[season] = targets
 
         exact_targets = sorted(
             (season, episode)
@@ -950,7 +962,7 @@ class TVDecisionService:
         pack_candidates: list[tuple[ReleaseEvaluation, set[int]]] = []
         actionable_season_set = set(actionable_seasons)
         pack_eligible_season_set = set(pack_eligible_seasons)
-        if not full_search:
+        if not full_search and pack_eligible_seasons:
             (
                 pack_evaluations,
                 pack_passing,
@@ -959,8 +971,9 @@ class TVDecisionService:
             ) = await self._search_season_sweeps_and_evaluate(
                 request,
                 rule_engine,
-                requested_seasons,
+                [season for season in requested_seasons if season in pack_eligible_season_set],
                 progress_callback=progress_callback,
+                cancellation_check=cancellation_check,
             )
             all_evaluated_releases.extend(pack_evaluations)
             all_search_errors.extend(pack_errors)
@@ -1005,6 +1018,7 @@ class TVDecisionService:
                 exact_targets,
                 seen_keys,
                 progress_callback=progress_callback,
+                cancellation_check=cancellation_check,
             )
             all_evaluated_releases.extend(exact_evaluations)
             all_search_errors.extend(exact_errors)
@@ -1022,7 +1036,11 @@ class TVDecisionService:
                 if existing is None or evaluation.total_score > existing.total_score:
                     best_episodes_by_key[key] = evaluation
 
-        if full_search:
+        if (
+            full_search
+            and pack_eligible_seasons
+            and not (cancellation_check is not None and cancellation_check())
+        ):
             if progress_callback is not None:
                 await progress_callback(
                     {
@@ -1138,6 +1156,8 @@ class TVDecisionService:
         )
         await self.db.commit()
 
+        search_cancelled = cancellation_check is not None and cancellation_check()
+
         if full_search and not actionable_target_keys and not actionable_seasons:
             await self._recompute_tv_statuses(request)
             await self.db.commit()
@@ -1146,12 +1166,17 @@ class TVDecisionService:
                 evaluations=all_evaluated_releases,
                 stored_releases_by_key=stored_releases_by_key,
                 failures=all_search_errors,
-                outcome=request.status.value,
+                outcome="cancelled" if search_cancelled else request.status.value,
             )
             return {
                 "status": request.status.value,
                 "selected_releases": [],
-                "message": "Full search refreshed aired episode results; no actionable episodes remain.",
+                "message": (
+                    "Search cancelled; completed results were retained."
+                    if search_cancelled
+                    else "Full search refreshed aired episode results; no actionable episodes remain."
+                ),
+                "cancelled": search_cancelled,
             }
 
         if progress_callback is not None:
@@ -1238,7 +1263,11 @@ class TVDecisionService:
                 stored_releases_by_key=stored_releases_by_key,
                 winners=all_selected_releases,
                 failures=all_search_errors,
-                outcome=str(action_result.get("status") or "selected"),
+                outcome=(
+                    "cancelled"
+                    if search_cancelled
+                    else str(action_result.get("status") or "selected")
+                ),
                 counts=history.summarize_counts(
                     all_evaluated_releases,
                     staged=len(all_selected_releases)
@@ -1299,7 +1328,29 @@ class TVDecisionService:
                     }
                     for e in all_selected_releases
                 ],
-                "message": action_result["message"],
+                "message": (
+                    f"Search cancelled; completed results were retained. {action_result['message']}"
+                    if search_cancelled
+                    else action_result["message"]
+                ),
+                "cancelled": search_cancelled,
+            }
+
+        if search_cancelled:
+            await self._recompute_tv_statuses(request)
+            await self.db.commit()
+            await history.finalize_run(
+                search_run,
+                evaluations=all_evaluated_releases,
+                stored_releases_by_key=stored_releases_by_key,
+                failures=all_search_errors,
+                outcome="cancelled",
+            )
+            return {
+                "status": request.status.value,
+                "selected_releases": [],
+                "message": "Search cancelled; completed results were retained.",
+                "cancelled": True,
             }
 
         # ── No releases passed ────────────────────────────────────────

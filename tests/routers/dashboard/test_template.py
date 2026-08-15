@@ -208,8 +208,8 @@ def test_dashboard_js_includes_tv_details_expand_collapse_controls():
     assert "function setDetailsScope(requestId, scope)" in js
     assert "window.setDetailsScope = setDetailsScope;" in js
     assert "scope: 'all'" in js
-    assert "function searchTvRequestNew()" in js
-    assert "function searchTvRequestFull()" in js
+    assert "function searchTvRequestNew(options = {})" in js
+    assert "function searchTvRequestFull(options = {})" in js
     assert "search/stream?search_mode=' + encodeURIComponent(fullSearch ? 'full' : 'new')" in js
     assert "window.startTvSearchProgress(streamUrl, modeLabel + ': ' + detailsTitle" in js
     assert "function searchRequestFromDetails()" in js
@@ -581,6 +581,33 @@ def test_dashboard_js_uses_cyan_staged_release_indicators():
     assert "rounded-xl bg-surface-950" in js
     # Staged badge on the card title uses the inline cyan pill style.
     assert "bg-cyan-900/60 text-cyan-300" in js
+
+
+def test_dashboard_js_skips_ineligible_pack_searches_and_can_research_completed_episodes():
+    js = _read_dashboard_js()
+
+    assert "function isSeasonPackEligible(season)" in js
+    assert "airDate && airDate > today" in js
+    assert "Pack search skipped: season is incomplete or partly available" in js
+    assert ">Search again</button>" in js
+    assert 'id="episode-search-' in js
+
+
+def test_dashboard_tv_whole_show_search_confirms_large_runs_and_supports_cancel(
+    dashboard_template_path,
+):
+    js = _read_dashboard_js()
+    with open(dashboard_template_path, encoding="utf-8") as handle:
+        template = handle.read()
+
+    assert "function countUnavailableTvSeasons(data = window.currentDetailsData)" in js
+    assert "unavailableSeasonCount < 5" in js
+    assert "window.confirm(" in js
+    assert "'/search/cancel'" in js
+    assert "function cancelActiveTvSearch()" in js
+    assert "window.confirmLargeTvSearch(requestId)" in js
+    assert "window.startTvSearchProgress(" in js
+    assert 'id="search-progress-cancel"' in template
 
 
 def test_dashboard_js_focuses_staged_tv_episode_after_reload():
