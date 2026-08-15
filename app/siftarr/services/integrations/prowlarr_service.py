@@ -16,7 +16,10 @@ from app.siftarr.config import Settings, get_settings
 from app.siftarr.services.utils.http_client import get_shared_client
 
 logger = logging.getLogger(__name__)
+
+_APOSTROPHE_TRANSLATION = str.maketrans("", "", "'`´‘’‛ʻʼʹ′＇ꞌ")
 ProgressCallback = Callable[[dict[str, Any]], Awaitable[None]]
+CancellationCheck = Callable[[], bool]
 
 # ── Search result cache ──────────────────────────────────────────────
 # LRU cache keyed by params hash, with TTL.  Only caches non-manual
@@ -192,8 +195,8 @@ class ProwlarrService:
 
     @staticmethod
     def _normalize_search_title(title: str) -> str:
-        """Strip apostrophes and normalize whitespace for broader indexer matching."""
-        normalized = title.replace("'", "")
+        """Strip ASCII/Unicode apostrophes for broader indexer matching."""
+        normalized = title.translate(_APOSTROPHE_TRANSLATION)
         return " ".join(normalized.split())
 
     @staticmethod
@@ -679,6 +682,7 @@ class ProwlarrService:
         cacheable: bool = True,
         request_id: int | None = None,
         progress_callback: ProgressCallback | None = None,
+        cancellation_check: CancellationCheck | None = None,
     ) -> ProwlarrSearchResult:
         """Run paginated TV season strategy searches until Prowlarr is exhausted."""
         if categories is None:
@@ -715,6 +719,17 @@ class ProwlarrService:
             page = 0
             seen_page_signatures: set[tuple[tuple[str, str, str, int], ...]] = set()
             while pages_searched < max_pages:
+                if cancellation_check is not None and cancellation_check():
+                    if progress_callback is not None:
+                        await progress_callback(
+                            {
+                                "phase": "season_stop",
+                                "percent": 45,
+                                "message": f"Cancelled season {season} after {pages_searched} page(s).",
+                                "detail": f"{len(all_releases)} unique release(s) kept.",
+                            }
+                        )
+                    break
                 result = await self.search_tv_season_page(
                     title,
                     season,

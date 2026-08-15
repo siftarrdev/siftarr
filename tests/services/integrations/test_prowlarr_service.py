@@ -63,6 +63,21 @@ class TestProwlarrService:
         """Apostrophes should be stripped for broader indexer matching."""
         assert ProwlarrService._normalize_search_title("Margo's") == "Margos"
         assert ProwlarrService._normalize_search_title("Tom & Jerry's") == "Tom & Jerrys"
+        for title in (
+            "Let's",
+            "Let`s",
+            "Let´s",
+            "Let‘s",
+            "Let’s",
+            "Let‛s",
+            "Letʻs",
+            "Letʼs",
+            "Letʹs",
+            "Let′s",
+            "Let＇s",
+            "Letꞌs",
+        ):
+            assert ProwlarrService._normalize_search_title(title) == "Lets"
 
     def test_normalize_search_title_preserves_normal_titles(self) -> None:
         """Titles without apostrophes should pass through unchanged, and whitespace stripped."""
@@ -538,6 +553,31 @@ class TestProwlarrService:
         assert [call["offset"] for call in calls] == [0, 100, 200]
         assert all("limit" not in call for call in calls)
         assert len(result.releases) == 254
+
+    @pytest.mark.asyncio
+    async def test_search_tv_season_sweep_cancellation_keeps_completed_pages(
+        self, monkeypatch
+    ) -> None:
+        service = ProwlarrService(Settings(prowlarr_tv_page_size=100))
+        cancelled = False
+        calls = []
+
+        async def fake_search(params, **kwargs):
+            nonlocal cancelled
+            calls.append(params)
+            cancelled = True
+            return ProwlarrSearchResult(
+                releases=[_release(i) for i in range(100)], query_time_ms=10
+            )
+
+        monkeypatch.setattr(service, "_search", fake_search)
+
+        result = await service.search_tv_season_sweep(
+            "The Rookie", 1, cancellation_check=lambda: cancelled
+        )
+
+        assert [call["offset"] for call in calls] == [0]
+        assert len(result.releases) == 100
 
     @pytest.mark.asyncio
     async def test_search_tv_season_sweep_stops_on_empty_page(self, monkeypatch) -> None:
