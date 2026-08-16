@@ -618,7 +618,7 @@ def test_dashboard_js_skips_ineligible_pack_searches_and_can_research_completed_
     assert 'id="episode-search-' in js
 
 
-def test_dashboard_tv_whole_show_search_confirms_large_runs_and_supports_cancel(
+def test_dashboard_tv_large_search_uses_scope_modal_and_supports_cancel(
     dashboard_template_path,
 ):
     js = _read_dashboard_js()
@@ -627,11 +627,18 @@ def test_dashboard_tv_whole_show_search_confirms_large_runs_and_supports_cancel(
 
     assert "function countUnavailableTvSeasons(data = window.currentDetailsData)" in js
     assert "unavailableSeasonCount < 5" in js
-    assert "window.confirm(" in js
+    assert "function chooseLargeTvSearch(choice)" in js
+    assert "window.confirm(" not in js
+    assert "searchChoice === 'packs'" in js
+    assert "await window.searchAllSeasonPacks(requestId)" in js
     assert "'/search/cancel'" in js
     assert "function cancelActiveTvSearch()" in js
     assert "window.confirmLargeTvSearch(requestId)" in js
     assert "window.startTvSearchProgress(" in js
+    assert 'id="large-tv-search-modal"' in template
+    assert "Search all</span>" in template
+    assert "Search season packs</span>" in template
+    assert "Don't search</span>" in template
     assert 'id="search-progress-cancel"' in template
 
 

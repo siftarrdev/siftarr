@@ -226,8 +226,23 @@ async function postToAction(action, redirectTo, trigger = null, scope = null) {
       const isTv = String(row?.dataset.type || '').toLowerCase() === 'tv';
       if (isTv) {
         try {
-          if (!(await window.confirmLargeTvSearch(requestId))) {
+          const searchChoice = await window.confirmLargeTvSearch(requestId);
+          if (searchChoice === 'none') {
             resetTrigger();
+            return;
+          }
+          if (searchChoice === 'packs') {
+            // Pack searches render into the TV details accordion, so open it
+            // directly on that scope before starting the selected search.
+            window.detailsAutoSearchStarted[requestId] = true;
+            await window.openRequestDetails(requestId, null, { focusTvScope: 'season_packs' });
+            window.isTvScopeSearchRunning = true;
+            try {
+              await window.searchAllSeasonPacks(requestId);
+            } finally {
+              window.isTvScopeSearchRunning = false;
+              resetTrigger();
+            }
             return;
           }
         } catch (error) {

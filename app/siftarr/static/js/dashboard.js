@@ -191,6 +191,11 @@ function initDashboard() {
   // Keyboard navigation for details modal
   document.addEventListener('keydown', (e) => {
     const modal = document.getElementById('request-details-modal');
+    const largeTvSearchModal = document.getElementById('large-tv-search-modal');
+    if (e.key === 'Escape' && largeTvSearchModal && !largeTvSearchModal.classList.contains('hidden')) {
+      window.chooseLargeTvSearch('none');
+      return;
+    }
     if (modal.classList.contains('hidden')) return;
     if (e.key === 'Escape') {
       const dropdown = document.getElementById('tv-search-scope-menu');

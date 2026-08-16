@@ -33,7 +33,7 @@ Primary flow:
 
 1. Overseerr webhook or manual action creates/syncs a request
 2. Browser access is gated by Plex SSO; the first Plex login claims the instance as the sole admin and must finish an initial full Plex sync before reaching protected pages, while API-key auth remains for webhooks/integrations
-3. Search and decision services query Prowlarr and evaluate releases (TV dashboard “Search for new” checks eligible whole-season packs before targeted exact `SxxEyy` fallback; “Full search” refreshes all aired episode results and conditionally runs one broad TV pack query; whole-show searches warn at five unavailable seasons and can cooperatively cancel future queries while retaining completed work; targeted episode and eligible-season searches remain available)
+3. Search and decision services query Prowlarr and evaluate releases (TV dashboard “Search for new” checks eligible whole-season packs before targeted exact `SxxEyy` fallback; “Full search” refreshes all aired episode results and conditionally runs one broad TV pack query; when five or more seasons remain unavailable, an in-app scope dialog offers whole-show search, season/multi-season pack-only search, or no search; targeted episode and eligible-season searches remain available)
 4. Search runs and compact rule evidence are persisted for request history and staging review
 5. Winning releases are staged or sent to qBittorrent
 6. Background services track retries, lifecycle state, Plex polling, and completion
@@ -266,8 +266,8 @@ Tests mirror the service subpackage organization under `tests/services/`:
 - container and FastAPI startup apply Alembic migrations to `head` before background work starts; FastAPI startup then seeds default rules for empty databases
 - `docker/Dockerfile` — multi-stage production image build (Node stage builds Tailwind CSS, Python stage runs the app)
 - `docker/docker-compose.yml` — local container orchestration with `docker/siftarr-rules.json` mounted for empty-database rule seeding
-- `docker/rebuild-run-logs.sh` — rebuild, run, and log-tail helper (use when deps change)
-- `docker/dev-up.sh` — fast dev loop with volume mounts and uvicorn --reload (daily use, no rebuild)
+- `docker/rebuild-run-logs.sh` — rebuild, run, and log-tail helper; converts dirty Git versions to PEP 440 before passing the Docker build version (use when deps change)
+- `docker/dev-up.sh` — fast dev loop with volume mounts and uvicorn --reload; uses the same PEP 440-safe build-version conversion (daily use, no rebuild)
 - `docker/docker-compose.override.yml` — dev overrides: source code volume mounts and `--reload` command
 - `docker/entrypoint.sh` — container startup script
 

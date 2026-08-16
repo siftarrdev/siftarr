@@ -612,19 +612,33 @@ async function confirmLargeTvSearch(requestId = window.currentRequestId) {
     data = await response.json();
   }
   const unavailableSeasonCount = countUnavailableTvSeasons(data);
-  if (unavailableSeasonCount < 5) return true;
-  return window.confirm(
-    unavailableSeasonCount +
-      ' seasons still have unavailable episodes. ' +
-      'This whole-show search may take a while. Continue?\n\n' +
-      'You can cancel after it starts or use the per-season and per-episode searches instead.',
-  );
+  if (unavailableSeasonCount < 5) return 'all';
+  if (window.isLargeTvSearchChoiceOpen) return 'none';
+  return new Promise(function (resolve) {
+    const modal = document.getElementById('large-tv-search-modal');
+    const description = document.getElementById('large-tv-search-description');
+    if (!modal || !description) return resolve('none');
+    description.textContent =
+      unavailableSeasonCount + ' seasons still have unavailable episodes. Choose how broadly to search.';
+    window.pendingLargeTvSearchChoice = resolve;
+    window.isLargeTvSearchChoiceOpen = true;
+    modal.classList.remove('hidden');
+    modal.querySelector('[onclick="chooseLargeTvSearch(\'all\')"]')?.focus();
+  });
+}
+
+function chooseLargeTvSearch(choice) {
+  const modal = document.getElementById('large-tv-search-modal');
+  if (modal) modal.classList.add('hidden');
+  const resolve = window.pendingLargeTvSearchChoice;
+  window.pendingLargeTvSearchChoice = null;
+  window.isLargeTvSearchChoiceOpen = false;
+  if (resolve) resolve(choice);
 }
 
 async function searchTvRequest(mode = 'new', _options = {}) {
   if (!window.currentRequestId) return;
   const requestId = window.currentRequestId;
-  if (!(await confirmLargeTvSearch(requestId))) return;
   const fullSearch = mode === 'full';
   const btn = document.getElementById(
     fullSearch ? 'request-details-tv-full-search-btn' : 'request-details-tv-search-btn',
@@ -632,7 +646,39 @@ async function searchTvRequest(mode = 'new', _options = {}) {
   const otherBtn = document.getElementById(
     fullSearch ? 'request-details-tv-search-btn' : 'request-details-tv-full-search-btn',
   );
+  if (window.isTvScopeSearchRunning || btn?.disabled || otherBtn?.disabled) return;
+  window.isTvScopeSearchRunning = true;
   const originalText = btn ? btn.innerHTML : '';
+  const restoreButtons = function () {
+    window.isTvScopeSearchRunning = false;
+    if (btn?.isConnected) {
+      btn.disabled = false;
+      btn.innerHTML = originalText || (fullSearch ? 'Full search' : 'Search for new');
+    }
+    if (otherBtn?.isConnected) otherBtn.disabled = false;
+  };
+  if (btn) btn.disabled = true;
+  if (otherBtn) otherBtn.disabled = true;
+
+  let searchChoice;
+  try {
+    searchChoice = await confirmLargeTvSearch(requestId);
+  } catch (error) {
+    restoreButtons();
+    throw error;
+  }
+  if (searchChoice === 'none') {
+    restoreButtons();
+    return;
+  }
+  if (searchChoice === 'packs') {
+    try {
+      await window.searchAllSeasonPacks(requestId);
+    } finally {
+      restoreButtons();
+    }
+    return;
+  }
   if (btn) {
     btn.disabled = true;
     btn.textContent = 'Searching...';
@@ -915,4 +961,5 @@ window.searchTvRequest = searchTvRequest;
 window.searchTvRequestNew = searchTvRequestNew;
 window.searchTvRequestFull = searchTvRequestFull;
 window.confirmLargeTvSearch = confirmLargeTvSearch;
+window.chooseLargeTvSearch = chooseLargeTvSearch;
 window.searchTvRequestAll = searchTvRequestAll;
