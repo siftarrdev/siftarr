@@ -42,6 +42,7 @@ Primary flow:
 ## Top-level repository layout
 
 - `app/siftarr/` — main application package
+- `frontend-src/` — canonical strict TypeScript sources for incrementally migrated browser modules; builds preserve existing static ES-module paths
 - `tests/` — automated regression and unit/integration tests
 - `db/alembic/` — database migration environment and revision history
 - `docker/` — container build and local container workflow
@@ -49,7 +50,7 @@ Primary flow:
 - `data/` — locally created runtime data directory for SQLite and staging artifacts; gitignored and not committed
 - `icons/` — branding assets used by docs/UI
 - `mockups/` — exploratory UI mockups, organized by design iteration/name
-- `.github/workflows/` — GitHub Actions quality checks, including enforced Prettier and ESLint validation for frontend JavaScript
+- `.github/workflows/` — GitHub Actions quality checks, including frontend formatting/lint, TypeScript checking, generated-output verification, and tests
 - `README.md` — user-facing overview and Docker Compose quick start
 - `CONTRIBUTING.md` — developer setup, workflow, quality gates, and PR expectations
 - `AGENTS.md` — repository-specific agent/development rules
@@ -57,7 +58,8 @@ Primary flow:
 - `pyproject.toml` — Python 3.14 project metadata, dependencies, hatchling/hatch-vcs build backend, pytest, and Ruff config
 - `ty.toml` — static type checker configuration (Python version target)
 - `uv.lock` — locked dependency graph for `uv`
-- `package.json` — Tailwind CSS build plus Prettier/ESLint formatting and lint scripts and npm development dependencies
+- `package.json` — Tailwind and incremental TypeScript builds plus frontend format, lint, typecheck, and test scripts
+- `tsconfig.json` / `tsconfig.build.json` — strict no-emit TypeScript checking and the browser-output build mapping
 - `eslint.config.mjs` / `.prettierrc.json` — JavaScript linting and formatting policy for browser code under `app/siftarr/static/js/`
 - `node_modules/` — JavaScript dependencies (gitignored)
 
@@ -229,6 +231,7 @@ Static assets.
 - `css/tailwind.css` — built Tailwind CSS output (generated, committed)
 - `css/tailwind-input.css` — Tailwind CSS v4 input with CSS-based theme configuration and custom component classes
 - `js/dashboard*.js` and `js/dashboard/` — dashboard client-side behavior for the redesigned details modal (score-first release cards with inline staged Approve/Discard/Replace, client-only TV scope chips, per-season "Season packs" drawers plus a grouped Season packs tab with per-season/multi-season pack searches, Activity overlay opened from the details header and pinned over the right third of the modal, responsive mobile reflow), filters, staged actions and alternative review modal, TV “Search for new”/“Full search” controls, movie release search UX, and SSE progress panel; polls move status fields in download-status endpoint and shows badges/paths
+- `js/dashboard/core/state.js` and `column-resizer.js` — committed generated ES modules built from matching canonical files under `frontend-src/dashboard/core/`; browser import specifiers remain unchanged
 - `js/staging_decision_log.js` — client-side fetching, URL-backed filters, pagination, and raw JSON expansion for the Rules decision-log page
 - `js/stats.js` — Stats API fetch/range handling and lightweight bar/time-series chart rendering
 - favicon assets
@@ -284,7 +287,16 @@ templates, rebuild the CSS:
 npm run build:css
 ```
 
-The Docker multi-stage build rebuilds Tailwind CSS automatically.
+The Docker multi-stage build uses Node 20 to rebuild Tailwind CSS and the migrated
+TypeScript modules automatically.
+
+## Incremental TypeScript build
+
+Only migrated browser leaf modules live in `frontend-src/`; all other dashboard
+JavaScript remains canonical under `app/siftarr/static/js/`. `npm run
+build:frontend` compiles TypeScript back to the currently imported static paths,
+while `npm run typecheck:frontend` performs strict no-emit checking. Commit the
+generated JavaScript and use `npm run verify:frontend-build` to detect stale output.
 
 ### Dev mode
 

@@ -1,6 +1,8 @@
 // Dashboard Modals Module - Modal dialogs and toast notifications
 // ===============================================================
 
+import { refreshCurrentTabContent } from './core.js';
+
 function showToast(message) {
   const container = document.getElementById('toast-container');
   if (!container) return;
@@ -254,7 +256,7 @@ async function postToAction(action, redirectTo, trigger = null, scope = null) {
       const onComplete = function (data) {
         window.updateRequestRow(requestId, data.result);
         resetTrigger();
-        window.refreshCurrentTabContent();
+        refreshCurrentTabContent();
       };
       const onError = function () {
         resetTrigger();
@@ -315,7 +317,7 @@ async function handleBulkDenyAction(event, form) {
     // Uncheck all selected checkboxes
     checkboxes.forEach((cb) => (cb.checked = false));
     window.showToast('Request(s) denied');
-    await window.refreshCurrentTabContent();
+    await refreshCurrentTabContent();
   } catch (err) {
     window.showToast('Error: ' + err.message);
   } finally {
@@ -379,7 +381,7 @@ function handleBulkRequestActionSubmit(event, form) {
         }
         resetSubmitter();
         // Refresh stats cards after search completes
-        window.refreshCurrentTabContent();
+        refreshCurrentTabContent();
       },
       function () {
         resetSubmitter();
@@ -426,7 +428,7 @@ async function submitDenyRequest() {
     }
     closeDenyModal();
     window.showToast('Request denied');
-    await window.refreshCurrentTabContent();
+    await refreshCurrentTabContent();
   } catch (err) {
     window.showToast('Error: ' + err.message);
   } finally {
@@ -486,17 +488,35 @@ if (document.readyState === 'loading') {
   bindDenyModalHandlers();
 }
 
-// Export functions to window for HTML onclick handlers
-window.showToast = showToast;
-window.showSearchProgressToast = showSearchProgressToast;
-window.postToAction = postToAction;
-window.setSearchActionLoading = setSearchActionLoading;
-window.showBulkSearchStatus = showBulkSearchStatus;
-window.handleBulkRequestActionSubmit = handleBulkRequestActionSubmit;
-window.openDenyModal = openDenyModal;
-window.submitDenyRequest = submitDenyRequest;
-window.closeDenyModal = closeDenyModal;
-window.bindDenyModalHandlers = bindDenyModalHandlers;
-window.openReplaceModal = openReplaceModal;
-window.closeReplaceModal = closeReplaceModal;
-window.bindSelectAll = bindSelectAll;
+export {
+  showToast,
+  showSearchProgressToast,
+  postToAction,
+  setSearchActionLoading,
+  showBulkSearchStatus,
+  handleBulkRequestActionSubmit,
+  openDenyModal,
+  submitDenyRequest,
+  closeDenyModal,
+  bindDenyModalHandlers,
+  openReplaceModal,
+  closeReplaceModal,
+  bindSelectAll,
+};
+
+// Temporary compatibility facade for HTML onclick handlers and unconverted modules.
+Object.assign(window, {
+  showToast,
+  showSearchProgressToast,
+  postToAction,
+  setSearchActionLoading,
+  showBulkSearchStatus,
+  handleBulkRequestActionSubmit,
+  openDenyModal,
+  submitDenyRequest,
+  closeDenyModal,
+  bindDenyModalHandlers,
+  openReplaceModal,
+  closeReplaceModal,
+  bindSelectAll,
+});

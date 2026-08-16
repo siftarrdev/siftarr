@@ -1,32 +1,12 @@
 // Dashboard Core Module - Tab navigation, utilities, and global state
 // ====================================================================
 
-// Global state attached to window so all modules can reference it
-window.tableSortState = {
-  active: { column: null, direction: 'asc' },
-  pending: { column: null, direction: 'asc' },
-  unreleased: { column: null, direction: 'asc' },
-  staged: { column: null, direction: 'asc' },
-  downloading: { column: null, direction: 'asc' },
-  finished: { column: null, direction: 'asc' },
-  rejected: { column: null, direction: 'asc' },
-};
-
-window.mediaFilterState = {};
-
-// Navigation state for prev/next in details modal
-window.visibleRequests = [];
-window.currentDetailsIndex = -1;
-
-window.currentReleases = [];
-window.currentRequestId = null;
-window.currentTvSeasons = [];
-window.currentRequestTimeline = [];
+import { dashboardState } from '/static/js/dashboard/core/state.js';
 
 const checkboxRangeAnchors = new Map();
 
 // Utility functions
-function escapeHtml(value) {
+export function escapeHtml(value) {
   return String(value ?? '')
     .replaceAll('&', '&amp;')
     .replaceAll('<', '&lt;')
@@ -35,13 +15,13 @@ function escapeHtml(value) {
     .replaceAll("'", '&#39;');
 }
 
-function setActiveTab(tabName) {
+export function setActiveTab(tabName) {
   const url = new URL(window.location);
   url.searchParams.set('tab', tabName);
   window.history.replaceState({}, '', url);
 }
 
-function showTab(tabName) {
+export function showTab(tabName) {
   const content = document.getElementById('content-' + tabName);
   const tab = document.getElementById('tab-' + tabName);
   if (!content || !tab) {
@@ -69,7 +49,7 @@ function showTab(tabName) {
   }
 }
 
-function setPoster(posterUrl, titleText) {
+export function setPoster(posterUrl, titleText) {
   const poster = document.getElementById('request-details-poster');
   const fallback = document.getElementById('request-details-poster-fallback');
   if (!poster || !fallback) return;
@@ -100,7 +80,7 @@ function setPoster(posterUrl, titleText) {
   fallback.classList.remove('hidden');
 }
 
-function getVisibleRequests() {
+export function getVisibleRequests() {
   const activeTabContent = document.querySelector('.tab-content:not(.hidden)');
   if (!activeTabContent) return [];
   const isDisplayed = (element) => {
@@ -132,7 +112,7 @@ function getVisibleRequests() {
     });
 }
 
-function refreshDetailsNavigationContext() {
+export function refreshDetailsNavigationContext() {
   const modal = document.getElementById('request-details-modal');
   if (!modal || modal.classList.contains('hidden')) return;
 
@@ -141,7 +121,7 @@ function refreshDetailsNavigationContext() {
   window.updateNavigationButtons();
 }
 
-function updateNavigationButtons() {
+export function updateNavigationButtons() {
   const prevBtn = document.getElementById('details-prev-btn');
   const nextBtn = document.getElementById('details-next-btn');
   const position = document.getElementById('details-position');
@@ -191,7 +171,7 @@ function updateNavigationButtons() {
   }
 }
 
-function navigateDetails(direction) {
+export function navigateDetails(direction) {
   const total = window.visibleRequests.length;
   if (total === 0) return;
 
@@ -206,7 +186,7 @@ function navigateDetails(direction) {
   }
 }
 
-function closeRequestDetails() {
+export function closeRequestDetails() {
   if (window.cancelLiveDetailsRefresh) window.cancelLiveDetailsRefresh();
   window.activeDetailsRequestId = null;
   window.detailsLoadToken = (window.detailsLoadToken || 0) + 1;
@@ -236,7 +216,7 @@ function getVisibleCheckboxRange(checkbox, selector) {
   return Array.from(scope.querySelectorAll(selector)).filter(isRangeSelectableCheckboxVisible);
 }
 
-function bindCheckboxRangeSelection(selector) {
+export function bindCheckboxRangeSelection(selector) {
   document.querySelectorAll(selector).forEach((checkbox) => {
     if (checkbox.dataset.checkboxRangeBound === 'true') return;
     checkbox.dataset.checkboxRangeBound = 'true';
@@ -268,7 +248,7 @@ function bindCheckboxRangeSelection(selector) {
  * Preserves text filter, media filter, and sort state.
  * Also updates stat cards.
  */
-async function refreshCurrentTabContent() {
+export async function refreshCurrentTabContent() {
   const activeTabEl = document.querySelector('.tab-content:not(.hidden)');
   if (!activeTabEl) return;
   const tabName = activeTabEl.id.replace('content-', '');
@@ -321,15 +301,32 @@ async function refreshCurrentTabContent() {
   }
 }
 
-// Export functions to window for HTML onclick handlers
-window.showTab = showTab;
-window.closeRequestDetails = closeRequestDetails;
-window.navigateDetails = navigateDetails;
-window.escapeHtml = escapeHtml;
-window.setActiveTab = setActiveTab;
-window.setPoster = setPoster;
-window.getVisibleRequests = getVisibleRequests;
-window.refreshDetailsNavigationContext = refreshDetailsNavigationContext;
-window.updateNavigationButtons = updateNavigationButtons;
-window.refreshCurrentTabContent = refreshCurrentTabContent;
-window.bindCheckboxRangeSelection = bindCheckboxRangeSelection;
+// Temporary adapter for untouched modules and HTML event handlers.
+export function installCoreCompatibility() {
+  Object.keys(dashboardState).forEach((key) => {
+    Object.defineProperty(window, key, {
+      configurable: true,
+      enumerable: true,
+      get: () => dashboardState[key],
+      set: (value) => {
+        dashboardState[key] = value;
+      },
+    });
+  });
+
+  Object.assign(window, {
+    showTab,
+    closeRequestDetails,
+    navigateDetails,
+    escapeHtml,
+    setActiveTab,
+    setPoster,
+    getVisibleRequests,
+    refreshDetailsNavigationContext,
+    updateNavigationButtons,
+    refreshCurrentTabContent,
+    bindCheckboxRangeSelection,
+  });
+}
+
+installCoreCompatibility();

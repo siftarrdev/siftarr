@@ -1,13 +1,16 @@
 // Dashboard Filters Module - Table filtering and sorting
 // ======================================================
 
-function toggleMediaFilter(tabName, mediaType) {
-  if (!window.mediaFilterState[tabName]) window.mediaFilterState[tabName] = null;
+import { refreshDetailsNavigationContext } from '/static/js/dashboard/core.js';
+import { dashboardState } from '/static/js/dashboard/core/state.js';
 
-  if (window.mediaFilterState[tabName] === mediaType) {
-    window.mediaFilterState[tabName] = null;
+export function toggleMediaFilter(tabName, mediaType) {
+  if (!dashboardState.mediaFilterState[tabName]) dashboardState.mediaFilterState[tabName] = null;
+
+  if (dashboardState.mediaFilterState[tabName] === mediaType) {
+    dashboardState.mediaFilterState[tabName] = null;
   } else {
-    window.mediaFilterState[tabName] = mediaType;
+    dashboardState.mediaFilterState[tabName] = mediaType;
   }
 
   const tvBtn = document.getElementById('media-filter-' + tabName + '-tv');
@@ -20,7 +23,11 @@ function toggleMediaFilter(tabName, mediaType) {
   });
 
   const activeBtn =
-    window.mediaFilterState[tabName] === 'tv' ? tvBtn : window.mediaFilterState[tabName] === 'movie' ? movieBtn : null;
+    dashboardState.mediaFilterState[tabName] === 'tv'
+      ? tvBtn
+      : dashboardState.mediaFilterState[tabName] === 'movie'
+        ? movieBtn
+        : null;
   if (activeBtn) {
     activeBtn.classList.remove('border-gray-700/60', 'text-gray-500');
     activeBtn.classList.add('border-brand-500', 'text-brand-400', 'bg-brand-500/10');
@@ -42,35 +49,35 @@ function applyAllFilters(tabName) {
   if (filterMap[tabName]) filterMap[tabName]();
 }
 
-function filterTable() {
+export function filterTable() {
   const filterEl = document.getElementById('filter-input');
   if (!filterEl) return;
   const filter = filterEl.value.toLowerCase();
-  const mediaType = window.mediaFilterState['active'] || null;
+  const mediaType = dashboardState.mediaFilterState.active || null;
   document.querySelectorAll('#active-requests-body tr').forEach((row) => {
     const textContent = `${row.dataset.title} ${row.dataset.type} ${row.dataset.statusLow} ${row.dataset.requestedby}`;
     const textMatch = !filter || textContent.includes(filter);
     const mediaMatch = !mediaType || row.dataset.type === mediaType;
     row.style.display = textMatch && mediaMatch ? '' : 'none';
   });
-  window.refreshDetailsNavigationContext();
+  refreshDetailsNavigationContext();
 }
 
-function filterPendingTable() {
+export function filterPendingTable() {
   const filterEl = document.getElementById('pending-filter-input');
   if (!filterEl) return;
   const filter = filterEl.value.toLowerCase();
-  const mediaType = window.mediaFilterState['pending'] || null;
+  const mediaType = dashboardState.mediaFilterState.pending || null;
   document.querySelectorAll('#pending-requests-body tr, #pending-request-cards [data-request-id]').forEach((row) => {
     const textContent = `${row.dataset.title} ${row.dataset.type} ${row.dataset.requestedby} ${row.dataset.status}`;
     const textMatch = !filter || textContent.includes(filter);
     const mediaMatch = !mediaType || row.dataset.type === mediaType;
     row.style.display = textMatch && mediaMatch ? '' : 'none';
   });
-  window.refreshDetailsNavigationContext();
+  refreshDetailsNavigationContext();
 }
 
-function filterStagedTable() {
+export function filterStagedTable() {
   const filterEl = document.getElementById('staged-filter-input');
   if (!filterEl) return;
   const filter = filterEl.value.toLowerCase();
@@ -78,10 +85,10 @@ function filterStagedTable() {
     const textContent = `${row.dataset.title} ${row.dataset.indexer} ${row.dataset.requeststate}`;
     row.style.display = textContent.includes(filter) ? '' : 'none';
   });
-  window.refreshDetailsNavigationContext();
+  refreshDetailsNavigationContext();
 }
 
-function filterDownloadingTable() {
+export function filterDownloadingTable() {
   const filterEl = document.getElementById('downloading-filter-input');
   if (!filterEl) return;
   const filter = filterEl.value.toLowerCase();
@@ -91,42 +98,42 @@ function filterDownloadingTable() {
       const textContent = `${row.dataset.title} ${row.dataset.indexer} ${row.dataset.state} ${row.dataset.requeststate}`;
       row.style.display = textContent.includes(filter) ? '' : 'none';
     });
-  window.refreshDetailsNavigationContext();
+  refreshDetailsNavigationContext();
 }
 
-function filterFinishedTable() {
+export function filterFinishedTable() {
   const filterEl = document.getElementById('finished-filter-input');
   if (!filterEl) return;
   const filter = filterEl.value.toLowerCase();
-  const mediaType = window.mediaFilterState['finished'] || null;
+  const mediaType = dashboardState.mediaFilterState.finished || null;
   document.querySelectorAll('#finished-requests-body tr, #finished-request-cards [data-request-id]').forEach((row) => {
     const textContent = `${row.dataset.title} ${row.dataset.type} ${row.dataset.requestedby}`;
     const textMatch = !filter || textContent.includes(filter);
     const mediaMatch = !mediaType || row.dataset.type === mediaType;
     row.style.display = textMatch && mediaMatch ? '' : 'none';
   });
-  window.refreshDetailsNavigationContext();
+  refreshDetailsNavigationContext();
 }
 
-function filterRejectedTable() {
+export function filterRejectedTable() {
   const filterEl = document.getElementById('rejected-filter-input');
   if (!filterEl) return;
   const filter = filterEl.value.toLowerCase();
-  const mediaType = window.mediaFilterState['rejected'] || null;
+  const mediaType = dashboardState.mediaFilterState.rejected || null;
   document.querySelectorAll('#rejected-requests-body tr, #rejected-request-cards [data-request-id]').forEach((row) => {
     const textContent = `${row.dataset.title} ${row.dataset.type} ${row.dataset.requestedby} ${row.dataset.reason}`;
     const textMatch = !filter || textContent.includes(filter);
     const mediaMatch = !mediaType || row.dataset.type === mediaType;
     row.style.display = textMatch && mediaMatch ? '' : 'none';
   });
-  window.refreshDetailsNavigationContext();
+  refreshDetailsNavigationContext();
 }
 
-function filterUnreleasedTable() {
+export function filterUnreleasedTable() {
   const filterEl = document.getElementById('unreleased-filter-input');
   if (!filterEl) return;
   const filter = filterEl.value.toLowerCase();
-  const mediaType = window.mediaFilterState['unreleased'] || null;
+  const mediaType = dashboardState.mediaFilterState.unreleased || null;
   document
     .querySelectorAll('#unreleased-requests-body tr, #unreleased-request-cards [data-request-id]')
     .forEach((row) => {
@@ -136,24 +143,24 @@ function filterUnreleasedTable() {
       const mediaMatch = !mediaType || row.dataset.type === mediaType;
       row.style.display = textMatch && mediaMatch ? '' : 'none';
     });
-  window.refreshDetailsNavigationContext();
+  refreshDetailsNavigationContext();
 }
 
-function filterReleaseCards() {
+export function filterReleaseCards() {
   const filterEl = document.getElementById('release-filter-input');
   const releasesContainer = document.getElementById('request-details-releases');
   if (!filterEl || !releasesContainer) return;
   const filter = filterEl.value.toLowerCase();
   releasesContainer.innerHTML =
     '<ul class="divide-y divide-gray-700/40">' +
-    window.currentReleases
+    dashboardState.currentReleases
       .filter((r) => !filter || r.title.toLowerCase().includes(filter))
-      .map((release) => window.renderReleaseCard(release, window.currentRequestId))
+      .map((release) => window.renderReleaseCard(release, dashboardState.currentRequestId))
       .join('') +
     '</ul>';
 }
 
-function sortTable(tableName, sortKey, preserveDirection = false, forcedDirection = null) {
+export function sortTable(tableName, sortKey, preserveDirection = false, forcedDirection = null) {
   const tableIdMap = {
     active: 'active-requests-table',
     pending: 'pending-requests-table',
@@ -173,7 +180,7 @@ function sortTable(tableName, sortKey, preserveDirection = false, forcedDirectio
     rejected: 'rejected-requests-body',
   };
   const numericKeys = new Set(['ovrank', 'retrycount', 'year', 'size', 'score', 'progress', 'eta']);
-  const state = window.tableSortState[tableName];
+  const state = dashboardState.tableSortState[tableName];
   const tbody = document.getElementById(bodyIdMap[tableName]);
   const table = document.getElementById(tableIdMap[tableName]);
   if (!tbody || !table || !state) return;
@@ -231,10 +238,10 @@ function sortTable(tableName, sortKey, preserveDirection = false, forcedDirectio
       if (card) cardContainer.appendChild(card);
     });
   }
-  window.refreshDetailsNavigationContext();
+  refreshDetailsNavigationContext();
 }
 
-function sortDashboardCards(tableName, encodedSort) {
+export function sortDashboardCards(tableName, encodedSort) {
   const [sortKey, direction] = String(encodedSort || '').split(':');
   if (!sortKey) return;
   sortTable(tableName, sortKey, true, direction === 'desc' ? 'desc' : 'asc');
@@ -245,9 +252,9 @@ function sortDashboardCards(tableName, encodedSort) {
  * Re-applies media filter button styling, re-applies the current sort,
  * and updates sort indicators in table headers.
  */
-function restoreTabState(tabName) {
+export function restoreTabState(tabName) {
   // Restore media filter button styling
-  const activeMediaType = window.mediaFilterState[tabName] || null;
+  const activeMediaType = dashboardState.mediaFilterState[tabName] || null;
   const tvBtn = document.getElementById('media-filter-' + tabName + '-tv');
   const movieBtn = document.getElementById('media-filter-' + tabName + '-movie');
   [tvBtn, movieBtn].forEach((btn) => {
@@ -278,7 +285,7 @@ function restoreTabState(tabName) {
   }
 
   // Re-apply sorting using saved state
-  const sortState = window.tableSortState[tabName];
+  const sortState = dashboardState.tableSortState[tabName];
   if (sortState && sortState.column) {
     // Update sort indicator in the header
     const tableIdMap = {
@@ -303,7 +310,7 @@ function restoreTabState(tabName) {
       }
     }
     // Re-sort rows without toggling direction (preserveDirection=true)
-    window.sortTable(tabName, sortState.column, true);
+    sortTable(tabName, sortState.column, true);
   } else {
     // No saved sort, just re-apply filters
     applyAllFilters(tabName);
@@ -318,7 +325,7 @@ function restoreTabState(tabName) {
  *   // ... replace DOM ...
  *   cleanup();
  */
-function saveTabState(tabName) {
+export function saveTabState(tabName) {
   // Save text filter value onto the input element so restoreTabState can find it
   const filterInputIdMap = {
     active: 'filter-input',
@@ -340,17 +347,19 @@ function saveTabState(tabName) {
   };
 }
 
-// Export functions to window for HTML onclick handlers
-window.toggleMediaFilter = toggleMediaFilter;
-window.filterTable = filterTable;
-window.filterPendingTable = filterPendingTable;
-window.filterStagedTable = filterStagedTable;
-window.filterDownloadingTable = filterDownloadingTable;
-window.filterFinishedTable = filterFinishedTable;
-window.filterRejectedTable = filterRejectedTable;
-window.filterUnreleasedTable = filterUnreleasedTable;
-window.filterReleaseCards = filterReleaseCards;
-window.sortTable = sortTable;
-window.sortDashboardCards = sortDashboardCards;
-window.restoreTabState = restoreTabState;
-window.saveTabState = saveTabState;
+// Temporary adapter for bootstrap code and HTML event handlers.
+Object.assign(window, {
+  toggleMediaFilter,
+  filterTable,
+  filterPendingTable,
+  filterStagedTable,
+  filterDownloadingTable,
+  filterFinishedTable,
+  filterRejectedTable,
+  filterUnreleasedTable,
+  filterReleaseCards,
+  sortTable,
+  sortDashboardCards,
+  restoreTabState,
+  saveTabState,
+});

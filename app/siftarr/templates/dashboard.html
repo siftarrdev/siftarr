@@ -920,5 +920,20 @@
 window.siftarrStagingModeEnabled = {{ 'true' if staging_mode_enabled else 'false' }};
 window.siftarrStaticVersion = {{ static_version | tojson }};
 </script>
+<script type="importmap">
+{
+  "imports": {
+    "/static/js/dashboard/core.js": "{{ url_for('static', path='/js/dashboard/core.js') }}?v={{ static_version }}",
+    "/static/js/dashboard/releases.js": "{{ url_for('static', path='/js/dashboard/releases.js') }}?v={{ static_version }}",
+    "/static/js/dashboard/filters.js": "{{ url_for('static', path='/js/dashboard/filters.js') }}?v={{ static_version }}",
+    "/static/js/dashboard/details.js": "{{ url_for('static', path='/js/dashboard/details.js') }}?v={{ static_version }}",
+    "/static/js/dashboard/staged.js": "{{ url_for('static', path='/js/dashboard/staged.js') }}?v={{ static_version }}",
+    "/static/js/dashboard/modals.js": "{{ url_for('static', path='/js/dashboard/modals.js') }}?v={{ static_version }}",
+    "/static/js/dashboard/search_sse.js": "{{ url_for('static', path='/js/dashboard/search_sse.js') }}?v={{ static_version }}",
+    "/static/js/dashboard/core/state.js": "{{ url_for('static', path='/js/dashboard/core/state.js') }}?v={{ static_version }}",
+    "/static/js/dashboard/core/column-resizer.js": "{{ url_for('static', path='/js/dashboard/core/column-resizer.js') }}?v={{ static_version }}"
+  }
+}
+</script>
 <script type="module" src="{{ url_for('static', path='/js/dashboard.js') }}?v={{ static_version }}"></script>
 {% endblock %}

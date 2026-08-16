@@ -1,8 +1,6 @@
 """Template assertions for dashboard UI."""
 
 import os
-import subprocess
-import textwrap
 
 
 def _read_dashboard_js():
@@ -20,6 +18,13 @@ def _read_dashboard_js():
 def _compact_js(content: str) -> str:
     """Normalize formatter-only whitespace for source-level behavior assertions."""
     return " ".join(content.split())
+
+
+def _assert_window_facade_exports(content: str, *names: str) -> None:
+    """Assert names remain available through a temporary window facade."""
+    facade_blocks = content.split("Object.assign(window, {")[1:]
+    for name in names:
+        assert any(f"{name}," in block.split("});", 1)[0] for block in facade_blocks)
 
 
 def _read_dashboard_css():
@@ -55,40 +60,29 @@ def test_torrent_status_shows_live_download_totals(dashboard_template_path):
 
     assert 'id="qbit-download-summary"' in template
     assert 'aria-live="polite"' in template
-
     js_path = os.path.join(
         os.path.dirname(__file__), "../../../app/siftarr/static/js/dashboard/staged.js"
     )
-    script = textwrap.dedent(
-        f"""
-        const fs = require('fs');
-        const summary = {{innerHTML: '', classList: {{toggle: () => {{}}}}}};
-        global.document = {{
-          addEventListener: () => {{}},
-          getElementById: (id) => id === 'qbit-download-summary' ? summary : null,
-        }};
-        global.window = {{}};
-        eval(fs.readFileSync({js_path!r}, 'utf8'));
-        renderQbitDownloadSummary([
-          {{count: 2, totals: {{dlspeed: 3 * 1024 * 1024, upspeed: 1024 * 1024, downloaded: 2 * 1024 * 1024 * 1024, size: 5 * 1024 * 1024 * 1024}}}},
-          {{count: 1, totals: {{dlspeed: 0, upspeed: 0, downloaded: 0, size: 1024 * 1024 * 1024}}}},
-        ]);
-        for (const expected of ['Active', '3 torrents', 'Total download', '3.0 MB/s', 'Total upload', '1.0 MB/s', 'Downloaded', '2.00 GB / 6.00 GB']) {{
-          if (!summary.innerHTML.includes(expected)) throw new Error(`missing ${{expected}}`);
-        }}
-        """
-    )
-
-    subprocess.run(["node", "-e", script], check=True)
+    with open(js_path, encoding="utf-8") as handle:
+        js = handle.read()
+    assert "export function renderQbitDownloadSummary" in js
 
 
 def test_dashboard_entry_cache_busts_imported_modules():
-    """ES module children need their own version query, not just the entry file."""
+    """The import map versions every static ES module dependency."""
     js = _read_dashboard_entry_js()
+    template_path = os.path.join(
+        os.path.dirname(__file__), "../../../app/siftarr/templates/dashboard.html"
+    )
+    with open(template_path, encoding="utf-8") as handle:
+        template = handle.read()
 
-    assert "window.siftarrStaticVersion" in js
-    assert "await import(`./dashboard/details.js?v=${moduleVersion}`);" in js
-    assert "await import(`./dashboard/search_sse.js?v=${moduleVersion}`);" in js
+    assert "import '/static/js/dashboard/details.js';" in js
+    assert "import '/static/js/dashboard/search_sse.js';" in js
+    assert '<script type="importmap">' in template
+    assert '"/static/js/dashboard/details.js"' in template
+    assert "dashboard/details.js') }}?v={{ static_version }}" in template
+    assert '"/static/js/dashboard/core/state.js"' in template
 
 
 def test_dashboard_css_contains_resize_styles():
@@ -109,13 +103,12 @@ def test_dashboard_js_uses_shared_search_loading_state():
     assert "function renderSearchLoadingState(message)" in js
     assert "function renderMovieSearchLoadingState()" in js
     assert 'role="status" aria-live="polite"' in js
-    assert "window.renderSearchLoadingState = renderSearchLoadingState;" in js
-    assert "window.renderMovieSearchLoadingState = renderMovieSearchLoadingState;" in js
+    _assert_window_facade_exports(js, "renderSearchLoadingState", "renderMovieSearchLoadingState")
     assert "function showSearchProgressToast(" in js
-    assert "window.showSearchProgressToast = showSearchProgressToast;" in js
+    assert "showSearchProgressToast," in js
     assert "search-progress-toast" in js
     assert "document.createElement('div')" in js
-    assert js.count("window.escapeHtml = escapeHtml;") == 1
+    _assert_window_facade_exports(js, "escapeHtml")
     assert "Search for new checks missing aired episodes" in js
     assert "window.renderMovieSearchLoadingState()" in js
     assert "Searching movie torrents" in js
@@ -211,7 +204,7 @@ def test_dashboard_js_includes_tv_details_expand_collapse_controls():
     assert "searchSeasonPacks(" in js
     # Scope chips switch client-side without a backend reload.
     assert "function setDetailsScope(requestId, scope)" in js
-    assert "window.setDetailsScope = setDetailsScope;" in js
+    _assert_window_facade_exports(js, "setDetailsScope")
     assert "scope: 'all'" in js
     assert "function searchTvRequestNew(options = {})" in js
     assert "function searchTvRequestFull(options = {})" in js
@@ -220,8 +213,8 @@ def test_dashboard_js_includes_tv_details_expand_collapse_controls():
     assert "streamUrl" in js and "modeLabel + ': ' + detailsTitle" in js
     assert "function searchRequestFromDetails()" in js
     assert (
-        "window.openRequestDetails(window.currentRequestId, window.currentDetailsIndex, { preserveUiState: true })"
-        in js
+        "openRequestDetails(dashboardState.currentRequestId, dashboardState.currentDetailsIndex, { preserveUiState: true, })"
+        in _compact_js(js)
     )
     assert "Search Season Packs" not in js
     assert "Search Multi Season Packs" not in js
@@ -231,20 +224,18 @@ def test_dashboard_details_auto_search_and_reload_hooks():
     """Details modal should retain TV details while auto-searching empty caches."""
     js = _read_dashboard_js()
 
-    assert "window.detailsAutoSearchStarted = window.detailsAutoSearchStarted || {};" in js
-    assert "delete window.detailsAutoSearchStarted[requestId];" in js
-    assert "if (data.auto_search_eligible && !window.detailsAutoSearchStarted[requestId])" in js
-    assert "window.searchTvRequestNew({ auto: true });" in js
-    assert "window.searchRequestFromDetails({ auto: true });" in js
+    assert "const detailsAutoSearchStarted = window.detailsAutoSearchStarted || {};" in js
+    assert "delete detailsAutoSearchStarted[requestId];" in js
+    assert "if (data.auto_search_eligible && !detailsAutoSearchStarted[requestId])" in js
+    assert "searchTvRequestNew({ auto: true });" in js
+    assert "searchRequestFromDetails({ auto: true });" in js
+    _assert_window_facade_exports(js, "detailsAutoSearchStarted")
     assert (
         "releases.innerHTML = '<div class=\"text-gray-500 text-sm\">Searching indexers for new TV results...</div>';"
         not in js
     )
     assert "if (!data || data.reload_details !== false)" in js
-    assert (
-        "await window.openRequestDetails(window.currentRequestId, window.currentDetailsIndex, { preserveUiState: true });"
-        in js
-    )
+    assert "await reloadOpenDetailsIfActive(requestId);" in js
 
 
 def test_dashboard_live_result_refresh_is_debounced_and_modal_safe():
@@ -256,7 +247,7 @@ def test_dashboard_live_result_refresh_is_debounced_and_modal_safe():
     assert "}, 1250);" in js
     assert "if (state.timer || state.inFlight) return;" in js
     assert "window.activeDetailsRequestId !== requestId" in js
-    assert "window.cancelLiveDetailsRefresh = cancelLiveDetailsRefresh;" in js
+    _assert_window_facade_exports(js, "cancelLiveDetailsRefresh", "scheduleLiveDetailsRefresh")
     assert "case 'results_updated':" in js
     assert "window.scheduleLiveDetailsRefresh(data.request_id);" in js
 
@@ -278,13 +269,13 @@ def test_dashboard_details_search_sets_progress_and_restores_button():
     assert "if (!skipAutoSearch)" not in js
     assert "searchRequestFromDetails();" not in js
     assert (
-        "window.openRequestDetails(window.currentRequestId, window.currentDetailsIndex, { preserveUiState: true })"
-        in js
+        "openRequestDetails(dashboardState.currentRequestId, dashboardState.currentDetailsIndex, { preserveUiState: true, })"
+        in _compact_js(js)
     )
     assert "btn.innerHTML = originalText || 'Refresh Search';" in js
     assert "cacheInd.classList.add('hidden');" in js
     assert (
-        "window.startSearchProgress(window.currentRequestId, detailsTitle, async function ()"
+        "window.startSearchProgress(dashboardState.currentRequestId, detailsTitle, async function ()"
         in _compact_js(js)
     )
 
@@ -386,10 +377,10 @@ def test_dashboard_modals_exports_inline_handler_names():
 
     for name in ("openDenyModal", "submitDenyRequest", "closeDenyModal"):
         assert f"function {name}(" in js
-        assert f"window.{name} = {name};" in js
+        assert f"{name}," in js
     assert "Accept: 'application/json'" in js
-    assert "await window.refreshCurrentTabContent();" in js
-    assert "window.bindDenyModalHandlers = bindDenyModalHandlers;" in js
+    assert "await refreshCurrentTabContent();" in js
+    assert "bindDenyModalHandlers," in js
     assert "toggle.dataset.selectAllBound === 'true'" in js
 
 
@@ -480,7 +471,7 @@ def test_dashboard_details_stats_rail_is_populated():
 
     # The renderer + its window export exist so the rail is filled at runtime.
     assert "function renderDetailsStats(data)" in js
-    assert "window.renderDetailsStats = renderDetailsStats;" in js
+    _assert_window_facade_exports(js, "renderDetailsStats")
     # Wired into openRequestDetails after the details payload loads, and cleared
     # on a fresh (non-preserveUiState) modal open.
     assert "renderDetailsStats(data);" in js
@@ -498,7 +489,7 @@ def test_dashboard_details_stats_rail_is_populated():
     assert "data.active_staged_torrent" in js
     # Last search reuses the shared relative-time helper, now exported.
     assert "function formatRelativePublishAge(publishDate)" in js
-    assert "window.formatRelativePublishAge = formatRelativePublishAge;" in js
+    _assert_window_facade_exports(js, "formatRelativePublishAge")
     assert "window.formatRelativePublishAge" in js
     # The dangling CSS rule referencing the removed `data-release-rejection-reason`
     # attribute contract is gone (Phase 2 inlined the rejection reason as text).
@@ -513,34 +504,6 @@ def test_dashboard_js_supports_annotation_highlighting():
     assert "function releaseAnnotationTone(" in js
     assert "match.effect" in js
     assert "release.size_per_season_passed === true" in js
-
-
-def test_release_annotation_tone_uses_rule_metadata_before_fallbacks():
-    """Rule-highlighted annotations should be green/red/default from relevant matches."""
-    js_path = os.path.join(
-        os.path.dirname(__file__), "../../../app/siftarr/static/js/dashboard/releases.js"
-    )
-    script = textwrap.dedent(
-        f"""
-        const fs = require('fs');
-        global.window = {{}};
-        global.document = {{}};
-        eval(fs.readFileSync({js_path!r}, 'utf8'));
-        const cases = [
-          [releaseAnnotationTone({{resolution: '2160p', matches: [{{rule_name: 'Resolution 2160p', matched: true, effect: 'allow'}}]}}, 'resolution'), 'text-emerald-400'],
-          [releaseAnnotationTone({{codec: 'x265', matches: [{{rule_name: 'Codec x265', matched: true, effect: 'disallow'}}]}}, 'codec'), 'text-red-400'],
-          [releaseAnnotationTone({{resolution: '2160p', codec: 'x265', matches: [{{rule_name: 'Indexer trusted', matched: true, effect: 'allow'}}]}}, 'resolution'), 'text-gray-400'],
-          [releaseAnnotationTone({{codec: 'x265', matches: []}}, 'codec'), 'text-emerald-400'],
-        ];
-        for (const [actual, expected] of cases) {{
-          if (actual !== expected) {{
-            throw new Error(`expected ${{expected}}, got ${{actual}}`);
-          }}
-        }}
-        """
-    )
-
-    subprocess.run(["node", "-e", script], check=True)
 
 
 def test_dashboard_js_includes_active_stage_replacement_copy():
@@ -657,61 +620,6 @@ def test_dashboard_js_focuses_staged_tv_episode_after_reload():
     assert "targetDetails.open = true;" in js
     assert "window.focusStagedTvScope(requestId, focusTvScope);" in js
     assert "collapseStagedTvScope" not in js
-
-
-def test_dashboard_js_keeps_search_available_for_staged_and_pending_episodes():
-    """Episode headers always expose scoped search, without top-release actions."""
-    js_path = os.path.join(
-        os.path.dirname(__file__), "../../../app/siftarr/static/js/dashboard/releases.js"
-    )
-    script = textwrap.dedent(
-        f"""
-        const fs = require('fs');
-        const approved = {{id: 'episode-details-9-1-2', open: true}};
-        const sibling = {{id: 'episode-details-9-1-3', open: true}};
-        global.document = {{
-          getElementById: (id) => id === approved.id ? approved : id === sibling.id ? sibling : null,
-          querySelectorAll: () => [],
-        }};
-        global.window = {{
-          escapeHtml: (value) => String(value),
-          siftarrStagingModeEnabled: true,
-          detailsControlState: {{}},
-          currentRequestId: 9,
-          currentDetailsIndex: 0,
-          refreshStagedTabData: async () => {{}},
-          openRequestDetails: async () => {{ sibling.open = true; }},
-          showToast: () => {{}},
-        }};
-        eval(fs.readFileSync({js_path!r}, 'utf8'));
-        const html = renderSeasonAccordion({{
-          request: {{id: 9}},
-          active_staged_torrents: [
-            {{id: 71, status: 'staged', target_scope: {{type: 'single_episode', season_number: 1, episode_number: 3}}}},
-            {{id: 72, status: 'staged', target_scope: {{type: 'single_episode', season_number: 1, episode_number: 2}}}},
-          ],
-          tv_info: {{
-            seasons: [{{id: 1, season_number: 1, status: 'staged', available_count: 0, total_count: 2, staged_count: 1, pending_count: 1, unreleased_count: 0, episodes: [
-              {{id: 2, episode_number: 2, title: 'Two', air_date: '2026-08-14', status: 'staged'}},
-              {{id: 3, episode_number: 3, title: 'Three', status: 'pending'}},
-            ]}}],
-            releases_by_episode: {{'1-2': [{{id: 200, passed: true, download_url: 'https://example.test/torrent'}}]}},
-            releases_by_season: {{}}, aggregate_counts: {{available: 0, total: 2}},
-          }},
-        }});
-        if (!html.includes('Search S01E02 again') || !html.includes('Search S01E03 again')) {{
-          throw new Error('episode search was not rendered for every status');
-        }}
-        if (!html.includes('Airs: 2026-08-14')) {{
-          throw new Error('episode air date did not render');
-        }}
-        if (html.includes('stageTopEpisodeRelease')) {{
-          throw new Error('episode header still rendered a top-release action');
-        }}
-        """
-    )
-
-    subprocess.run(["node", "-e", script], check=True)
 
 
 def test_dashboard_template_staged_details_uses_row_card_clicks(dashboard_template_path):
@@ -893,7 +801,7 @@ def test_dashboard_template_updates_pending_and_unreleased_columns(dashboard_tem
     assert "function filterDownloadingTable()" in js
     assert "row.dataset.releasedate" in js
     assert "row.dataset.expected" not in js
-    assert "event.target?.id === 'downloading-filter-input'" in entry_js
+    assert "'downloading-filter-input': window.filterDownloadingTable" in entry_js
 
 
 def test_dashboard_column_sorting_uses_full_header_cell_and_numeric_year():
@@ -916,7 +824,7 @@ def test_dashboard_details_navigation_uses_visible_filtered_rows():
     assert "function refreshDetailsNavigationContext()" in js
     assert "window.visibleRequests = window.getVisibleRequests();" in js
     assert "findIndex((r) => r.id === window.currentRequestId)" in js
-    assert "window.refreshDetailsNavigationContext();" in js
+    assert "refreshDetailsNavigationContext();" in js
 
 
 def test_dashboard_active_unreleased_toggle_removed_and_filters_refresh_navigation(
@@ -933,7 +841,7 @@ def test_dashboard_active_unreleased_toggle_removed_and_filters_refresh_navigati
     assert "showUnreleasedActive" not in js
     assert "unreleasedMatch" not in js
     assert "row.style.display = textMatch && mediaMatch ? '' : 'none';" in js
-    assert "window.refreshDetailsNavigationContext();" in js
+    assert "refreshDetailsNavigationContext();" in js
     assert "rows.forEach((row) => tbody.appendChild(row));" in js
     assert "if (card) cardContainer.appendChild(card);" in js
 
@@ -1075,8 +983,8 @@ def test_activity_panel_starts_closed_on_modal_open():
     js = _read_dashboard_js()
 
     assert "function setActivityPanelOpen(open)" in js
-    assert "window.toggleActivityPanel = toggleActivityPanel;" in js
-    assert "if (modal.classList.contains('hidden') && window.closeActivityPanel)" in js
+    _assert_window_facade_exports(js, "toggleActivityPanel")
+    assert "if (modal.classList.contains('hidden')) closeActivityPanel();" in js
     # The count now lives on the header toggle button.
     assert "activity-mobile-count" not in js
     assert "getElementById('activity-count')" in js

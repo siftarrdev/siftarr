@@ -2,120 +2,18 @@
 // ==========================
 // This file imports all dashboard modules and initializes the application.
 
-const moduleVersion = encodeURIComponent(window.siftarrStaticVersion || Date.now().toString());
-
-await import(`./dashboard/core.js?v=${moduleVersion}`);
-await import(`./dashboard/releases.js?v=${moduleVersion}`);
-await import(`./dashboard/filters.js?v=${moduleVersion}`);
-await import(`./dashboard/details.js?v=${moduleVersion}`);
-await import(`./dashboard/staged.js?v=${moduleVersion}`);
-await import(`./dashboard/modals.js?v=${moduleVersion}`);
-await import(`./dashboard/search_sse.js?v=${moduleVersion}`);
-
-// Column Resizer Class - Must be defined here as it's used across modules
-class ColumnResizer {
-  constructor() {
-    this.tables = document.querySelectorAll('table.data-resizable');
-    this.storageKey = 'siftarr_col_widths';
-    this.savedWidths = this.loadWidths();
-    this.activeHandle = null;
-    this.activeCol = null;
-    this.startX = 0;
-    this.startWidth = 0;
-    this.minWidth = 60;
-    this.init();
-  }
-
-  loadWidths() {
-    try {
-      return JSON.parse(localStorage.getItem(this.storageKey)) || {};
-    } catch {
-      return {};
-    }
-  }
-
-  saveWidths() {
-    localStorage.setItem(this.storageKey, JSON.stringify(this.savedWidths));
-  }
-
-  init() {
-    this.attachHandles();
-
-    document.addEventListener('mousemove', (e) => this.onMouseMove(e));
-    document.addEventListener('mouseup', () => this.endResize());
-    document.addEventListener('mouseleave', () => this.endResize());
-  }
-
-  // Re-queryable: tab refreshes replace table markup, so handles must be
-  // re-attached against the new DOM without duplicating the document-level
-  // drag listeners bound in init().
-  attachHandles() {
-    this.tables = document.querySelectorAll('table.data-resizable');
-    this.tables.forEach((table) => {
-      const tableId = table.id;
-      if (!this.savedWidths[tableId]) {
-        this.savedWidths[tableId] = {};
-      }
-      const tableWidths = this.savedWidths[tableId];
-
-      table.querySelectorAll('th[data-col-key]').forEach((th) => {
-        const colKey = th.dataset.colKey;
-        const col = table.querySelector(`col[data-col-key="${colKey}"]`);
-        if (!col) return;
-
-        if (tableWidths[colKey]) {
-          col.style.width = tableWidths[colKey] + 'px';
-        }
-        const handle = th.querySelector('.resize-handle');
-        if (handle) {
-          handle.addEventListener('mousedown', (e) => this.startResize(e, col));
-        }
-      });
-    });
-  }
-
-  startResize(e, col) {
-    e.preventDefault();
-    e.stopPropagation();
-    this.activeHandle = e.target;
-    this.activeCol = col;
-    this.startX = e.clientX;
-    this.startWidth = parseInt(col.style.width) || col.offsetWidth || 100;
-    this.activeHandle.classList.add('dragging');
-    document.body.classList.add('resizing');
-  }
-
-  onMouseMove(e) {
-    if (!this.activeHandle || !this.activeCol) return;
-    const dx = e.clientX - this.startX;
-    const newWidth = Math.max(this.minWidth, this.startWidth + dx);
-    this.activeCol.style.width = newWidth + 'px';
-  }
-
-  endResize() {
-    if (!this.activeHandle || !this.activeCol) return;
-
-    const tableId = this.activeCol.closest('table').id;
-    const colKey = this.activeCol.dataset.colKey;
-    const finalWidth = parseInt(this.activeCol.style.width) || this.activeCol.offsetWidth;
-
-    if (!this.savedWidths[tableId]) {
-      this.savedWidths[tableId] = {};
-    }
-    this.savedWidths[tableId][colKey] = finalWidth;
-    this.saveWidths();
-
-    this.activeHandle.classList.remove('dragging');
-    document.body.classList.remove('resizing');
-    this.activeHandle = null;
-    this.activeCol = null;
-  }
-}
+// dashboard.html maps these stable specifiers to versioned URLs. Import maps
+// make the entry and every child share the server-provided static revision.
+import '/static/js/dashboard/core.js';
+import '/static/js/dashboard/releases.js';
+import '/static/js/dashboard/filters.js';
+import '/static/js/dashboard/details.js';
+import '/static/js/dashboard/staged.js';
+import '/static/js/dashboard/modals.js';
+import '/static/js/dashboard/search_sse.js';
+import { ColumnResizer } from '/static/js/dashboard/core/column-resizer.js';
 
 // Initialize on DOM ready
-// Note: because this module uses top-level await import(), DOMContentLoaded
-// may fire before the dynamic imports resolve, so we use the readyState
-// guard pattern (same as modals.js).
 function initDashboard() {
   // Initialize column resizer
   const columnResizer = new ColumnResizer();
@@ -136,33 +34,22 @@ function initDashboard() {
     window.filterTable();
   }
 
-  // Bind event listeners for filter inputs
-  const filterInput = document.getElementById('filter-input');
-  const pendingFilterInput = document.getElementById('pending-filter-input');
-  const downloadingFilterInput = document.getElementById('downloading-filter-input');
-  const finishedFilterInput = document.getElementById('finished-filter-input');
-  const rejectedFilterInput = document.getElementById('rejected-filter-input');
-  const unreleasedFilterInput = document.getElementById('unreleased-filter-input');
+  // Delegate filter events because tab refreshes replace filter inputs.
   const activeSelectAll = document.getElementById('active-select-all');
   const pendingSelectAll = document.getElementById('pending-select-all');
 
-  if (filterInput) filterInput.addEventListener('input', window.filterTable);
-  if (pendingFilterInput) pendingFilterInput.addEventListener('input', window.filterPendingTable);
-  if (downloadingFilterInput) downloadingFilterInput.addEventListener('input', window.filterDownloadingTable);
-  if (finishedFilterInput) finishedFilterInput.addEventListener('input', window.filterFinishedTable);
-  if (rejectedFilterInput) rejectedFilterInput.addEventListener('input', window.filterRejectedTable);
-  if (unreleasedFilterInput) unreleasedFilterInput.addEventListener('input', window.filterUnreleasedTable);
-
-  const releaseFilterInput = document.getElementById('release-filter-input');
-  if (releaseFilterInput) releaseFilterInput.addEventListener('input', window.filterReleaseCards);
-
   document.addEventListener('input', (event) => {
-    if (event.target?.id === 'staged-filter-input') {
-      window.filterStagedTable();
-    }
-    if (event.target?.id === 'downloading-filter-input') {
-      window.filterDownloadingTable();
-    }
+    const handlers = {
+      'filter-input': window.filterTable,
+      'pending-filter-input': window.filterPendingTable,
+      'staged-filter-input': window.filterStagedTable,
+      'downloading-filter-input': window.filterDownloadingTable,
+      'finished-filter-input': window.filterFinishedTable,
+      'rejected-filter-input': window.filterRejectedTable,
+      'unreleased-filter-input': window.filterUnreleasedTable,
+      'release-filter-input': window.filterReleaseCards,
+    };
+    handlers[event.target?.id]?.();
   });
 
   // Bind select all checkboxes

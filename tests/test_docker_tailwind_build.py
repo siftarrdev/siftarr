@@ -29,13 +29,13 @@ def test_tailwind_stage_scans_the_whole_app_tree():
 def test_tailwind_stage_copies_sources_before_building():
     stage = _tailwind_stage()
 
-    assert stage.index("COPY app/ ./app/") < stage.index("@tailwindcss/cli")
+    assert stage.index("COPY app/ ./app/") < stage.index("npm run build:css")
 
 
 def test_tailwind_output_is_copied_into_the_runtime_image():
     content = DOCKERFILE.read_text(encoding="utf-8")
 
     assert (
-        "COPY --from=tailwind-builder /build/app/siftarr/static/css/tailwind.css"
+        "COPY --from=frontend-builder /build/app/siftarr/static/css/tailwind.css"
         " ./app/siftarr/static/css/tailwind.css" in content
     )
