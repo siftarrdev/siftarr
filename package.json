@@ -3,17 +3,28 @@
   "private": true,
   "devDependencies": {
     "@eslint/js": "^10.0.1",
+    "@playwright/test": "^1.62.1",
     "@tailwindcss/cli": "^4.0.0",
     "eslint": "^10.8.1",
     "globals": "^17.11.0",
+    "jsdom": "^27.4.0",
     "prettier": "^3.9.6",
-    "tailwindcss": "^4.3.0"
+    "tailwindcss": "^4.3.0",
+    "typescript": "^5.9.2",
+    "typescript-eslint": "^8.39.1",
+    "vitest": "^4.1.10"
   },
   "scripts": {
     "build:css": "npx @tailwindcss/cli -i ./app/siftarr/static/css/tailwind-input.css -o ./app/siftarr/static/css/tailwind.css --minify",
-    "format:js": "prettier --write \"app/siftarr/static/js/**/*.js\" eslint.config.mjs",
-    "format:js:check": "prettier --check \"app/siftarr/static/js/**/*.js\" eslint.config.mjs",
-    "lint:js": "eslint \"app/siftarr/static/js/**/*.js\"",
-    "check:js": "npm run format:js:check && npm run lint:js"
+    "build:frontend": "tsc -p tsconfig.build.json && prettier --write \"app/siftarr/static/js/dashboard/core/{state,column-resizer}.js\"",
+    "typecheck:frontend": "tsc -p tsconfig.json --noEmit",
+    "verify:frontend-build": "npm run build:frontend && git diff --exit-code -- app/siftarr/static/js/dashboard/core/state.js app/siftarr/static/js/dashboard/core/column-resizer.js",
+    "format:js": "prettier --write \"app/siftarr/static/js/**/*.js\" \"frontend-src/**/*.{ts,mjs}\" \"frontend-tests/**/*.{js,mjs}\" *.config.mjs",
+    "format:js:check": "prettier --check \"app/siftarr/static/js/**/*.js\" \"frontend-src/**/*.{ts,mjs}\" \"frontend-tests/**/*.{js,mjs}\" *.config.mjs",
+    "lint:js": "eslint \"app/siftarr/static/js/**/*.js\" && eslint --config frontend-src/eslint.config.mjs \"frontend-src/**/*.ts\" frontend-src/eslint.config.mjs && eslint --config frontend-tests/eslint.config.mjs \"frontend-tests/**/*.js\" frontend-tests/eslint.config.mjs vitest.config.mjs playwright.config.mjs",
+    "test:unit:js": "vitest run",
+    "test:e2e": "playwright test",
+    "test:js": "npm run test:unit:js",
+    "check:js": "npm run format:js:check && npm run lint:js && npm run test:js"
   }
 }

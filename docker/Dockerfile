@@ -1,7 +1,8 @@
-# Stage 1: Build Tailwind CSS
-FROM node:20-slim AS tailwind-builder
+# Stage 1: Build browser assets
+FROM node:20-slim AS frontend-builder
 WORKDIR /build
-COPY package.json ./
+COPY package.json package-lock.json tsconfig.json tsconfig.build.json ./
+COPY frontend-src/ ./frontend-src/
 # The whole app tree must be present: Tailwind only emits utilities it finds in
 # scanned sources, and the dashboard builds most of the request-details markup in
 # app/siftarr/static/js/. Copying just the templates silently dropped every
@@ -9,8 +10,9 @@ COPY package.json ./
 # with no spacing at all in the container while looking fine locally).
 COPY app/ ./app/
 RUN --mount=type=cache,target=/root/.npm \
-    npm install && \
-    npx @tailwindcss/cli -i ./app/siftarr/static/css/tailwind-input.css -o ./app/siftarr/static/css/tailwind.css --minify
+    npm ci && \
+    npm run build:frontend && \
+    npm run build:css
 
 # Stage 2: Python application
 FROM python:3.14-slim
@@ -46,8 +48,10 @@ RUN --mount=type=cache,target=/root/.cache/uv \
     SETUPTOOLS_SCM_PRETEND_VERSION_FOR_SIFTARR="${SIFTARR_VERSION#v}" \
     uv sync --frozen
 
-# Copy pre-built Tailwind CSS from build stage
-COPY --from=tailwind-builder /build/app/siftarr/static/css/tailwind.css ./app/siftarr/static/css/tailwind.css
+# Copy assets rebuilt from their canonical sources.
+COPY --from=frontend-builder /build/app/siftarr/static/css/tailwind.css ./app/siftarr/static/css/tailwind.css
+COPY --from=frontend-builder /build/app/siftarr/static/js/dashboard/core/state.js ./app/siftarr/static/js/dashboard/core/state.js
+COPY --from=frontend-builder /build/app/siftarr/static/js/dashboard/core/column-resizer.js ./app/siftarr/static/js/dashboard/core/column-resizer.js
 COPY db/alembic/ ./alembic/
 COPY db/alembic.ini ./
 

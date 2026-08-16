@@ -1,9 +1,12 @@
 // Dashboard Releases Module - Release card rendering and search actions
 // ====================================================================
 
+import { escapeHtml } from './core.js';
+import { dashboardState } from './core/state.js';
+
 function renderAnnotation(value, toneClass = 'text-gray-400', dataAttr = '') {
   if (!value) return '';
-  return `<span class="${toneClass}" ${dataAttr}>${window.escapeHtml(value)}</span>`;
+  return `<span class="${toneClass}" ${dataAttr}>${escapeHtml(value)}</span>`;
 }
 
 function renderSearchLoadingState(message) {
@@ -11,7 +14,7 @@ function renderSearchLoadingState(message) {
     '<div class="dashboard-search-loading" role="status" aria-live="polite">' +
     '<svg class="animate-spin h-4 w-4 shrink-0" aria-hidden="true" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>' +
     '<span>' +
-    window.escapeHtml(message) +
+    escapeHtml(message) +
     '</span>' +
     '</div>'
   );
@@ -143,13 +146,13 @@ function summarizeRejectionReason(reason) {
 
 function renderRejectionVerdict(release) {
   const summary = summarizeRejectionReason(release.rejection_reason);
-  const fullReason = release.rejection_reason ? window.escapeHtml(release.rejection_reason) : '';
+  const fullReason = release.rejection_reason ? escapeHtml(release.rejection_reason) : '';
   const titleAttr = fullReason ? ' title="' + fullReason + '"' : '';
   return (
     '<span class="font-semibold text-red-400 whitespace-nowrap"' +
     titleAttr +
     ' data-release-rejection="true">' +
-    window.escapeHtml(summary) +
+    escapeHtml(summary) +
     '</span>'
   );
 }
@@ -179,9 +182,9 @@ function renderIconAction(kind, label, attrs = '', disabled = false) {
   const disabledClasses = disabled ? ' opacity-35 cursor-not-allowed' : '';
   return (
     '<button type="button" aria-label="' +
-    window.escapeHtml(label) +
+    escapeHtml(label) +
     '" title="' +
-    window.escapeHtml(label) +
+    escapeHtml(label) +
     '" class="tap inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border transition-colors ' +
     RELEASE_ACTION_CLASSES[kind] +
     disabledClasses +
@@ -230,13 +233,13 @@ function renderReleaseCard(release, requestId, options = {}) {
     ' font-bold ' +
     scoreColor +
     ' tabular-nums leading-none">' +
-    window.escapeHtml(String(release.score ?? 0)) +
+    escapeHtml(String(release.score ?? 0)) +
     '</div></div>';
 
   const stagedBadge = activeSelectionMode
     ? '<span class="inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-medium bg-cyan-900/60 text-cyan-300 ring-1 ring-inset ring-cyan-700/40">Staged</span>'
     : '';
-  const titleText = window.escapeHtml(release.title);
+  const titleText = escapeHtml(release.title);
   // Long release titles get two wrapped lines at <lg (with a modest type
   // down-step) instead of a single truncated line, and truncate on desktop
   // where the row is wide enough.
@@ -268,12 +271,12 @@ function renderReleaseCard(release, requestId, options = {}) {
       ? '<span class="' +
         (Number(release.seeders) === 0 ? 'font-bold text-red-400' : '') +
         '">' +
-        window.escapeHtml(String(release.seeders)) +
+        escapeHtml(String(release.seeders)) +
         ' seeders</span>'
       : '',
     release.files != null
       ? '<span data-release-files="true">' +
-        window.escapeHtml(String(release.files)) +
+        escapeHtml(String(release.files)) +
         ' file' +
         (release.files === 1 ? '' : 's') +
         '</span>'
@@ -300,7 +303,7 @@ function renderReleaseCard(release, requestId, options = {}) {
   const disableAction = !(release.download_url || release.magnet_url);
   const manualDataJson = storedReleaseId
     ? '{}'
-    : window.escapeHtml(
+    : escapeHtml(
         JSON.stringify({
           title: release.title || '',
           size: release.size_bytes ?? 0,
@@ -316,7 +319,7 @@ function renderReleaseCard(release, requestId, options = {}) {
           release_group: release.release_group || '',
         }),
       );
-  const stageScopeJson = window.escapeHtml(JSON.stringify(releaseScope || {}));
+  const stageScopeJson = escapeHtml(JSON.stringify(releaseScope || {}));
   const actionTitle = window.siftarrStagingModeEnabled
     ? isActiveSelection
       ? 'This torrent is already the active staged selection.'
@@ -328,7 +331,7 @@ function renderReleaseCard(release, requestId, options = {}) {
   let actionHtml;
   const releaseUseAttrs =
     ' data-stage-url="' +
-    window.escapeHtml(formAction) +
+    escapeHtml(formAction) +
     '" data-stage-fields="' +
     manualDataJson +
     '" data-stage-scope="' +
@@ -439,17 +442,17 @@ function renderCoverageBadge(release) {
           ? 'text-red-400'
           : 'text-gray-400') +
       '">' +
-      window.escapeHtml(release.size_per_season) +
+      escapeHtml(release.size_per_season) +
       '/season</span>'
     : '';
 
   return (
     '<div class="mt-1 flex flex-wrap items-center gap-2 text-xs text-gray-400">' +
     '<span class="badge badge-blue">' +
-    window.escapeHtml(countText) +
+    escapeHtml(countText) +
     '</span>' +
     '<span>' +
-    window.escapeHtml(coverageText) +
+    escapeHtml(coverageText) +
     '</span>' +
     sizePerSeason +
     seriesBadge +
@@ -480,7 +483,6 @@ function isEpisodeComplete(episode) {
   const status = episode && episode.status;
   return status === 'available' || status === 'completed';
 }
-window.isEpisodeComplete = isEpisodeComplete;
 
 function seasonNeededCount(season) {
   return (season && season.episodes ? season.episodes : []).filter(function (ep) {
@@ -651,13 +653,13 @@ function renderStagedPackRow(staged, _requestId) {
     '<div class="min-w-0 flex-1 basis-[70%] lg:basis-auto">' +
     '<div class="flex items-center gap-2 flex-wrap">' +
     '<span class="text-[13px] leading-snug text-white font-medium overflow-wrap-anywhere line-clamp-2 lg:line-clamp-none lg:truncate">' +
-    window.escapeHtml(staged.title || 'Staged pack') +
+    escapeHtml(staged.title || 'Staged pack') +
     '</span>' +
     '<span class="inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-medium bg-cyan-900/60 text-cyan-300 ring-1 ring-inset ring-cyan-700/40">Staged</span>' +
     '</div>' +
     '<div class="text-[11px] leading-tight text-gray-400 flex items-center gap-1 lg:gap-1.5 flex-wrap">' +
     '<span>' +
-    window.escapeHtml(stagedScopeLabel(staged)) +
+    escapeHtml(stagedScopeLabel(staged)) +
     '</span>' +
     '<span class="text-gray-600">·</span>' +
     '<span class="text-gray-500">no cached result — awaiting approval</span>' +
@@ -703,7 +705,7 @@ function renderSeasonPacksDrawer(requestId, season, seasonPacks, stagedPacks) {
     '<span class="text-xs ' +
     (orphanStaged.length ? 'text-cyan-300' : 'text-gray-500') +
     '">' +
-    window.escapeHtml(countParts.join(' · ')) +
+    escapeHtml(countParts.join(' · ')) +
     '</span>' +
     '<div class="ml-auto flex items-center gap-2 shrink-0">' +
     renderSeasonPackSearchButton(requestId, season) +
@@ -743,7 +745,7 @@ function renderSeasonPackGroup(requestId, season, seasonPacks, stagedPacks) {
     seasonNumber +
     '</span>' +
     '<span class="text-xs text-gray-500">' +
-    window.escapeHtml(headerMeta) +
+    escapeHtml(headerMeta) +
     '</span>' +
     '<div class="ml-auto flex items-center gap-2">' +
     renderSeasonPackSearchButton(requestId, season) +
@@ -804,7 +806,7 @@ function renderMultiSeasonPackGroup(requestId, multiSeasonReleases, stagedPacks)
     '<span class="text-xs ' +
     (orphanStaged.length ? 'text-cyan-300' : 'text-gray-500') +
     '">' +
-    window.escapeHtml(countParts.join(' · ')) +
+    escapeHtml(countParts.join(' · ')) +
     '</span>' +
     '<div class="ml-auto flex items-center gap-2">' +
     '<button type="button" onclick="searchMultiSeasonPacks(' +
@@ -904,7 +906,7 @@ function renderScopeChip(requestId, value, label, count, activeScope) {
     '\')" class="' +
     classes +
     '">' +
-    window.escapeHtml(label) +
+    escapeHtml(label) +
     ' <span class="' +
     countClass +
     '">' +
@@ -922,7 +924,7 @@ function renderSeasonAccordion(data) {
     const emptyState = syncState.refresh_in_progress
       ? 'No cached season information yet. Background refresh in progress...'
       : 'No season information available.';
-    return '<div class="text-gray-500 text-sm">' + window.escapeHtml(emptyState) + '</div>';
+    return '<div class="text-gray-500 text-sm">' + escapeHtml(emptyState) + '</div>';
   }
 
   // Client-only scope (detailsControlState.scope). Defaults to 'all' when the
@@ -990,7 +992,7 @@ function renderSeasonAccordion(data) {
     renderScopeChip(requestId, 'season_packs', 'Season packs', totalPackCount, scope) +
     renderScopeChip(requestId, 'complete_series', 'Complete series', completeSeriesReleases.length, scope) +
     '<span class="basis-full text-xs text-gray-500 lg:basis-auto lg:ml-auto">' +
-    window.escapeHtml(aggregateText) +
+    escapeHtml(aggregateText) +
     '</span>' +
     '</div>';
 
@@ -1097,16 +1099,16 @@ function renderSeasonAccordion(data) {
             String(ep.episode_number).padStart(2, '0') +
             '</span>' +
             '<span class="min-w-0 flex-1 basis-[55%] text-[13px] lg:text-sm text-white truncate lg:basis-auto">' +
-            window.escapeHtml(ep.title || 'Untitled') +
+            escapeHtml(ep.title || 'Untitled') +
             '</span>' +
             (ep.air_date
-              ? '<span class="text-xs text-gray-500 shrink-0">Airs: ' + window.escapeHtml(ep.air_date) + '</span>'
+              ? '<span class="text-xs text-gray-500 shrink-0">Airs: ' + escapeHtml(ep.air_date) + '</span>'
               : '') +
             '<div class="ml-auto flex flex-wrap items-center justify-end gap-3.5 shrink-0">' +
             '<span class="badge ' +
             badgeClass +
             '">' +
-            window.escapeHtml(statusLabel) +
+            escapeHtml(statusLabel) +
             '</span>' +
             renderIconAction(
               'search',
@@ -1162,13 +1164,13 @@ function renderSeasonAccordion(data) {
         season.season_number +
         '</span>' +
         '<span class="min-w-0 text-xs text-gray-500 truncate">' +
-        window.escapeHtml(availableText) +
+        escapeHtml(availableText) +
         '</span>' +
         packsChip +
         '<span class="lg:ml-auto shrink-0"><span class="badge ' +
         seasonBadgeClass +
         '">' +
-        window.escapeHtml(season.status || 'unknown') +
+        escapeHtml(season.status || 'unknown') +
         '</span></span>' +
         renderIconAction(
           'search',
@@ -1431,8 +1433,8 @@ async function submitReleaseAction(btn, approveNow = false) {
     const payload = await resp.json().catch(() => ({}));
     window.showToast(payload.message || (approveNow ? 'Release approved and sent' : 'Active staged selection updated'));
     window.refreshStagedTabData();
-    if (window.currentRequestId) {
-      await window.openRequestDetails(window.currentRequestId, window.currentDetailsIndex, {
+    if (dashboardState.currentRequestId) {
+      await window.openRequestDetails(dashboardState.currentRequestId, dashboardState.currentDetailsIndex, {
         preserveUiState: true,
         focusTvScope: approveNow ? null : stagedScope,
       });
@@ -1468,7 +1470,7 @@ async function rejectRelease(btn, requestId, releaseId) {
     }
     const payload = await response.json().catch(() => ({}));
     window.showToast(payload.message || 'Release rejected');
-    await window.openRequestDetails(requestId, window.currentDetailsIndex, { preserveUiState: true });
+    await window.openRequestDetails(requestId, dashboardState.currentDetailsIndex, { preserveUiState: true });
   } catch (err) {
     btn.disabled = false;
     btn.removeAttribute('aria-busy');
@@ -1493,7 +1495,7 @@ async function stageIndividualEpisodes(btn, requestId, seasonNumber) {
     const payload = await resp.json().catch(() => ({}));
     window.showToast(payload.message || 'Individual episode releases staged');
     window.refreshStagedTabData();
-    await window.openRequestDetails(requestId, window.currentDetailsIndex, { preserveUiState: true });
+    await window.openRequestDetails(requestId, dashboardState.currentDetailsIndex, { preserveUiState: true });
   } catch (err) {
     btn.disabled = false;
     btn.textContent = originalText;
@@ -1530,8 +1532,10 @@ async function inlineStagedAction(actionUrl, btn = null) {
     }
     const data = await response.json().catch(() => ({}));
     if (window.refreshStagedTabData) await window.refreshStagedTabData();
-    if (window.openRequestDetails && window.currentRequestId) {
-      await window.openRequestDetails(window.currentRequestId, window.currentDetailsIndex, { preserveUiState: true });
+    if (window.openRequestDetails && dashboardState.currentRequestId) {
+      await window.openRequestDetails(dashboardState.currentRequestId, dashboardState.currentDetailsIndex, {
+        preserveUiState: true,
+      });
     }
     if (approvedEpisodeDetailsId) {
       const approvedEpisodeDetails = document.getElementById(approvedEpisodeDetailsId);
@@ -1683,28 +1687,59 @@ function updateTvAccordionControls() {
   });
 }
 
-// Export functions to window for HTML onclick handlers
-window.renderReleaseCard = renderReleaseCard;
-window.renderSearchLoadingState = renderSearchLoadingState;
-window.renderMovieSearchLoadingState = renderMovieSearchLoadingState;
-window.renderSeasonAccordion = renderSeasonAccordion;
-window.formatRelativePublishAge = formatRelativePublishAge;
-window.markEpisodeAvailable = markEpisodeAvailable;
-window.markSeasonAvailable = markSeasonAvailable;
-window.searchSeasonPacks = searchSeasonPacks;
-window.searchMultiSeasonPacks = searchMultiSeasonPacks;
-window.searchAllSeasonPacks = searchAllSeasonPacks;
-window.searchEpisode = searchEpisode;
-window.stageRelease = stageRelease;
-window.approveRelease = approveRelease;
-window.rejectRelease = rejectRelease;
-window.stageIndividualEpisodes = stageIndividualEpisodes;
-window.inlineStagedAction = inlineStagedAction;
-window.focusTvEpisode = focusTvEpisode;
-window.focusStagedTvScope = focusStagedTvScope;
-window.openStagedRequestDetailsFromElement = openStagedRequestDetailsFromElement;
-window.captureDetailsAccordionState = captureDetailsAccordionState;
-window.restoreDetailsAccordionState = restoreDetailsAccordionState;
-window.toggleTvDetailsAll = toggleTvDetailsAll;
-window.toggleTvSeasonDetails = toggleTvSeasonDetails;
-window.updateTvAccordionControls = updateTvAccordionControls;
+export {
+  renderReleaseCard,
+  renderSearchLoadingState,
+  renderMovieSearchLoadingState,
+  renderSeasonAccordion,
+  formatRelativePublishAge,
+  isEpisodeComplete,
+  markEpisodeAvailable,
+  markSeasonAvailable,
+  searchSeasonPacks,
+  searchMultiSeasonPacks,
+  searchAllSeasonPacks,
+  searchEpisode,
+  stageRelease,
+  approveRelease,
+  rejectRelease,
+  stageIndividualEpisodes,
+  inlineStagedAction,
+  focusTvEpisode,
+  focusStagedTvScope,
+  openStagedRequestDetailsFromElement,
+  captureDetailsAccordionState,
+  restoreDetailsAccordionState,
+  toggleTvDetailsAll,
+  toggleTvSeasonDetails,
+  updateTvAccordionControls,
+};
+
+// Temporary compatibility facade for HTML onclick handlers and unconverted modules.
+Object.assign(window, {
+  renderReleaseCard,
+  renderSearchLoadingState,
+  renderMovieSearchLoadingState,
+  renderSeasonAccordion,
+  formatRelativePublishAge,
+  isEpisodeComplete,
+  markEpisodeAvailable,
+  markSeasonAvailable,
+  searchSeasonPacks,
+  searchMultiSeasonPacks,
+  searchAllSeasonPacks,
+  searchEpisode,
+  stageRelease,
+  approveRelease,
+  rejectRelease,
+  stageIndividualEpisodes,
+  inlineStagedAction,
+  focusTvEpisode,
+  focusStagedTvScope,
+  openStagedRequestDetailsFromElement,
+  captureDetailsAccordionState,
+  restoreDetailsAccordionState,
+  toggleTvDetailsAll,
+  toggleTvSeasonDetails,
+  updateTvAccordionControls,
+});

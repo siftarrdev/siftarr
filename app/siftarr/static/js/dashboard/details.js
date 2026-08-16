@@ -1,19 +1,22 @@
 // Dashboard Details Module - Request details modal and timeline
 // =============================================================
 
-window.detailsControlState = window.detailsControlState || {};
-window.detailsControlHandlersReady = false;
-window.detailsControlDebounce = null;
-window.detailsAutoSearchStarted = window.detailsAutoSearchStarted || {};
-window.liveDetailsRefresh = window.liveDetailsRefresh || {
+import { escapeHtml, getVisibleRequests, setPoster, updateNavigationButtons } from './core.js';
+import { dashboardState } from './core/state.js';
+
+const detailsControlState = window.detailsControlState || {};
+const detailsAutoSearchStarted = window.detailsAutoSearchStarted || {};
+const liveDetailsRefresh = window.liveDetailsRefresh || {
   timer: null,
   inFlight: false,
   pending: false,
   requestId: null,
 };
+let detailsControlHandlersReady = false;
+let detailsControlDebounce = null;
 
 function cancelLiveDetailsRefresh(requestId = null) {
-  const state = window.liveDetailsRefresh;
+  const state = liveDetailsRefresh;
   if (requestId !== null && state.requestId !== requestId) return;
   clearTimeout(state.timer);
   state.timer = null;
@@ -27,7 +30,7 @@ function cancelLiveDetailsRefresh(requestId = null) {
 function scheduleLiveDetailsRefresh(requestId) {
   const modal = document.getElementById('request-details-modal');
   if (!modal || modal.classList.contains('hidden') || window.activeDetailsRequestId !== requestId) return;
-  const state = window.liveDetailsRefresh;
+  const state = liveDetailsRefresh;
   state.requestId = requestId;
   state.pending = true;
   if (state.timer || state.inFlight) return;
@@ -38,7 +41,7 @@ function scheduleLiveDetailsRefresh(requestId) {
     state.inFlight = true;
     const scrollTop = modal.scrollTop;
     try {
-      await window.openRequestDetails(requestId, window.currentDetailsIndex, { preserveUiState: true });
+      await openRequestDetails(requestId, dashboardState.currentDetailsIndex, { preserveUiState: true });
       if (!modal.classList.contains('hidden') && window.activeDetailsRequestId === requestId)
         modal.scrollTop = scrollTop;
     } finally {
@@ -51,7 +54,7 @@ function scheduleLiveDetailsRefresh(requestId) {
 async function reloadOpenDetailsIfActive(requestId) {
   if (window.activeDetailsRequestId !== requestId) return;
   cancelLiveDetailsRefresh(requestId);
-  await window.openRequestDetails(requestId, window.currentDetailsIndex, { preserveUiState: true });
+  await openRequestDetails(requestId, dashboardState.currentDetailsIndex, { preserveUiState: true });
 }
 
 function defaultDetailsControls() {
@@ -63,15 +66,15 @@ function defaultDetailsControls() {
 }
 
 function getDetailsControls(requestId) {
-  if (!window.detailsControlState[requestId]) {
-    window.detailsControlState[requestId] = defaultDetailsControls();
+  if (!detailsControlState[requestId]) {
+    detailsControlState[requestId] = defaultDetailsControls();
   }
-  return window.detailsControlState[requestId];
+  return detailsControlState[requestId];
 }
 
 function resetDetailsControls(requestId, options = {}) {
-  window.detailsControlState[requestId] = defaultDetailsControls();
-  if (options.updateInputs) window.applyDetailsControls(window.detailsControlState[requestId]);
+  detailsControlState[requestId] = defaultDetailsControls();
+  if (options.updateInputs) applyDetailsControls(detailsControlState[requestId]);
 }
 
 function buildDetailsUrl(requestId) {
@@ -133,10 +136,10 @@ function compareReleasesForDetails(a, b, controls) {
 }
 
 function applyLocalReleaseSort() {
-  if (!window.currentRequestId) return false;
+  if (!dashboardState.currentRequestId) return false;
   const releasesEl = document.getElementById('request-details-releases');
   if (!releasesEl) return false;
-  const controls = getDetailsControls(window.currentRequestId);
+  const controls = getDetailsControls(dashboardState.currentRequestId);
   const sortReleases = (releases) => (releases || []).slice().sort((a, b) => compareReleasesForDetails(a, b, controls));
   if (window.currentRequestMediaType === 'tv' && window.currentDetailsData?.tv_info) {
     const data = JSON.parse(JSON.stringify(window.currentDetailsData));
@@ -156,30 +159,32 @@ function applyLocalReleaseSort() {
     }
     if (window.updateTvAccordionControls) window.updateTvAccordionControls();
     window.currentDetailsData = data;
-    window.currentReleases = data.releases || [];
+    dashboardState.currentReleases = data.releases || [];
     return true;
   }
-  if (Array.isArray(window.currentReleases)) {
-    window.currentReleases = sortReleases(window.currentReleases);
+  if (Array.isArray(dashboardState.currentReleases)) {
+    dashboardState.currentReleases = sortReleases(dashboardState.currentReleases);
     releasesEl.innerHTML =
       '<ul class="divide-y divide-gray-700/40">' +
-      window.currentReleases.map((release) => window.renderReleaseCard(release, window.currentRequestId)).join('') +
+      dashboardState.currentReleases
+        .map((release) => window.renderReleaseCard(release, dashboardState.currentRequestId))
+        .join('') +
       '</ul>';
-    if (window.currentDetailsData) window.currentDetailsData.releases = window.currentReleases;
+    if (window.currentDetailsData) window.currentDetailsData.releases = dashboardState.currentReleases;
     return true;
   }
   return false;
 }
 
 function reloadDetailsWithControls(debounceMs = 0) {
-  if (!window.currentRequestId) return;
+  if (!dashboardState.currentRequestId) return;
   const run = () =>
-    window.openRequestDetails(window.currentRequestId, window.currentDetailsIndex, {
+    openRequestDetails(dashboardState.currentRequestId, dashboardState.currentDetailsIndex, {
       preserveUiState: true,
     });
-  clearTimeout(window.detailsControlDebounce);
+  clearTimeout(detailsControlDebounce);
   if (debounceMs > 0) {
-    window.detailsControlDebounce = setTimeout(run, debounceMs);
+    detailsControlDebounce = setTimeout(run, debounceMs);
   } else {
     run();
   }
@@ -196,8 +201,8 @@ function setDetailsScope(requestId, scope) {
 }
 
 function ensureDetailsControlHandlers() {
-  if (window.detailsControlHandlersReady) return;
-  window.detailsControlHandlersReady = true;
+  if (detailsControlHandlersReady) return;
+  detailsControlHandlersReady = true;
   const filterInput = document.getElementById('release-filter-input');
   const resolutionSelect = document.getElementById('release-resolution-filter');
   const sortSelect = document.getElementById('release-sort-key');
@@ -205,32 +210,32 @@ function ensureDetailsControlHandlers() {
   const resetBtn = document.getElementById('release-controls-reset');
   if (filterInput)
     filterInput.addEventListener('input', () => {
-      const controls = getDetailsControls(window.currentRequestId);
+      const controls = getDetailsControls(dashboardState.currentRequestId);
       controls.title = filterInput.value.trim();
       reloadDetailsWithControls(300);
     });
   if (resolutionSelect)
     resolutionSelect.addEventListener('change', () => {
-      const controls = getDetailsControls(window.currentRequestId);
+      const controls = getDetailsControls(dashboardState.currentRequestId);
       controls.resolution = resolutionSelect.value;
       reloadDetailsWithControls();
     });
   if (sortSelect)
     sortSelect.addEventListener('change', () => {
-      const controls = getDetailsControls(window.currentRequestId);
+      const controls = getDetailsControls(dashboardState.currentRequestId);
       controls.sort = sortSelect.value;
       applyLocalReleaseSort();
     });
   if (directionBtn)
     directionBtn.addEventListener('click', () => {
-      const controls = getDetailsControls(window.currentRequestId);
+      const controls = getDetailsControls(dashboardState.currentRequestId);
       controls.direction = (controls.direction || 'desc') === 'desc' ? 'asc' : 'desc';
       applyDetailsControls(controls);
       applyLocalReleaseSort();
     });
   if (resetBtn)
     resetBtn.addEventListener('click', () => {
-      resetDetailsControls(window.currentRequestId, { updateInputs: true });
+      resetDetailsControls(dashboardState.currentRequestId, { updateInputs: true });
       reloadDetailsWithControls();
     });
 }
@@ -254,19 +259,19 @@ async function openRequestDetails(requestId, explicitIndex = null, options = {})
   const searchBtn = document.getElementById('request-details-search-btn');
   const tvSearchBtn = document.getElementById('request-details-tv-search-btn');
   const tvFullSearchBtn = document.getElementById('request-details-tv-full-search-btn');
-  window.ensureDetailsControlHandlers();
+  ensureDetailsControlHandlers();
 
   // Build navigation context from currently visible rows
   if (explicitIndex !== null) {
-    window.currentDetailsIndex = explicitIndex;
+    dashboardState.currentDetailsIndex = explicitIndex;
   } else {
-    window.visibleRequests = window.getVisibleRequests();
-    window.currentDetailsIndex = window.visibleRequests.findIndex((r) => r.id === requestId);
-    if (window.currentDetailsIndex === -1) {
-      window.currentDetailsIndex = 0;
+    dashboardState.visibleRequests = getVisibleRequests();
+    dashboardState.currentDetailsIndex = dashboardState.visibleRequests.findIndex((r) => r.id === requestId);
+    if (dashboardState.currentDetailsIndex === -1) {
+      dashboardState.currentDetailsIndex = 0;
     }
   }
-  window.updateNavigationButtons();
+  updateNavigationButtons();
 
   const timelineWasOpen = preserveUiState ? !!document.getElementById('request-details-timeline')?.open : false;
   const preservedDetailsState =
@@ -297,8 +302,8 @@ async function openRequestDetails(requestId, explicitIndex = null, options = {})
   if (tvFullSearchBtn) {
     tvFullSearchBtn.classList.add('hidden');
   }
-  window.currentTvSeasons = [];
-  window.setPoster(null, 'Loading poster');
+  dashboardState.currentTvSeasons = [];
+  setPoster(null, 'Loading poster');
   // #release-results-header and #release-controls are hidden on mobile by
   // default (the mobile filter chip toggles #release-controls) and shown on
   // desktop via lg:flex. Avoid removing `hidden` here — that would surface
@@ -316,19 +321,17 @@ async function openRequestDetails(requestId, explicitIndex = null, options = {})
   const cacheIndicatorInit = document.getElementById('release-cache-indicator');
   if (cacheIndicatorInit) cacheIndicatorInit.classList.add('hidden');
   if (!preserveUiState) {
-    window.resetDetailsControls(requestId, { updateInputs: true });
-    delete window.detailsAutoSearchStarted[requestId];
+    resetDetailsControls(requestId, { updateInputs: true });
+    delete detailsAutoSearchStarted[requestId];
   }
   // The Activity overlay always starts closed on a fresh modal open. Open
   // state does not persist across reopens, but prev/next navigation reuses an
   // already-visible modal and should not close a panel the user just opened.
-  if (modal.classList.contains('hidden') && window.closeActivityPanel) {
-    window.closeActivityPanel();
-  }
+  if (modal.classList.contains('hidden')) closeActivityPanel();
   modal.classList.remove('hidden');
 
   try {
-    const response = await fetch(window.buildDetailsUrl(requestId));
+    const response = await fetch(buildDetailsUrl(requestId));
     if (!response.ok) {
       throw new Error(`Server error: ${response.status}`);
     }
@@ -342,9 +345,9 @@ async function openRequestDetails(requestId, explicitIndex = null, options = {})
     // are absent), so only non-empty segments are joined to avoid stray
     // separators.
     const subtitleSegments = [
-      data.request.year ? window.escapeHtml(String(data.request.year)) : '',
-      data.request.media_type ? window.escapeHtml(String(data.request.media_type)) : '',
-      data.request.status ? window.escapeHtml(String(data.request.status).replace(/_/g, ' ')) : '',
+      data.request.year ? escapeHtml(String(data.request.year)) : '',
+      data.request.media_type ? escapeHtml(String(data.request.media_type)) : '',
+      data.request.status ? escapeHtml(String(data.request.status).replace(/_/g, ' ')) : '',
     ].filter(Boolean);
     meta.textContent = subtitleSegments.join(' · ');
     overview.textContent = data.overseerr?.overview || 'No synopsis available.';
@@ -357,14 +360,14 @@ async function openRequestDetails(requestId, explicitIndex = null, options = {})
     if (metaRow) {
       const items = [];
       if (data.request.year)
-        items.push(`<span class="badge badge-gray">Year ${window.escapeHtml(String(data.request.year))}</span>`);
+        items.push(`<span class="badge badge-gray">Year ${escapeHtml(String(data.request.year))}</span>`);
       if (data.request.media_type)
         items.push(
-          `<span class="badge badge-gray">${window.escapeHtml(String(data.request.media_type).toUpperCase())}</span>`,
+          `<span class="badge badge-gray">${escapeHtml(String(data.request.media_type).toUpperCase())}</span>`,
         );
       if (data.request.status)
         items.push(
-          `<span class="badge badge-gray">${window.escapeHtml(String(data.request.status).replace(/_/g, ' '))}</span>`,
+          `<span class="badge badge-gray">${escapeHtml(String(data.request.status).replace(/_/g, ' '))}</span>`,
         );
       metaRow.innerHTML = items.join('');
     }
@@ -378,7 +381,7 @@ async function openRequestDetails(requestId, explicitIndex = null, options = {})
         releaseDateEl.classList.add('hidden');
       }
     }
-    window.setPoster(data.overseerr?.poster, data.request.title);
+    setPoster(data.overseerr?.poster, data.request.title);
     if (overseerrLink && data.overseerr?.url) {
       overseerrLink.href = data.overseerr.url;
       overseerrLink.classList.remove('hidden');
@@ -399,17 +402,17 @@ async function openRequestDetails(requestId, explicitIndex = null, options = {})
       tvFullSearchBtn.classList.remove('hidden');
     }
 
-    window.currentReleases = data.releases || [];
+    dashboardState.currentReleases = data.releases || [];
     window.currentDetailsData = data;
-    window.currentRequestId = data.request.id;
+    dashboardState.currentRequestId = data.request.id;
     window.currentRequestMediaType = data.request.media_type || 'movie';
-    window.loadSearchHistory();
+    loadSearchHistory();
 
     const cacheIndicator = document.getElementById('release-cache-indicator');
     const cacheIndicatorText = document.getElementById('release-cache-indicator-text');
 
     if (data.request.media_type === 'tv' && data.tv_info) {
-      window.currentTvSeasons = data.tv_info.seasons || [];
+      dashboardState.currentTvSeasons = data.tv_info.seasons || [];
       if (cacheIndicator) cacheIndicator.classList.add('hidden');
       releases.innerHTML = window.renderSeasonAccordion(data);
       if (preservedDetailsState && window.restoreDetailsAccordionState) {
@@ -420,10 +423,12 @@ async function openRequestDetails(requestId, explicitIndex = null, options = {})
       }
       if (window.updateTvAccordionControls) window.updateTvAccordionControls();
     } else {
-      if (window.currentReleases.length > 0) {
+      if (dashboardState.currentReleases.length > 0) {
         releases.innerHTML =
           '<ul class="divide-y divide-gray-700/40">' +
-          window.currentReleases.map((release) => window.renderReleaseCard(release, window.currentRequestId)).join('') +
+          dashboardState.currentReleases
+            .map((release) => window.renderReleaseCard(release, dashboardState.currentRequestId))
+            .join('') +
           '</ul>';
         if (cacheIndicator && cacheIndicatorText) {
           cacheIndicatorText.textContent = 'Showing cached results';
@@ -435,23 +440,23 @@ async function openRequestDetails(requestId, explicitIndex = null, options = {})
           '<div class="text-gray-500 text-sm">No cached search results yet. Use Refresh Search to search indexers.</div>';
       }
     }
-    window.applyDetailsControls(data.release_controls || {});
-    window.updateReleaseCountText(data);
+    applyDetailsControls(data.release_controls || {});
+    updateReleaseCountText(data);
 
-    window.currentRequestTimeline = data.timeline || [];
-    renderTimeline(window.currentRequestTimeline, { open: timelineWasOpen });
+    dashboardState.currentRequestTimeline = data.timeline || [];
+    renderTimeline(dashboardState.currentRequestTimeline, { open: timelineWasOpen });
     renderDetailsStats(data);
 
-    if (data.auto_search_eligible && !window.detailsAutoSearchStarted[requestId]) {
-      window.detailsAutoSearchStarted[requestId] = true;
+    if (data.auto_search_eligible && !detailsAutoSearchStarted[requestId]) {
+      detailsAutoSearchStarted[requestId] = true;
       if (data.request.media_type === 'tv') {
         // The season accordion is useful before the first result arrives:
         // it exposes episode names, air dates, and status while the SSE
         // progress toast reports the search state. Do not replace it.
-        window.searchTvRequestNew({ auto: true });
+        searchTvRequestNew({ auto: true });
       } else {
         releases.innerHTML = window.renderMovieSearchLoadingState();
-        window.searchRequestFromDetails({ auto: true });
+        searchRequestFromDetails({ auto: true });
       }
     }
   } catch (err) {
@@ -459,15 +464,11 @@ async function openRequestDetails(requestId, explicitIndex = null, options = {})
     title.textContent = 'Error loading details';
     meta.textContent = err.message || 'Unknown error';
     overview.textContent = '';
-    window.setPoster(null, 'Poster unavailable');
+    setPoster(null, 'Poster unavailable');
     releases.innerHTML =
       '<div class="text-red-400 text-sm">Failed to load request details. Check that Overseerr is reachable.</div>';
   }
 }
-
-window.scheduleLiveDetailsRefresh = scheduleLiveDetailsRefresh;
-window.cancelLiveDetailsRefresh = cancelLiveDetailsRefresh;
-window.reloadOpenDetailsIfActive = reloadOpenDetailsIfActive;
 
 // Render the desktop left-rail stat list (`#request-details-stats`):
 // Cached results / Passed / Rejected / Staged / Last search. Desktop-only
@@ -503,7 +504,7 @@ function renderDetailsStats(data) {
 }
 
 function detailsStatRow(label, ddClass, value) {
-  return `<div class="flex justify-between gap-3"><dt class="text-gray-500">${window.escapeHtml(label)}</dt><dd class="${ddClass}">${window.escapeHtml(value)}</dd></div>`;
+  return `<div class="flex justify-between gap-3"><dt class="text-gray-500">${escapeHtml(label)}</dt><dd class="${ddClass}">${escapeHtml(value)}</dd></div>`;
 }
 
 // Derive a relative "Last search" string from the latest timeline entry's
@@ -536,19 +537,19 @@ function renderRuleEvidence(evidence) {
     .map((m) => {
       const ok = m.matched ? 'badge-green' : 'badge-red';
       const delta = Number(m.score_delta || 0);
-      return `<span class="badge ${ok}" title="${window.escapeHtml(m.rule_type || m.effect || '')}">${window.escapeHtml(m.rule_name || 'Rule')} ${delta ? `(${delta > 0 ? '+' : ''}${delta})` : ''}</span>`;
+      return `<span class="badge ${ok}" title="${escapeHtml(m.rule_type || m.effect || '')}">${escapeHtml(m.rule_name || 'Rule')} ${delta ? `(${delta > 0 ? '+' : ''}${delta})` : ''}</span>`;
     })
     .join(' ');
 }
 
 async function loadSearchHistory() {
-  if (!window.currentRequestId) return;
+  if (!dashboardState.currentRequestId) return;
   const container = document.getElementById('request-details-search-history');
   if (!container) return;
   container.innerHTML = '<div class="text-gray-500">Loading search history...</div>';
   let runsCount = 0;
   try {
-    const response = await fetch(`/requests/${window.currentRequestId}/search-history?limit=5`);
+    const response = await fetch(`/requests/${dashboardState.currentRequestId}/search-history?limit=5`);
     if (!response.ok) throw new Error(`Server error: ${response.status}`);
     const data = await response.json();
     const runs = data.runs || [];
@@ -565,14 +566,14 @@ async function loadSearchHistory() {
           .slice(0, 5)
           .map(
             (c) =>
-              `<details class="mt-2 rounded-lg border border-gray-700/50 bg-surface-900/60 p-2"><summary class="cursor-pointer text-gray-200">${window.escapeHtml(c.title || 'Candidate')} <span class="text-emerald-400">Score ${window.escapeHtml(String(c.score ?? 0))}</span> <span class="text-gray-500">${window.escapeHtml(c.status || '')}</span></summary><div class="mt-2 flex flex-wrap gap-1">${renderRuleEvidence(c.rule_evidence || {})}</div>${c.rejection_reason ? `<div class="mt-2 text-red-300">${window.escapeHtml(c.rejection_reason)}</div>` : ''}</details>`,
+              `<details class="mt-2 rounded-lg border border-gray-700/50 bg-surface-900/60 p-2"><summary class="cursor-pointer text-gray-200">${escapeHtml(c.title || 'Candidate')} <span class="text-emerald-400">Score ${escapeHtml(String(c.score ?? 0))}</span> <span class="text-gray-500">${escapeHtml(c.status || '')}</span></summary><div class="mt-2 flex flex-wrap gap-1">${renderRuleEvidence(c.rule_evidence || {})}</div>${c.rejection_reason ? `<div class="mt-2 text-red-300">${escapeHtml(c.rejection_reason)}</div>` : ''}</details>`,
           )
           .join('');
-        return `<div class="mb-3 rounded-lg border border-gray-700/60 bg-surface-900/70 p-3"><div class="flex flex-wrap items-center gap-2"><span class="badge badge-gray">${window.escapeHtml(run.status || 'unknown')}</span><span class="badge badge-gray">${window.escapeHtml(run.outcome || '')}</span><span>${window.escapeHtml(run.started_at || '')}</span><span>${window.escapeHtml(run.source || '')}</span><span>${window.escapeHtml(run.search_mode || '')}</span></div><div class="mt-2 text-xs text-gray-400">Total ${counts.total ?? 0} · Passed ${counts.passed ?? 0} · Rejected ${counts.rejected ?? 0} · Staged ${counts.staged ?? 0} · Sent ${counts.sent ?? 0}</div>${run.error ? `<div class="mt-2 text-red-300">${window.escapeHtml(run.error)}</div>` : ''}${candidates}</div>`;
+        return `<div class="mb-3 rounded-lg border border-gray-700/60 bg-surface-900/70 p-3"><div class="flex flex-wrap items-center gap-2"><span class="badge badge-gray">${escapeHtml(run.status || 'unknown')}</span><span class="badge badge-gray">${escapeHtml(run.outcome || '')}</span><span>${escapeHtml(run.started_at || '')}</span><span>${escapeHtml(run.source || '')}</span><span>${escapeHtml(run.search_mode || '')}</span></div><div class="mt-2 text-xs text-gray-400">Total ${counts.total ?? 0} · Passed ${counts.passed ?? 0} · Rejected ${counts.rejected ?? 0} · Staged ${counts.staged ?? 0} · Sent ${counts.sent ?? 0}</div>${run.error ? `<div class="mt-2 text-red-300">${escapeHtml(run.error)}</div>` : ''}${candidates}</div>`;
       })
       .join('');
   } catch (err) {
-    container.innerHTML = `<div class="text-red-400">Failed to load search history: ${window.escapeHtml(err.message || 'Unknown error')}</div>`;
+    container.innerHTML = `<div class="text-red-400">Failed to load search history: ${escapeHtml(err.message || 'Unknown error')}</div>`;
   }
   updateActivityCount(null, runsCount);
 }
@@ -591,10 +592,6 @@ function updateActivityCount(timelineDelta, runsDelta) {
   el.textContent = String(timeline + runs);
 }
 
-window.loadSearchHistory = loadSearchHistory;
-window.renderRuleEvidence = renderRuleEvidence;
-window.renderDetailsStats = renderDetailsStats;
-
 function countUnavailableTvSeasons(data = window.currentDetailsData) {
   const seasons = data?.tv_info?.seasons || [];
   return seasons.filter(function (season) {
@@ -604,10 +601,10 @@ function countUnavailableTvSeasons(data = window.currentDetailsData) {
   }).length;
 }
 
-async function confirmLargeTvSearch(requestId = window.currentRequestId) {
+async function confirmLargeTvSearch(requestId = dashboardState.currentRequestId) {
   let data = window.currentDetailsData;
   if (!data || data.request?.id !== requestId) {
-    const response = await fetch(window.buildDetailsUrl(requestId));
+    const response = await fetch(buildDetailsUrl(requestId));
     if (!response.ok) throw new Error('Could not inspect TV seasons: HTTP ' + response.status);
     data = await response.json();
   }
@@ -637,8 +634,8 @@ function chooseLargeTvSearch(choice) {
 }
 
 async function searchTvRequest(mode = 'new', _options = {}) {
-  if (!window.currentRequestId) return;
-  const requestId = window.currentRequestId;
+  if (!dashboardState.currentRequestId) return;
+  const requestId = dashboardState.currentRequestId;
   const fullSearch = mode === 'full';
   const btn = document.getElementById(
     fullSearch ? 'request-details-tv-full-search-btn' : 'request-details-tv-search-btn',
@@ -728,18 +725,18 @@ async function searchTvRequestAll() {
 }
 
 async function refreshPlexAndReload() {
-  if (!window.currentRequestId) return;
+  if (!dashboardState.currentRequestId) return;
   const btn = document.getElementById('request-details-refresh-plex');
   if (btn) {
     btn.disabled = true;
     btn.textContent = 'Refreshing...';
   }
   try {
-    const response = await fetch('/requests/' + window.currentRequestId + '/refresh-plex', { method: 'POST' });
+    const response = await fetch('/requests/' + dashboardState.currentRequestId + '/refresh-plex', { method: 'POST' });
     if (!response.ok) {
       throw new Error('Server error: ' + response.status);
     }
-    await openRequestDetails(window.currentRequestId, window.currentDetailsIndex);
+    await openRequestDetails(dashboardState.currentRequestId, dashboardState.currentDetailsIndex);
   } catch (err) {
     console.error('Plex refresh failed:', err);
     if (btn) {
@@ -750,7 +747,7 @@ async function refreshPlexAndReload() {
 }
 
 async function searchRequestFromDetails() {
-  if (!window.currentRequestId) return;
+  if (!dashboardState.currentRequestId) return;
   const btn = document.getElementById('request-details-search-btn');
   const originalText = btn ? btn.innerHTML : '';
   if (btn) {
@@ -766,8 +763,10 @@ async function searchRequestFromDetails() {
   if (cacheInd) {
     cacheInd.classList.add('hidden');
   }
-  window.startSearchProgress(window.currentRequestId, detailsTitle, async function () {
-    await window.openRequestDetails(window.currentRequestId, window.currentDetailsIndex, { preserveUiState: true });
+  window.startSearchProgress(dashboardState.currentRequestId, detailsTitle, async function () {
+    await openRequestDetails(dashboardState.currentRequestId, dashboardState.currentDetailsIndex, {
+      preserveUiState: true,
+    });
     if (btn) {
       btn.disabled = false;
       btn.innerHTML = originalText || 'Refresh Search';
@@ -871,9 +870,9 @@ function renderTimeline(timelineData, options = {}) {
       const label = labelMap[entry.event_type] || entry.event_type.replace(/_/g, ' ');
       const detail = timelineDetail(entry);
       const ts = formatTimelineTimestamp(entry.created_at);
-      const safeLabel = window.escapeHtml(label);
-      const safeTs = window.escapeHtml(ts);
-      const safeDetail = detail ? window.escapeHtml(String(detail)) : '';
+      const safeLabel = escapeHtml(label);
+      const safeTs = escapeHtml(ts);
+      const safeDetail = detail ? escapeHtml(String(detail)) : '';
       return `<div class="relative flex items-start gap-3 -ml-[1.15rem]">
             <div class="w-2.5 h-2.5 rounded-full ${dot} mt-1.5 shrink-0 ring-2 ring-surface-900"></div>
             <div class="min-w-0 flex-1">
@@ -928,11 +927,6 @@ function toggleActivityPanel() {
   setActivityPanelOpen(!isActivityPanelOpen());
 }
 
-window.isActivityPanelOpen = isActivityPanelOpen;
-window.openActivityPanel = openActivityPanel;
-window.closeActivityPanel = closeActivityPanel;
-window.toggleActivityPanel = toggleActivityPanel;
-
 // Mobile filter chip toggle: expands/collapses #release-controls on <lg.
 // #release-controls is `hidden lg:flex` in the template, so toggling `hidden`
 // only affects mobile — on desktop `lg:flex` overrides `hidden` regardless.
@@ -944,22 +938,67 @@ function toggleMobileFilter() {
   controls.classList.toggle('hidden', !willShow);
   if (chip) chip.setAttribute('aria-expanded', willShow ? 'true' : 'false');
 }
-window.toggleMobileFilter = toggleMobileFilter;
 
-// Export functions to window for HTML onclick handlers
-window.openRequestDetails = openRequestDetails;
-window.ensureDetailsControlHandlers = ensureDetailsControlHandlers;
-window.resetDetailsControls = resetDetailsControls;
-window.buildDetailsUrl = buildDetailsUrl;
-window.applyDetailsControls = applyDetailsControls;
-window.updateReleaseCountText = updateReleaseCountText;
-window.applyLocalReleaseSort = applyLocalReleaseSort;
-window.setDetailsScope = setDetailsScope;
-window.refreshPlexAndReload = refreshPlexAndReload;
-window.searchRequestFromDetails = searchRequestFromDetails;
-window.searchTvRequest = searchTvRequest;
-window.searchTvRequestNew = searchTvRequestNew;
-window.searchTvRequestFull = searchTvRequestFull;
-window.confirmLargeTvSearch = confirmLargeTvSearch;
-window.chooseLargeTvSearch = chooseLargeTvSearch;
-window.searchTvRequestAll = searchTvRequestAll;
+export {
+  applyDetailsControls,
+  applyLocalReleaseSort,
+  buildDetailsUrl,
+  cancelLiveDetailsRefresh,
+  chooseLargeTvSearch,
+  closeActivityPanel,
+  confirmLargeTvSearch,
+  ensureDetailsControlHandlers,
+  isActivityPanelOpen,
+  loadSearchHistory,
+  openActivityPanel,
+  openRequestDetails,
+  refreshPlexAndReload,
+  reloadOpenDetailsIfActive,
+  renderDetailsStats,
+  renderRuleEvidence,
+  resetDetailsControls,
+  scheduleLiveDetailsRefresh,
+  searchRequestFromDetails,
+  searchTvRequest,
+  searchTvRequestAll,
+  searchTvRequestFull,
+  searchTvRequestNew,
+  setDetailsScope,
+  toggleActivityPanel,
+  toggleMobileFilter,
+  updateReleaseCountText,
+};
+
+// Temporary compatibility facade for HTML onclick handlers and unconverted release/SSE modules.
+Object.assign(window, {
+  detailsControlState,
+  detailsAutoSearchStarted,
+  liveDetailsRefresh,
+  applyDetailsControls,
+  applyLocalReleaseSort,
+  buildDetailsUrl,
+  cancelLiveDetailsRefresh,
+  chooseLargeTvSearch,
+  closeActivityPanel,
+  confirmLargeTvSearch,
+  ensureDetailsControlHandlers,
+  isActivityPanelOpen,
+  loadSearchHistory,
+  openActivityPanel,
+  openRequestDetails,
+  refreshPlexAndReload,
+  reloadOpenDetailsIfActive,
+  renderDetailsStats,
+  renderRuleEvidence,
+  resetDetailsControls,
+  scheduleLiveDetailsRefresh,
+  searchRequestFromDetails,
+  searchTvRequest,
+  searchTvRequestAll,
+  searchTvRequestFull,
+  searchTvRequestNew,
+  setDetailsScope,
+  toggleActivityPanel,
+  toggleMobileFilter,
+  updateReleaseCountText,
+});

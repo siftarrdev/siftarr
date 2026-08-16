@@ -71,3 +71,45 @@ uv run pytest -k plex
 
 For final validation, run the repository quality gates in the order documented in
 [AGENTS.md](../AGENTS.md) and [CONTRIBUTING.md](../CONTRIBUTING.md).
+
+## Frontend tests
+
+Install Node dependencies with `npm ci`, then run the jsdom unit tests with:
+
+```bash
+npm run test:unit:js
+```
+
+The stable dashboard core modules under `frontend-src/` are strict TypeScript.
+Their generated ES modules are committed under the existing
+`app/siftarr/static/js/` browser paths; do not edit those generated files by
+hand. After changing TypeScript, run:
+
+```bash
+npm run typecheck:frontend
+npm run build:frontend
+npm run verify:frontend-build  # CI check that committed output is current
+```
+
+The Playwright smoke test uses the normal production API-key authentication path; it
+does not bypass or disable auth. Initialize the database, install Chromium, and start
+Siftarr with a dedicated test API key:
+
+```bash
+mkdir -p data/db
+SIFTARR_DB_PATH=data/db/siftarr.db uv run alembic upgrade head
+npx playwright install chromium
+AUTH_ENABLED=true SIFTARR_API_KEY=e2e-local-key SIFTARR_DB_PATH=data/db/siftarr.db uv run uvicorn app.siftarr.main:app
+```
+
+In another shell, pass the same key to Playwright (and optionally override the base
+URL, which defaults to `http://127.0.0.1:8000`):
+
+```bash
+SIFTARR_E2E_API_KEY=e2e-local-key npm run test:e2e
+# SIFTARR_E2E_BASE_URL=http://localhost:8000 SIFTARR_E2E_API_KEY=e2e-local-key npm run test:e2e
+```
+
+Use `npm run check:js` for JavaScript/TypeScript formatting, lint, and DOM unit-test
+validation. Browser smoke tests remain a separate command because they require a
+running application.

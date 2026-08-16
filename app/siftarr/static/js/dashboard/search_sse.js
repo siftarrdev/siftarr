@@ -473,9 +473,20 @@ function updateRequestRow(requestId, result) {
   row.setAttribute('data-status', status);
 }
 
-window.closeSearchProgress = closeSearchProgress;
-window.cancelActiveTvSearch = cancelActiveTvSearch;
-window.startSearchProgress = startSearchProgress;
-window.startBulkSearchProgress = startBulkSearchProgress;
-window.startTvSearchProgress = startTvSearchProgress;
-window.updateRequestRow = updateRequestRow;
+export {
+  closeSearchProgress,
+  cancelActiveTvSearch,
+  startSearchProgress,
+  startBulkSearchProgress,
+  startTvSearchProgress,
+  updateRequestRow,
+};
+
+Object.assign(window, {
+  closeSearchProgress,
+  cancelActiveTvSearch,
+  startSearchProgress,
+  startBulkSearchProgress,
+  startTvSearchProgress,
+  updateRequestRow,
+});
