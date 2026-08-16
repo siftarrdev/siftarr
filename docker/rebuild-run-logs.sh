@@ -13,13 +13,13 @@ fi
 RAW_VERSION=$(git -C "$REPO_ROOT" describe --dirty --tags --always 2>/dev/null || printf '0.0.0')
 VERSION=$(printf '%s' "$RAW_VERSION" | python -c 'import re, sys
 version = sys.stdin.read().strip()
-match = re.fullmatch(r"v?(\d+\.\d+\.\d+)(?:-(\d+)-g([0-9a-f]+)(-dirty)?)?", version)
+match = re.fullmatch(r"v?(\d+\.\d+\.\d+)(?:-(\d+)-g([0-9a-f]+))?(-dirty)?", version)
 if not match:
     print(version.lstrip("v"))
     raise SystemExit(0)
 base, commits, sha, dirty = match.groups()
 if commits is None:
-    print(base)
+    print(base + ("+dirty" if dirty else ""))
 else:
     local = f"+g{sha}"
     if dirty:

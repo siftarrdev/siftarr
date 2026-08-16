@@ -31,6 +31,12 @@ build-backend = "hatchling.build"
 [tool.hatch.version]
 source = "vcs"
 
+[tool.hatch.version.raw-options]
+# `setuptools-scm`'s default dirty-tag suffix (for example, `0.2.21-dirty`)
+# is not PEP 440 compliant and prevents editable Docker builds from starting.
+# Keep the dirty state, but express it as valid local version metadata.
+local_scheme = "dirty-tag"
+
 [tool.hatch.build.hooks.vcs]
 version-file = "app/siftarr/_version.py"
 
