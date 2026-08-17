@@ -15,10 +15,19 @@ export default tseslint.config(
       },
     },
     rules: {
+      '@typescript-eslint/ban-ts-comment': 'error',
       '@typescript-eslint/no-unused-vars': [
         'error',
         { argsIgnorePattern: '^_', caughtErrorsIgnorePattern: '^_', varsIgnorePattern: '^_' },
       ],
+    },
+  },
+  {
+    files: ['**/dashboard/*.ts'],
+    rules: {
+      '@typescript-eslint/ban-ts-comment': ['warn', { 'ts-nocheck': false }],
+      'no-var': 'off',
+      '@typescript-eslint/no-dynamic-delete': 'off',
     },
   },
   {

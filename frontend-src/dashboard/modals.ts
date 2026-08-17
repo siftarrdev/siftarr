@@ -1,7 +1,9 @@
 // @ts-nocheck
 // Dashboard Modals Module - Modal dialogs and toast notifications
 // ===============================================================
+
 import { refreshCurrentTabContent } from './core.js';
+
 function showToast(message) {
   const container = document.getElementById('toast-container');
   if (!container) return;
@@ -20,9 +22,11 @@ function showToast(message) {
     setTimeout(() => toast.remove(), 300);
   }, 4000);
 }
+
 function showSearchProgressToast(title, message, items) {
   const container = document.getElementById('toast-container');
   if (!container) return { update: () => {}, dismiss: () => {} };
+
   const el = document.createElement('div');
   el.className =
     'search-progress-toast bg-surface-800 border border-gray-700/70 rounded-2xl shadow-2xl p-4 pointer-events-auto w-full max-w-sm transition-opacity duration-300 opacity-0';
@@ -45,6 +49,7 @@ function showSearchProgressToast(title, message, items) {
     '<div class="text-[10px] uppercase tracking-wide text-gray-500 mb-1">Searching for</div>' +
     '<ul class="search-progress-items space-y-1 text-gray-300 max-h-28 overflow-y-auto"></ul>' +
     '</div>';
+
   // Populate items list
   const itemsWrap = el.querySelector('.search-progress-items-wrap');
   const itemsList = el.querySelector('.search-progress-items');
@@ -63,7 +68,9 @@ function showSearchProgressToast(title, message, items) {
       itemsList.appendChild(li);
     }
   }
+
   container.appendChild(el);
+
   // Animate bar
   const bar = el.querySelector('.search-progress-bar');
   if (bar) {
@@ -74,11 +81,13 @@ function showSearchProgressToast(title, message, items) {
       if (bar) bar.style.width = '90%';
     }, 150);
   }
+
   // Fade in
   requestAnimationFrame(() => {
     el.classList.remove('opacity-0');
     el.classList.add('opacity-100');
   });
+
   return {
     update(newMessage, failed = false) {
       const statusEl = el.querySelector('.search-progress-status');
@@ -105,6 +114,7 @@ function showSearchProgressToast(title, message, items) {
     },
   };
 }
+
 function setSearchActionLoading(trigger, message = 'Searching...') {
   if (!trigger) return;
   trigger.disabled = true;
@@ -118,15 +128,18 @@ function setSearchActionLoading(trigger, message = 'Searching...') {
     '</span>';
   trigger.setAttribute('aria-busy', 'true');
 }
+
 function disableSearchControls(scope) {
   if (!scope) return;
   scope.querySelectorAll('[data-search-action="true"], [data-search-submit-control="true"]').forEach((control) => {
     control.disabled = true;
   });
 }
+
 function isVisibleBulkCheckbox(checkbox) {
   return !!(checkbox && (checkbox.offsetParent || checkbox.getClientRects().length));
 }
+
 function getDedupedCheckedBulkCheckboxes(form, selector = 'input[name="request_ids"]:checked') {
   if (!form) return [];
   const source = Array.from(form.querySelectorAll(selector)).filter(isVisibleBulkCheckbox);
@@ -137,6 +150,7 @@ function getDedupedCheckedBulkCheckboxes(form, selector = 'input[name="request_i
     return true;
   });
 }
+
 function getRequestTitleFromRow(row) {
   if (!row) return null;
   const titleCell = row.querySelector('td:nth-child(2)');
@@ -144,6 +158,7 @@ function getRequestTitleFromRow(row) {
   const title = titleCell ? titleCell.textContent.trim() : cardTitle ? cardTitle.textContent.trim() : '';
   return title || row.dataset.title || null;
 }
+
 function collectBulkSearchTitles(form, searchAll = false) {
   if (!form) return [];
   const selector = searchAll ? 'tbody tr' : 'input[name="request_ids"]:checked, input[name="torrent_ids"]:checked';
@@ -154,6 +169,7 @@ function collectBulkSearchTitles(form, searchAll = false) {
     .map((node) => getRequestTitleFromRow(searchAll ? node : node.closest('tr') || node.closest('[data-request-id]')))
     .filter(Boolean);
 }
+
 async function submitSearchRequest(action, body, redirectTo) {
   const response = await fetch(action, {
     method: 'POST',
@@ -163,6 +179,7 @@ async function submitSearchRequest(action, body, redirectTo) {
   if (!response.ok) throw new Error('Search request failed (' + response.status + ')');
   return response.url || redirectTo || window.location.href;
 }
+
 function showBulkSearchStatus(form, searchAll = false) {
   if (!form) return;
   const panel = form.querySelector('[data-bulk-search-status="true"]');
@@ -187,6 +204,7 @@ function showBulkSearchStatus(form, searchAll = false) {
   }
   panel.classList.remove('hidden');
 }
+
 async function postToAction(action, redirectTo, trigger = null, scope = null) {
   const row = scope || (trigger ? trigger.closest('tr') || trigger.closest('[data-request-id]') : null);
   const title = getRequestTitleFromRow(row);
@@ -266,6 +284,7 @@ async function postToAction(action, redirectTo, trigger = null, scope = null) {
     })
     .catch(() => {});
 }
+
 async function handleBulkDenyAction(event, form) {
   event.preventDefault();
   const submitter = event.submitter;
@@ -274,6 +293,7 @@ async function handleBulkDenyAction(event, form) {
   if (submitter && submitter.value) {
     formData.set('action', submitter.value);
   }
+
   // Collect selected request IDs from checkboxes
   const checkboxes = getDedupedCheckedBulkCheckboxes(form);
   const ids = checkboxes.map((cb) => cb.value).filter(Boolean);
@@ -283,6 +303,7 @@ async function handleBulkDenyAction(event, form) {
   }
   formData.delete('request_ids');
   ids.forEach((id) => formData.append('request_ids', id));
+
   if (submitter) submitter.disabled = true;
   try {
     const response = await fetch('/requests/bulk', {
@@ -305,13 +326,16 @@ async function handleBulkDenyAction(event, form) {
   }
   return false;
 }
+
 function handleBulkRequestActionSubmit(event, form) {
   const submitter = event.submitter;
   if (!submitter) return true;
+
   // Handle deny actions via fetch
   if (submitter.value === 'deny') {
     return handleBulkDenyAction(event, form);
   }
+
   // Search actions
   if (submitter.dataset.searchSubmitControl !== 'true') return true;
   if (form.dataset.searchSubmitting === 'true') return false;
@@ -326,6 +350,7 @@ function handleBulkRequestActionSubmit(event, form) {
   const titles = collectBulkSearchTitles(form, searchAll);
   setSearchActionLoading(submitter, searchAll ? 'Searching all...' : 'Searching...');
   disableSearchControls(form);
+
   var ids = [];
   if (!searchAll) {
     var checkboxes = getDedupedCheckedBulkCheckboxes(form);
@@ -335,6 +360,7 @@ function handleBulkRequestActionSubmit(event, form) {
       })
       .filter(Boolean);
   }
+
   function resetSubmitter() {
     form.dataset.searchSubmitting = '';
     var originalText = submitter.dataset.originalText || submitter.value;
@@ -343,6 +369,7 @@ function handleBulkRequestActionSubmit(event, form) {
     submitter.textContent = originalText;
     submitter.removeAttribute('aria-busy');
   }
+
   if (searchAll || ids.length > 0) {
     window.startBulkSearchProgress(
       ids,
@@ -367,8 +394,10 @@ function handleBulkRequestActionSubmit(event, form) {
   }
   return false;
 }
+
 let _denyRequestId = null;
 let _denyRedirectTo = null;
+
 function openDenyModal(requestId, redirectTo) {
   _denyRequestId = requestId;
   _denyRedirectTo = redirectTo || '/';
@@ -377,15 +406,18 @@ function openDenyModal(requestId, redirectTo) {
   if (reason) reason.value = '';
   if (modal) modal.classList.remove('hidden');
 }
+
 async function submitDenyRequest() {
   if (!_denyRequestId) return;
   const btn = document.getElementById('deny-submit-btn');
   if (btn) btn.disabled = true;
   const reason = document.getElementById('deny-reason');
+
   try {
     const formData = new FormData();
     formData.append('redirect_to', _denyRedirectTo);
     if (reason && reason.value) formData.append('reason', reason.value);
+
     const response = await fetch('/requests/' + _denyRequestId + '/deny', {
       method: 'POST',
       headers: { Accept: 'application/json' },
@@ -404,12 +436,14 @@ async function submitDenyRequest() {
     if (btn) btn.disabled = false;
   }
 }
+
 function closeDenyModal() {
   const modal = document.getElementById('deny-modal');
   if (modal) modal.classList.add('hidden');
   _denyRequestId = null;
   _denyRedirectTo = null;
 }
+
 function bindDenyModalHandlers() {
   const submitBtn = document.getElementById('deny-submit-btn');
   if (submitBtn && !submitBtn.getAttribute('onclick') && submitBtn.dataset.denyHandlerBound !== 'true') {
@@ -420,6 +454,7 @@ function bindDenyModalHandlers() {
     submitBtn.dataset.denyHandlerBound = 'true';
   }
 }
+
 function openReplaceModal(torrentId, requestId, torrentTitle, redirectTo) {
   const modal = document.getElementById('replace-modal');
   const form = document.getElementById('replace-form');
@@ -431,9 +466,11 @@ function openReplaceModal(torrentId, requestId, torrentTitle, redirectTo) {
   reason.value = '';
   modal.classList.remove('hidden');
 }
+
 function closeReplaceModal() {
   document.getElementById('replace-modal').classList.add('hidden');
 }
+
 function bindSelectAll(toggle, checkboxSelector) {
   if (!toggle) return;
   if (toggle.dataset.selectAllBound === 'true') return;
@@ -445,11 +482,13 @@ function bindSelectAll(toggle, checkboxSelector) {
     });
   });
 }
+
 if (document.readyState === 'loading') {
   document.addEventListener('DOMContentLoaded', bindDenyModalHandlers);
 } else {
   bindDenyModalHandlers();
 }
+
 export {
   showToast,
   showSearchProgressToast,
@@ -465,6 +504,7 @@ export {
   closeReplaceModal,
   bindSelectAll,
 };
+
 // Temporary compatibility facade for HTML onclick handlers and unconverted modules.
 Object.assign(window, {
   showToast,

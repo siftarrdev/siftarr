@@ -1,8 +1,10 @@
 // @ts-nocheck
 // Dashboard Details Module - Request details modal and timeline
 // =============================================================
+
 import { escapeHtml, getVisibleRequests, setPoster, updateNavigationButtons } from './core.js';
 import { dashboardState } from './core/state.js';
+
 const detailsControlState = window.detailsControlState || {};
 const detailsAutoSearchStarted = window.detailsAutoSearchStarted || {};
 const liveDetailsRefresh = window.liveDetailsRefresh || {
@@ -13,6 +15,7 @@ const liveDetailsRefresh = window.liveDetailsRefresh || {
 };
 let detailsControlHandlersReady = false;
 let detailsControlDebounce = null;
+
 function cancelLiveDetailsRefresh(requestId = null) {
   const state = liveDetailsRefresh;
   if (requestId !== null && state.requestId !== requestId) return;
@@ -21,6 +24,7 @@ function cancelLiveDetailsRefresh(requestId = null) {
   state.pending = false;
   state.requestId = null;
 }
+
 // SSE can report several committed result batches in quick succession.  Keep
 // the DB-backed details render responsive without replacing the modal DOM for
 // every batch.
@@ -47,11 +51,13 @@ function scheduleLiveDetailsRefresh(requestId) {
     }
   }, 1250);
 }
+
 async function reloadOpenDetailsIfActive(requestId) {
   if (window.activeDetailsRequestId !== requestId) return;
   cancelLiveDetailsRefresh(requestId);
   await openRequestDetails(requestId, dashboardState.currentDetailsIndex, { preserveUiState: true });
 }
+
 function defaultDetailsControls() {
   // `scope` is client-only (TV accordion: 'all' | 'season_packs' | 'complete_series').
   // It is deliberately NOT sent in `buildDetailsUrl` — the backend filter/sort
@@ -59,16 +65,19 @@ function defaultDetailsControls() {
   // `applyLocalReleaseSort`.
   return { title: '', resolution: 'all', sort: 'score', direction: 'desc', scope: 'all' };
 }
+
 function getDetailsControls(requestId) {
   if (!detailsControlState[requestId]) {
     detailsControlState[requestId] = defaultDetailsControls();
   }
   return detailsControlState[requestId];
 }
+
 function resetDetailsControls(requestId, options = {}) {
   detailsControlState[requestId] = defaultDetailsControls();
   if (options.updateInputs) applyDetailsControls(detailsControlState[requestId]);
 }
+
 function buildDetailsUrl(requestId) {
   const controls = getDetailsControls(requestId);
   const params = new URLSearchParams();
@@ -79,6 +88,7 @@ function buildDetailsUrl(requestId) {
   const suffix = params.toString();
   return `/requests/${requestId}/details${suffix ? '?' + suffix : ''}`;
 }
+
 function applyDetailsControls(controls) {
   const filterInput = document.getElementById('release-filter-input');
   const resolutionSelect = document.getElementById('release-resolution-filter');
@@ -93,6 +103,7 @@ function applyDetailsControls(controls) {
     directionBtn.textContent = direction === 'asc' ? 'Asc' : 'Desc';
   }
 }
+
 function updateReleaseCountText(data) {
   const countEl = document.getElementById('release-results-count');
   if (!countEl) return;
@@ -100,11 +111,13 @@ function updateReleaseCountText(data) {
   const total = data.total_releases ?? filtered;
   countEl.textContent = filtered === total ? `${filtered} results` : `${filtered} of ${total} results`;
 }
+
 function normalizeReleaseSortValue(value) {
   if (typeof value === 'string') return value.toLocaleLowerCase();
   if (typeof value === 'number') return value;
   return value || '';
 }
+
 function releaseSortValue(release, sortKey) {
   if (sortKey === 'published') return release.publish_date || '';
   if (sortKey === 'size') return release.size_bytes || 0;
@@ -113,6 +126,7 @@ function releaseSortValue(release, sortKey) {
   if (sortKey === 'indexer') return release.indexer || '';
   return release.score || 0;
 }
+
 function compareReleasesForDetails(a, b, controls) {
   const direction = controls.direction === 'asc' ? 1 : -1;
   const primaryA = normalizeReleaseSortValue(releaseSortValue(a, controls.sort || 'score'));
@@ -121,6 +135,7 @@ function compareReleasesForDetails(a, b, controls) {
   if (primaryA > primaryB) return 1 * direction;
   return String(a.title || '').localeCompare(String(b.title || ''), undefined, { sensitivity: 'base' });
 }
+
 function applyLocalReleaseSort() {
   if (!dashboardState.currentRequestId) return false;
   const releasesEl = document.getElementById('request-details-releases');
@@ -161,6 +176,7 @@ function applyLocalReleaseSort() {
   }
   return false;
 }
+
 function reloadDetailsWithControls(debounceMs = 0) {
   if (!dashboardState.currentRequestId) return;
   const run = () =>
@@ -174,6 +190,7 @@ function reloadDetailsWithControls(debounceMs = 0) {
     run();
   }
 }
+
 // Client-only TV scope-chip handler. Switches the TV accordion between
 // "All results" (Season → Episode), "Season packs", and "Complete series"
 // without a backend reload — `applyLocalReleaseSort` re-renders the TV branch
@@ -183,6 +200,7 @@ function setDetailsScope(requestId, scope) {
   controls.scope = scope;
   applyLocalReleaseSort();
 }
+
 function ensureDetailsControlHandlers() {
   if (detailsControlHandlersReady) return;
   detailsControlHandlersReady = true;
@@ -222,6 +240,7 @@ function ensureDetailsControlHandlers() {
       reloadDetailsWithControls();
     });
 }
+
 async function openRequestDetails(requestId, explicitIndex = null, options = {}) {
   if (window.activeDetailsRequestId && window.activeDetailsRequestId !== requestId) {
     cancelLiveDetailsRefresh(window.activeDetailsRequestId);
@@ -242,6 +261,7 @@ async function openRequestDetails(requestId, explicitIndex = null, options = {})
   const tvSearchBtn = document.getElementById('request-details-tv-search-btn');
   const tvFullSearchBtn = document.getElementById('request-details-tv-full-search-btn');
   ensureDetailsControlHandlers();
+
   // Build navigation context from currently visible rows
   if (explicitIndex !== null) {
     dashboardState.currentDetailsIndex = explicitIndex;
@@ -253,9 +273,11 @@ async function openRequestDetails(requestId, explicitIndex = null, options = {})
     }
   }
   updateNavigationButtons();
+
   const timelineWasOpen = preserveUiState ? !!document.getElementById('request-details-timeline')?.open : false;
   const preservedDetailsState =
     preserveUiState && window.captureDetailsAccordionState ? window.captureDetailsAccordionState() : null;
+
   if (!preserveUiState) {
     title.textContent = 'Loading...';
     meta.textContent = '';
@@ -308,6 +330,7 @@ async function openRequestDetails(requestId, explicitIndex = null, options = {})
   // already-visible modal and should not close a panel the user just opened.
   if (modal.classList.contains('hidden')) closeActivityPanel();
   modal.classList.remove('hidden');
+
   try {
     const response = await fetch(buildDetailsUrl(requestId));
     if (!response.ok) {
@@ -316,6 +339,7 @@ async function openRequestDetails(requestId, explicitIndex = null, options = {})
     const data = await response.json();
     // A navigation or a newer live-refresh request won the race.
     if (window.detailsLoadToken !== loadToken) return;
+
     title.textContent = data.request.title;
     // Mobile subtitle in the header card: a compact "year · type · status"
     // line. The details API only exposes type + status today (year/age/by
@@ -363,25 +387,31 @@ async function openRequestDetails(requestId, explicitIndex = null, options = {})
       overseerrLink.href = data.overseerr.url;
       overseerrLink.classList.remove('hidden');
     }
+
     if (data.request.media_type === 'tv' && refreshPlexBtn) {
       refreshPlexBtn.classList.remove('hidden');
     }
+
     if (data.request.media_type === 'movie' && searchBtn) {
       searchBtn.classList.remove('hidden');
     }
+
     if (data.request.media_type === 'tv' && tvSearchBtn) {
       tvSearchBtn.classList.remove('hidden');
     }
     if (data.request.media_type === 'tv' && tvFullSearchBtn) {
       tvFullSearchBtn.classList.remove('hidden');
     }
+
     dashboardState.currentReleases = data.releases || [];
     window.currentDetailsData = data;
     dashboardState.currentRequestId = data.request.id;
     window.currentRequestMediaType = data.request.media_type || 'movie';
     loadSearchHistory();
+
     const cacheIndicator = document.getElementById('release-cache-indicator');
     const cacheIndicatorText = document.getElementById('release-cache-indicator-text');
+
     if (data.request.media_type === 'tv' && data.tv_info) {
       dashboardState.currentTvSeasons = data.tv_info.seasons || [];
       if (cacheIndicator) cacheIndicator.classList.add('hidden');
@@ -413,9 +443,11 @@ async function openRequestDetails(requestId, explicitIndex = null, options = {})
     }
     applyDetailsControls(data.release_controls || {});
     updateReleaseCountText(data);
+
     dashboardState.currentRequestTimeline = data.timeline || [];
     renderTimeline(dashboardState.currentRequestTimeline, { open: timelineWasOpen });
     renderDetailsStats(data);
+
     if (data.auto_search_eligible && !detailsAutoSearchStarted[requestId]) {
       detailsAutoSearchStarted[requestId] = true;
       if (data.request.media_type === 'tv') {
@@ -438,6 +470,7 @@ async function openRequestDetails(requestId, explicitIndex = null, options = {})
       '<div class="text-red-400 text-sm">Failed to load request details. Check that Overseerr is reachable.</div>';
   }
 }
+
 // Render the desktop left-rail stat list (`#request-details-stats`):
 // Cached results / Passed / Rejected / Staged / Last search. Desktop-only
 // (the element is `hidden lg:block`); the mobile header card omits stats.
@@ -470,9 +503,11 @@ function renderDetailsStats(data) {
     detailsStatRow('Last search', 'text-gray-300', lastSearch),
   ].join('');
 }
+
 function detailsStatRow(label, ddClass, value) {
   return `<div class="flex justify-between gap-3"><dt class="text-gray-500">${escapeHtml(label)}</dt><dd class="${ddClass}">${escapeHtml(value)}</dd></div>`;
 }
+
 // Derive a relative "Last search" string from the latest timeline entry's
 // `created_at` timestamp. Reuses the repo's `formatRelativePublishAge` helper
 // (exported from releases.js) when present; falls back to "—" when there is no
@@ -494,6 +529,7 @@ function formatDetailsLastSearch(timeline) {
   const relative = window.formatRelativePublishAge ? window.formatRelativePublishAge(latestCreatedAt) : '';
   return relative || '—';
 }
+
 function renderRuleEvidence(evidence) {
   const matches = (evidence && evidence.matches) || [];
   if (!matches.length) return '<span class="text-gray-500">No rule details</span>';
@@ -506,6 +542,7 @@ function renderRuleEvidence(evidence) {
     })
     .join(' ');
 }
+
 async function loadSearchHistory() {
   if (!dashboardState.currentRequestId) return;
   const container = document.getElementById('request-details-search-history');
@@ -541,6 +578,7 @@ async function loadSearchHistory() {
   }
   updateActivityCount(null, runsCount);
 }
+
 // Update the "Activity · N" count shown on the modal-header toggle button.
 // `renderTimeline` and `loadSearchHistory` each contribute their segment count;
 // the running total is cached on the dataset of #activity-count so
@@ -554,6 +592,7 @@ function updateActivityCount(timelineDelta, runsDelta) {
   const runs = Number(el.dataset.runs || 0);
   el.textContent = String(timeline + runs);
 }
+
 function countUnavailableTvSeasons(data = window.currentDetailsData) {
   const seasons = data?.tv_info?.seasons || [];
   return seasons.filter(function (season) {
@@ -562,6 +601,7 @@ function countUnavailableTvSeasons(data = window.currentDetailsData) {
     });
   }).length;
 }
+
 async function confirmLargeTvSearch(requestId = dashboardState.currentRequestId) {
   let data = window.currentDetailsData;
   if (!data || data.request?.id !== requestId) {
@@ -584,6 +624,7 @@ async function confirmLargeTvSearch(requestId = dashboardState.currentRequestId)
     modal.querySelector('[onclick="chooseLargeTvSearch(\'all\')"]')?.focus();
   });
 }
+
 function chooseLargeTvSearch(choice) {
   const modal = document.getElementById('large-tv-search-modal');
   if (modal) modal.classList.add('hidden');
@@ -592,6 +633,7 @@ function chooseLargeTvSearch(choice) {
   window.isLargeTvSearchChoiceOpen = false;
   if (resolve) resolve(choice);
 }
+
 async function searchTvRequest(mode = 'new', _options = {}) {
   if (!dashboardState.currentRequestId) return;
   const requestId = dashboardState.currentRequestId;
@@ -615,6 +657,7 @@ async function searchTvRequest(mode = 'new', _options = {}) {
   };
   if (btn) btn.disabled = true;
   if (otherBtn) otherBtn.disabled = true;
+
   let searchChoice;
   try {
     searchChoice = await confirmLargeTvSearch(requestId);
@@ -669,15 +712,19 @@ async function searchTvRequest(mode = 'new', _options = {}) {
     '/requests/' + requestId + '/search/cancel',
   );
 }
+
 async function searchTvRequestNew(options = {}) {
   return searchTvRequest('new', options);
 }
+
 async function searchTvRequestFull(options = {}) {
   return searchTvRequest('full', options);
 }
+
 async function searchTvRequestAll() {
   return searchTvRequestNew();
 }
+
 async function refreshPlexAndReload() {
   if (!dashboardState.currentRequestId) return;
   const btn = document.getElementById('request-details-refresh-plex');
@@ -699,6 +746,7 @@ async function refreshPlexAndReload() {
     }
   }
 }
+
 async function searchRequestFromDetails() {
   if (!dashboardState.currentRequestId) return;
   const btn = document.getElementById('request-details-search-btn');
@@ -726,6 +774,7 @@ async function searchRequestFromDetails() {
     }
   });
 }
+
 function renderTimeline(timelineData, options = {}) {
   const container = document.getElementById('request-details-timeline');
   const entries = document.getElementById('timeline-entries');
@@ -783,6 +832,7 @@ function renderTimeline(timelineData, options = {}) {
       minute: '2-digit',
     });
   }
+
   function timelineDetail(entry) {
     if (!entry.details) return '';
     const d = entry.details;
@@ -814,6 +864,7 @@ function renderTimeline(timelineData, options = {}) {
     }
     return '';
   }
+
   entries.innerHTML = timelineData
     .map((entry) => {
       const dot = colorMap[entry.event_type] || 'bg-gray-500';
@@ -836,6 +887,7 @@ function renderTimeline(timelineData, options = {}) {
     })
     .join('');
 }
+
 // Activity panel: an overlay popup pinned to the right third of the details
 // modal body (full width <lg), opened from the "Activity · N" button in the
 // modal header. It is closed on every breakpoint by default and on every fresh
@@ -845,6 +897,7 @@ function isActivityPanelOpen() {
   const panel = document.getElementById('activity-panel');
   return !!panel && !panel.classList.contains('hidden');
 }
+
 function setActivityPanelOpen(open) {
   const panel = document.getElementById('activity-panel');
   const backdrop = document.getElementById('activity-backdrop');
@@ -862,15 +915,19 @@ function setActivityPanelOpen(open) {
     toggle.focus();
   }
 }
+
 function openActivityPanel() {
   setActivityPanelOpen(true);
 }
+
 function closeActivityPanel() {
   setActivityPanelOpen(false);
 }
+
 function toggleActivityPanel() {
   setActivityPanelOpen(!isActivityPanelOpen());
 }
+
 // Mobile filter chip toggle: expands/collapses #release-controls on <lg.
 // #release-controls is `hidden lg:flex` in the template, so toggling `hidden`
 // only affects mobile — on desktop `lg:flex` overrides `hidden` regardless.
@@ -882,6 +939,7 @@ function toggleMobileFilter() {
   controls.classList.toggle('hidden', !willShow);
   if (chip) chip.setAttribute('aria-expanded', willShow ? 'true' : 'false');
 }
+
 export {
   applyDetailsControls,
   applyLocalReleaseSort,
@@ -911,6 +969,7 @@ export {
   toggleMobileFilter,
   updateReleaseCountText,
 };
+
 // Temporary compatibility facade for HTML onclick handlers and unconverted release/SSE modules.
 Object.assign(window, {
   detailsControlState,

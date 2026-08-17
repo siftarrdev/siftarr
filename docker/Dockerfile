@@ -50,8 +50,7 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 
 # Copy assets rebuilt from their canonical sources.
 COPY --from=frontend-builder /build/app/siftarr/static/css/tailwind.css ./app/siftarr/static/css/tailwind.css
-COPY --from=frontend-builder /build/app/siftarr/static/js/dashboard/core/state.js ./app/siftarr/static/js/dashboard/core/state.js
-COPY --from=frontend-builder /build/app/siftarr/static/js/dashboard/core/column-resizer.js ./app/siftarr/static/js/dashboard/core/column-resizer.js
+COPY --from=frontend-builder /build/app/siftarr/static/js/ ./app/siftarr/static/js/
 COPY db/alembic/ ./alembic/
 COPY db/alembic.ini ./
 

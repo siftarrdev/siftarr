@@ -1,8 +1,11 @@
 // @ts-nocheck
 // Dashboard Core Module - Tab navigation, utilities, and global state
 // ====================================================================
+
 import { dashboardState } from '/static/js/dashboard/core/state.js';
+
 const checkboxRangeAnchors = new Map();
+
 // Utility functions
 export function escapeHtml(value) {
   return String(value ?? '')
@@ -12,11 +15,13 @@ export function escapeHtml(value) {
     .replaceAll('"', '&quot;')
     .replaceAll("'", '&#39;');
 }
+
 export function setActiveTab(tabName) {
   const url = new URL(window.location);
   url.searchParams.set('tab', tabName);
   window.history.replaceState({}, '', url);
 }
+
 export function showTab(tabName) {
   const content = document.getElementById('content-' + tabName);
   const tab = document.getElementById('tab-' + tabName);
@@ -44,16 +49,19 @@ export function showTab(tabName) {
     if (window._stopStagedStatusPoll) window._stopStagedStatusPoll();
   }
 }
+
 export function setPoster(posterUrl, titleText) {
   const poster = document.getElementById('request-details-poster');
   const fallback = document.getElementById('request-details-poster-fallback');
   if (!poster || !fallback) return;
+
   poster.onerror = () => {
     poster.classList.add('hidden');
     poster.removeAttribute('src');
     fallback.textContent = 'Poster could not be loaded';
     fallback.classList.remove('hidden');
   };
+
   if (posterUrl) {
     poster.src = posterUrl;
     poster.alt = titleText;
@@ -65,12 +73,14 @@ export function setPoster(posterUrl, titleText) {
     fallback.classList.add('hidden');
     return;
   }
+
   poster.classList.add('hidden');
   poster.removeAttribute('src');
   poster.alt = 'No poster available';
   fallback.textContent = 'No poster available';
   fallback.classList.remove('hidden');
 }
+
 export function getVisibleRequests() {
   const activeTabContent = document.querySelector('.tab-content:not(.hidden)');
   if (!activeTabContent) return [];
@@ -102,22 +112,27 @@ export function getVisibleRequests() {
       return true;
     });
 }
+
 export function refreshDetailsNavigationContext() {
   const modal = document.getElementById('request-details-modal');
   if (!modal || modal.classList.contains('hidden')) return;
+
   window.visibleRequests = window.getVisibleRequests();
   window.currentDetailsIndex = window.visibleRequests.findIndex((r) => r.id === window.currentRequestId);
   window.updateNavigationButtons();
 }
+
 export function updateNavigationButtons() {
   const prevBtn = document.getElementById('details-prev-btn');
   const nextBtn = document.getElementById('details-next-btn');
   const position = document.getElementById('details-position');
   if (!prevBtn || !nextBtn || !position) return;
+
   // Mobile bottom-bar prev/next set (guarded so desktop-only contexts work).
   const prevBtnMobile = document.getElementById('details-prev-btn-mobile');
   const nextBtnMobile = document.getElementById('details-next-btn-mobile');
   const positionMobile = document.getElementById('details-position-mobile');
+
   const total = window.visibleRequests.length;
   if (total === 0) {
     const emptyPosition = '- of -';
@@ -131,14 +146,18 @@ export function updateNavigationButtons() {
     if (nextBtnMobile) nextBtnMobile.disabled = true;
     return;
   }
+
   const currentIndex = window.currentDetailsIndex >= 0 ? window.currentDetailsIndex : -1;
   const positionText = currentIndex >= 0 ? `${currentIndex + 1} of ${total}` : `- of ${total}`;
   position.textContent = positionText;
   if (positionMobile) positionMobile.textContent = positionText;
+
   const prevIndex = currentIndex >= 0 ? (currentIndex - 1 + total) % total : total - 1;
   const nextIndex = currentIndex >= 0 ? (currentIndex + 1) % total : 0;
+
   const prevTitle = `← ${window.visibleRequests[prevIndex].title} (wraps around)`;
   const nextTitle = `${window.visibleRequests[nextIndex].title} → (wraps around)`;
+
   prevBtn.disabled = false;
   nextBtn.disabled = false;
   prevBtn.title = prevTitle;
@@ -152,9 +171,11 @@ export function updateNavigationButtons() {
     nextBtnMobile.title = nextTitle;
   }
 }
+
 export function navigateDetails(direction) {
   const total = window.visibleRequests.length;
   if (total === 0) return;
+
   if (window.currentDetailsIndex < 0) {
     window.currentDetailsIndex = direction < 0 ? total - 1 : 0;
   } else {
@@ -165,12 +186,14 @@ export function navigateDetails(direction) {
     window.openRequestDetails(targetRequest.id, window.currentDetailsIndex);
   }
 }
+
 export function closeRequestDetails() {
   if (window.cancelLiveDetailsRefresh) window.cancelLiveDetailsRefresh();
   window.activeDetailsRequestId = null;
   window.detailsLoadToken = (window.detailsLoadToken || 0) + 1;
   document.getElementById('request-details-modal').classList.add('hidden');
 }
+
 function isRangeSelectableCheckboxVisible(checkbox) {
   const item = checkbox.closest('tr, [data-request-id], [data-torrent-id]');
   if (!item || item.style.display === 'none') return !item;
@@ -182,27 +205,32 @@ function isRangeSelectableCheckboxVisible(checkbox) {
   }
   return true;
 }
+
 function getCheckboxRangeKey(checkbox, selector) {
   const scope = checkbox.closest('table') || checkbox.closest('form') || document;
   if (scope.id) return `${selector}:${scope.id}`;
   return selector;
 }
+
 function getVisibleCheckboxRange(checkbox, selector) {
   const scope = checkbox.closest('table') || checkbox.closest('form') || document;
   return Array.from(scope.querySelectorAll(selector)).filter(isRangeSelectableCheckboxVisible);
 }
+
 export function bindCheckboxRangeSelection(selector) {
   document.querySelectorAll(selector).forEach((checkbox) => {
     if (checkbox.dataset.checkboxRangeBound === 'true') return;
     checkbox.dataset.checkboxRangeBound = 'true';
     checkbox.addEventListener('click', (event) => {
       event.stopPropagation();
+
       const current = event.currentTarget;
       const key = getCheckboxRangeKey(current, selector);
       const visibleCheckboxes = getVisibleCheckboxRange(current, selector);
       const currentIndex = visibleCheckboxes.indexOf(current);
       const anchor = checkboxRangeAnchors.get(key);
       const anchorIndex = anchor ? visibleCheckboxes.indexOf(anchor) : -1;
+
       if (event.shiftKey && currentIndex >= 0 && anchorIndex >= 0) {
         const start = Math.min(anchorIndex, currentIndex);
         const end = Math.max(anchorIndex, currentIndex);
@@ -210,10 +238,12 @@ export function bindCheckboxRangeSelection(selector) {
           rangeCheckbox.checked = current.checked;
         });
       }
+
       checkboxRangeAnchors.set(key, current);
     });
   });
 }
+
 /**
  * Refresh the currently visible tab's content by fetching fresh HTML from the server.
  * Preserves text filter, media filter, and sort state.
@@ -223,6 +253,7 @@ export async function refreshCurrentTabContent() {
   const activeTabEl = document.querySelector('.tab-content:not(.hidden)');
   if (!activeTabEl) return;
   const tabName = activeTabEl.id.replace('content-', '');
+
   const restore = window.saveTabState(tabName);
   try {
     const response = await fetch(window.location.pathname, { headers: { Accept: 'text/html' } });
@@ -230,18 +261,22 @@ export async function refreshCurrentTabContent() {
     const html = await response.text();
     const parser = new DOMParser();
     const doc = parser.parseFromString(html, 'text/html');
+
     // Update tab content
     const newTabContent = doc.getElementById('content-' + tabName);
     if (newTabContent) {
       activeTabEl.innerHTML = newTabContent.innerHTML;
     }
+
     // Update stat cards
     const statsContainer = document.querySelector('.grid.grid-cols-2.md\\:grid-cols-7');
     const newStatsContainer = doc.querySelector('.grid.grid-cols-2.md\\:grid-cols-7');
     if (statsContainer && newStatsContainer) {
       statsContainer.innerHTML = newStatsContainer.innerHTML;
     }
+
     restore();
+
     // Re-bind selection handlers if applicable
     if (tabName === 'staged') {
       if (window.bindStagedSelectionHandlers) {
@@ -266,6 +301,7 @@ export async function refreshCurrentTabContent() {
     console.error('Failed to refresh tab content:', err);
   }
 }
+
 // Temporary adapter for untouched modules and HTML event handlers.
 export function installCoreCompatibility() {
   Object.keys(dashboardState).forEach((key) => {
@@ -278,6 +314,7 @@ export function installCoreCompatibility() {
       },
     });
   });
+
   Object.assign(window, {
     showTab,
     closeRequestDetails,
@@ -292,4 +329,5 @@ export function installCoreCompatibility() {
     bindCheckboxRangeSelection,
   });
 }
+
 installCoreCompatibility();
