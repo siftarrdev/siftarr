@@ -1,24 +1,83 @@
 // @ts-nocheck
 // Dashboard Staged Module - Staged tab polling and bulk actions
 // =============================================================
+
 import { bindCheckboxRangeSelection, escapeHtml } from '/static/js/dashboard/core.js';
+
+interface QbitManaged {
+  request_id?: number | string;
+  id?: number | string;
+}
+interface QbitTorrent {
+  name?: string;
+  hash?: string;
+  state?: string;
+  progress?: number | string | null;
+  eta?: number | string | null;
+  dlspeed?: number | string;
+  size?: number | string;
+  downloaded?: number | string;
+  uploaded?: number | string;
+  ratio?: number | string;
+  added_on?: number | string | null;
+  managed?: QbitManaged | null;
+}
+interface QbitTotals {
+  dlspeed?: number | string;
+  upspeed?: number | string;
+  downloaded?: number | string;
+  uploaded?: number | string;
+  size?: number | string;
+}
+interface QbitGroup {
+  request_id?: number | string | null;
+  title?: string;
+  name?: string;
+  hash?: string;
+  count?: number;
+  match?: string;
+  totals?: QbitTotals;
+  torrents?: QbitTorrent[];
+  dlspeed?: number;
+  upspeed?: number;
+  downloaded?: number;
+  size?: number;
+}
+interface QbitResponse {
+  qbit_unavailable?: boolean;
+  groups?: QbitGroup[];
+}
+type QbitSort = 'added-desc' | 'eta-asc' | 'added-asc';
+declare global {
+  interface Window {
+    saveTabState: (tab: string) => () => void;
+    bindSelectAll?: (el: Element, selector: string) => void;
+    reinitColumnResizer?: () => void;
+    showToast: (message: string) => void;
+    renderRuleEvidence?: (evidence: Record<string, unknown>) => string;
+  }
+}
+
 // Torrent Status tab poll intervals. The active/downloading sub-tab refreshes
 // aggressively; completed torrents barely change, so they poll slowly.
 const ACTIVE_DOWNLOADS_POLL_INTERVAL_MS = 1000;
 const COMPLETED_TORRENTS_POLL_INTERVAL_MS = 10000;
+
 let stagedTabRefreshInFlight = false;
 let downloadingTabRefreshInFlight = false;
-let _stagedStatusPollInterval = null;
+let _stagedStatusPollInterval: ReturnType<typeof setInterval> | null = null;
 let _downloadStatusPatchInFlight = false;
 let _stagedStatusPollWanted = false;
 // Which sub-view of the Torrent Status tab is visible: 'downloading' | 'completed'.
-let _torrentStatusView = 'downloading';
+let _torrentStatusView: 'downloading' | 'completed' = 'downloading';
 // Shared by both Torrent Status sub-views so changing views or polling does not
 // reset the user's selected ordering.
 let _torrentStatusSort = 'added-desc';
+
 function _currentPollIntervalMs() {
   return _torrentStatusView === 'completed' ? COMPLETED_TORRENTS_POLL_INTERVAL_MS : ACTIVE_DOWNLOADS_POLL_INTERVAL_MS;
 }
+
 export function _startStagedStatusPoll() {
   _stagedStatusPollWanted = true;
   _stopPollTimer();
@@ -26,9 +85,10 @@ export function _startStagedStatusPoll() {
   if (document.visibilityState === 'hidden') return;
   _stagedStatusPollInterval = setInterval(_patchStagedDownloadStatus, _currentPollIntervalMs());
 }
+
 // Sub-view toggle for the Torrent Status tab. Only the visible sub-view is
 // polled, and switching restarts the timer at that sub-view's interval.
-export function showQbitView(view) {
+export function showQbitView(view: 'downloading' | 'completed') {
   const downloading = document.getElementById('qbit-download-list');
   const completed = document.getElementById('qbit-completed-list');
   if (!downloading || !completed) return;
@@ -49,26 +109,31 @@ export function showQbitView(view) {
   syncQbitSortControl();
   if (_stagedStatusPollWanted) _startStagedStatusPoll();
 }
+
 function syncQbitSortControl() {
   const control = document.getElementById('qbit-torrent-sort');
-  if (control) control.value = _torrentStatusSort;
+  if (control) (control as HTMLSelectElement).value = _torrentStatusSort;
 }
-export function setQbitTorrentSort(sort) {
+
+export function setQbitTorrentSort(sort: string) {
   if (!['added-desc', 'eta-asc', 'added-asc'].includes(sort)) return;
-  _torrentStatusSort = sort;
+  _torrentStatusSort = sort as QbitSort;
   syncQbitSortControl();
   _patchStagedDownloadStatus();
 }
+
 function _stopPollTimer() {
   if (_stagedStatusPollInterval !== null) {
     clearInterval(_stagedStatusPollInterval);
     _stagedStatusPollInterval = null;
   }
 }
+
 export function _stopStagedStatusPoll() {
   _stagedStatusPollWanted = false;
   _stopPollTimer();
 }
+
 document.addEventListener('visibilitychange', () => {
   if (!_stagedStatusPollWanted) return;
   if (document.visibilityState === 'hidden') {
@@ -77,6 +142,7 @@ document.addEventListener('visibilitychange', () => {
     _startStagedStatusPoll();
   }
 });
+
 async function _patchStagedDownloadStatus() {
   const downloadingContent = document.getElementById('content-downloading');
   if (!downloadingContent || downloadingContent.classList.contains('hidden')) return;
@@ -89,7 +155,7 @@ async function _patchStagedDownloadStatus() {
   try {
     const response = await fetch(completedView ? '/api/torrents/completed' : '/api/downloads');
     if (!response.ok) return;
-    const data = await response.json();
+    const data = (await response.json()) as QbitResponse;
     if (data.qbit_unavailable) {
       const summary = document.getElementById('qbit-download-summary');
       if (summary) summary.textContent = 'qBittorrent unavailable';
@@ -104,10 +170,12 @@ async function _patchStagedDownloadStatus() {
     _downloadStatusPatchInFlight = false;
   }
 }
-function qbitNumber(value, divisor = 1, digits = 1) {
+
+function qbitNumber(value: unknown, divisor = 1, digits = 1): string {
   return Number.isFinite(Number(value)) ? `${(Number(value) / divisor).toFixed(digits)}` : '—';
 }
-function qbitManagedActions(managed, card = false) {
+
+function qbitManagedActions(managed: QbitManaged | null | undefined, card = false): string {
   if (!managed) return '<span class="text-xs text-gray-500">Not managed by Siftarr</span>';
   const requestId = Number(managed.request_id);
   const torrentId = Number(managed.id);
@@ -116,16 +184,19 @@ function qbitManagedActions(managed, card = false) {
   const deleteClasses = card ? 'btn-danger btn-sm' : 'text-red-400 hover:text-red-300 font-medium';
   return `<button type="button" onclick="openRequestDetails(${requestId})" class="${classes}">Details</button><button type="button" onclick="checkNow(${torrentId})" class="${classes}">Check Now</button><button type="button" onclick="if (confirm('Delete this torrent and downloaded data from qBittorrent, then return the request to pending?')) postStagedAction('/staged/${torrentId}/delete-download', '/?tab=downloading')" class="${deleteClasses}">Delete</button>`;
 }
-function qbitBytes(value) {
+
+function qbitBytes(value: unknown): string {
   const number = Number(value);
   if (!Number.isFinite(number)) return '—';
   if (Math.abs(number) >= 1024 * 1024 * 1024) return `${(number / 1024 / 1024 / 1024).toFixed(2)} GB`;
   return `${(number / 1024 / 1024).toFixed(1)} MB`;
 }
-function qbitSpeed(value) {
+
+function qbitSpeed(value: unknown): string {
   return `${qbitNumber(value, 1024 * 1024)} MB/s`;
 }
-function qbitAggregateDownloadTotals(groups) {
+
+function qbitAggregateDownloadTotals(groups: QbitGroup[]) {
   return (groups || []).reduce(
     (totals, group) => {
       const groupTotals = group.totals || {};
@@ -138,18 +209,21 @@ function qbitAggregateDownloadTotals(groups) {
       return totals;
     },
     { count: 0, dlspeed: 0, upspeed: 0, downloaded: 0, size: 0 },
-  );
+  ) as { count: number; dlspeed: number; upspeed: number; downloaded: number; size: number };
 }
-export function renderQbitDownloadSummary(groups) {
+
+export function renderQbitDownloadSummary(groups: QbitGroup[]) {
   const summary = document.getElementById('qbit-download-summary');
   if (!summary) return;
   const totals = qbitAggregateDownloadTotals(groups);
   const torrentLabel = totals.count === 1 ? 'torrent' : 'torrents';
   summary.innerHTML = `<span><span class="text-gray-500">Active</span> ${totals.count} ${torrentLabel}</span><span><span class="text-gray-500">Total download</span> ↓ ${qbitSpeed(totals.dlspeed)}</span><span><span class="text-gray-500">Total upload</span> ↑ ${qbitSpeed(totals.upspeed)}</span><span><span class="text-gray-500">Downloaded</span> ${qbitBytes(totals.downloaded)} / ${qbitBytes(totals.size)}</span>`;
 }
-function qbitGroupKey(group) {
+
+function qbitGroupKey(group: QbitGroup): string {
   return group.request_id === null || group.request_id === undefined ? 'unmanaged' : String(group.request_id);
 }
+
 // Collapse state is keyed by request_id (via the group key) and captured/restored
 // around every re-render, mirroring the accordion pattern in releases.js. Without
 // it a 1s poll would slam every expanded group shut.
@@ -158,33 +232,43 @@ function qbitGroupKey(group) {
 // so the two representations are OR-ed together: a group counts as expanded when
 // either is open. Overwriting instead of OR-ing collapsed every desktop group on
 // each poll, because the untouched mobile card always reported open === false.
-function captureQbitGroupState(prefix) {
-  const state = {};
-  const record = (key, open) => {
+function captureQbitGroupState(prefix: string): Record<string, boolean> {
+  const state: Record<string, boolean> = {};
+  const record = (key: string | undefined, open: boolean) => {
     if (key === undefined) return;
     state[key] = !!state[key] || !!open;
   };
-  document.querySelectorAll(`tr[data-download-group][data-group-prefix="${prefix}"]`).forEach((el) => {
-    record(el.dataset.downloadGroup, el.getAttribute('aria-expanded') === 'true');
-  });
-  document.querySelectorAll(`details[data-download-group][data-group-prefix="${prefix}"]`).forEach((el) => {
-    record(el.dataset.downloadGroup, el.open);
-  });
+  document
+    .querySelectorAll<HTMLTableRowElement>(`tr[data-download-group][data-group-prefix="${prefix}"]`)
+    .forEach((el) => {
+      record(el.dataset.downloadGroup, el.getAttribute('aria-expanded') === 'true');
+    });
+  document
+    .querySelectorAll<HTMLDetailsElement>(`details[data-download-group][data-group-prefix="${prefix}"]`)
+    .forEach((el) => {
+      record(el.dataset.downloadGroup, el.open);
+    });
   return state;
 }
-function restoreQbitGroupState(prefix, state) {
+
+function restoreQbitGroupState(prefix: string, state: Record<string, boolean> | undefined) {
   if (!state) return;
-  document.querySelectorAll(`details[data-download-group][data-group-prefix="${prefix}"]`).forEach((el) => {
-    const key = el.dataset.downloadGroup;
-    if (Object.prototype.hasOwnProperty.call(state, key)) el.open = !!state[key];
-  });
-  document.querySelectorAll(`tr[data-download-group][data-group-prefix="${prefix}"]`).forEach((el) => {
-    const key = el.dataset.downloadGroup;
-    if (!Object.prototype.hasOwnProperty.call(state, key)) return;
-    setQbitGroupOpen(prefix, key, !!state[key]);
-  });
+  document
+    .querySelectorAll<HTMLDetailsElement>(`details[data-download-group][data-group-prefix="${prefix}"]`)
+    .forEach((el) => {
+      const key = el.dataset.downloadGroup;
+      if (Object.prototype.hasOwnProperty.call(state, key)) el.open = !!state[key];
+    });
+  document
+    .querySelectorAll<HTMLTableRowElement>(`tr[data-download-group][data-group-prefix="${prefix}"]`)
+    .forEach((el) => {
+      const key = el.dataset.downloadGroup;
+      if (!Object.prototype.hasOwnProperty.call(state, key)) return;
+      setQbitGroupOpen(prefix, key, !!state[key]);
+    });
 }
-function setQbitGroupOpen(prefix, key, open) {
+
+function setQbitGroupOpen(prefix: string, key: string, open: boolean) {
   const header = document.querySelector(`tr[data-download-group="${key}"][data-group-prefix="${prefix}"]`);
   if (header) {
     header.setAttribute('aria-expanded', open ? 'true' : 'false');
@@ -198,27 +282,34 @@ function setQbitGroupOpen(prefix, key, open) {
   // are always in the DOM (visibility is CSS-only), so if they are allowed to
   // disagree the OR in captureQbitGroupState makes a collapse spring back open
   // on the next poll.
-  const card = document.querySelector(`details[data-download-group="${key}"][data-group-prefix="${prefix}"]`);
+  const card = document.querySelector<HTMLDetailsElement>(
+    `details[data-download-group="${key}"][data-group-prefix="${prefix}"]`,
+  );
   if (card && card.open !== open) card.open = open;
 }
+
 // Mobile <details> toggles natively, so mirror its state onto the desktop row.
 // setQbitGroupOpen only writes card.open when it differs, so this cannot recurse.
-export function syncQbitGroupFromCard(prefix, key, open) {
+export function syncQbitGroupFromCard(prefix: string, key: string, open: boolean) {
   setQbitGroupOpen(prefix, key, !!open);
 }
-export function toggleQbitGroup(prefix, key) {
+
+export function toggleQbitGroup(prefix: string, key: string) {
   const header = document.querySelector(`tr[data-download-group="${key}"][data-group-prefix="${prefix}"]`);
   if (!header) return;
   setQbitGroupOpen(prefix, key, header.getAttribute('aria-expanded') !== 'true');
 }
+
 // Lower-confidence matches are labelled so a title-only grouping is never
 // mistaken for a torrent Siftarr actually staged.
 const QBIT_MATCH_LABELS = { staged: 'Staged match', title: 'Title match' };
-function qbitMatchBadge(match) {
+
+function qbitMatchBadge(match: string | undefined) {
   const label = QBIT_MATCH_LABELS[match];
   return label ? `<span class="badge badge-gray">${label}</span>` : '';
 }
-function qbitGroupTotalsText(totals, showSpeeds) {
+
+function qbitGroupTotalsText(totals: QbitTotals, showSpeeds: boolean) {
   const parts = [];
   if (showSpeeds) {
     parts.push(`↓ ${qbitSpeed(totals.dlspeed)}`);
@@ -229,7 +320,8 @@ function qbitGroupTotalsText(totals, showSpeeds) {
   parts.push(`Up ${qbitBytes(totals.uploaded)}`);
   return parts.join(' · ');
 }
-function qbitTorrentSortValue(torrent) {
+
+function qbitTorrentSortValue(torrent: QbitTorrent) {
   if (_torrentStatusSort === 'eta-asc') {
     const rawEta = torrent.eta;
     if (rawEta === null || rawEta === undefined || rawEta === '') return Infinity;
@@ -244,8 +336,9 @@ function qbitTorrentSortValue(torrent) {
   if (!Number.isFinite(addedOn)) return Infinity;
   return _torrentStatusSort === 'added-desc' ? -addedOn : addedOn;
 }
-function sortQbitGroups(groups) {
-  const tieBreak = (left, right) =>
+
+function sortQbitGroups(groups: QbitGroup[]) {
+  const tieBreak = (left: QbitTorrent, right: QbitTorrent) =>
     String(left.name || left.hash || '').localeCompare(String(right.name || right.hash || ''));
   const sorted = (groups || []).map((group) => ({
     ...group,
@@ -259,22 +352,37 @@ function sortQbitGroups(groups) {
     return difference || String(left.title || '').localeCompare(String(right.title || ''));
   });
 }
+
 // Shared grouped renderer for both sub-views. Groups with a single torrent are
 // rendered as a flat row/card (no needless expand click); everything else gets a
 // collapsible header carrying the aggregate totals.
-function renderQbitGroups(groups, options) {
+function renderQbitGroups(
+  groups: QbitGroup[],
+  options: {
+    prefix: string;
+    colspan: number;
+    showSpeeds: boolean;
+    rowHtml: (torrent: QbitTorrent, attrs: string, child?: boolean) => string;
+    cardHtml: (torrent: QbitTorrent) => string;
+    emptyText: string;
+    cards: HTMLElement;
+    body: HTMLElement;
+  },
+) {
   const { prefix, colspan, showSpeeds, rowHtml, cardHtml, emptyText, cards, body } = options;
   if (!cards || !body) return;
   const escape = escapeHtml;
   const state = captureQbitGroupState(prefix);
   groups = sortQbitGroups(groups);
+
   if (!groups.length) {
     cards.innerHTML = `<p class="text-sm text-gray-500">${escape(emptyText)}</p>`;
     body.innerHTML = `<tr><td colspan="${colspan}" class="px-5 py-6 text-sm text-gray-500">${escape(emptyText)}</td></tr>`;
     return;
   }
-  const tableChunks = [];
-  const cardChunks = [];
+
+  const tableChunks: string[] = [];
+  const cardChunks: string[] = [];
   groups.forEach((group) => {
     const key = qbitGroupKey(group);
     const torrents = group.torrents || [];
@@ -299,11 +407,13 @@ function renderQbitGroups(groups, options) {
       `<details data-download-group="${escape(key)}" data-group-prefix="${prefix}" ontoggle="syncQbitGroupFromCard('${prefix}', '${escape(key)}', this.open)" class="rounded-xl border border-gray-700/60 bg-surface-900/60"><summary class="tap cursor-pointer px-3 py-2"><div class="overflow-wrap-anywhere text-sm font-semibold text-white">${title}</div><div class="mt-1 text-xs text-gray-400 tabular-nums">${count} torrents · ${summary}</div></summary><div class="space-y-3 p-3">${torrents.map(cardHtml).join('')}</div></details>`,
     );
   });
+
   body.innerHTML = tableChunks.join('');
   cards.innerHTML = cardChunks.join('');
   restoreQbitGroupState(prefix, state);
 }
-function renderQbitDownloads(groups) {
+
+function renderQbitDownloads(groups: QbitGroup[]) {
   const cards = document.getElementById('downloading-torrent-cards');
   const body = document.getElementById('downloading-torrents-body');
   if (!cards || !body) return;
@@ -343,9 +453,10 @@ function renderQbitDownloads(groups) {
   renderQbitDownloadSummary(groups);
   if (window.reinitColumnResizer) window.reinitColumnResizer();
 }
+
 // Completed sub-view: speeds are meaningless once a torrent is done, so the
 // columns are size / downloaded / uploaded / ratio instead.
-function renderQbitCompleted(groups) {
+function renderQbitCompleted(groups: QbitGroup[]) {
   const cards = document.getElementById('completed-torrent-cards');
   const body = document.getElementById('completed-torrents-body');
   if (!cards || !body) return;
@@ -381,7 +492,8 @@ function renderQbitCompleted(groups) {
   });
   if (window.reinitColumnResizer) window.reinitColumnResizer();
 }
-function formatEta(seconds) {
+
+function formatEta(seconds: number | string | null | undefined) {
   if (seconds === null || seconds === undefined || seconds < 0) return '—';
   if (seconds === 0) return 'now';
   const total = Math.round(seconds);
@@ -392,10 +504,12 @@ function formatEta(seconds) {
   if (hours > 0) return `${hours}h ${minutes}m`;
   return `${minutes}m`;
 }
+
 export async function refreshStagedTabData() {
   if (stagedTabRefreshInFlight) return;
   const stagedContent = document.getElementById('content-staged');
   if (!stagedContent) return;
+
   const restore = window.saveTabState('staged');
   stagedTabRefreshInFlight = true;
   try {
@@ -406,6 +520,7 @@ export async function refreshStagedTabData() {
     const doc = parser.parseFromString(html, 'text/html');
     const newContent = doc.getElementById('content-staged');
     if (!newContent) return;
+
     stagedContent.innerHTML = newContent.innerHTML;
     if (window.reinitColumnResizer) window.reinitColumnResizer();
     bindStagedSelectionHandlers();
@@ -414,6 +529,7 @@ export async function refreshStagedTabData() {
       window.bindSelectAll(stagedSelectAll, '.staged-torrent-checkbox');
     }
     restore();
+
     refreshDashboardStatCards(doc);
   } catch (err) {
     console.error('Failed to refresh staged tab:', err);
@@ -421,10 +537,12 @@ export async function refreshStagedTabData() {
     stagedTabRefreshInFlight = false;
   }
 }
+
 export async function refreshDownloadingTabData() {
   if (downloadingTabRefreshInFlight) return;
   const downloadingContent = document.getElementById('content-downloading');
   if (!downloadingContent) return;
+
   const restore = window.saveTabState('downloading');
   downloadingTabRefreshInFlight = true;
   try {
@@ -435,11 +553,13 @@ export async function refreshDownloadingTabData() {
     const doc = parser.parseFromString(html, 'text/html');
     const newContent = doc.getElementById('content-downloading');
     if (!newContent) return;
+
     downloadingContent.innerHTML = newContent.innerHTML;
     if (window.reinitColumnResizer) window.reinitColumnResizer();
     showQbitView(_torrentStatusView);
     await _patchStagedDownloadStatus();
     restore();
+
     refreshDashboardStatCards(doc);
   } catch (err) {
     console.error('Failed to refresh downloading tab:', err);
@@ -447,9 +567,11 @@ export async function refreshDownloadingTabData() {
     downloadingTabRefreshInFlight = false;
   }
 }
+
 function getDashboardStatCardsContainer(root = document) {
   return root.querySelector('[data-dashboard-stat-cards]');
 }
+
 function refreshDashboardStatCards(doc) {
   const statsContainer = getDashboardStatCardsContainer(document);
   const newStatsContainer = getDashboardStatCardsContainer(doc);
@@ -457,10 +579,12 @@ function refreshDashboardStatCards(doc) {
     statsContainer.innerHTML = newStatsContainer.innerHTML;
   }
 }
+
 export function bindStagedSelectionHandlers() {
   bindCheckboxRangeSelection('.staged-torrent-checkbox');
 }
-export async function checkNow(torrentId) {
+
+export async function checkNow(torrentId: number | string) {
   try {
     const response = await fetch('/staged/' + torrentId + '/check-now', { method: 'POST' });
     if (!response.ok) {
@@ -478,7 +602,8 @@ export async function checkNow(torrentId) {
     window.showToast('Error: ' + err.message);
   }
 }
-export async function postStagedAction(actionUrl, redirectTo = '/?tab=staged') {
+
+export async function postStagedAction(actionUrl: string, redirectTo = '/?tab=staged') {
   try {
     const formData = new FormData();
     formData.append('redirect_to', redirectTo);
@@ -501,24 +626,30 @@ export async function postStagedAction(actionUrl, redirectTo = '/?tab=staged') {
     window.showToast('Error: ' + err.message);
   }
 }
+
 function getSelectedStagedTorrentIds() {
   return Array.from(
     new Set(
-      Array.from(document.querySelectorAll('.staged-torrent-checkbox:checked')).map((checkbox) => checkbox.value),
+      Array.from(document.querySelectorAll<HTMLInputElement>('.staged-torrent-checkbox:checked')).map(
+        (checkbox) => checkbox.value,
+      ),
     ),
   );
 }
-export async function bulkStagedAction(action) {
+
+export async function bulkStagedAction(action: string) {
   const selectedIds = getSelectedStagedTorrentIds();
   if (selectedIds.length === 0) {
     window.showToast('Select one or more staged torrents first.');
     return;
   }
+
   try {
     const formData = new FormData();
     formData.append('action', action);
     selectedIds.forEach((id) => formData.append('torrent_ids', id));
     formData.append('redirect_to', '/?tab=staged');
+
     const response = await fetch('/staged/bulk', {
       method: 'POST',
       headers: { Accept: 'application/json' },
@@ -528,7 +659,7 @@ export async function bulkStagedAction(action) {
       const errorData = await response.json().catch(() => null);
       throw new Error(errorData?.detail || errorData?.message || `Server error: ${response.status}`);
     }
-    document.querySelectorAll('.staged-torrent-checkbox').forEach((checkbox) => {
+    document.querySelectorAll<HTMLInputElement>('.staged-torrent-checkbox').forEach((checkbox) => {
       checkbox.checked = false;
     });
     const data = await response.json().catch(() => ({}));
@@ -543,9 +674,11 @@ export async function bulkStagedAction(action) {
     window.showToast('Error: ' + err.message);
   }
 }
+
 export function closeStagedReview() {
   document.getElementById('staged-review-modal')?.classList.add('hidden');
 }
+
 function renderAlternative(item) {
   const evidence = item.rule_evidence || {};
   const selected = item.selected ? '<span class="badge badge-yellow">Selected</span>' : '';
@@ -553,6 +686,7 @@ function renderAlternative(item) {
   const seedersClass = item.seeders != null && Number(item.seeders) === 0 ? 'font-bold text-red-400' : '';
   return `<div class="rounded-xl border border-gray-700/60 bg-surface-850 p-3"><div class="flex flex-wrap items-center gap-2"><div class="min-w-0 flex-1 font-semibold text-white break-words">${escapeHtml(item.title || 'Unknown')}</div>${selected}${active}<span class="badge badge-gray">${escapeHtml(item.source || '')}</span></div><div class="mt-2 grid grid-cols-2 gap-2 text-xs text-gray-400 md:grid-cols-6"><div>Score <span class="text-emerald-400">${escapeHtml(String(item.score ?? 0))}</span></div><div>${escapeHtml(item.indexer || '-')}</div><div>${escapeHtml(item.resolution || '-')}</div><div>${escapeHtml(item.codec || '-')}</div><div>Seeders <span class="${seedersClass}">${escapeHtml(String(item.seeders ?? '-'))}</span></div><div>${escapeHtml(item.status || '')}</div></div>${item.rejection_reason ? `<div class="mt-2 text-red-300 text-xs">${escapeHtml(item.rejection_reason)}</div>` : ''}<div class="mt-3 flex flex-wrap gap-1">${window.renderRuleEvidence ? window.renderRuleEvidence(evidence) : ''}</div></div>`;
 }
+
 export async function openStagedReview(torrentId) {
   const modal = document.getElementById('staged-review-modal');
   const content = document.getElementById('staged-review-content');
@@ -571,6 +705,7 @@ export async function openStagedReview(torrentId) {
     content.innerHTML = `<div class="text-red-400">Failed to load alternatives: ${escapeHtml(err.message || 'Unknown error')}</div>`;
   }
 }
+
 // Temporary compatibility facade for HTML event handlers and untouched modules.
 Object.assign(window, {
   checkNow,

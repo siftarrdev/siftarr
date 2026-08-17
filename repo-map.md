@@ -42,7 +42,7 @@ Primary flow:
 ## Top-level repository layout
 
 - `app/siftarr/` — main application package
-- `frontend-src/` — canonical strict TypeScript sources for incrementally migrated browser modules; builds preserve existing static ES-module paths
+- `frontend-src/` — canonical TypeScript sources for migrated browser modules; strict checking is enabled, with narrowly scoped transitional `@ts-nocheck` exceptions in legacy dashboard modules; builds preserve existing static paths
 - `tests/` — automated regression and unit/integration tests
 - `db/alembic/` — database migration environment and revision history
 - `docker/` — container build and local container workflow
@@ -230,10 +230,9 @@ Static assets.
 - `css/dashboard.css` — supplemental UI styling
 - `css/tailwind.css` — built Tailwind CSS output (generated, committed)
 - `css/tailwind-input.css` — Tailwind CSS v4 input with CSS-based theme configuration and custom component classes
-- `js/dashboard*.js` and `js/dashboard/` — dashboard client-side behavior for the redesigned details modal (score-first release cards with inline staged Approve/Discard/Replace, client-only TV scope chips, per-season "Season packs" drawers plus a grouped Season packs tab with per-season/multi-season pack searches, Activity overlay opened from the details header and pinned over the right third of the modal, responsive mobile reflow), filters, staged actions and alternative review modal, TV “Search for new”/“Full search” controls, movie release search UX, and SSE progress panel; polls move status fields in download-status endpoint and shows badges/paths
-- `js/dashboard/core/state.js` and `column-resizer.js` — committed generated ES modules built from matching canonical files under `frontend-src/dashboard/core/`; browser import specifiers remain unchanged
-- `js/staging_decision_log.js` — client-side fetching, URL-backed filters, pagination, and raw JSON expansion for the Rules decision-log page
-- `js/stats.js` — Stats API fetch/range handling and lightweight bar/time-series chart rendering
+- `js/dashboard.js` and `js/dashboard/` — generated browser assets for the dashboard entrypoint and its migrated TypeScript modules (details modal, releases, filters, staged actions, modals, search SSE, core utilities/state, and column resizing); canonical sources live under `frontend-src/dashboard/`
+- `js/staging_decision_log.js` — generated client-side fetching, URL-backed filters, pagination, and raw JSON expansion for the Rules decision-log page; source is `frontend-src/staging_decision_log.ts`
+- `js/stats.js` — generated Stats API fetch/range handling and lightweight bar/time-series chart rendering; source is `frontend-src/stats.ts`
 - favicon assets
 
 ## Tests map
@@ -292,11 +291,13 @@ TypeScript modules automatically.
 
 ## Incremental TypeScript build
 
-Only migrated browser leaf modules live in `frontend-src/`; all other dashboard
-JavaScript remains canonical under `app/siftarr/static/js/`. `npm run
-build:frontend` compiles TypeScript back to the currently imported static paths,
-while `npm run typecheck:frontend` performs strict no-emit checking. Commit the
-generated JavaScript and use `npm run verify:frontend-build` to detect stale output.
+All migrated browser modules live in `frontend-src/`; `npm run build:frontend`
+compiles them to the existing static paths and promotes the dashboard entrypoint
+to `app/siftarr/static/js/dashboard.js`. Commit generated JavaScript and use
+`npm run verify:frontend-build` to detect stale output. The largest legacy
+dashboard modules retain narrowly scoped transitional `@ts-nocheck` exceptions;
+these are permitted by the dashboard ESLint override but do not disable the
+compiler for the rest of the TypeScript tree.
 
 ### Dev mode
 
@@ -310,6 +311,11 @@ rebuild (`docker/rebuild-run-logs.sh`).
 Run in this order:
 
 ```bash
+npm run format:js:check
+npm run lint:js
+npm run typecheck:frontend
+npm run verify:frontend-build
+npm run test:js
 uv run ruff format .
 uv run ruff check .
 uv run ty check

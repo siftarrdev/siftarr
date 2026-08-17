@@ -1,22 +1,28 @@
 // @ts-nocheck
 // Dashboard Filters Module - Table filtering and sorting
 // ======================================================
+
 import { refreshDetailsNavigationContext } from '/static/js/dashboard/core.js';
 import { dashboardState } from '/static/js/dashboard/core/state.js';
+
 export function toggleMediaFilter(tabName, mediaType) {
   if (!dashboardState.mediaFilterState[tabName]) dashboardState.mediaFilterState[tabName] = null;
+
   if (dashboardState.mediaFilterState[tabName] === mediaType) {
     dashboardState.mediaFilterState[tabName] = null;
   } else {
     dashboardState.mediaFilterState[tabName] = mediaType;
   }
+
   const tvBtn = document.getElementById('media-filter-' + tabName + '-tv');
   const movieBtn = document.getElementById('media-filter-' + tabName + '-movie');
+
   [tvBtn, movieBtn].forEach((btn) => {
     if (!btn) return;
     btn.classList.remove('border-brand-500', 'text-brand-400', 'bg-brand-500/10');
     btn.classList.add('border-gray-700/60', 'text-gray-500');
   });
+
   const activeBtn =
     dashboardState.mediaFilterState[tabName] === 'tv'
       ? tvBtn
@@ -27,8 +33,10 @@ export function toggleMediaFilter(tabName, mediaType) {
     activeBtn.classList.remove('border-gray-700/60', 'text-gray-500');
     activeBtn.classList.add('border-brand-500', 'text-brand-400', 'bg-brand-500/10');
   }
+
   applyAllFilters(tabName);
 }
+
 function applyAllFilters(tabName) {
   const filterMap = {
     active: filterTable,
@@ -41,6 +49,7 @@ function applyAllFilters(tabName) {
   };
   if (filterMap[tabName]) filterMap[tabName]();
 }
+
 export function filterTable() {
   const filterEl = document.getElementById('filter-input');
   if (!filterEl) return;
@@ -54,6 +63,7 @@ export function filterTable() {
   });
   refreshDetailsNavigationContext();
 }
+
 export function filterPendingTable() {
   const filterEl = document.getElementById('pending-filter-input');
   if (!filterEl) return;
@@ -67,6 +77,7 @@ export function filterPendingTable() {
   });
   refreshDetailsNavigationContext();
 }
+
 export function filterStagedTable() {
   const filterEl = document.getElementById('staged-filter-input');
   if (!filterEl) return;
@@ -77,6 +88,7 @@ export function filterStagedTable() {
   });
   refreshDetailsNavigationContext();
 }
+
 export function filterDownloadingTable() {
   const filterEl = document.getElementById('downloading-filter-input');
   if (!filterEl) return;
@@ -89,6 +101,7 @@ export function filterDownloadingTable() {
     });
   refreshDetailsNavigationContext();
 }
+
 export function filterFinishedTable() {
   const filterEl = document.getElementById('finished-filter-input');
   if (!filterEl) return;
@@ -102,6 +115,7 @@ export function filterFinishedTable() {
   });
   refreshDetailsNavigationContext();
 }
+
 export function filterRejectedTable() {
   const filterEl = document.getElementById('rejected-filter-input');
   if (!filterEl) return;
@@ -115,6 +129,7 @@ export function filterRejectedTable() {
   });
   refreshDetailsNavigationContext();
 }
+
 export function filterUnreleasedTable() {
   const filterEl = document.getElementById('unreleased-filter-input');
   if (!filterEl) return;
@@ -131,6 +146,7 @@ export function filterUnreleasedTable() {
     });
   refreshDetailsNavigationContext();
 }
+
 export function filterReleaseCards() {
   const filterEl = document.getElementById('release-filter-input');
   const releasesContainer = document.getElementById('request-details-releases');
@@ -144,6 +160,7 @@ export function filterReleaseCards() {
       .join('') +
     '</ul>';
 }
+
 export function sortTable(tableName, sortKey, preserveDirection = false, forcedDirection = null) {
   const tableIdMap = {
     active: 'active-requests-table',
@@ -168,6 +185,7 @@ export function sortTable(tableName, sortKey, preserveDirection = false, forcedD
   const tbody = document.getElementById(bodyIdMap[tableName]);
   const table = document.getElementById(tableIdMap[tableName]);
   if (!tbody || !table || !state) return;
+
   if (forcedDirection) {
     state.column = sortKey;
     state.direction = forcedDirection;
@@ -181,6 +199,7 @@ export function sortTable(tableName, sortKey, preserveDirection = false, forcedD
     state.column = sortKey;
     state.direction = 'asc';
   }
+
   table.querySelectorAll('.sort-indicator').forEach((el) => {
     el.textContent = '';
   });
@@ -188,6 +207,7 @@ export function sortTable(tableName, sortKey, preserveDirection = false, forcedD
   if (indicator) {
     indicator.textContent = state.direction === 'asc' ? ' \u25B2' : ' \u25BC';
   }
+
   const rows = Array.from(tbody.querySelectorAll('tr'));
   rows.sort((a, b) => {
     const aVal = a.dataset[sortKey] || '';
@@ -221,11 +241,13 @@ export function sortTable(tableName, sortKey, preserveDirection = false, forcedD
   }
   refreshDetailsNavigationContext();
 }
+
 export function sortDashboardCards(tableName, encodedSort) {
   const [sortKey, direction] = String(encodedSort || '').split(':');
   if (!sortKey) return;
   sortTable(tableName, sortKey, true, direction === 'desc' ? 'desc' : 'asc');
 }
+
 /**
  * Restore tab UI state after an in-place DOM refresh.
  * Re-applies media filter button styling, re-applies the current sort,
@@ -246,6 +268,7 @@ export function restoreTabState(tabName) {
     activeBtn.classList.remove('border-gray-700/60', 'text-gray-500');
     activeBtn.classList.add('border-brand-500', 'text-brand-400', 'bg-brand-500/10');
   }
+
   // Restore text filter value
   const filterInputIdMap = {
     active: 'filter-input',
@@ -261,6 +284,7 @@ export function restoreTabState(tabName) {
     filterInput.value = filterInput.dataset.priorValue;
     delete filterInput.dataset.priorValue;
   }
+
   // Re-apply sorting using saved state
   const sortState = dashboardState.tableSortState[tabName];
   if (sortState && sortState.column) {
@@ -293,6 +317,7 @@ export function restoreTabState(tabName) {
     applyAllFilters(tabName);
   }
 }
+
 /**
  * Save and restore tab state around an in-place refresh.
  * Call before replacing innerHTML to save state, call after to restore.
@@ -316,11 +341,13 @@ export function saveTabState(tabName) {
   if (filterInput && filterInput.value) {
     filterInput.dataset.priorValue = filterInput.value;
   }
+
   // Return a cleanup function that restores state
   return function restore() {
     restoreTabState(tabName);
   };
 }
+
 // Temporary adapter for bootstrap code and HTML event handlers.
 Object.assign(window, {
   toggleMediaFilter,

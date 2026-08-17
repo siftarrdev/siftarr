@@ -2,29 +2,38 @@
 // Search SSE Progress Panel
 // ==========================
 // Reusable SSE-based search progress panel for the dashboard.
+
 let activeSearchEventSource = null;
 let activeTvSearchCancelUrl = null;
+
 function getProgressBar() {
   return document.getElementById('search-progress-bar');
 }
+
 function getProgressPanel() {
   return document.getElementById('search-progress-panel');
 }
+
 function getProgressStatus() {
   return document.getElementById('search-progress-status');
 }
+
 function getProgressTitle() {
   return document.getElementById('search-progress-title');
 }
+
 function getProgressSubtitle() {
   return document.getElementById('search-progress-subtitle');
 }
+
 function getProgressActiveWrap() {
   return document.getElementById('search-progress-active-wrap');
 }
+
 function getProgressActiveList() {
   return document.getElementById('search-progress-active-list');
 }
+
 function resetProgressPanel() {
   const bar = getProgressBar();
   const status = getProgressStatus();
@@ -33,6 +42,7 @@ function resetProgressPanel() {
   const activeWrap = getProgressActiveWrap();
   const activeList = getProgressActiveList();
   const cancelButton = document.getElementById('search-progress-cancel');
+
   if (bar) {
     bar.style.width = '0%';
     bar.classList.remove('bg-emerald-500', 'bg-red-500');
@@ -49,6 +59,7 @@ function resetProgressPanel() {
     cancelButton.textContent = 'Cancel search';
   }
 }
+
 function closeSearchProgress() {
   if (activeSearchEventSource) {
     activeSearchEventSource.close();
@@ -59,6 +70,7 @@ function closeSearchProgress() {
   if (panel) panel.classList.add('hidden');
   resetProgressPanel();
 }
+
 function setPhaseStyles(bar, phase) {
   bar.classList.remove('bg-brand-500', 'bg-emerald-500', 'bg-red-500');
   if (phase === 'complete') {
@@ -69,6 +81,7 @@ function setPhaseStyles(bar, phase) {
     bar.classList.add('bg-brand-500');
   }
 }
+
 async function _invokeCallback(cb, data) {
   if (typeof cb === 'function') {
     try {
@@ -78,23 +91,30 @@ async function _invokeCallback(cb, data) {
     }
   }
 }
+
 async function _finishSearchEventSource(es, cb, data) {
   if (activeSearchEventSource === es) activeSearchEventSource = null;
   activeTvSearchCancelUrl = null;
   es.close();
   await _invokeCallback(cb, data);
 }
+
 function startSearchProgress(requestId, title, onComplete, onError) {
   closeSearchProgress();
   resetProgressPanel();
+
   const panel = getProgressPanel();
   if (panel) panel.classList.remove('hidden');
+
   const titleEl = getProgressTitle();
   if (titleEl && title) titleEl.textContent = title;
+
   let finished = false;
+
   const url = '/requests/' + requestId + '/search/stream';
   const es = new EventSource(url);
   activeSearchEventSource = es;
+
   es.onmessage = (event) => {
     let data;
     try {
@@ -102,12 +122,14 @@ function startSearchProgress(requestId, title, onComplete, onError) {
     } catch {
       return;
     }
+
     const bar = getProgressBar();
     const status = getProgressStatus();
     const titleEl = getProgressTitle();
     const subtitle = getProgressSubtitle();
     const activeWrap = getProgressActiveWrap();
     const activeList = getProgressActiveList();
+
     if (data.percent !== undefined && bar) {
       bar.style.width = data.percent + '%';
     }
@@ -132,6 +154,7 @@ function startSearchProgress(requestId, title, onComplete, onError) {
     if (title && titleEl) {
       titleEl.textContent = title;
     }
+
     if (data.phase) {
       if (bar) setPhaseStyles(bar, data.phase);
       switch (data.phase) {
@@ -163,6 +186,7 @@ function startSearchProgress(requestId, title, onComplete, onError) {
       }
     }
   };
+
   es.onerror = () => {
     if (finished) {
       es.close();
@@ -181,13 +205,17 @@ function startSearchProgress(requestId, title, onComplete, onError) {
     _invokeCallback(onError, { phase: 'error', message: 'Connection lost' });
   };
 }
+
 function startBulkSearchProgress(requestIds, titles, onComplete, onError, options) {
   closeSearchProgress();
   resetProgressPanel();
+
   const panel = getProgressPanel();
   if (panel) panel.classList.remove('hidden');
+
   const titleEl = getProgressTitle();
   if (titleEl) titleEl.textContent = 'Bulk Search';
+
   const activeWrap = getProgressActiveWrap();
   const activeList = getProgressActiveList();
   if (activeWrap && titles && titles.length > 0) {
@@ -206,7 +234,9 @@ function startBulkSearchProgress(requestIds, titles, onComplete, onError, option
         .join('');
     }
   }
+
   let finished = false;
+
   const params = requestIds.map(function (id) {
     return 'request_ids=' + encodeURIComponent(id);
   });
@@ -217,6 +247,7 @@ function startBulkSearchProgress(requestIds, titles, onComplete, onError, option
   const url = '/requests/bulk/search/stream' + (query ? '?' + query : '');
   const es = new EventSource(url);
   activeSearchEventSource = es;
+
   es.onmessage = (event) => {
     let data;
     try {
@@ -224,15 +255,18 @@ function startBulkSearchProgress(requestIds, titles, onComplete, onError, option
     } catch {
       return;
     }
+
     const bar = getProgressBar();
     const status = getProgressStatus();
     const subtitle = getProgressSubtitle();
     const list = getProgressActiveList();
+
     if (data.phase === 'starting') {
       if (bar) bar.style.width = '5%';
       if (status) status.textContent = 'Starting bulk search…';
       if (subtitle && data.total) subtitle.textContent = data.total + ' request(s) queued';
     }
+
     if (data.phase === 'searching') {
       if (data.total && data.current !== undefined) {
         const pct = Math.round((data.current / data.total) * 100);
@@ -253,6 +287,7 @@ function startBulkSearchProgress(requestIds, titles, onComplete, onError, option
         });
       }
     }
+
     if (data.phase === 'complete') {
       finished = true;
       if (bar) {
@@ -265,6 +300,7 @@ function startBulkSearchProgress(requestIds, titles, onComplete, onError, option
       _finishSearchEventSource(es, onComplete, data);
       setTimeout(() => closeSearchProgress(), 3000);
     }
+
     if (data.phase === 'error') {
       finished = true;
       if (bar) {
@@ -277,6 +313,7 @@ function startBulkSearchProgress(requestIds, titles, onComplete, onError, option
       _finishSearchEventSource(es, onError, data);
     }
   };
+
   es.onerror = () => {
     if (finished) {
       es.close();
@@ -295,6 +332,7 @@ function startBulkSearchProgress(requestIds, titles, onComplete, onError, option
     _invokeCallback(onError, { phase: 'error', message: 'Connection lost' });
   };
 }
+
 async function cancelActiveTvSearch() {
   if (!activeTvSearchCancelUrl) return;
   const button = document.getElementById('search-progress-cancel');
@@ -315,19 +353,25 @@ async function cancelActiveTvSearch() {
     if (status) status.textContent = 'Could not cancel search: ' + error.message;
   }
 }
+
 function startTvSearchProgress(streamUrl, title, onComplete, onError, cancelUrl = null) {
   closeSearchProgress();
   resetProgressPanel();
+
   const panel = getProgressPanel();
   if (panel) panel.classList.remove('hidden');
+
   const titleEl = getProgressTitle();
   if (titleEl && title) titleEl.textContent = title;
   activeTvSearchCancelUrl = cancelUrl;
   const cancelButton = document.getElementById('search-progress-cancel');
   if (cancelButton && cancelUrl) cancelButton.classList.remove('hidden');
+
   let finished = false;
+
   const es = new EventSource(streamUrl);
   activeSearchEventSource = es;
+
   es.onmessage = (event) => {
     let data;
     try {
@@ -335,14 +379,17 @@ function startTvSearchProgress(streamUrl, title, onComplete, onError, cancelUrl 
     } catch {
       return;
     }
+
     const bar = getProgressBar();
     const status = getProgressStatus();
+
     if (data.percent !== undefined && bar) {
       bar.style.width = data.percent + '%';
     }
     if (data.message && status) {
       status.textContent = data.message;
     }
+
     if (data.phase) {
       switch (data.phase) {
         case 'results_updated':
@@ -370,6 +417,7 @@ function startTvSearchProgress(streamUrl, title, onComplete, onError, cancelUrl 
       }
     }
   };
+
   es.onerror = () => {
     if (finished) {
       es.close();
@@ -388,9 +436,11 @@ function startTvSearchProgress(streamUrl, title, onComplete, onError, cancelUrl 
     _invokeCallback(onError, { phase: 'error', message: 'Connection lost' });
   };
 }
+
 function updateRequestRow(requestId, result) {
   const row = document.querySelector('tr[data-request-id="' + requestId + '"]');
   if (!row) return;
+
   const status = result.status || '';
   const badgeCell = row.querySelector('td > .badge');
   if (badgeCell) {
@@ -415,12 +465,15 @@ function updateRequestRow(requestId, result) {
     }
     badgeCell.textContent = status;
   }
+
   const searchButtons = row.querySelectorAll('[data-search-action="true"]');
   searchButtons.forEach(function (btn) {
     btn.disabled = false;
   });
+
   row.setAttribute('data-status', status);
 }
+
 export {
   closeSearchProgress,
   cancelActiveTvSearch,
@@ -429,6 +482,7 @@ export {
   startTvSearchProgress,
   updateRequestRow,
 };
+
 Object.assign(window, {
   closeSearchProgress,
   cancelActiveTvSearch,

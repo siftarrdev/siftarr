@@ -16,9 +16,9 @@
   },
   "scripts": {
     "build:css": "npx @tailwindcss/cli -i ./app/siftarr/static/css/tailwind-input.css -o ./app/siftarr/static/css/tailwind.css --minify",
-    "build:frontend": "tsc -p tsconfig.build.json && prettier --write \"app/siftarr/static/js/dashboard/core/{state,column-resizer}.js\"",
+    "build:frontend": "tsc -p tsconfig.build.json && cp app/siftarr/static/js/dashboard/dashboard.js app/siftarr/static/js/dashboard.js && rm app/siftarr/static/js/dashboard/dashboard.js && prettier --write \"app/siftarr/static/js/**/*.js\"",
     "typecheck:frontend": "tsc -p tsconfig.json --noEmit",
-    "verify:frontend-build": "npm run build:frontend && git diff --exit-code -- app/siftarr/static/js/dashboard/core/state.js app/siftarr/static/js/dashboard/core/column-resizer.js",
+    "verify:frontend-build": "npm run build:frontend && git diff --exit-code -- app/siftarr/static/js",
     "format:js": "prettier --write \"app/siftarr/static/js/**/*.js\" \"frontend-src/**/*.{ts,mjs}\" \"frontend-tests/**/*.{js,mjs}\" *.config.mjs",
     "format:js:check": "prettier --check \"app/siftarr/static/js/**/*.js\" \"frontend-src/**/*.{ts,mjs}\" \"frontend-tests/**/*.{js,mjs}\" *.config.mjs",
     "lint:js": "eslint \"app/siftarr/static/js/**/*.js\" && eslint --config frontend-src/eslint.config.mjs \"frontend-src/**/*.ts\" frontend-src/eslint.config.mjs && eslint --config frontend-tests/eslint.config.mjs \"frontend-tests/**/*.js\" frontend-tests/eslint.config.mjs vitest.config.mjs playwright.config.mjs",

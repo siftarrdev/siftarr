@@ -1,30 +1,68 @@
-function requiredElement(selector) {
-  const element = document.querySelector(selector);
+export {};
+
+type Point = { label: string; value: number };
+type StatRow = { label: string; value?: number; avg_ms?: number };
+type Series = { label: string; points?: Point[] };
+type ChartRow = Point | Series;
+type Cards = {
+  total_requests: number;
+  downloads_processed: number;
+  approval_rate: number | null;
+  evaluated_requests: number;
+  enabled_rules: number;
+  total_rules: number;
+};
+type StatsData = {
+  range: { label: string };
+  cards: Cards;
+  availability?: Record<string, string>;
+  empty: boolean;
+  charts: {
+    resolution_split?: StatRow[];
+    source_split?: StatRow[];
+    rule_outcomes?: StatRow[];
+    processing_times?: StatRow[];
+    time_series?: Record<string, (Point | Series)[]>;
+  };
+};
+
+function requiredElement<T extends HTMLElement>(selector: string): T {
+  const element = document.querySelector<T>(selector);
   if (!element) throw new Error(`Missing stats element: ${selector}`);
   return element;
 }
-const form = requiredElement('#stats-range-form');
-const rangeSelect = requiredElement('#stats-range');
-const customRange = requiredElement('.stats-custom-range');
-const loading = requiredElement('#stats-loading');
-const errorBox = requiredElement('#stats-error');
-const emptyBox = requiredElement('#stats-empty');
-const content = requiredElement('#stats-content');
-const rangeLabel = requiredElement('#stats-range-label');
-function setHidden(el, hidden) {
+
+const form = requiredElement<HTMLFormElement>('#stats-range-form');
+const rangeSelect = requiredElement<HTMLSelectElement>('#stats-range');
+const customRange = requiredElement<HTMLElement>('.stats-custom-range');
+const loading = requiredElement<HTMLElement>('#stats-loading');
+const errorBox = requiredElement<HTMLElement>('#stats-error');
+const emptyBox = requiredElement<HTMLElement>('#stats-empty');
+const content = requiredElement<HTMLElement>('#stats-content');
+const rangeLabel = requiredElement<HTMLElement>('#stats-range-label');
+
+function setHidden(el: HTMLElement, hidden: boolean) {
   el.classList.toggle('hidden', hidden);
 }
-function formatNumber(value) {
+
+function formatNumber(value: number | null | undefined) {
   return new Intl.NumberFormat().format(value || 0);
 }
-function formatMs(value) {
+
+function formatMs(value: number | null | undefined) {
   if (value === null || value === undefined) return '--';
   if (value >= 3600000) return `${(value / 3600000).toFixed(1)}h`;
   if (value >= 60000) return `${(value / 60000).toFixed(1)}m`;
   if (value >= 1000) return `${(value / 1000).toFixed(1)}s`;
   return `${Math.round(value)}ms`;
 }
-function renderBars(container, rows, valueKey = 'value', availability = 'stats') {
+
+function renderBars(
+  container: HTMLElement,
+  rows: StatRow[] | undefined,
+  valueKey: 'value' | 'avg_ms' = 'value',
+  availability: string = 'stats',
+) {
   container.innerHTML = '';
   if (availability === 'unavailable') {
     const message = document.createElement('p');
@@ -64,15 +102,17 @@ function renderBars(container, rows, valueKey = 'value', availability = 'stats')
     container.appendChild(item);
   });
 }
-function allPoints(rows) {
+
+function allPoints(rows: ChartRow[] | undefined): Point[] {
   if (!rows) return [];
   const first = rows[0];
   if (first && 'points' in first) {
     return rows.flatMap((row) => ('points' in row && row.points ? row.points : []));
   }
-  return rows;
+  return rows as Point[];
 }
-function renderPointSeries(container, rows, availability = 'stats') {
+
+function renderPointSeries(container: HTMLElement, rows: ChartRow[] | undefined, availability: string = 'stats') {
   container.innerHTML = '';
   if (availability === 'unavailable') {
     const message = document.createElement('p');
@@ -91,7 +131,8 @@ function renderPointSeries(container, rows, availability = 'stats') {
     return;
   }
   const first = rows[0];
-  const seriesRows = first && 'points' in first ? rows : [{ label: 'Total', points: rows }];
+  const seriesRows: Series[] =
+    first && 'points' in first ? (rows as Series[]) : [{ label: 'Total', points: rows as Point[] }];
   const max = Math.max(...allPoints(seriesRows).map((point) => point.value || 0), 1);
   const wrapper = document.createElement('div');
   wrapper.className = 'space-y-4';
@@ -103,11 +144,13 @@ function renderPointSeries(container, rows, availability = 'stats') {
     label.textContent = series.label;
     const total = document.createElement('span');
     total.className = 'font-mono';
-    total.textContent = formatNumber((series.points || []).reduce((sum, point) => sum + (point.value || 0), 0));
+    total.textContent = formatNumber(
+      (series.points || []).reduce((sum: number, point: Point) => sum + (point.value || 0), 0),
+    );
     title.append(label, total);
     const bars = document.createElement('div');
     bars.className = 'flex h-24 items-end gap-1 rounded-lg bg-surface-850 p-2';
-    (series.points || []).forEach((point) => {
+    (series.points || []).forEach((point: Point) => {
       const bar = document.createElement('div');
       const height = Math.max(((point.value || 0) / max) * 100, point.value > 0 ? 5 : 1);
       bar.className = 'min-w-1 flex-1 rounded-t bg-brand-500/80';
@@ -120,71 +163,76 @@ function renderPointSeries(container, rows, availability = 'stats') {
   });
   container.appendChild(wrapper);
 }
-function updateCards(cards, availability = {}) {
-  document.querySelector('[data-card="total_requests"]').textContent = formatNumber(cards.total_requests);
-  document.querySelector('[data-card="downloads_processed"]').textContent =
+
+function updateCards(cards: Cards, availability: Record<string, string> = {}) {
+  (document.querySelector('[data-card="total_requests"]') as HTMLElement).textContent = formatNumber(
+    cards.total_requests,
+  );
+  (document.querySelector('[data-card="downloads_processed"]') as HTMLElement).textContent =
     availability.downloads_processed === 'unavailable' ? '--' : formatNumber(cards.downloads_processed);
-  document.querySelector('[data-card="approval_rate"]').textContent =
+  (document.querySelector('[data-card="approval_rate"]') as HTMLElement).textContent =
     cards.approval_rate === null ? '--' : `${cards.approval_rate}%`;
-  document.querySelector('[data-card="evaluated_requests"]').textContent =
+  (document.querySelector('[data-card="evaluated_requests"]') as HTMLElement).textContent =
     availability.evaluated_requests === 'unavailable'
       ? 'Unavailable'
       : `${formatNumber(cards.evaluated_requests)} evaluated`;
-  document.querySelector('[data-card="rules"]').textContent =
+  (document.querySelector('[data-card="rules"]') as HTMLElement).textContent =
     `${formatNumber(cards.enabled_rules)} / ${formatNumber(cards.total_rules)}`;
 }
-function renderStats(data) {
+
+function renderStats(data: StatsData) {
   rangeLabel.textContent = data.range.label;
   updateCards(data.cards, data.availability);
   renderBars(
-    document.querySelector('[data-chart="resolution_split"]'),
+    document.querySelector('[data-chart="resolution_split"]') as HTMLElement,
     data.charts.resolution_split,
     'value',
     data.availability?.resolution_split,
   );
   renderBars(
-    document.querySelector('[data-chart="source_split"]'),
+    document.querySelector('[data-chart="source_split"]') as HTMLElement,
     data.charts.source_split,
     'value',
     data.availability?.source_split,
   );
   renderBars(
-    document.querySelector('[data-chart="rule_outcomes"]'),
+    document.querySelector('[data-chart="rule_outcomes"]') as HTMLElement,
     data.charts.rule_outcomes,
     'value',
     data.availability?.rule_outcomes,
   );
   renderBars(
-    document.querySelector('[data-chart="processing_times"]'),
+    document.querySelector('[data-chart="processing_times"]') as HTMLElement,
     data.charts.processing_times,
     'avg_ms',
     data.availability?.processing_times,
   );
-  const series = data.charts.time_series || {};
+  const series: Record<string, ChartRow[]> = data.charts.time_series || {};
   renderPointSeries(
-    document.querySelector('[data-series-chart="downloads"]'),
+    document.querySelector('[data-series-chart="downloads"]') as HTMLElement,
     series.downloads,
     data.availability?.downloads_series,
   );
   renderPointSeries(
-    document.querySelector('[data-series-chart="failures"]'),
+    document.querySelector('[data-series-chart="failures"]') as HTMLElement,
     series.failures,
     data.availability?.failures_series,
   );
   renderPointSeries(
-    document.querySelector('[data-series-chart="rule_rejections"]'),
+    document.querySelector('[data-series-chart="rule_rejections"]') as HTMLElement,
     series.rule_rejections,
     data.availability?.rule_rejections_series,
   );
   renderPointSeries(
-    document.querySelector('[data-series-chart="indexer_behavior"]'),
+    document.querySelector('[data-series-chart="indexer_behavior"]') as HTMLElement,
     series.indexer_behavior,
     data.availability?.indexer_behavior_series,
   );
   setHidden(emptyBox, !data.empty);
   setHidden(content, false);
 }
-function buildUrl() {
+
+function buildUrl(): string {
   const params = new URLSearchParams(
     Array.from(new FormData(form).entries()).map(([key, value]) => [key, String(value)]),
   );
@@ -194,6 +242,7 @@ function buildUrl() {
   }
   return `/stats/data?${params.toString()}`;
 }
+
 async function loadStats() {
   setHidden(loading, false);
   setHidden(errorBox, true);
@@ -209,16 +258,18 @@ async function loadStats() {
     setHidden(loading, true);
   }
 }
+
 function syncCustomRange() {
   const custom = rangeSelect.value === 'custom';
   customRange.classList.toggle('hidden', !custom);
   customRange.classList.toggle('grid', custom);
 }
+
 rangeSelect.addEventListener('change', syncCustomRange);
 form.addEventListener('submit', (event) => {
   event.preventDefault();
   loadStats();
 });
+
 syncCustomRange();
 loadStats();
-export {};

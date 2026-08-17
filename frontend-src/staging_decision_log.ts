@@ -1,27 +1,44 @@
-'use strict';
 (function () {
-  function requiredElement(id) {
+  function requiredElement<T extends HTMLElement>(id: string): T {
     const element = document.getElementById(id);
     if (!element) throw new Error(`Missing decision log element: ${id}`);
-    return element;
+    return element as T;
   }
-  const form = requiredElement('decision-log-filters');
-  const results = requiredElement('decision-log-results');
-  const status = requiredElement('decision-log-status');
-  const prev = requiredElement('decision-log-prev');
-  const next = requiredElement('decision-log-next');
-  const reset = requiredElement('decision-log-reset');
+  const form = requiredElement<HTMLFormElement>('decision-log-filters');
+  const results = requiredElement<HTMLElement>('decision-log-results');
+  const status = requiredElement<HTMLElement>('decision-log-status');
+  const prev = requiredElement<HTMLButtonElement>('decision-log-prev');
+  const next = requiredElement<HTMLButtonElement>('decision-log-next');
+  const reset = requiredElement<HTMLButtonElement>('decision-log-reset');
   let page = Number(new URLSearchParams(window.location.search).get('page') || '1');
-  function esc(value) {
+
+  function esc(value: unknown) {
     return String(value ?? '').replace(
       /[&<>"']/g,
-      (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c] ?? c,
+      (c) =>
+        (({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }) as Record<string, string>)[c] ?? c,
     );
   }
-  function selected(entry) {
+  type JsonObject = Record<string, unknown>;
+  type DecisionEntry = JsonObject & {
+    selected_release?: JsonObject;
+    new_torrent?: JsonObject;
+    request?: JsonObject;
+    selection?: JsonObject;
+    logged_at?: string;
+    event_type?: string;
+    outcome?: string;
+  };
+  type DecisionData = {
+    total: number;
+    page: number;
+    has_next: boolean;
+    items: DecisionEntry[];
+  };
+  function selected(entry: DecisionEntry): JsonObject {
     return entry.selected_release || entry.new_torrent || {};
   }
-  function localTime(value) {
+  function localTime(value: string | null | undefined): string {
     if (!value) return 'Unknown time';
     const d = new Date(value);
     return Number.isNaN(d.getTime()) ? value : d.toLocaleString();
@@ -35,17 +52,17 @@
     p.set('page_size', '25');
     return p;
   }
-  function syncUrl(p) {
+  function syncUrl(p: URLSearchParams) {
     window.history.replaceState(null, '', `${window.location.pathname}?${p.toString()}`);
   }
   function fillForm() {
     const p = new URLSearchParams(window.location.search);
     for (const el of Array.from(form.elements)) {
-      const input = el;
+      const input = el as HTMLInputElement;
       if (input.name && p.has(input.name)) input.value = p.get(input.name) ?? '';
     }
   }
-  function render(data) {
+  function render(data: DecisionData) {
     status.textContent = data.total
       ? `Page ${data.page} · ${data.total} entries`
       : 'No decision-log entries match these filters.';
@@ -81,7 +98,7 @@
       const r = await fetch(`/staged/decision-log?${p.toString()}`, { credentials: 'same-origin' });
       if (!r.ok) throw new Error(`HTTP ${r.status}`);
       render(await r.json());
-    } catch (e) {
+    } catch (e: unknown) {
       status.textContent = `Error loading decision log: ${e instanceof Error ? e.message : 'Unknown error'}`;
     }
   }
