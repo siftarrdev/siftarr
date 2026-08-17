@@ -5,10 +5,10 @@ import logging
 import os
 import re
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, cast
 from urllib.parse import urlsplit
 
-from fastapi import APIRouter, Depends, Form, HTTPException, Query
+from fastapi import APIRouter, BackgroundTasks, Depends, Form, HTTPException, Query
 from fastapi import Request as FastAPIRequest
 from fastapi.responses import JSONResponse, RedirectResponse
 from sqlalchemy import select
@@ -39,6 +39,7 @@ from app.siftarr.services.lifecycle.download_queue_service import DownloadQueueS
 from app.siftarr.services.lifecycle.lifecycle_service import LifecycleService
 from app.siftarr.services.lifecycle.overseerr_sync_service import (
     approve_overseerr_request_best_effort,
+    approve_overseerr_request_in_background,
 )
 from app.siftarr.services.search_history_service import SearchHistoryService
 from app.siftarr.services.stats_metrics_service import record_staged_release_fact
@@ -397,6 +398,7 @@ async def _approve_torrent(
     *,
     commit_transition: bool = True,
     cleanup_paths: list[tuple[str, str]] | None = None,
+    background_tasks: BackgroundTasks | None = None,
 ) -> bool:
     request = None
     if torrent.request_id:
@@ -452,12 +454,21 @@ async def _approve_torrent(
         if torrent_hash is None:
             return False
 
-    try:
-        await approve_overseerr_request_best_effort(db, request, reason="staged_approval_qbit_sent")
-    except Exception:
-        logger.exception(
-            "Best-effort Overseerr approval failed for request_id=%s", torrent.request_id
+    if background_tasks is not None and request is not None:
+        background_tasks.add_task(
+            approve_overseerr_request_in_background,
+            request.id,
+            reason="staged_approval_qbit_sent",
         )
+    else:
+        try:
+            await approve_overseerr_request_best_effort(
+                db, request, reason="staged_approval_qbit_sent"
+            )
+        except Exception:
+            logger.exception(
+                "Best-effort Overseerr approval failed for request_id=%s", torrent.request_id
+            )
 
     activity_log = ActivityLogService(db)
     await activity_log.log(
@@ -560,13 +571,23 @@ async def _mark_torrent_approved_after_qbit(
     rules_selected_torrent: StagedTorrent | None,
     torrent_hash: str | None,
     cleanup_paths: list[tuple[str, str]],
+    background_tasks: BackgroundTasks | None = None,
 ) -> None:
-    try:
-        await approve_overseerr_request_best_effort(db, request, reason="staged_approval_qbit_sent")
-    except Exception:
-        logger.exception(
-            "Best-effort Overseerr approval failed for request_id=%s", torrent.request_id
+    if background_tasks is not None and request is not None:
+        background_tasks.add_task(
+            approve_overseerr_request_in_background,
+            request.id,
+            reason="staged_approval_qbit_sent",
         )
+    else:
+        try:
+            await approve_overseerr_request_best_effort(
+                db, request, reason="staged_approval_qbit_sent"
+            )
+        except Exception:
+            logger.exception(
+                "Best-effort Overseerr approval failed for request_id=%s", torrent.request_id
+            )
 
     activity_log = ActivityLogService(db)
     await activity_log.log(
@@ -699,6 +720,7 @@ def _should_refresh_staged_tab(
 async def approve_staged_torrent(
     torrent_id: int,
     http_request: FastAPIRequest,
+    background_tasks: BackgroundTasks = cast(BackgroundTasks, None),
     db: AsyncSession = Depends(get_db),
 ) -> RedirectResponse | JSONResponse:
     """Approve a staged torrent - send to qBittorrent."""
@@ -714,6 +736,7 @@ async def approve_staged_torrent(
         db,
         commit_transition=False,
         cleanup_paths=cleanup_paths,
+        background_tasks=background_tasks,
     )
     if not success:
         await db.rollback()
@@ -798,6 +821,7 @@ async def delete_downloading_torrent(
 @router.post("/bulk", response_model=None)
 async def bulk_staged_action(
     http_request: FastAPIRequest,
+    background_tasks: BackgroundTasks = cast(BackgroundTasks, None),
     action: str = Form(...),
     torrent_ids: list[int] = Form(default=[]),
     db: AsyncSession = Depends(get_db),
@@ -887,6 +911,7 @@ async def bulk_staged_action(
                 rules_selected_torrent=rules_selected_torrent,
                 torrent_hash=result.torrent_hash,
                 cleanup_paths=cleanup_paths,
+                background_tasks=background_tasks,
             )
             processed += 1
     else:

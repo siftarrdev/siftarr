@@ -13,6 +13,26 @@ from app.siftarr.services.lifecycle.activity_log_service import ActivityLogServi
 logger = logging.getLogger(__name__)
 
 
+async def approve_overseerr_request_in_background(
+    request_id: int,
+    *,
+    reason: str,
+) -> None:
+    """Perform Overseerr approval after the local approval response is sent."""
+    # BackgroundTasks run after the request-scoped session is closed, so use a
+    # fresh session rather than capturing the router's AsyncSession.
+    from app.siftarr.database import async_session_maker, init_engine
+    from app.siftarr.models.request import Request as RequestModel
+
+    if async_session_maker is None:
+        init_engine()
+    if async_session_maker is None:  # pragma: no cover - defensive startup guard
+        return
+    async with async_session_maker() as db:
+        request = await db.get(RequestModel, request_id)
+        await approve_overseerr_request_best_effort(db, request, reason=reason)
+
+
 async def approve_overseerr_request_best_effort(
     db: AsyncSession,
     request: Request | None,

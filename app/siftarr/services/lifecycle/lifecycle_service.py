@@ -47,11 +47,19 @@ class LifecycleService:
 
     async def _load_all_episodes(self, request: Request) -> list[Episode]:
         """Load all episodes across all seasons for a TV request."""
-        all_episodes: list[Episode] = []
-        for season in request.seasons:
-            result = await self.db.execute(select(Episode).where(Episode.season_id == season.id))
-            all_episodes.extend(result.scalars().all())
-        return all_episodes
+        # Approval commonly transitions a single episode on a show with many
+        # seasons.  Do this in one query instead of issuing one query per
+        # season (the old implementation made approval latency grow with the
+        # number of seasons).
+        season_ids = [season.id for season in request.seasons]
+        if not season_ids:
+            return []
+        result = await self.db.execute(
+            select(Episode)
+            .where(Episode.season_id.in_(season_ids))
+            .order_by(Episode.season_id, Episode.episode_number)
+        )
+        return list(result.scalars().all())
 
     @staticmethod
     def _episodes_covered_by_title(
@@ -155,9 +163,11 @@ class LifecycleService:
                             ep.status = RequestStatus.DOWNLOADING
                 # COMPLETED — no episode-level changes needed
                 # Recompute season statuses and derive request status from episodes
+                episodes_by_season: dict[int, list[Episode]] = {}
+                for episode in all_episodes:
+                    episodes_by_season.setdefault(episode.season_id, []).append(episode)
                 for season in request.seasons:
-                    season_eps = [ep for ep in all_episodes if ep.season_id == season.id]
-                    season.status = derive_season_status(season_eps)
+                    season.status = derive_season_status(episodes_by_season.get(season.id, []))
                 request.status = derive_request_status_from_episodes(all_episodes)
         else:
             request.status = new_status
