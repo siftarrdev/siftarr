@@ -1433,13 +1433,15 @@ async function submitReleaseAction(btn, approveNow = false) {
     }
     const payload = await resp.json().catch(() => ({}));
     window.showToast(payload.message || (approveNow ? 'Release approved and sent' : 'Active staged selection updated'));
-    window.refreshStagedTabData();
-    if (dashboardState.currentRequestId) {
-      await window.openRequestDetails(dashboardState.currentRequestId, dashboardState.currentDetailsIndex, {
-        preserveUiState: true,
-        focusTvScope: approveNow ? null : stagedScope,
-      });
-    }
+    await Promise.all([
+      window.refreshStagedTabData ? window.refreshStagedTabData() : Promise.resolve(),
+      dashboardState.currentRequestId
+        ? window.openRequestDetails(dashboardState.currentRequestId, dashboardState.currentDetailsIndex, {
+            preserveUiState: true,
+            focusTvScope: approveNow ? null : stagedScope,
+          })
+        : Promise.resolve(),
+    ]);
   } catch (err) {
     btn.disabled = false;
     btn.removeAttribute('aria-busy');
@@ -1532,12 +1534,16 @@ async function inlineStagedAction(actionUrl, btn = null) {
       throw new Error(errorData?.detail || errorData?.message || `Server error: ${response.status}`);
     }
     const data = await response.json().catch(() => ({}));
-    if (window.refreshStagedTabData) await window.refreshStagedTabData();
-    if (window.openRequestDetails && dashboardState.currentRequestId) {
-      await window.openRequestDetails(dashboardState.currentRequestId, dashboardState.currentDetailsIndex, {
-        preserveUiState: true,
-      });
-    }
+    // These are independent reads; run them concurrently so approval does
+    // not wait for a full staged-tab render before updating open details.
+    await Promise.all([
+      window.refreshStagedTabData ? window.refreshStagedTabData() : Promise.resolve(),
+      window.openRequestDetails && dashboardState.currentRequestId
+        ? window.openRequestDetails(dashboardState.currentRequestId, dashboardState.currentDetailsIndex, {
+            preserveUiState: true,
+          })
+        : Promise.resolve(),
+    ]);
     if (approvedEpisodeDetailsId) {
       const approvedEpisodeDetails = document.getElementById(approvedEpisodeDetailsId);
       if (approvedEpisodeDetails) approvedEpisodeDetails.open = false;
