@@ -1094,7 +1094,16 @@ async def test_sync_overseerr_prefetches_with_bounded_parallelism(monkeypatch, b
 
 
 @pytest.mark.asyncio
-async def test_sync_overseerr_uses_request_id_when_external_id_collides(monkeypatch, base_context):
+@pytest.mark.parametrize(
+    ("existing_rows", "expected_external_id"),
+    [
+        ([("1", None), ("999", 202)], "1-201"),
+        ([("1", None), ("1-201", None), ("999", 202)], "1-201-2"),
+    ],
+)
+async def test_sync_overseerr_uses_available_request_id_when_external_id_collides(
+    monkeypatch, base_context, existing_rows, expected_external_id
+):
     """A new Seerr request must not disappear behind an ambiguous external ID."""
 
     class FakeDB:
@@ -1105,7 +1114,7 @@ async def test_sync_overseerr_uses_request_id_when_external_id_collides(monkeypa
 
         async def execute(self, _statement):
             result = MagicMock()
-            result.fetchall.return_value = [("1", None), ("999", 202)]
+            result.fetchall.return_value = existing_rows
             return result
 
         def add(self, obj):
@@ -1176,7 +1185,7 @@ async def test_sync_overseerr_uses_request_id_when_external_id_collides(monkeypa
     assert response_context["message"] == "Synced 1 new request(s) from Overseerr"
     assert len(mock_db.added) == 1
     assert mock_db.added[0].overseerr_request_id == 201
-    assert mock_db.added[0].external_id == "1-201"
+    assert mock_db.added[0].external_id == expected_external_id
     mock_db.commit.assert_awaited_once()
     evaluate_mock.assert_awaited_once()
 
