@@ -1444,6 +1444,12 @@ async def import_overseerr_requests(
                 external_id = prepared.external_id
                 if external_id in existing_external_ids:
                     external_id = f"{external_id}-{prepared.overseerr_request_id}"
+                    suffix = 2
+                    while external_id in existing_external_ids:
+                        external_id = (
+                            f"{prepared.external_id}-{prepared.overseerr_request_id}-{suffix}"
+                        )
+                        suffix += 1
 
                 new_request = RequestModel(
                     external_id=external_id,
