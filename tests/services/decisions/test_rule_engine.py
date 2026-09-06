@@ -273,6 +273,32 @@ class TestRuleEngine:
         assert result.passed is True
         assert result.total_score == 40
 
+    @pytest.mark.parametrize(
+        ("pattern", "title", "score"),
+        [
+            (r"x265|HEVC|H[ ._-]?265", "Silo.S03E10.1080p.x264-GROUP", 0),
+            (r"x265|HEVC|H[ ._-]?265", "Silo.S03E10.1080p.H 265-GROUP", 40),
+            (r"x265|HEVC|H[ ._-]?265", "Silo.S03E10.1080p.H.265-GROUP", 40),
+            (r"(1080p x265)", "Silo.S03E10.1080p.WEB.x264-GROUP", 0),
+            (r"^1080p x265$", "x265 1080p", 0),
+            ("1080p x265", "Silo.S03E10.x265.WEB.1080p-GROUP", 40),
+        ],
+    )
+    def test_phrase_fallback_preserves_regex_syntax(self, pattern, title, score):
+        engine = RuleEngine(scorer_patterns=[(1, "Codec preference", pattern, 40)])
+        result = engine.evaluate(
+            ProwlarrRelease(
+                title=title,
+                size=1024**3,
+                seeders=10,
+                leechers=0,
+                download_url="http://example.com",
+                indexer="test",
+            )
+        )
+        assert result.passed is True
+        assert result.total_score == score
+
     def test_from_db_rules_normalizes_raw_tv_target_strings_for_size_rules(self):
         pack_rule = MagicMock(spec=Rule)
         pack_rule.is_enabled = True

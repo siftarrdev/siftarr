@@ -175,9 +175,15 @@ class RuleEngine:
         pattern = compiled.pattern.strip()
         if not re.search(r"\s", pattern):
             return False
+        # Only literal phrases support the out-of-order term fallback. Splitting
+        # regex syntax can break character classes or change groups/alternation.
+        if any(character in pattern for character in r"\.^$*+?{}[]|()"):
+            return False
         normalized = RuleEngine._normalize_match_text(value)
         terms = [term for term in re.split(r"\s+", pattern) if term]
-        return bool(terms) and all(re.search(term, normalized, compiled.flags) for term in terms)
+        return bool(terms) and all(
+            re.search(re.escape(term), normalized, compiled.flags) for term in terms
+        )
 
     @staticmethod
     def _scope_matches(rule_scope: str, media_type: str | None) -> bool:
