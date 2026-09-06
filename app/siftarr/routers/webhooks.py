@@ -3,9 +3,10 @@
 import contextlib
 import logging
 from datetime import datetime
+from typing import Self
 
 from fastapi import APIRouter, BackgroundTasks, Depends
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -31,11 +32,17 @@ router = APIRouter(prefix="/webhook", tags=["webhooks"])
 class OverseerrMedia(BaseModel):
     """Media information from Overseerr webhook."""
 
-    media_type: str = Field(description="Type: 'movie' or 'tv'")
-    tmdbid: int | None = Field(default=None, description="TMDB ID")
-    tvdbid: int | None = Field(default=None, description="TVDB ID")
+    media_type: MediaType = Field(description="Type: 'movie' or 'tv'")
+    tmdbid: int | None = Field(default=None, gt=0, description="TMDB ID")
+    tvdbid: int | None = Field(default=None, gt=0, description="TVDB ID")
     requested_seasons: list[int] | None = Field(default=None, description="Season numbers")
     requested_episodes: list[int] | None = Field(default=None, description="Episode numbers")
+
+    @model_validator(mode="after")
+    def require_media_id(self) -> Self:
+        if self.tmdbid is None and self.tvdbid is None:
+            raise ValueError("At least one of tmdbid or tvdbid is required")
+        return self
 
 
 class OverseerrUser(BaseModel):
@@ -82,7 +89,7 @@ async def receive_overseerr_webhook(
         return {"status": "ignored", "message": f"Event type '{payload.event}' not handled"}
 
     # Determine media type
-    media_type = MediaType.MOVIE if payload.media.media_type == "movie" else MediaType.TV
+    media_type = payload.media.media_type
 
     base_external_id = str(payload.media.tmdbid or payload.media.tvdbid)
     if payload.request and payload.request.id:

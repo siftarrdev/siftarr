@@ -167,7 +167,7 @@ def create_app() -> FastAPI:
         secret_key=get_settings().secret_key,
         max_age=86400 * 30,  # 30 days
         same_site="lax",
-        https_only=False,  # Set to True in production behind HTTPS
+        https_only=get_settings().session_https_only,
     )
 
     # Auth router is included BEFORE the auth dependency so its endpoints

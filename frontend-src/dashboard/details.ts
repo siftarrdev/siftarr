@@ -15,6 +15,7 @@ const liveDetailsRefresh = window.liveDetailsRefresh || {
 };
 let detailsControlHandlersReady = false;
 let detailsControlDebounce = null;
+let searchHistoryLoadGeneration = 0;
 
 function cancelLiveDetailsRefresh(requestId = null) {
   const state = liveDetailsRefresh;
@@ -545,14 +546,23 @@ function renderRuleEvidence(evidence) {
 
 async function loadSearchHistory() {
   if (!dashboardState.currentRequestId) return;
+  const requestId = dashboardState.currentRequestId;
+  const generation = ++searchHistoryLoadGeneration;
+  const detailsLoadToken = window.detailsLoadToken || 0;
+  const isCurrentLoad = () =>
+    searchHistoryLoadGeneration === generation &&
+    dashboardState.currentRequestId === requestId &&
+    window.activeDetailsRequestId === requestId &&
+    (window.detailsLoadToken || 0) === detailsLoadToken;
   const container = document.getElementById('request-details-search-history');
   if (!container) return;
   container.innerHTML = '<div class="text-gray-500">Loading search history...</div>';
   let runsCount = 0;
   try {
-    const response = await fetch(`/requests/${dashboardState.currentRequestId}/search-history?limit=5`);
+    const response = await fetch(`/requests/${requestId}/search-history?limit=5`);
     if (!response.ok) throw new Error(`Server error: ${response.status}`);
     const data = await response.json();
+    if (!isCurrentLoad()) return;
     const runs = data.runs || [];
     runsCount = runs.length;
     if (!runs.length) {
@@ -574,8 +584,10 @@ async function loadSearchHistory() {
       })
       .join('');
   } catch (err) {
+    if (!isCurrentLoad()) return;
     container.innerHTML = `<div class="text-red-400">Failed to load search history: ${escapeHtml(err.message || 'Unknown error')}</div>`;
   }
+  if (!isCurrentLoad()) return;
   updateActivityCount(null, runsCount);
 }
 

@@ -152,6 +152,11 @@ class Settings(BaseSettings):
     # Authentication settings
     api_key: str = Field(default=PLACEHOLDER_API_KEY, validation_alias="SIFTARR_API_KEY")
     auth_enabled: bool = False
+    session_https_only: bool = Field(
+        default=False,
+        validation_alias="SIFTARR_SESSION_HTTPS_ONLY",
+        description="Only send browser session cookies over HTTPS. Enable behind an HTTPS proxy.",
+    )
 
     # Session secret key (auto-generated if not set)
     secret_key: str = Field(

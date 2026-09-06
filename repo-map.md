@@ -44,6 +44,7 @@ Primary flow:
 - `app/siftarr/` — main application package
 - `frontend-src/` — canonical TypeScript sources for migrated browser modules; strict checking is enabled, with narrowly scoped transitional `@ts-nocheck` exceptions in legacy dashboard modules; builds preserve existing static paths
 - `tests/` — automated regression and unit/integration tests
+- `frontend-tests/` — Vitest browser-module regressions and Playwright smoke tests
 - `db/alembic/` — database migration environment and revision history
 - `docker/` — container build and local container workflow
 - `docs/` — cross-cutting documentation index; detailed component docs live beside code
@@ -95,6 +96,7 @@ The old duplicated developer guide and stale product specification under `docs/`
 - `get_settings()` — cached singleton accessor
 - `reload_settings()` — invalidates the cached singleton (called after runtime setting changes)
 - first-run API key safety helpers (placeholder constant and secure key generation)
+- `SIFTARR_SESSION_HTTPS_ONLY` enables Secure browser session cookies for HTTPS deployments; defaults to false for HTTP local access
 - Siftarr auto-detects `/data/config/rules.json` as a mounted Rules export JSON used only to seed an empty rules table; `SIFTARR_DEFAULT_RULES_PATH` can override this path
 - `SECRET_KEY` controls browser session signing when explicitly set; otherwise Siftarr auto-generates and persists a session secret beside the SQLite DB (override path with `SIFTARR_SECRET_KEY_FILE`) so Plex SSO browser sessions survive restarts
 - `get_static_version()` — cache-busting value for static assets
@@ -137,7 +139,7 @@ HTTP route layer.
 - `settings.py` — settings UI (connection test/save/reset, scheduler interval save/reset, staging toggle, Plex rescan, Overseerr sync, cache/reseed actions, SSE progress streams, API key management, Plex SSO status, non-secret settings backup preview/restore, qBit mover enable/paths/retention settings and manual trigger, and Settings-hosted background job status/manual triggers); Overseerr reconciliation keys imports by request ID so repeat requests and cross-provider media-ID collisions remain distinct, uses SettingsStore for DB-backed persistence, and keeps the SSO-managed Plex token out of connection saves/resets/backups
 - `stats.py` — protected Stats page and JSON data endpoint for all-time, preset, and custom date ranges, including chart-ready time-series payloads
 - `staged.py` — staged torrent review/approval endpoints, staged-alternative comparison API, session/API-key staging decision-log API, and download-status endpoint returning move tracking fields (status, path, error) for dashboard visibility
-- `webhooks.py` — inbound webhook handling
+- `webhooks.py` — inbound webhook handling; validates movie/TV media types and requires a positive TMDB or TVDB identifier before request creation
 
 ### `app/siftarr/services/`
 
@@ -179,7 +181,7 @@ Business logic and integrations, organized into thematic subpackages:
 **`integrations/`** — External service adapters
 - `prowlarr_service.py` — Prowlarr indexer integration; LRU search cache (45s TTL, 50 entries), TV exact-episode, broad-pack, and guarded season-search helpers
 - `qbittorrent_service.py` — qBittorrent download client integration; includes idempotent single/bulk torrent add, unfinished/completed listing, serialized `save_path`/`seeding_time` access, `set_torrent_location()` with `move=True`, and torrent deletion with configurable file removal
-- `overseerr_service.py` — Overseerr request management integration
+- `overseerr_service.py` — Overseerr request management integration; media-details cache has a 60s TTL, expiry pruning, and a 512-entry LRU bound
 - `connection_tester.py` — external connectivity test helpers
 - `plex_service/` — Plex media server integration (lookup, scan, episode availability)
 
@@ -240,6 +242,8 @@ Static assets.
 Tests mirror the service subpackage organization under `tests/services/`:
 
 - `tests/routers/auth/` — auth router coverage (login, plex auth, logout, session info)
+- `tests/routers/auth/test_session_cookies.py` — HTTP response checks for configurable Secure session cookies
+- `tests/routers/test_webhooks.py` — webhook payload validation and accepted request creation
 - `tests/routers/dashboard/` — dashboard page/API/action coverage, including details controls and SSE search streams
 - `tests/routers/settings/` — settings page, connections, maintenance, and jobs coverage
 - `tests/routers/stats/` — Stats page/API coverage, including protection, range validation, and JSON payload shape
@@ -253,6 +257,7 @@ Tests mirror the service subpackage organization under `tests/services/`:
 - `tests/services/releases/` — release parser, serializers, staging, and release selection tests
 - `tests/services/utils/` — type utils tests
 - Top-level `tests/test_*.py` — integration tests (season sweep, torrent helpers, API, router-level, config)
+- `frontend-tests/unit/dashboard-regressions.test.js` — stat refresh, safe replace-title handling, and stale search-history response guards; rendered-title escaping also has coverage in `tests/routers/dashboard/test_template.py`
 
 ## CI/CD Workflows
 

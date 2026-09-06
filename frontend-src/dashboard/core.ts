@@ -269,8 +269,8 @@ export async function refreshCurrentTabContent() {
     }
 
     // Update stat cards
-    const statsContainer = document.querySelector('.grid.grid-cols-2.md\\:grid-cols-7');
-    const newStatsContainer = doc.querySelector('.grid.grid-cols-2.md\\:grid-cols-7');
+    const statsContainer = document.querySelector('[data-dashboard-stat-cards]');
+    const newStatsContainer = doc.querySelector('[data-dashboard-stat-cards]');
     if (statsContainer && newStatsContainer) {
       statsContainer.innerHTML = newStatsContainer.innerHTML;
     }

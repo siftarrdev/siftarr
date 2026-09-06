@@ -13,6 +13,13 @@ from app.siftarr.services.integrations.overseerr_service import (
 )
 
 
+@pytest.fixture(autouse=True)
+def clear_cache_between_tests():
+    overseerr_service.clear_media_details_cache()
+    yield
+    overseerr_service.clear_media_details_cache()
+
+
 class TestOverseerrService:
     """Test cases for OverseerrService."""
 
@@ -526,6 +533,57 @@ class TestOverseerrService:
 
         assert cleared == 2
         assert overseerr_service._MEDIA_DETAILS_CACHE == {}
+
+
+class TestMediaDetailsCacheBounds:
+    @pytest.fixture
+    def cached_service(self, monkeypatch):
+        settings = MagicMock(overseerr_url="http://localhost:5055", overseerr_api_key="test")
+        service = OverseerrService(settings=settings)
+        client = AsyncMock()
+        response = MagicMock(status_code=200)
+        response.json.return_value = {"id": 123}
+        client.get.return_value = response
+        monkeypatch.setattr(overseerr_service, "get_shared_client", AsyncMock(return_value=client))
+        monkeypatch.setattr(overseerr_service, "_MEDIA_DETAILS_CACHE_MAX_SIZE", 2)
+        return service, client
+
+    async def test_evicts_least_recently_used_entry(self, cached_service):
+        service, client = cached_service
+        await service.get_media_details("tv", 1)
+        await service.get_media_details("tv", 2)
+        await service.get_media_details("tv", 1)
+        assert client.get.await_count == 2
+
+        await service.get_media_details("tv", 3)
+        assert list(overseerr_service._MEDIA_DETAILS_CACHE) == [("tv", 1), ("tv", 3)]
+        await service.get_media_details("tv", 2)
+        assert client.get.await_count == 4
+        assert len(overseerr_service._MEDIA_DETAILS_CACHE) == 2
+
+    async def test_prunes_expired_entries_even_when_not_requested(
+        self, cached_service, monkeypatch
+    ):
+        service, client = cached_service
+        monkeypatch.setattr(overseerr_service.time, "monotonic", lambda: 100.0)
+        await service.get_media_details("tv", 1)
+        await service.get_media_details("tv", 2)
+
+        monkeypatch.setattr(overseerr_service.time, "monotonic", lambda: 160.0)
+        await service.get_media_details("tv", 3)
+        assert list(overseerr_service._MEDIA_DETAILS_CACHE) == [("tv", 3)]
+        await service.get_media_details("tv", 1)
+        assert client.get.await_count == 4
+
+    async def test_failed_refresh_does_not_retain_expired_data(self, cached_service, monkeypatch):
+        service, client = cached_service
+        monkeypatch.setattr(overseerr_service.time, "monotonic", lambda: 100.0)
+        await service.get_media_details("tv", 1)
+        monkeypatch.setattr(overseerr_service.time, "monotonic", lambda: 161.0)
+        client.get.return_value.status_code = 503
+
+        assert await service.get_media_details("tv", 1) is None
+        assert not overseerr_service._MEDIA_DETAILS_CACHE
 
 
 class TestExtractPosterPath:
