@@ -368,6 +368,12 @@
 
     {# ═══════════════ TORRENT STATUS TAB (id kept as "downloading" for deep links) ═══════════════ #}
     <div id="content-downloading" class="tab-content hidden">
+        <section class="card mb-4 p-4" data-download-health aria-label="Download health">
+            <h2 class="section-title mb-2">Download health</h2>
+            <div class="space-y-3" data-download-health-list aria-live="polite">
+                <p class="text-sm text-gray-500">Loading download health observations...</p>
+            </div>
+        </section>
         {# id="downloading-torrent-cards" class="space-y-3 p-3 md:hidden" #}
         <div class="card overflow-hidden">
             <div class="card-header flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
@@ -930,6 +936,7 @@ window.siftarrStaticVersion = {{ static_version | tojson }};
     "/static/js/dashboard/staged.js": "{{ url_for('static', path='/js/dashboard/staged.js') }}?v={{ static_version }}",
     "/static/js/dashboard/modals.js": "{{ url_for('static', path='/js/dashboard/modals.js') }}?v={{ static_version }}",
     "/static/js/dashboard/search_sse.js": "{{ url_for('static', path='/js/dashboard/search_sse.js') }}?v={{ static_version }}",
+    "/static/js/dashboard/download_health.js": "{{ url_for('static', path='/js/dashboard/download_health.js') }}?v={{ static_version }}",
     "/static/js/dashboard/core/state.js": "{{ url_for('static', path='/js/dashboard/core/state.js') }}?v={{ static_version }}",
     "/static/js/dashboard/core/column-resizer.js": "{{ url_for('static', path='/js/dashboard/core/column-resizer.js') }}?v={{ static_version }}"
   }

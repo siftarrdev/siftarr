@@ -82,6 +82,9 @@ def staged_torrent_payload(torrent: StagedTorrent | None) -> dict[str, Any] | No
         "indexer": torrent.indexer,
         "status": torrent.status,
         "selection_source": torrent.selection_source,
+        "target_scope": getattr(torrent, "target_scope", None),
+        "rule_fingerprint": getattr(torrent, "rule_fingerprint", None),
+        "seeders_snapshot": getattr(torrent, "seeders_snapshot", None),
         "download_url": sidecar_payload.get("download_url"),
         "magnet_url": getattr(torrent, "magnet_url", None),
         "info_hash": getattr(torrent, "info_hash", None) or sidecar_payload.get("info_hash"),
@@ -192,11 +195,16 @@ def log_staging_decision(
 ) -> None:
     approved = staged_torrent_payload(approved_torrent)
     rules = staged_torrent_payload(rules_selected_torrent)
-    event_type = (
-        "manual_override"
-        if rules_selected_torrent is not None and approved_torrent.id != rules_selected_torrent.id
-        else "rule_accept"
-    )
+    # A rule-selected row remains a rule acceptance even when an older approved
+    # row for another episode happens to have a different database id. Manual
+    # overrides require a different, same-scope rule choice.
+    event_type = "rule_accept"
+    if approved_torrent.selection_source != "rule" and rules_selected_torrent is not None:
+        same_scope = getattr(approved_torrent, "target_scope", None) == getattr(
+            rules_selected_torrent, "target_scope", None
+        )
+        if same_scope and approved_torrent.id != rules_selected_torrent.id:
+            event_type = "manual_override"
     append_entry(
         build_decision_entry(
             event_type=event_type,

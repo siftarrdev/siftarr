@@ -10,12 +10,14 @@ import '/static/js/dashboard/releases.js';
 import '/static/js/dashboard/filters.js';
 import '/static/js/dashboard/details.js';
 import '/static/js/dashboard/staged.js';
+import '/static/js/dashboard/download_health.js';
 import '/static/js/dashboard/modals.js';
 import '/static/js/dashboard/search_sse.js';
 import { ColumnResizer } from '/static/js/dashboard/core/column-resizer.js';
 
 // Initialize on DOM ready
 function initDashboard() {
+  window.initDownloadHealth?.();
   // Initialize column resizer
   const columnResizer = new ColumnResizer();
 

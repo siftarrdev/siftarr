@@ -11,6 +11,7 @@ quick start or directly beside application code.
 - [repo-map.md](../repo-map.md) is the living high-level map of code ownership, runtime paths, and
   operational files.
 - [stats-metrics.md](stats-metrics.md) documents Stats metric semantics and immutable persistence.
+- [release-selection.md](release-selection.md) documents release structure preferences, downloadability, recovery settings, and targeted rule corrections.
 - `docs/` is reserved for remaining cross-cutting project notes.
 
 ## Component docs live with code

@@ -20,6 +20,7 @@ from app.siftarr.routers import (
     dashboard,
     dashboard_actions,
     dashboard_api,
+    download_health,
     rules,
     search_sse,
     settings,
@@ -188,6 +189,7 @@ def create_app() -> FastAPI:
     app.include_router(settings.router, dependencies=auth)
     app.include_router(stats.router, dependencies=auth)
     app.include_router(staged.router, dependencies=auth)
+    app.include_router(download_health.router, dependencies=auth)
 
     @app.get("/", dependencies=auth)
     async def root() -> RedirectResponse:

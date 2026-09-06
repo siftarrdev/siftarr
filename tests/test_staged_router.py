@@ -17,10 +17,16 @@ class TestStagedRouter:
     """Focused tests for staged approval behavior."""
 
     @pytest.fixture
-    def mock_db(self):
-        """Create a mock database session."""
+    def mock_db(self, monkeypatch):
+        """Isolate submission/lifecycle unit tests from database-backed preflight.
+
+        Real-session confirmation and current-rule behavior is covered separately
+        in test_approval_validation.py. These mocks exercise qBit failures, bulk
+        submission, logging and cleanup after preflight has succeeded.
+        """
         db = AsyncMock()
         db.add = MagicMock()
+        monkeypatch.setattr(staged, "_approval_warnings", AsyncMock(return_value=[]))
         return db
 
     @pytest.mark.asyncio
@@ -96,6 +102,7 @@ class TestStagedRouter:
         rule_torrent = MagicMock()
         rule_torrent.id = 5
         rule_torrent.selection_source = "rule"
+        rule_torrent.target_scope = torrent.target_scope = "same-episode"
 
         rule_result = MagicMock()
         rule_result.scalars.return_value.first.return_value = rule_torrent
@@ -839,6 +846,8 @@ class TestStagedRouter:
                 await staged.approve_staged_torrent(
                     torrent.id,
                     http_request=MagicMock(headers={"accept": "application/json"}),
+                    confirm_rules=True,
+                    confirm_seeders=True,
                     db=db,
                 )
 
@@ -921,6 +930,8 @@ class TestStagedRouter:
                 action="approve",
                 torrent_ids=[1, 2],
                 http_request=MagicMock(headers={"accept": "application/json"}),
+                confirm_rules=True,
+                confirm_seeders=True,
                 db=db,
             )
 
@@ -1004,6 +1015,8 @@ class TestStagedRouter:
                 action="approve",
                 torrent_ids=[1],
                 http_request=MagicMock(headers={"accept": "application/json"}),
+                confirm_rules=True,
+                confirm_seeders=True,
                 db=db,
             )
 
@@ -1070,6 +1083,8 @@ class TestStagedRouter:
             await staged.approve_staged_torrent(
                 1,
                 http_request=MagicMock(headers={"accept": "application/json"}),
+                confirm_rules=True,
+                confirm_seeders=True,
                 db=db,
             )
 
@@ -1141,6 +1156,8 @@ class TestStagedRouter:
             await staged.approve_staged_torrent(
                 1,
                 http_request=MagicMock(headers={"accept": "application/json"}),
+                confirm_rules=True,
+                confirm_seeders=True,
                 db=db,
             )
 
@@ -1212,6 +1229,7 @@ class TestStagedRouter:
         old_torrent.id = 10
         old_torrent.request_id = 4
         old_torrent.status = "approved"
+        old_torrent.target_scope = new_torrent.target_scope = "same-episode"
 
         request = MagicMock()
         request.id = 4
@@ -1223,6 +1241,7 @@ class TestStagedRouter:
         request_result.scalar_one_or_none.return_value = request
         old_result = MagicMock()
         old_result.scalar_one_or_none.return_value = old_torrent
+        old_result.scalars.return_value.all.return_value = [old_torrent]
         mock_db.execute.side_effect = [new_result, request_result, old_result]
 
         qbittorrent = AsyncMock()
@@ -1230,6 +1249,12 @@ class TestStagedRouter:
         monkeypatch.setattr(staged, "get_settings", lambda: MagicMock())
         monkeypatch.setattr(staged, "QbittorrentService", MagicMock(return_value=qbittorrent))
         monkeypatch.setattr(staged, "log_replacement_decision", MagicMock())
+
+        async def approve(torrent, *_args, **_kwargs):
+            torrent.status = "approved"
+            return True
+
+        monkeypatch.setattr(staged, "_approve_torrent", approve)
         monkeypatch.setattr(staged.os.path, "exists", MagicMock(return_value=False))
 
         response = await staged.replace_staged_torrent(
@@ -1269,6 +1294,7 @@ class TestStagedRouter:
         old_torrent.id = 10
         old_torrent.request_id = 4
         old_torrent.status = "approved"
+        old_torrent.target_scope = new_torrent.target_scope = "same-episode"
 
         request = MagicMock()
         request.id = 4
@@ -1280,6 +1306,7 @@ class TestStagedRouter:
         request_result.scalar_one_or_none.return_value = request
         old_result = MagicMock()
         old_result.scalar_one_or_none.return_value = old_torrent
+        old_result.scalars.return_value.all.return_value = [old_torrent]
         mock_db.execute.side_effect = [new_result, request_result, old_result]
 
         qbittorrent = AsyncMock()
@@ -1287,6 +1314,12 @@ class TestStagedRouter:
         monkeypatch.setattr(staged, "get_settings", lambda: MagicMock())
         monkeypatch.setattr(staged, "QbittorrentService", MagicMock(return_value=qbittorrent))
         monkeypatch.setattr(staged, "log_replacement_decision", MagicMock())
+
+        async def approve(torrent, *_args, **_kwargs):
+            torrent.status = "approved"
+            return True
+
+        monkeypatch.setattr(staged, "_approve_torrent", approve)
         monkeypatch.setattr(staged.os.path, "exists", MagicMock(return_value=False))
 
         response = await staged.replace_staged_torrent(

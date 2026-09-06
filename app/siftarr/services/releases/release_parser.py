@@ -112,6 +112,31 @@ def is_multi_episode_release(title: str) -> bool:
     )
 
 
+def parse_release_episode_keys(title: str) -> tuple[tuple[int, int], ...]:
+    """Expand explicit SxxEyy chains/ranges without guessing pack episode counts."""
+    keys: set[tuple[int, int]] = set()
+    followup = re.compile(
+        r"^[.\s_]*(?:(?P<range>-)[.\s_]*E?(?P<end>\d{1,3})|E(?P<next>\d{1,3}))(?!\d)",
+        re.IGNORECASE,
+    )
+    for match in SINGLE_EPISODE_RELEASE_PATTERN.finditer(title):
+        season, episode = int(match.group("season")), int(match.group("episode"))
+        keys.add((season, episode))
+        tail = title[match.end() :]
+        while extra := followup.match(tail):
+            next_episode = int(extra.group("end") or extra.group("next"))
+            if extra.group("range"):
+                keys.update(
+                    (season, number)
+                    for number in range(min(episode, next_episode), max(episode, next_episode) + 1)
+                )
+            else:
+                keys.add((season, next_episode))
+            episode = next_episode
+            tail = tail[extra.end() :]
+    return tuple(sorted(keys))
+
+
 @dataclass(frozen=True)
 class MovieReleaseIdentity:
     title: str | None
@@ -253,18 +278,41 @@ def tv_release_identity_rejection_reason(
     expected_tokens = normalize_movie_title_identity(
         (request_title or "").replace("&", " and ")
     ).split()
-    release_tokens = normalize_movie_title_identity(release_title).split()
-    if not expected_tokens or release_tokens[: len(expected_tokens)] != expected_tokens:
-        return f"TV identity mismatch: release does not begin with request title '{request_title}'"
+    parsed_title = parse_release_title_identity(release_title)
+    release_tokens = normalize_movie_title_identity(
+        (parsed_title or "").replace("&", " and ")
+    ).split()
+    for suffix in (
+        ["the", "complete", "series"],
+        ["complete", "series"],
+        ["all", "seasons"],
+        ["complete", "seasons"],
+        ["complete"],
+    ):
+        if release_tokens[-len(suffix) :] == suffix and release_tokens != expected_tokens:
+            release_tokens = release_tokens[: -len(suffix)]
+            break
+    parsed_year = _movie_year_token(release_tokens[-1]) if release_tokens else None
+    if parsed_year is not None:
+        release_tokens = release_tokens[:-1]
+    matches_title = bool(expected_tokens) and release_tokens == expected_tokens
+    if not matches_title and expected_tokens and request_year is not None:
+        from app.siftarr.config import get_settings
 
-    remaining_tokens = release_tokens[len(expected_tokens) :]
-    if request_year is not None and remaining_tokens:
-        release_year = _movie_year_token(remaining_tokens[0])
-        if release_year is not None and release_year != request_year:
-            return (
-                "TV identity mismatch: release year "
-                f"{release_year} does not match request year {request_year}"
-            )
+        key = f"{' '.join(expected_tokens)}|{request_year}"
+        aliases = get_settings().trusted_tv_title_aliases.get(key, [])
+        matches_title = any(
+            release_tokens == normalize_movie_title_identity(alias.replace("&", " and ")).split()
+            for alias in aliases
+        )
+    if not matches_title:
+        return f"TV identity mismatch: release title does not match request title '{request_title}'"
+
+    if request_year is not None and parsed_year is not None and parsed_year != request_year:
+        return (
+            "TV identity mismatch: release year "
+            f"{parsed_year} does not match request year {request_year}"
+        )
     return None
 
 

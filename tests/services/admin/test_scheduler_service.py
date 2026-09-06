@@ -410,6 +410,11 @@ async def test_download_completion_check_closes_plex_service_on_error(monkeypatc
     plex_instance = AsyncMock()
     qbittorrent_instance = AsyncMock()
     plex_polling_instance = AsyncMock()
+    download_health_service = AsyncMock()
+    download_health_service.observe.return_value = {
+        "qbit_available": True,
+        "problems": [],
+    }
     download_completion_service = AsyncMock()
     download_completion_service.check_downloading_requests = AsyncMock(
         side_effect=RuntimeError("download boom")
@@ -427,6 +432,11 @@ async def test_download_completion_check_closes_plex_service_on_error(monkeypatc
         lambda db_session, plex: plex_polling_instance,
     )
     monkeypatch.setattr(
+        scheduler_service,
+        "DownloadHealthService",
+        lambda db_session, qbittorrent: download_health_service,
+    )
+    monkeypatch.setattr(
         "app.siftarr.services.admin.scheduler_service.DownloadCompletionService",
         lambda db_session, qbittorrent, plex_polling: download_completion_service,
     )
@@ -436,6 +446,7 @@ async def test_download_completion_check_closes_plex_service_on_error(monkeypatc
 
     await service._check_download_completion()
 
+    download_health_service.observe.assert_awaited_once()
     download_completion_service.check_downloading_requests.assert_awaited_once()
     logger.exception.assert_called_once_with("Error during download completion check")
 

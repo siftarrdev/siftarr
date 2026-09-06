@@ -149,6 +149,10 @@ def compact_rule_evidence(evaluation: ReleaseEvaluation | Any) -> dict[str, obje
         "score": normalize_int(getattr(evaluation, "total_score", 0)),
         "rejection_reason": normalize_optional_text(getattr(evaluation, "rejection_reason", None)),
         "size_passed": _derive_size_passed(evaluation),
+        "size_fallback": any(
+            getattr(match, "effect", None) == "size_fallback"
+            for match in getattr(evaluation, "matches", [])
+        ),
         "matches": [serialize_rule_match(match) for match in getattr(evaluation, "matches", [])],
     }
 
@@ -167,6 +171,12 @@ def compact_candidate_snapshot(
         "size": format_release_size(release.size),
         "seeders": release.seeders,
         "leechers": release.leechers,
+        "files": release.files,
+        "file_metadata_observed_at": (
+            release.file_metadata_observed_at.isoformat()
+            if release.file_metadata_observed_at is not None
+            else None
+        ),
         "indexer": release.indexer,
         "resolution": release.resolution,
         "codec": release.codec,

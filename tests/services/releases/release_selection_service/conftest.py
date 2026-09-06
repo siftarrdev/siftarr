@@ -3,6 +3,16 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from app.siftarr.models.request import MediaType, Request, RequestStatus
+from app.siftarr.services.releases.release_disposition_service import ReleaseDispositionService
+
+
+@pytest.fixture(autouse=True)
+def _mock_disposition_lookup(monkeypatch):
+    monkeypatch.setattr(ReleaseDispositionService, "blocked", AsyncMock(return_value=None))
+    monkeypatch.setattr(
+        "app.siftarr.services.releases.staging_service.record_staged_release_fact",
+        AsyncMock(),
+    )
 
 
 @pytest.fixture

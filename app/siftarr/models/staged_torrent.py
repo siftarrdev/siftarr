@@ -2,7 +2,7 @@
 
 from datetime import datetime
 
-from sqlalchemy import BigInteger, DateTime, ForeignKey, Index, Integer, String, Text
+from sqlalchemy import JSON, BigInteger, Boolean, DateTime, ForeignKey, Index, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.siftarr.models._base import Base, utc_now
@@ -37,6 +37,17 @@ class StagedTorrent(Base):
     magnet_url: Mapped[str | None] = mapped_column(Text, nullable=True)
     info_hash: Mapped[str | None] = mapped_column(String(40), nullable=True)
     selection_source: Mapped[str] = mapped_column(String(20), default="rule")
+    source_release_id: Mapped[int | None] = mapped_column(
+        ForeignKey("releases.id", ondelete="SET NULL"), nullable=True
+    )
+    seeders_snapshot: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    rule_evidence_snapshot: Mapped[dict[str, object] | None] = mapped_column(JSON, nullable=True)
+    rule_fingerprint: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    target_scope: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    identity_override: Mapped[bool] = mapped_column(Boolean, default=False)
+    rules_override: Mapped[bool] = mapped_column(Boolean, default=False)
+    seeders_override: Mapped[bool] = mapped_column(Boolean, default=False)
+    rejection_override: Mapped[bool] = mapped_column(Boolean, default=False)
 
     # Status
     status: Mapped[str] = mapped_column(
@@ -53,6 +64,7 @@ class StagedTorrent(Base):
     replaced_by_id: Mapped[int | None] = mapped_column(
         Integer, ForeignKey("staged_torrents.id"), nullable=True
     )
+    replaces_id: Mapped[int | None] = mapped_column(ForeignKey("staged_torrents.id"), nullable=True)
     replaced_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     replacement_reason: Mapped[str | None] = mapped_column(String(500), nullable=True)
 

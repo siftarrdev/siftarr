@@ -1,7 +1,8 @@
 """Dashboard form-POST actions router for request lifecycle operations."""
 
 import logging
-from datetime import datetime
+from datetime import UTC, datetime
+from typing import Any, cast
 
 from fastapi import APIRouter, Depends, Form, HTTPException
 from fastapi import Request as FastAPIRequest
@@ -18,6 +19,8 @@ from app.siftarr.models.request import MediaType, RequestStatus
 from app.siftarr.models.request import Request as RequestModel
 from app.siftarr.models.season import Season
 from app.siftarr.services.dashboard.search_service import SearchService
+from app.siftarr.services.decisions.rule_engine import ReleaseEvaluation
+from app.siftarr.services.decisions.rule_engine_provider import get_rule_engine
 from app.siftarr.services.integrations.overseerr_service import OverseerrService
 from app.siftarr.services.integrations.prowlarr_service import ProwlarrRelease
 from app.siftarr.services.lifecycle.activity_log_service import ActivityLogService
@@ -27,6 +30,22 @@ from app.siftarr.services.lifecycle.episode_derive import (
 )
 from app.siftarr.services.lifecycle.lifecycle_service import LifecycleService
 from app.siftarr.services.lifecycle.pending_queue_service import PendingQueueService
+from app.siftarr.services.releases.release_disposition_service import ReleaseDispositionService
+from app.siftarr.services.releases.release_parser import (
+    cached_parse_release_coverage,
+    parse_season_episode,
+    serialize_release_coverage,
+)
+from app.siftarr.services.releases.release_serializers import compact_rule_evidence
+from app.siftarr.services.releases.release_storage import (
+    build_prowlarr_release,
+    stored_seeders_observed_at,
+)
+from app.siftarr.services.releases.release_validation_service import (
+    ReleaseWarning,
+    identity_warning,
+    snapshot_warnings,
+)
 from app.siftarr.services.releases.staging_service import StagingService
 from app.siftarr.services.request_service import (
     bulk_redirect_url,
@@ -86,6 +105,157 @@ def _selection_success_message(result: dict[str, object]) -> str:
 def _json_action_response(message: str, redirect_to: str) -> JSONResponse:
     """Return the standard JSON shape used by dashboard fetch actions."""
     return JSONResponse({"status": "ok", "message": message, "redirect_to": redirect_to})
+
+
+async def _persist_manual_candidate_uncommitted(
+    db: AsyncSession,
+    request: RequestModel,
+    candidate: ProwlarrRelease,
+    evaluation: ReleaseEvaluation,
+) -> Release:
+    """Upsert a manual candidate without committing before confirmation."""
+    filters = [Release.request_id == request.id]
+    if candidate.info_hash:
+        filters.append(Release.info_hash == candidate.info_hash)
+    else:
+        filters.extend([Release.title == candidate.title, Release.info_hash.is_(None)])
+    record = (await db.execute(select(Release).where(*filters))).scalar_one_or_none()
+    durable_rejection = None
+    if record is None:
+        record = Release(
+            request_id=request.id,
+            title=candidate.title,
+            size=candidate.size,
+            seeders=candidate.seeders,
+            leechers=candidate.leechers,
+            download_url=candidate.download_url,
+            indexer=candidate.indexer,
+        )
+        db.add(record)
+    else:
+        durable_rejection = await ReleaseDispositionService(db).blocked(
+            request.id, record, media_type=request.media_type
+        )
+    prior_rejection_reason = record.rejection_reason
+    parsed = parse_season_episode(candidate.title)
+    coverage = cached_parse_release_coverage(candidate.title)
+    record.title = candidate.title
+    record.size = candidate.size
+    record.seeders = candidate.seeders
+    record.leechers = candidate.leechers
+    record.download_url = candidate.download_url
+    record.magnet_url = candidate.magnet_url
+    record.info_hash = candidate.info_hash
+    record.indexer = candidate.indexer
+    record.publish_date = candidate.publish_date
+    record.resolution = candidate.resolution
+    record.codec = candidate.codec
+    record.release_group = candidate.release_group
+    record.uploaded_by = candidate.uploaded_by
+    record.files = candidate.files
+    record.season_number = parsed.season_number
+    record.episode_number = parsed.episode_number
+    record.season_coverage = serialize_release_coverage(coverage)
+    record.score = evaluation.total_score
+    record.passed_rules = evaluation.passed
+    record.rejection_reason = evaluation.rejection_reason
+    record.rule_evidence = compact_rule_evidence(evaluation)
+    record.search_source = "manual"
+    if durable_rejection is not None:
+        record.passed_rules = False
+        record.rejection_reason = prior_rejection_reason or durable_rejection.reason
+    await db.flush()
+    return record
+
+
+async def _require_release_confirmations(
+    db: AsyncSession,
+    request: RequestModel,
+    releases: list[Release],
+    confirmations: dict[str, bool],
+    *,
+    evaluations: dict[int, ReleaseEvaluation] | None = None,
+    allow_size_fallback_release_ids: set[int] | None = None,
+) -> None:
+    warnings: list[dict[str, object]] = []
+    dispositions = ReleaseDispositionService(db)
+    media_type = (
+        request.media_type.value
+        if hasattr(request.media_type, "value")
+        else str(request.media_type)
+    )
+    engine = await get_rule_engine(db, media_type)
+    accepted: list[tuple[Release, ReleaseEvaluation, bool]] = []
+    for release in releases:
+        candidate = build_prowlarr_release(release)
+        evaluation = (evaluations or {}).get(release.id)
+        if evaluation is None:
+            raw_prior_matches = (release.rule_evidence or {}).get("matches", [])
+            prior_matches = (
+                cast(list[Any], raw_prior_matches) if isinstance(raw_prior_matches, list) else []
+            )
+            prior_fallback = any(
+                isinstance(match, dict) and match.get("effect") == "size_fallback"
+                for match in prior_matches
+            )
+            evaluation = engine.evaluate(
+                candidate,
+                allow_episode_size_fallback=prior_fallback
+                or release.id in (allow_size_fallback_release_ids or set()),
+            )
+        found = snapshot_warnings(release)
+        # The persisted passed_rules value is historical. Only the current
+        # engine result controls the rules confirmation at handoff.
+        found = [warning for warning in found if warning.code != "rules"]
+        found = [warning for warning in found if warning.code != "seeders"]
+        observed = stored_seeders_observed_at(release)
+        if observed is None:
+            found.append(ReleaseWarning("seeders", "Seeder observation time is unknown"))
+        else:
+            if observed.tzinfo is None:
+                observed = observed.replace(tzinfo=UTC)
+            age_hours = (datetime.now(UTC) - observed).total_seconds() / 3600
+            if age_hours > get_settings().release_observation_max_age_hours or release.seeders <= 0:
+                found.append(
+                    ReleaseWarning(
+                        "seeders",
+                        f"Seeder count {release.seeders} was observed {age_hours:.1f} hours ago at {observed.isoformat()}",
+                    )
+                )
+        if not evaluation.passed:
+            found.append(
+                ReleaseWarning(
+                    "rules", evaluation.rejection_reason or "Release fails current rules"
+                )
+            )
+        identity = identity_warning(request, release)
+        if identity:
+            found.append(identity)
+        blocked = await dispositions.blocked(request.id, release, media_type=request.media_type)
+        if blocked:
+            found.append(ReleaseWarning("rejected", blocked.reason or "Release was rejected"))
+        for warning in found:
+            if not confirmations.get(warning.code, False):
+                warnings.append(
+                    {
+                        "code": warning.code,
+                        "message": warning.message,
+                        "release_id": release.id,
+                        "title": release.title,
+                    }
+                )
+        accepted.append((release, evaluation, blocked is not None))
+    if warnings:
+        raise HTTPException(
+            status_code=409,
+            detail={"message": "Explicit confirmation required", "warnings": warnings},
+        )
+    for release, evaluation, durably_rejected in accepted:
+        release.score = evaluation.total_score
+        release.rule_evidence = compact_rule_evidence(evaluation)
+        if not durably_rejected:
+            release.passed_rules = evaluation.passed
+            release.rejection_reason = evaluation.rejection_reason
 
 
 async def _deny_request_record(
@@ -190,6 +360,10 @@ async def use_request_release(
     http_request: FastAPIRequest,
     redirect_to: str | None = Form(default=None),
     approve_now: bool = Form(default=False),
+    confirm_identity: bool = Form(default=False),
+    confirm_rules: bool = Form(default=False),
+    confirm_seeders: bool = Form(default=False),
+    confirm_rejected: bool = Form(default=False),
     db: AsyncSession = Depends(get_db),
 ) -> RedirectResponse | JSONResponse:
     """Stage or send a selected stored release for a request."""
@@ -202,6 +376,14 @@ async def use_request_release(
     if not release:
         raise HTTPException(status_code=404, detail="Release not found")
 
+    confirmations = {
+        "identity": confirm_identity is True,
+        "rules": confirm_rules is True,
+        "seeders": confirm_seeders is True,
+        "rejected": confirm_rejected is True,
+    }
+    await _require_release_confirmations(db, request, [release], confirmations)
+
     staging_service = StagingService(db)
     if approve_now is True:
         result = await staging_service.use_releases(
@@ -209,12 +391,16 @@ async def use_request_release(
             [release],
             selection_source="manual",
             force_download=True,
+            identity_override=confirm_identity is True,
+            rejection_override=confirm_rejected is True,
         )
     else:
         result = await staging_service.use_releases(
             request,
             [release],
             selection_source="manual",
+            identity_override=confirm_identity is True,
+            rejection_override=confirm_rejected is True,
         )
     if "application/json" in http_request.headers.get("accept", ""):
         return JSONResponse(
@@ -239,6 +425,10 @@ async def stage_individual_episode_releases(
     season_number: int,
     http_request: FastAPIRequest,
     redirect_to: str | None = Form(default=None),
+    confirm_identity: bool = Form(default=False),
+    confirm_rules: bool = Form(default=False),
+    confirm_seeders: bool = Form(default=False),
+    confirm_rejected: bool = Form(default=False),
     db: AsyncSession = Depends(get_db),
 ) -> RedirectResponse | JSONResponse:
     """Stage the highest-scored stored release for each episode in a TV season."""
@@ -264,15 +454,46 @@ async def stage_individual_episode_releases(
             Release.request_id == request_id,
             Release.season_number == season_number,
             Release.episode_number.in_(episode_numbers),
-            Release.passed_rules.is_(True),
             _release_has_usable_url(),
         )
         .order_by(Release.episode_number.asc(), Release.score.desc(), Release.seeders.desc())
     )
+    candidates = list(release_result.scalars().all())
+    engine = await get_rule_engine(db, request.media_type.value)
+    dispositions = ReleaseDispositionService(db)
     releases_by_episode: dict[int, Release] = {}
-    for release in release_result.scalars().all():
-        if release.episode_number is not None and release.episode_number not in releases_by_episode:
-            releases_by_episode[release.episode_number] = release
+    selected_evaluations: dict[int, ReleaseEvaluation] = {}
+    fallback_ids: set[int] = set()
+    for episode_number in episode_numbers:
+        eligible: list[tuple[Release, ReleaseEvaluation, bool]] = []
+        fallback: list[tuple[Release, ReleaseEvaluation, bool]] = []
+        for release in candidates:
+            if release.episode_number != episode_number:
+                continue
+            if await dispositions.blocked(request.id, release, media_type=request.media_type):
+                continue
+            candidate = build_prowlarr_release(release)
+            normal = engine.evaluate(candidate)
+            if normal.passed:
+                eligible.append((release, normal, False))
+                continue
+            relaxed = engine.evaluate(candidate, allow_episode_size_fallback=True)
+            if relaxed.passed:
+                fallback.append((release, relaxed, True))
+        pool = eligible or fallback
+        if not pool:
+            continue
+        winner, evaluation, used_fallback = max(
+            pool,
+            key=lambda item: (
+                item[1].total_score,
+                item[0].seeders if isinstance(item[0].seeders, int) else 0,
+            ),
+        )
+        releases_by_episode[episode_number] = winner
+        selected_evaluations[winner.id] = evaluation
+        if used_fallback:
+            fallback_ids.add(winner.id)
 
     missing = [episode for episode in episode_numbers if episode not in releases_by_episode]
     if missing:
@@ -284,10 +505,25 @@ async def stage_individual_episode_releases(
             status_code=400,
         )
 
+    selected = [releases_by_episode[episode] for episode in episode_numbers]
+    await _require_release_confirmations(
+        db,
+        request,
+        selected,
+        {
+            "identity": confirm_identity is True,
+            "rules": confirm_rules is True,
+            "seeders": confirm_seeders is True,
+            "rejected": confirm_rejected is True,
+        },
+        evaluations=selected_evaluations,
+        allow_size_fallback_release_ids=fallback_ids,
+    )
+
     result = await StagingService(db).stage_individual_episode_releases(
         request,
         season_number,
-        [releases_by_episode[episode] for episode in episode_numbers],
+        selected,
     )
     message = _selection_success_message(result)
     if "application/json" in http_request.headers.get("accept", ""):
@@ -305,7 +541,7 @@ async def reject_request_release(
     db: AsyncSession = Depends(get_db),
 ) -> JSONResponse:
     """Mark one stored candidate as manually rejected in the details view."""
-    await load_request_or_404(db, request_id)
+    request = await load_request_or_404(db, request_id)
     result = await db.execute(
         select(Release).where(Release.id == release_id, Release.request_id == request_id)
     )
@@ -315,8 +551,31 @@ async def reject_request_release(
 
     release.passed_rules = False
     release.rejection_reason = "Manually rejected"
+    await ReleaseDispositionService(db).record_rejection(
+        request_id,
+        release,
+        media_type=request.media_type,
+        reason="Manually rejected",
+    )
     await db.commit()
     return JSONResponse({"status": "ok", "message": "Release rejected"})
+
+
+@router.delete("/{request_id}/releases/{release_id}/reject")
+async def clear_request_release_rejection(
+    request_id: int, release_id: int, db: AsyncSession = Depends(get_db)
+) -> JSONResponse:
+    request = await load_request_or_404(db, request_id)
+    release = (
+        await db.execute(
+            select(Release).where(Release.id == release_id, Release.request_id == request_id)
+        )
+    ).scalar_one_or_none()
+    if release is None:
+        raise HTTPException(status_code=404, detail="Release not found")
+    await ReleaseDispositionService(db).clear(request_id, release, media_type=request.media_type)
+    await db.commit()
+    return JSONResponse({"status": "ok", "message": "Release rejection cleared"})
 
 
 @router.post("/{request_id}/manual-release/use", response_model=None)
@@ -338,6 +597,10 @@ async def use_manual_release(
     uploaded_by: str | None = Form(default=None),
     redirect_to: str | None = Form(default=None),
     approve_now: bool = Form(default=False),
+    confirm_identity: bool = Form(default=False),
+    confirm_rules: bool = Form(default=False),
+    confirm_seeders: bool = Form(default=False),
+    confirm_rejected: bool = Form(default=False),
     db: AsyncSession = Depends(get_db),
 ) -> RedirectResponse | JSONResponse:
     """Persist and use an ad hoc manual-search release for a request."""
@@ -367,10 +630,34 @@ async def use_manual_release(
     )
 
     service = SearchService(db)
-    if approve_now is True:
-        result = await service.select_manual_release(request, release, force_download=True)
-    else:
-        result = await service.select_manual_release(request, release)
+    evaluation = await service.evaluate_manual_release(request, release)
+    stored_release = await _persist_manual_candidate_uncommitted(db, request, release, evaluation)
+    try:
+        await _require_release_confirmations(
+            db,
+            request,
+            [stored_release],
+            {
+                "identity": confirm_identity is True,
+                "rules": confirm_rules is True,
+                "seeders": confirm_seeders is True,
+                "rejected": confirm_rejected is True,
+            },
+            evaluations={stored_release.id: evaluation},
+        )
+    except HTTPException:
+        await db.rollback()
+        raise
+    await db.commit()
+    staging = StagingService(db)
+    result = await staging.use_releases(
+        request,
+        [stored_release],
+        selection_source="manual",
+        force_download=approve_now is True,
+        identity_override=confirm_identity is True,
+        rejection_override=confirm_rejected is True,
+    )
     if "application/json" in http_request.headers.get("accept", ""):
         return JSONResponse(
             {

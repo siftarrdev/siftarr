@@ -1,6 +1,7 @@
 """Tests for dashboard action routes."""
 
 import json
+from datetime import UTC, datetime
 from typing import cast
 from unittest.mock import AsyncMock, MagicMock, call
 
@@ -11,6 +12,120 @@ from sqlalchemy.dialects import sqlite
 from app.siftarr.models.request import MediaType, RequestStatus
 from app.siftarr.routers import dashboard_actions
 from app.siftarr.services.dashboard import search_service as search_service_mod
+from app.siftarr.services.integrations.prowlarr_service import ProwlarrRelease
+
+_real_require_release_confirmations = dashboard_actions._require_release_confirmations
+
+
+@pytest.fixture(autouse=True)
+def _stable_release_preflight(monkeypatch):
+    """Keep legacy route-shape tests focused on their original concern."""
+    evaluation = MagicMock(passed=True, total_score=0, rejection_reason=None, matches=[])
+    engine = MagicMock()
+    engine.evaluate.return_value = evaluation
+    monkeypatch.setattr(dashboard_actions, "get_rule_engine", AsyncMock(return_value=engine))
+    monkeypatch.setattr(
+        dashboard_actions.ReleaseDispositionService,
+        "blocked",
+        AsyncMock(return_value=None),
+    )
+    monkeypatch.setattr(
+        dashboard_actions.ReleaseDispositionService,
+        "record_rejection",
+        AsyncMock(),
+    )
+    monkeypatch.setattr(dashboard_actions, "_require_release_confirmations", AsyncMock())
+    monkeypatch.setattr(dashboard_actions, "build_prowlarr_release", MagicMock())
+
+
+@pytest.mark.asyncio
+async def test_episode_selection_uses_current_scores_and_skips_rejected_alternatives(
+    mock_db, monkeypatch
+):
+    request = MagicMock(id=7, media_type=MediaType.TV)
+    monkeypatch.setattr(dashboard_actions, "load_request_or_404", AsyncMock(return_value=request))
+
+    def stored(release_id, episode, title, old_score, seeders):
+        item = MagicMock()
+        item.id, item.episode_number, item.title = release_id, episode, title
+        item.score, item.seeders = old_score, seeders
+        return item
+
+    stale_top = stored(1, 1, "stale", 100, 20)
+    current_top = stored(2, 1, "current", 0, 5)
+    rejected = stored(3, 1, "rejected", 500, 50)
+    episodes_result = MagicMock()
+    episodes_result.scalars.return_value.all.return_value = [1]
+    releases_result = MagicMock()
+    releases_result.scalars.return_value.all.return_value = [stale_top, current_top, rejected]
+    mock_db.execute.side_effect = [episodes_result, releases_result]
+
+    monkeypatch.setattr(
+        dashboard_actions,
+        "build_prowlarr_release",
+        lambda item: ProwlarrRelease(
+            title=item.title,
+            size=1,
+            seeders=item.seeders,
+            leechers=0,
+            download_url="https://example.test/torrent",
+            indexer="test",
+        ),
+    )
+    engine = MagicMock()
+    engine.evaluate.side_effect = lambda candidate, **_: MagicMock(
+        passed=True,
+        total_score={"stale": 1, "current": 50, "rejected": 100}[candidate.title],
+        rejection_reason=None,
+        matches=[],
+    )
+    monkeypatch.setattr(dashboard_actions, "get_rule_engine", AsyncMock(return_value=engine))
+    blocked = AsyncMock(
+        side_effect=lambda _request_id, item, **_: MagicMock() if item is rejected else None
+    )
+    monkeypatch.setattr(dashboard_actions.ReleaseDispositionService, "blocked", blocked)
+    preflight = AsyncMock()
+    monkeypatch.setattr(dashboard_actions, "_require_release_confirmations", preflight)
+    staging = AsyncMock()
+    staging.stage_individual_episode_releases.return_value = {"status": "staged"}
+    monkeypatch.setattr(dashboard_actions, "StagingService", lambda _db: staging)
+
+    await dashboard_actions.stage_individual_episode_releases(
+        7, 1, MagicMock(headers={"accept": "application/json"}), db=mock_db
+    )
+
+    staging.stage_individual_episode_releases.assert_awaited_once_with(request, 1, [current_top])
+    assert preflight.await_args_list[0].args[2] == [current_top]
+
+
+@pytest.mark.asyncio
+async def test_confirmation_conflict_does_not_update_stored_score(mock_db, monkeypatch):
+    request = MagicMock(id=7, media_type=MediaType.TV)
+    release = MagicMock(id=9, score=77, rule_evidence=None, created_at=datetime.now(UTC))
+    release.seeders = 10
+    candidate = ProwlarrRelease(
+        title="Show.S01E01",
+        size=1,
+        seeders=10,
+        leechers=0,
+        download_url="https://example.test/torrent",
+        indexer="test",
+    )
+    monkeypatch.setattr(dashboard_actions, "build_prowlarr_release", lambda _: candidate)
+    monkeypatch.setattr(dashboard_actions, "snapshot_warnings", lambda _: [])
+    monkeypatch.setattr(dashboard_actions, "identity_warning", lambda *_: None)
+    evaluation = MagicMock(
+        passed=False, total_score=-50, rejection_reason="current rule failure", matches=[]
+    )
+    engine = MagicMock()
+    engine.evaluate.return_value = evaluation
+    monkeypatch.setattr(dashboard_actions, "get_rule_engine", AsyncMock(return_value=engine))
+
+    with pytest.raises(HTTPException) as exc:
+        await _real_require_release_confirmations(mock_db, request, [release], {})
+
+    assert exc.value.status_code == 409
+    assert release.score == 77
 
 
 @pytest.mark.asyncio
@@ -387,6 +502,8 @@ async def test_use_request_release_redirects_pending_requests_to_pending_tab(moc
         request_record,
         [release_record],
         selection_source="manual",
+        identity_override=False,
+        rejection_override=False,
     )
 
 
@@ -418,6 +535,8 @@ async def test_use_request_release_approve_now_bypasses_staging(mock_db, monkeyp
         [release_record],
         selection_source="manual",
         force_download=True,
+        identity_override=False,
+        rejection_override=False,
     )
 
 
@@ -464,8 +583,10 @@ async def test_use_manual_release_persists_then_uses_release(mock_db, monkeypatc
         "from_db_rules",
         MagicMock(return_value=fake_engine),
     )
-    monkeypatch.setattr(search_service_mod, "persist_manual_release", persist_manual_release)
-    monkeypatch.setattr(search_service_mod, "StagingService", lambda db: staging_instance)
+    monkeypatch.setattr(
+        dashboard_actions, "_persist_manual_candidate_uncommitted", persist_manual_release
+    )
+    monkeypatch.setattr(dashboard_actions, "StagingService", lambda db: staging_instance)
 
     response = await dashboard_actions.use_manual_release(
         request_id=21,
@@ -494,6 +615,9 @@ async def test_use_manual_release_persists_then_uses_release(mock_db, monkeypatc
         request_record,
         [stored_release],
         selection_source="manual",
+        force_download=False,
+        identity_override=False,
+        rejection_override=False,
     )
 
 
@@ -628,8 +752,10 @@ async def test_use_manual_release_json_reports_replacement_outcome(mock_db, monk
         "from_db_rules",
         MagicMock(return_value=fake_engine),
     )
-    monkeypatch.setattr(search_service_mod, "persist_manual_release", persist_manual_release)
-    monkeypatch.setattr(search_service_mod, "StagingService", lambda db: staging_instance)
+    monkeypatch.setattr(
+        dashboard_actions, "_persist_manual_candidate_uncommitted", persist_manual_release
+    )
+    monkeypatch.setattr(dashboard_actions, "StagingService", lambda db: staging_instance)
 
     response = await dashboard_actions.use_manual_release(
         request_id=21,

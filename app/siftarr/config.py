@@ -136,6 +136,21 @@ class Settings(BaseSettings):
     max_retry_duration_days: int = 7
     overseerr_poll_interval_minutes: int = Field(default=5, ge=1)
     qbittorrent_completion_poll_interval_seconds: int = Field(default=30, ge=5)
+    # Downloadability adjustments are bounded preferences, not eligibility rules.
+    release_file_count_bonus: int = Field(default=5, ge=0, le=100)
+    release_high_file_count_penalty: int = Field(default=10, ge=0, le=100)
+    release_archive_penalty: int = Field(default=100, ge=0, le=500)
+    release_rar_title_penalty: int = Field(default=50, ge=0, le=500)
+    release_low_seed_penalty: int = Field(default=40, ge=0, le=500)
+    release_marginal_seed_penalty: int = Field(default=10, ge=0, le=500)
+    tv_episode_fallback_max_size_gb: float = Field(default=3.0, ge=0, le=100)
+    release_observation_max_age_hours: int = Field(default=24, ge=1)
+    download_stall_warning_hours: int = Field(default=6, ge=1)
+    download_stall_recovery_hours: int = Field(default=24, ge=1)
+    release_failure_cooldown_hours: int = Field(default=24, ge=1)
+    # Explicit aliases keyed by normalized title plus original-series year.
+    # Example: {"top gear|2002": ["Top Gear UK"]}. Never infer regional aliases.
+    trusted_tv_title_aliases: dict[str, list[str]] = Field(default_factory=dict)
     plex_fast_sync_interval_minutes: int = Field(default=5, ge=1)
     plex_full_sync_frequency: str = "daily"
     max_episode_discovery: int = 30
@@ -185,6 +200,12 @@ class Settings(BaseSettings):
     prowlarr_tv_strategy_imdb_enabled: bool = False
     prowlarr_tv_strategy_title_season_token_enabled: bool = True
     prowlarr_tv_strategy_tvdb_enabled: bool = False
+
+    @model_validator(mode="after")
+    def _validate_download_recovery_thresholds(self) -> Settings:
+        if self.download_stall_recovery_hours < self.download_stall_warning_hours:
+            raise ValueError("download recovery threshold must not precede the warning threshold")
+        return self
 
     @model_validator(mode="after")
     def _validate_tv_sweep_strategies(self) -> Settings:

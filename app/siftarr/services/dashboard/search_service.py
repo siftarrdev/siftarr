@@ -1,6 +1,7 @@
 """Search service for request processing and manual release selection."""
 
 import logging
+import re
 from collections.abc import Awaitable, Callable
 from copy import copy
 from time import perf_counter
@@ -51,6 +52,10 @@ from app.siftarr.services.releases.release_storage import (
     persist_manual_release,
     store_search_results,
 )
+from app.siftarr.services.releases.release_validation_service import (
+    apply_dispositions,
+    identity_warning,
+)
 from app.siftarr.services.releases.staging_service import StagingService
 from app.siftarr.services.stats_metrics_service import record_rule_outcomes
 from app.siftarr.services.utils.media_helpers import extract_media_title_and_year
@@ -79,7 +84,12 @@ class SearchService:
             if tv_release_identity_rejection_reason(
                 request_title=getattr(request, "title", None),
                 request_year=getattr(request, "year", None),
-                release_title=release.title,
+                release_title=re.sub(
+                    r"(?i)([._ -])(?:the[._ -]+)?complete(?:[._ -]+series)?(?=[._ -])",
+                    r"\1S00",
+                    release.title,
+                    count=1,
+                ),
             )
             is None
         ]
@@ -100,9 +110,14 @@ class SearchService:
         release: ProwlarrRelease,
         *,
         force_download: bool = False,
+        identity_override: bool = False,
+        rejection_override: bool = False,
     ) -> dict[str, object]:
         """Persist and use a manual-search release through the normal selection path."""
         evaluation = await self.evaluate_manual_release(request, release)
+        identity = identity_warning(request, release)
+        if identity and not identity_override:
+            raise RuntimeError(identity.message)
         stored_release = await persist_manual_release(self.db, request, release, evaluation)
         await record_rule_outcomes(
             self.db,
@@ -120,11 +135,15 @@ class SearchService:
                 [stored_release],
                 selection_source="manual",
                 force_download=True,
+                identity_override=identity_override,
+                rejection_override=rejection_override,
             )
         return await staging_service.use_releases(
             request,
             [stored_release],
             selection_source="manual",
+            identity_override=identity_override,
+            rejection_override=rejection_override,
         )
 
     async def process_request_search(
@@ -233,7 +252,7 @@ class SearchService:
             )
 
         stored_rows = await self._persist_tv_season_sweep(
-            request.id, result.releases, season_number=season_number
+            request, result.releases, season_number=season_number
         )
         await self._commit_result_update(request.id, len(stored_rows), progress_callback)
         releases = self._filter_serialize_stored_tv_releases(stored_rows, scope=scope)
@@ -281,16 +300,14 @@ class SearchService:
         stored_rows: list[Release] = []
         for season in season_numbers:
             stored_rows.extend(
-                await self._persist_tv_season_sweep(
-                    request.id, result.releases, season_number=season
-                )
+                await self._persist_tv_season_sweep(request, result.releases, season_number=season)
             )
         if not season_numbers:
             # No known/requested seasons: persist the broad sweep directly so
             # complete-series packs are still cached and stageable.
             stored_rows.extend(
                 await self._persist_tv_evaluations(
-                    request.id, result.releases, scope=scope_for_persist
+                    request, result.releases, scope=scope_for_persist
                 )
             )
         stored_rows = self._dedupe_stored_releases(stored_rows)
@@ -331,7 +348,7 @@ class SearchService:
         if episode_result.error:
             return TVSearchData(releases=[], scope=scope, error=episode_result.error)
         exact_rows = await self._persist_tv_evaluations(
-            request.id,
+            request,
             getattr(episode_result, "releases", []),
             scope=scope,
         )
@@ -399,20 +416,20 @@ class SearchService:
         return filtered_rows
 
     async def _persist_tv_season_sweep(
-        self, request_id: int, releases: list[ProwlarrRelease], *, season_number: int
+        self, request: RequestModel, releases: list[ProwlarrRelease], *, season_number: int
     ) -> list[Release]:
         """Evaluate and persist the full sweep, then return stored season rows."""
         persisted_rows = await self._persist_tv_evaluations(
-            request_id,
+            request,
             releases,
             scope={"type": "season_sweep", "season_number": season_number},
         )
-        cached_rows = await self._load_cached_tv_releases(request_id, season_number=season_number)
+        cached_rows = await self._load_cached_tv_releases(request.id, season_number=season_number)
         return cached_rows or persisted_rows
 
     async def _persist_tv_evaluations(
         self,
-        request_id: int,
+        request: RequestModel,
         releases: list[ProwlarrRelease],
         *,
         scope: dict[str, object],
@@ -421,13 +438,19 @@ class SearchService:
         evaluations = [
             self._evaluation_for_release(engine.evaluate(release), release) for release in releases
         ]
+        for evaluation in evaluations:
+            identity = identity_warning(request, evaluation.release)
+            if identity:
+                evaluation.passed = False
+                evaluation.rejection_reason = identity.message
+        await apply_dispositions(self.db, request, evaluations)
         try:
             stored_by_key = await store_search_results(
-                self.db, request_id, evaluations, scope=scope, source="adhoc"
+                self.db, request.id, evaluations, scope=scope, source="adhoc"
             )
         except StopAsyncIteration, StopIteration:
             return [
-                self._transient_release_from_evaluation(request_id, evaluation)
+                self._transient_release_from_evaluation(request.id, evaluation)
                 for evaluation in evaluations
             ]
         return self._dedupe_stored_releases(list(stored_by_key.values()))
