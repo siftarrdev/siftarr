@@ -92,6 +92,18 @@ def test_auth_enabled_defaults_to_api_auth_disabled_only():
     assert Settings().auth_enabled is False
 
 
+def test_session_https_only_defaults_to_false(monkeypatch):
+    monkeypatch.delenv("SIFTARR_SESSION_HTTPS_ONLY", raising=False)
+    monkeypatch.setitem(Settings.model_config, "env_file", None)
+    assert Settings().session_https_only is False
+
+
+def test_session_https_only_can_be_enabled_by_environment(monkeypatch):
+    monkeypatch.setenv("SIFTARR_SESSION_HTTPS_ONLY", "true")
+    monkeypatch.setitem(Settings.model_config, "env_file", None)
+    assert Settings().session_https_only is True
+
+
 def test_generate_api_key_is_random_and_not_placeholder():
     first = generate_api_key()
     second = generate_api_key()

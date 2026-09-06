@@ -175,11 +175,14 @@ Most settings can be edited in the UI. Useful environment variables include:
 | `PLEX_URL` | unset | Plex server URL; Plex token is normally managed by SSO. |
 | `SIFTARR_API_KEY` | generated | Programmatic/webhook API key. |
 | `SECRET_KEY` | generated under `/data/db/` | Optional explicit browser session signing key. |
+| `SIFTARR_SESSION_HTTPS_ONLY` | `false` | Set to `true` when accessing Siftarr over HTTPS to mark browser session cookies `Secure`. |
 | `SIFTARR_DB_PATH` | `/data/db/siftarr.db` | SQLite path used when `DATABASE_URL` is not set. |
 | `DATABASE_URL` | SQLite under `/data/db/` | Full database URL override. |
 | `STAGING_MODE_ENABLED` | `true` | Stage selected releases before qBittorrent. |
 | `RETRY_INTERVAL_HOURS` | `24` | Pending retry cadence. |
 | `MAX_RETRY_DURATION_DAYS` | `7` | Pending retry window. |
+
+When using an HTTPS reverse proxy, set `SIFTARR_SESSION_HTTPS_ONLY=true` and restart Siftarr. The browser will then send session cookies only over HTTPS. Leave it `false` for HTTP-only local installations; enabling it there prevents browser sessions from working.
 
 ## Troubleshooting
 

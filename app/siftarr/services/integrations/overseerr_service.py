@@ -1,6 +1,7 @@
 """Service for interacting with Overseerr API."""
 
 import time
+from collections import OrderedDict
 from typing import Any
 
 import httpx
@@ -8,8 +9,9 @@ import httpx
 from app.siftarr.config import Settings, get_settings
 from app.siftarr.services.utils.http_client import get_shared_client
 
-_MEDIA_DETAILS_CACHE: dict[tuple[str, int], tuple[float, dict]] = {}
+_MEDIA_DETAILS_CACHE: OrderedDict[tuple[str, int], tuple[float, dict]] = OrderedDict()
 _MEDIA_DETAILS_CACHE_TTL = 60.0
+_MEDIA_DETAILS_CACHE_MAX_SIZE = 512
 
 
 def clear_media_details_cache() -> int:
@@ -254,11 +256,17 @@ class OverseerrService:
 
         cache_key = (media_type, external_id)
         now = time.monotonic()
+        expired_keys = [
+            key
+            for key, (timestamp, _) in _MEDIA_DETAILS_CACHE.items()
+            if now - timestamp >= _MEDIA_DETAILS_CACHE_TTL
+        ]
+        for key in expired_keys:
+            del _MEDIA_DETAILS_CACHE[key]
         cached = _MEDIA_DETAILS_CACHE.get(cache_key)
         if cached is not None:
-            ts, data = cached
-            if now - ts < _MEDIA_DETAILS_CACHE_TTL:
-                return data
+            _MEDIA_DETAILS_CACHE.move_to_end(cache_key)
+            return cached[1]
 
         endpoint = f"{self.base_url}/api/v1/{media_type}/{external_id}"
         client = await self._get_client()
@@ -268,7 +276,10 @@ class OverseerrService:
             response = await client.get(endpoint, headers=headers, timeout=30.0)
             if response.status_code == 200:
                 data = response.json()
-                _MEDIA_DETAILS_CACHE[cache_key] = (now, data)
+                _MEDIA_DETAILS_CACHE[cache_key] = (time.monotonic(), data)
+                _MEDIA_DETAILS_CACHE.move_to_end(cache_key)
+                while len(_MEDIA_DETAILS_CACHE) > _MEDIA_DETAILS_CACHE_MAX_SIZE:
+                    _MEDIA_DETAILS_CACHE.popitem(last=False)
                 return data
             return None
         except httpx.RequestError:

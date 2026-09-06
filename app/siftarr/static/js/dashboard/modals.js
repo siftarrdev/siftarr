@@ -431,6 +431,9 @@ function openReplaceModal(torrentId, requestId, torrentTitle, redirectTo) {
   reason.value = '';
   modal.classList.remove('hidden');
 }
+function openReplaceModalFromElement(element, torrentId, requestId, redirectTo) {
+  openReplaceModal(torrentId, requestId, element.dataset.torrentTitle, redirectTo);
+}
 function closeReplaceModal() {
   document.getElementById('replace-modal').classList.add('hidden');
 }
@@ -462,6 +465,7 @@ export {
   closeDenyModal,
   bindDenyModalHandlers,
   openReplaceModal,
+  openReplaceModalFromElement,
   closeReplaceModal,
   bindSelectAll,
 };
@@ -478,6 +482,7 @@ Object.assign(window, {
   closeDenyModal,
   bindDenyModalHandlers,
   openReplaceModal,
+  openReplaceModalFromElement,
   closeReplaceModal,
   bindSelectAll,
 });

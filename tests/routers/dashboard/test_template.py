@@ -1,6 +1,53 @@
 """Template assertions for dashboard UI."""
 
 import os
+from html.parser import HTMLParser
+
+import pytest
+
+from app.siftarr.routers.dashboard import templates
+
+
+@pytest.mark.parametrize(
+    "title",
+    [
+        "Movie's title",
+        r"Backslash \\ and 'quotes'",
+        "');window.titleExecuted=true;//",
+        '"><img src=x onerror="window.titleExecuted=true">',
+    ],
+)
+def test_replace_buttons_keep_titles_out_of_javascript(title):
+    class ReplaceButtonParser(HTMLParser):
+        def __init__(self):
+            super().__init__()
+            self.buttons = []
+
+        def handle_starttag(self, tag, attrs):
+            attributes = dict(attrs)
+            if tag == "button" and "openReplaceModal" in attributes.get("onclick", ""):
+                self.buttons.append(attributes)
+
+    html = templates.env.get_template("dashboard.html").render(
+        url_for=lambda name, path: f"/static{path}",
+        static_version="test",
+        stats={},
+        staging_mode_enabled=True,
+        staged_torrents=[
+            {"id": 4, "request_id": 9, "title": title, "size": 1024, "status": "staged"}
+        ],
+        staged_request_statuses={9: "staged"},
+        movie_identity_mismatch_warnings={},
+        replace_staged_torrent_ids={4},
+    )
+    parser = ReplaceButtonParser()
+    parser.feed(html)
+
+    assert len(parser.buttons) == 2  # Mobile and desktop layouts.
+    for button in parser.buttons:
+        assert button["data-torrent-title"] == title
+        assert button["onclick"] == "openReplaceModalFromElement(this, 4, 9, '/?tab=downloading')"
+        assert "onerror" not in button
 
 
 def _read_dashboard_js():
@@ -637,7 +684,7 @@ def test_dashboard_template_staged_details_uses_row_card_clicks(dashboard_templa
     assert "event.stopPropagation()" in staged_section
     assert "postStagedAction('/staged/{{ torrent.id }}/approve'" in staged_section
     assert "postStagedAction('/staged/{{ torrent.id }}/discard'" in staged_section
-    assert "openReplaceModal({{ torrent.id }}" in staged_section
+    assert "openReplaceModalFromElement(this, {{ torrent.id }}" in staged_section
 
 
 def test_dashboard_js_removes_scope_menu_helpers():
@@ -771,7 +818,7 @@ def test_dashboard_template_splits_staged_and_downloading_tabs(dashboard_templat
     assert "RAR-packed or otherwise unimportable" in template
     assert "Open qBittorrent" in template
     assert "torrent.id in replace_staged_torrent_ids" in template
-    assert "openReplaceModal({{ torrent.id }}" in template
+    assert "openReplaceModalFromElement(this, {{ torrent.id }}" in template
     assert (
         "openReplaceModal({{ torrent.id }}, {{ torrent.request_id }}"
         not in template[
