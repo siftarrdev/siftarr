@@ -9,7 +9,13 @@ from app.siftarr.models.release import Release
 from app.siftarr.models.request import MediaType, Request
 from app.siftarr.models.staged_torrent import StagedTorrent
 from app.siftarr.services.integrations.prowlarr_service import ProwlarrRelease
+from app.siftarr.services.releases.release_disposition_service import ReleaseDispositionService
 from app.siftarr.services.releases.staging_service import StagingService
+
+
+@pytest.fixture(autouse=True)
+def _mock_disposition_lookup(monkeypatch):
+    monkeypatch.setattr(ReleaseDispositionService, "blocked", AsyncMock(return_value=None))
 
 
 class TestStagingServiceUnit:

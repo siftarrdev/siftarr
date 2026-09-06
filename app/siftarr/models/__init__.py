@@ -3,8 +3,10 @@
 from app.siftarr.models._base import Base
 from app.siftarr.models.activity_log import ActivityLog, EventType
 from app.siftarr.models.app_setting import AppSetting
+from app.siftarr.models.download_health import DownloadHealth
 from app.siftarr.models.episode import Episode
 from app.siftarr.models.release import Release
+from app.siftarr.models.release_disposition import ReleaseDisposition
 from app.siftarr.models.request import MediaType, Request, RequestStatus
 from app.siftarr.models.rule import Rule, RuleType
 from app.siftarr.models.search_history import SearchRun, SearchRunCandidate
@@ -20,12 +22,14 @@ __all__ = [
     "ActivityLog",
     "AppSetting",
     "Base",
+    "DownloadHealth",
     "Episode",
     "EventType",
     "MediaType",
     "Request",
     "RequestStatus",
     "Release",
+    "ReleaseDisposition",
     "Rule",
     "RuleType",
     "Season",

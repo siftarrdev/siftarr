@@ -1,9 +1,11 @@
 """Staged torrent management router."""
 
+import hashlib
 import json
 import logging
 import os
 import re
+from dataclasses import asdict
 from datetime import UTC, datetime
 from typing import Any, cast
 from urllib.parse import urlsplit
@@ -17,6 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.siftarr.config import get_settings
 from app.siftarr.database import get_db
 from app.siftarr.models.activity_log import ActivityLog, EventType
+from app.siftarr.models.release import Release
 from app.siftarr.models.request import (
     MediaType,
     Request,
@@ -27,6 +30,7 @@ from app.siftarr.models.staged_torrent import StagedTorrent
 from app.siftarr.services import staging_decision_log
 from app.siftarr.services.admin.plex_polling_service import CheckRequestResult, PlexPollingService
 from app.siftarr.services.auth_service import require_session_or_api_key
+from app.siftarr.services.decisions.rule_engine_provider import get_rule_engine
 from app.siftarr.services.integrations.plex_service import PlexService
 from app.siftarr.services.integrations.qbittorrent_service import (
     BulkAddResult,
@@ -40,6 +44,20 @@ from app.siftarr.services.lifecycle.lifecycle_service import LifecycleService
 from app.siftarr.services.lifecycle.overseerr_sync_service import (
     approve_overseerr_request_best_effort,
     approve_overseerr_request_in_background,
+)
+from app.siftarr.services.lifecycle.pending_queue_service import PendingQueueService
+from app.siftarr.services.releases.release_disposition_service import (
+    ReleaseDispositionService,
+    release_target_scope,
+)
+from app.siftarr.services.releases.release_serializers import compact_rule_evidence
+from app.siftarr.services.releases.release_storage import (
+    build_prowlarr_release,
+    stored_seeders_observed_at,
+)
+from app.siftarr.services.releases.release_validation_service import (
+    ReleaseWarning,
+    identity_warning,
 )
 from app.siftarr.services.search_history_service import SearchHistoryService
 from app.siftarr.services.stats_metrics_service import record_staged_release_fact
@@ -350,6 +368,27 @@ def log_manual_discard_decision(
         staging_decision_log.STAGING_DECISION_LOG_PATH = original_path
 
 
+def _confirmation_given(value: object) -> bool:
+    return value is True
+
+
+def _scope_for(torrent: StagedTorrent, media_type: object) -> str:
+    return torrent.target_scope or release_target_scope(torrent, media_type=media_type)
+
+
+def _engine_fingerprint(engine: object) -> str:
+    policy = getattr(engine, "quality_policy", None)
+    payload = {
+        "size": [vars(rule) for rule in getattr(engine, "size_limit_rules", [])],
+        "exclude": getattr(engine, "exclusion_patterns", []),
+        "require": getattr(engine, "requirement_patterns", []),
+        "score": getattr(engine, "scorer_patterns", []),
+        "quality": asdict(policy) if policy is not None else None,
+    }
+    encoded = json.dumps(payload, sort_keys=True, default=str, separators=(",", ":"))
+    return hashlib.sha256(encoded.encode()).hexdigest()
+
+
 def _wants_json(http_request: FastAPIRequest) -> bool:
     return "application/json" in http_request.headers.get("accept", "")
 
@@ -358,6 +397,95 @@ def _progress_percent(progress: float | None) -> float | None:
     if progress is None:
         return None
     return round(progress * 100, 1)
+
+
+async def _approval_warnings(
+    db: AsyncSession, torrent: StagedTorrent, request: Request | None
+) -> list[dict[str, str]]:
+    if not isinstance(request, Request):
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "message": "Approval validation requires an associated request",
+                "warnings": [],
+            },
+        )
+    source: object = torrent
+    stored: Release | None = None
+    if torrent.source_release_id is not None:
+        stored = (
+            await db.execute(
+                select(Release).where(
+                    Release.id == torrent.source_release_id, Release.request_id == request.id
+                )
+            )
+        ).scalar_one_or_none()
+        if stored is not None:
+            source = stored
+    warnings: list[ReleaseWarning] = []
+    if stored is None:
+        warnings.extend(
+            [
+                ReleaseWarning(
+                    "rules",
+                    "Current rules cannot be verified because the source release is missing",
+                ),
+                ReleaseWarning(
+                    "seeders", "Seeder observation time is unknown for this legacy staged release"
+                ),
+            ]
+        )
+    else:
+        media_type = (
+            request.media_type.value
+            if hasattr(request.media_type, "value")
+            else str(request.media_type)
+        )
+        engine = await get_rule_engine(db, media_type)
+        prior_evidence = torrent.rule_evidence_snapshot
+        allow_fallback = (
+            isinstance(prior_evidence, dict) and prior_evidence.get("size_fallback") is True
+        )
+        current = engine.evaluate(
+            build_prowlarr_release(stored),
+            allow_episode_size_fallback=allow_fallback,
+        )
+        torrent.rule_fingerprint = _engine_fingerprint(engine)
+        torrent.rule_evidence_snapshot = compact_rule_evidence(current)
+        torrent.seeders_snapshot = stored.seeders
+        torrent.score = current.total_score
+        if not current.passed:
+            warnings.append(
+                ReleaseWarning("rules", current.rejection_reason or "Release fails current rules")
+            )
+        observed = stored_seeders_observed_at(stored)
+        if observed is None:
+            warnings.append(ReleaseWarning("seeders", "Seeder observation time is unknown"))
+        else:
+            if observed.tzinfo is None:
+                observed = observed.replace(tzinfo=UTC)
+            age_hours = (datetime.now(UTC) - observed).total_seconds() / 3600
+            max_age = get_settings().release_observation_max_age_hours
+            if age_hours > max_age or stored.seeders <= 0:
+                warnings.append(
+                    ReleaseWarning(
+                        "seeders",
+                        f"Seeder count {stored.seeders} was observed {age_hours:.1f} hours ago at {observed.isoformat()}",
+                    )
+                )
+    identity = identity_warning(request, source)
+    if identity:
+        warnings.append(identity)
+    if source is not torrent and getattr(source, "title", None) != torrent.title:
+        submitted_identity = identity_warning(request, torrent)
+        if submitted_identity:
+            warnings.append(submitted_identity)
+    disposition = await ReleaseDispositionService(db).blocked(
+        request.id, source, media_type=request.media_type
+    )
+    if disposition:
+        warnings.append(ReleaseWarning("rejected", disposition.reason or "Release was rejected"))
+    return [{"code": warning.code, "message": warning.message} for warning in warnings]
 
 
 def _download_completed_torrent_ids(details: str | None) -> set[int]:
@@ -399,9 +527,10 @@ async def _approve_torrent(
     commit_transition: bool = True,
     cleanup_paths: list[tuple[str, str]] | None = None,
     background_tasks: BackgroundTasks | None = None,
+    approval_request: Request | None = None,
 ) -> bool:
-    request = None
-    if torrent.request_id:
+    request = approval_request
+    if request is None and torrent.request_id:
         result = await db.execute(select(Request).where(Request.id == torrent.request_id))
         request = result.scalar_one_or_none()
 
@@ -422,7 +551,20 @@ async def _approve_torrent(
             )
             .order_by(StagedTorrent.score.desc(), StagedTorrent.created_at.asc())
         )
-        rules_selected_torrent = rules_selected_result.scalars().first()
+        rule_candidates = list(rules_selected_result.scalars().all())
+        if not rule_candidates:
+            legacy_candidate = rules_selected_result.scalars().first()
+            if legacy_candidate is not None:
+                rule_candidates = [legacy_candidate]
+        rules_selected_torrent = next(
+            (
+                candidate
+                for candidate in rule_candidates
+                if _scope_for(candidate, request.media_type)
+                == _scope_for(torrent, request.media_type)
+            ),
+            None,
+        )
 
     runtime_settings = get_settings()
     qbittorrent = QbittorrentService(settings=runtime_settings)
@@ -537,7 +679,20 @@ async def _load_approval_context(
             )
             .order_by(StagedTorrent.score.desc(), StagedTorrent.created_at.asc())
         )
-        rules_selected_torrent = rules_selected_result.scalars().first()
+        rule_candidates = list(rules_selected_result.scalars().all())
+        if not rule_candidates:
+            legacy_candidate = rules_selected_result.scalars().first()
+            if legacy_candidate is not None:
+                rule_candidates = [legacy_candidate]
+        rules_selected_torrent = next(
+            (
+                candidate
+                for candidate in rule_candidates
+                if _scope_for(candidate, request.media_type)
+                == _scope_for(torrent, request.media_type)
+            ),
+            None,
+        )
     return request, rules_selected_torrent, category
 
 
@@ -643,6 +798,20 @@ async def _discard_torrent(torrent: StagedTorrent, db: AsyncSession) -> bool:
                 lifecycle_service = LifecycleService(db)
                 await lifecycle_service.transition(torrent.request_id, RequestStatus.PENDING)
 
+            if isinstance(request, Request):
+                await ReleaseDispositionService(db).record_rejection(
+                    request.id,
+                    torrent,
+                    media_type=request.media_type,
+                    reason="Manually discarded",
+                    staged_torrent_id=torrent.id,
+                )
+                await PendingQueueService(db).add_to_queue(
+                    request.id,
+                    error_message="Selected release was manually discarded",
+                    commit=False,
+                )
+
     torrent.status = "discarded"
     log_manual_discard_decision(request=request, rejected_torrent=torrent)
 
@@ -721,6 +890,10 @@ async def approve_staged_torrent(
     torrent_id: int,
     http_request: FastAPIRequest,
     background_tasks: BackgroundTasks = cast(BackgroundTasks, None),
+    confirm_identity: bool = Form(default=False),
+    confirm_rules: bool = Form(default=False),
+    confirm_seeders: bool = Form(default=False),
+    confirm_rejected: bool = Form(default=False),
     db: AsyncSession = Depends(get_db),
 ) -> RedirectResponse | JSONResponse:
     """Approve a staged torrent - send to qBittorrent."""
@@ -730,6 +903,37 @@ async def approve_staged_torrent(
     if not torrent:
         raise HTTPException(status_code=404, detail="Staged torrent not found")
 
+    request = None
+    if torrent.request_id is not None:
+        request = (
+            await db.execute(select(Request).where(Request.id == torrent.request_id))
+        ).scalar_one_or_none()
+    if request is None:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "message": "Approval validation requires an associated request",
+                "warnings": [],
+            },
+        )
+    warnings = await _approval_warnings(db, torrent, request)
+    confirmations = {
+        "identity": _confirmation_given(confirm_identity),
+        "rules": _confirmation_given(confirm_rules),
+        "seeders": _confirmation_given(confirm_seeders),
+        "rejected": _confirmation_given(confirm_rejected),
+    }
+    unconfirmed = [warning for warning in warnings if not confirmations.get(warning["code"], False)]
+    if unconfirmed:
+        raise HTTPException(
+            status_code=409,
+            detail={"message": "Explicit confirmation required", "warnings": unconfirmed},
+        )
+    torrent.identity_override = _confirmation_given(confirm_identity)
+    torrent.rules_override = _confirmation_given(confirm_rules)
+    torrent.seeders_override = _confirmation_given(confirm_seeders)
+    torrent.rejection_override = _confirmation_given(confirm_rejected)
+
     cleanup_paths: list[tuple[str, str]] = []
     success = await _approve_torrent(
         torrent,
@@ -737,6 +941,7 @@ async def approve_staged_torrent(
         commit_transition=False,
         cleanup_paths=cleanup_paths,
         background_tasks=background_tasks,
+        approval_request=request,
     )
     if not success:
         await db.rollback()
@@ -824,6 +1029,10 @@ async def bulk_staged_action(
     background_tasks: BackgroundTasks = cast(BackgroundTasks, None),
     action: str = Form(...),
     torrent_ids: list[int] = Form(default=[]),
+    confirm_identity: bool = Form(default=False),
+    confirm_rules: bool = Form(default=False),
+    confirm_seeders: bool = Form(default=False),
+    confirm_rejected: bool = Form(default=False),
     db: AsyncSession = Depends(get_db),
 ) -> RedirectResponse | JSONResponse:
     """Apply an approve/discard action to multiple staged torrents."""
@@ -848,8 +1057,21 @@ async def bulk_staged_action(
         qbittorrent = QbittorrentService(settings=runtime_settings)
         contexts: dict[int, tuple[Request | None, StagedTorrent | None]] = {}
         payloads: list[BulkTorrentPayload] = []
+        confirmations = {
+            "identity": _confirmation_given(confirm_identity),
+            "rules": _confirmation_given(confirm_rules),
+            "seeders": _confirmation_given(confirm_seeders),
+            "rejected": _confirmation_given(confirm_rejected),
+        }
+        pending_warnings: list[dict[str, Any]] = []
         for torrent in torrents:
             request, rules_selected_torrent, category = await _load_approval_context(torrent, db)
+            warnings = await _approval_warnings(db, torrent, request)
+            for warning in warnings:
+                if not confirmations.get(warning["code"], False):
+                    pending_warnings.append(
+                        {**warning, "torrent_id": torrent.id, "title": torrent.title}
+                    )
             contexts[torrent.id] = (request, rules_selected_torrent)
             payload, source_error = _bulk_payload_for_torrent(torrent, category)
             if payload is None:
@@ -865,6 +1087,17 @@ async def bulk_staged_action(
                 failed.append(failed_item)
                 continue
             payloads.append(payload)
+
+        if pending_warnings:
+            raise HTTPException(
+                status_code=409,
+                detail={"message": "Explicit confirmation required", "warnings": pending_warnings},
+            )
+        for torrent in torrents:
+            torrent.identity_override = _confirmation_given(confirm_identity)
+            torrent.rules_override = _confirmation_given(confirm_rules)
+            torrent.seeders_override = _confirmation_given(confirm_seeders)
+            torrent.rejection_override = _confirmation_given(confirm_rejected)
 
         bulk_results = await qbittorrent.add_torrents_bulk(payloads) if payloads else []
         if not isinstance(bulk_results, list):
@@ -953,6 +1186,10 @@ async def replace_staged_torrent(
     torrent_id: int,
     reason: str | None = Form(None),
     redirect_to: str | None = Form(None),
+    confirm_identity: bool = Form(default=False),
+    confirm_rules: bool = Form(default=False),
+    confirm_seeders: bool = Form(default=False),
+    confirm_rejected: bool = Form(default=False),
     db: AsyncSession = Depends(get_db),
 ) -> RedirectResponse:
     """Replace an approved torrent with a new staged one."""
@@ -983,6 +1220,20 @@ async def replace_staged_torrent(
     if not request:
         raise HTTPException(status_code=404, detail="Associated request not found")
 
+    warnings = await _approval_warnings(db, new_torrent, request)
+    confirmations = {
+        "identity": _confirmation_given(confirm_identity),
+        "rules": _confirmation_given(confirm_rules),
+        "seeders": _confirmation_given(confirm_seeders),
+        "rejected": _confirmation_given(confirm_rejected),
+    }
+    unconfirmed = [warning for warning in warnings if not confirmations.get(warning["code"], False)]
+    if unconfirmed:
+        raise HTTPException(
+            status_code=409,
+            detail={"message": "Explicit confirmation required", "warnings": unconfirmed},
+        )
+
     # Find the currently approved torrent for this request (the one being replaced)
     result = await db.execute(
         select(StagedTorrent).where(
@@ -990,44 +1241,37 @@ async def replace_staged_torrent(
             StagedTorrent.status == "approved",
         )
     )
-    old_torrent = result.scalar_one_or_none()
-
-    if not old_torrent:
+    same_scope = [
+        candidate
+        for candidate in result.scalars().all()
+        if _scope_for(candidate, request.media_type) == _scope_for(new_torrent, request.media_type)
+    ]
+    if len(same_scope) != 1:
         raise HTTPException(
-            status_code=400,
-            detail="No approved torrent found to replace for this request",
+            status_code=409,
+            detail=(
+                "No same-scope approved torrent found to replace"
+                if not same_scope
+                else "Multiple same-scope approved torrents found; replacement is ambiguous"
+            ),
         )
+    old_torrent = same_scope[0]
+    new_torrent.identity_override = _confirmation_given(confirm_identity)
+    new_torrent.rules_override = _confirmation_given(confirm_rules)
+    new_torrent.seeders_override = _confirmation_given(confirm_seeders)
+    new_torrent.rejection_override = _confirmation_given(confirm_rejected)
 
-    # Determine category
-    category = MediaCategory.TV
-    if request.media_type == MediaType.MOVIE:
-        category = MediaCategory.MOVIES
-
-    # Add new torrent to qBittorrent
-    runtime_settings = get_settings()
-    qbittorrent = QbittorrentService(settings=runtime_settings)
-    success = False
-
-    download_url = _staged_download_url(new_torrent)
-    if new_torrent.magnet_url:
-        torrent_hash = await qbittorrent.add_torrent(
-            magnet_uri=new_torrent.magnet_url,
-            category=category,
-        )
-        success = torrent_hash is not None
-    elif download_url and not os.path.exists(new_torrent.torrent_path):
-        success = (
-            await qbittorrent.add_torrent(magnet_uri=download_url, category=category) is not None
-        )
-    else:
-        success = (
-            await qbittorrent.add_torrent(
-                torrent_path=new_torrent.torrent_path,
-                category=category,
-            )
-            is not None
-        )
-
+    cleanup_paths: list[tuple[str, str]] = []
+    success = await _approve_torrent(
+        new_torrent,
+        db,
+        commit_transition=False,
+        cleanup_paths=cleanup_paths,
+        approval_request=request,
+    )
+    if not success:
+        await db.rollback()
+        raise HTTPException(status_code=502, detail="Replacement torrent submission failed")
     if success:
         # Log the replacement decision
         log_replacement_decision(
@@ -1043,20 +1287,10 @@ async def replace_staged_torrent(
         old_torrent.replaced_at = datetime.now(UTC)
         old_torrent.replacement_reason = reason
 
-        # Mark the new torrent as approved
-        new_torrent.status = "approved"
-        await record_staged_release_fact(db, new_torrent)
-
-        # Delete staging files for the new torrent
-        try:
-            if os.path.exists(new_torrent.torrent_path):
-                os.remove(new_torrent.torrent_path)
-            if os.path.exists(new_torrent.json_path):
-                os.remove(new_torrent.json_path)
-        except OSError:
-            pass
+        new_torrent.replaces_id = old_torrent.id
 
     await db.commit()
+    _delete_staging_files(cleanup_paths)
 
     redirect_url = _safe_local_redirect_url(redirect_to, "/?tab=staged")
     return RedirectResponse(url=redirect_url, status_code=303)

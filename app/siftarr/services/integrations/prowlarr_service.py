@@ -6,7 +6,7 @@ import re
 import time as time_module
 from collections import OrderedDict
 from collections.abc import Awaitable, Callable
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any, cast
 
 import httpx
@@ -99,6 +99,9 @@ class ProwlarrRelease(BaseModel):
     release_group: str | None = None
     uploaded_by: str | None = None
     files: int | None = None
+    file_paths: tuple[str, ...] | None = None
+    file_metadata_observed_at: datetime | None = None
+    seeders_observed_at: datetime | None = None
 
 
 class ProwlarrSearchResult(BaseModel):
@@ -166,14 +169,24 @@ class ProwlarrService:
         codec = self._extract_codec(title)
         release_group = release.get("releaseGroup") or self._extract_release_group(title)
         uploaded_by = release.get("uploadedBy") or release.get("uploader")
-        files = (
-            release.get("files")
-            or release.get("fileCount")
-            or release.get("filesCount")
-            or release.get("file_count")
-            or release.get("numFiles")
-            or release.get("numberOfFiles")
-        )
+        files = None
+        for key in ("files", "fileCount", "filesCount", "file_count", "numFiles", "numberOfFiles"):
+            candidate = release.get(key)
+            if candidate is not None:
+                if (
+                    isinstance(candidate, int)
+                    and not isinstance(candidate, bool)
+                    and candidate >= 0
+                ):
+                    files = candidate
+                break
+        raw_paths = release.get("filePaths")
+        file_paths = None
+        if isinstance(raw_paths, list) and all(isinstance(path, str) for path in raw_paths):
+            safe_paths = tuple(path for path in raw_paths if path and len(path) <= 4096)
+            if len(safe_paths) == len(raw_paths) and len(safe_paths) <= 10_000:
+                file_paths = safe_paths
+        observed_at = datetime.now(UTC) if files is not None or file_paths is not None else None
 
         return ProwlarrRelease(
             title=title,
@@ -191,6 +204,9 @@ class ProwlarrService:
             release_group=release_group,
             uploaded_by=uploaded_by,
             files=files,
+            file_paths=file_paths,
+            file_metadata_observed_at=observed_at,
+            seeders_observed_at=datetime.now(UTC) if release.get("seeders") is not None else None,
         )
 
     @staticmethod
@@ -499,6 +515,21 @@ class ProwlarrService:
             "categories": categories,
         }
         metadata_result = await self._search(metadata_params, cacheable=cacheable)
+        if title and metadata_result.releases:
+            from app.siftarr.services.releases.release_parser import (
+                tv_release_identity_rejection_reason,
+            )
+
+            # Unrelated metadata hits must not suppress the title-query fallback.
+            # Copy rather than mutate a result potentially held in the search cache.
+            matching = [
+                release
+                for release in metadata_result.releases
+                if not tv_release_identity_rejection_reason(
+                    request_title=title, request_year=year, release_title=release.title
+                )
+            ]
+            metadata_result = metadata_result.model_copy(update={"releases": matching})
         if metadata_result.releases or not title:
             return metadata_result
 

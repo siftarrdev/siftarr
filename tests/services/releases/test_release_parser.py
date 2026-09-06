@@ -53,6 +53,14 @@ class TestTVReleaseIdentity:
         assert reason is not None
         assert reason.startswith("TV identity mismatch")
 
+    def test_rejects_longer_show_name_with_matching_prefix(self):
+        reason = tv_release_identity_rejection_reason(
+            request_title="Top Gear",
+            request_year=2002,
+            release_title="Top.Gear.US.S01E01.1080p",
+        )
+        assert reason is not None
+
     def test_rejects_matching_title_with_wrong_year(self):
         assert (
             tv_release_identity_rejection_reason(

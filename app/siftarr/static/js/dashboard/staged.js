@@ -439,6 +439,7 @@ export async function refreshDownloadingTabData() {
     if (window.reinitColumnResizer) window.reinitColumnResizer();
     showQbitView(_torrentStatusView);
     await _patchStagedDownloadStatus();
+    await window.loadDownloadHealth?.();
     restore();
     refreshDashboardStatCards(doc);
   } catch (err) {
@@ -482,11 +483,22 @@ export async function postStagedAction(actionUrl, redirectTo = '/?tab=staged') {
   try {
     const formData = new FormData();
     formData.append('redirect_to', redirectTo);
-    const response = await fetch(actionUrl, {
+    let response = await fetch(actionUrl, {
       method: 'POST',
       headers: { Accept: 'application/json' },
       body: formData,
     });
+    if (response.status === 409) {
+      const conflict = await response.json().catch(() => null);
+      const warnings = conflict?.detail?.warnings || [];
+      const requested = new Set();
+      for (const warning of warnings) {
+        if (!window.confirm(`${warning.message}\n\nApprove anyway?`)) return;
+        if (warning.code) requested.add(warning.code);
+      }
+      requested.forEach((code) => formData.append(`confirm_${code}`, 'true'));
+      response = await fetch(actionUrl, { method: 'POST', headers: { Accept: 'application/json' }, body: formData });
+    }
     if (!response.ok) {
       const errorData = await response.json().catch(() => null);
       throw new Error(errorData?.detail || errorData?.message || `Server error: ${response.status}`);
@@ -519,11 +531,29 @@ export async function bulkStagedAction(action) {
     formData.append('action', action);
     selectedIds.forEach((id) => formData.append('torrent_ids', id));
     formData.append('redirect_to', '/?tab=staged');
-    const response = await fetch('/staged/bulk', {
+    let response = await fetch('/staged/bulk', {
       method: 'POST',
       headers: { Accept: 'application/json' },
       body: formData,
     });
+    if (response.status === 409) {
+      const conflict = await response.json().catch(() => null);
+      const warnings = conflict?.detail?.warnings || [];
+      const byCode = new Map();
+      warnings.forEach((warning) => {
+        if (!byCode.has(warning.code)) byCode.set(warning.code, []);
+        byCode.get(warning.code).push(`#${warning.torrent_id} ${warning.title}: ${warning.message}`);
+      });
+      for (const [code, messages] of byCode) {
+        if (!window.confirm(`${messages.join('\n')}\n\nApprove these anyway?`)) return;
+        formData.append(`confirm_${code}`, 'true');
+      }
+      response = await fetch('/staged/bulk', {
+        method: 'POST',
+        headers: { Accept: 'application/json' },
+        body: formData,
+      });
+    }
     if (!response.ok) {
       const errorData = await response.json().catch(() => null);
       throw new Error(errorData?.detail || errorData?.message || `Server error: ${response.status}`);

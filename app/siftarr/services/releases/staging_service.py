@@ -7,6 +7,7 @@ handoff workflow into a single service boundary.
 import json
 import logging
 import os
+import re
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -22,6 +23,7 @@ from app.siftarr.models.release import Release
 from app.siftarr.models.request import MediaType, Request, RequestStatus
 from app.siftarr.models.season import Season
 from app.siftarr.models.staged_torrent import StagedTorrent
+from app.siftarr.services.decisions.rule_engine_provider import get_rule_engine
 from app.siftarr.services.integrations.prowlarr_service import ProwlarrRelease
 from app.siftarr.services.integrations.qbittorrent_service import MediaCategory, QbittorrentService
 from app.siftarr.services.lifecycle.activity_log_service import ActivityLogService
@@ -30,19 +32,27 @@ from app.siftarr.services.lifecycle.episode_derive import (
     derive_season_status,
 )
 from app.siftarr.services.lifecycle.pending_queue_service import PendingQueueService
+from app.siftarr.services.releases.release_disposition_service import (
+    ReleaseDispositionService,
+    release_hash,
+    release_target_scope,
+)
 from app.siftarr.services.releases.release_parser import (
     cached_parse_release_coverage,
 )
 from app.siftarr.services.releases.release_serializers import (
+    compact_rule_evidence,
     scope_to_episode_set,
     serialize_target_scope,
     tv_target_scopes_overlap,
 )
 from app.siftarr.services.releases.release_storage import build_prowlarr_release
-from app.siftarr.services.stats_metrics_service import record_release_fact
+from app.siftarr.services.releases.release_validation_service import identity_warning
+from app.siftarr.services.stats_metrics_service import record_staged_release_fact
 from app.siftarr.services.utils.http_client import get_shared_client
 from app.siftarr.services.utils.safe_names import safe_staging_filename
 from app.siftarr.services.utils.torrent_identity import extract_torrent_hash
+from app.siftarr.services.utils.torrent_metainfo import inspect_torrent_metainfo
 
 STAGING_DIR = Path("/data/staging")
 
@@ -301,6 +311,9 @@ class StagingService:
         *,
         commit: bool = True,
         download_torrent_file: bool = False,
+        source_release: Release | None = None,
+        identity_override: bool = False,
+        rejection_override: bool = False,
     ) -> StagedTorrent:
         """
         Save a release to staging.
@@ -359,6 +372,34 @@ class StagingService:
         else:
             logger.debug("Staging without local torrent file: %s", release.title)
 
+        metainfo_observation = None
+        if torrent_path.exists():
+            try:
+                metainfo_observation = inspect_torrent_metainfo(torrent_path.read_bytes())
+            except OSError:
+                metainfo_observation = None
+        if metainfo_observation is not None:
+            release.files = metainfo_observation.file_count
+            release.file_paths = metainfo_observation.file_paths
+            release.file_metadata_observed_at = datetime.now(UTC)
+            engine = await get_rule_engine(self.db, request.media_type.value)
+            previous = source_release.rule_evidence if source_release is not None else None
+            current = engine.evaluate(
+                release,
+                allow_episode_size_fallback=isinstance(previous, dict)
+                and previous.get("size_fallback") is True,
+            )
+            score = current.total_score
+            if source_release is not None:
+                source_release.files = metainfo_observation.file_count
+                source_release.score = score
+                source_release.rule_evidence = compact_rule_evidence(current)
+                source_release.release_parse_metadata = {
+                    **(source_release.release_parse_metadata or {}),
+                    "file_paths": list(release.file_paths),
+                    "file_metadata_observed_at": release.file_metadata_observed_at.isoformat(),
+                }
+
         metadata = {
             "request": {
                 "id": request.id,
@@ -382,6 +423,14 @@ class StagingService:
                 "download_url": release.download_url,
                 "magnet_url": release.magnet_url,
                 "info_hash": release.info_hash,
+                "files": release.files,
+                "file_paths": list(release.file_paths) if release.file_paths is not None else None,
+                "file_metadata_observed_at": release.file_metadata_observed_at.isoformat()
+                if release.file_metadata_observed_at
+                else None,
+                "seeders_observed_at": release.seeders_observed_at.isoformat()
+                if release.seeders_observed_at
+                else None,
             },
             "staged_at": datetime.now(UTC).isoformat(),
             "filename": filename,
@@ -409,6 +458,18 @@ class StagingService:
             magnet_url=release.magnet_url,
             info_hash=info_hash,
             selection_source=selection_source,
+            source_release_id=(
+                source_release.id
+                if source_release is not None and isinstance(source_release.id, int)
+                else None
+            ),
+            seeders_snapshot=release.seeders,
+            rule_evidence_snapshot=source_release.rule_evidence
+            if source_release is not None
+            else None,
+            target_scope=release_target_scope(release, media_type=request.media_type),
+            identity_override=identity_override,
+            rejection_override=rejection_override,
             status="staged",
         )
 
@@ -594,6 +655,8 @@ class StagingService:
         *,
         selection_source: str = "manual",
         force_download: bool = False,
+        identity_override: bool = False,
+        rejection_override: bool = False,
     ) -> dict[str, object]:
         """Stage or send one or more stored releases for a request.
 
@@ -615,7 +678,28 @@ class StagingService:
 
         runtime_settings = get_settings()
         queue_service = PendingQueueService(self.db)
+        if selection_source == "rule":
+            identity_override = False
+            rejection_override = False
         usable_releases = [release for release in releases if release is not None]
+        disposition_service = ReleaseDispositionService(self.db)
+        validated: list[Release] = []
+        for release in usable_releases:
+            identity = identity_warning(request, release)
+            if identity and not identity_override:
+                raise RuntimeError(identity.message)
+            blocked = await disposition_service.blocked(
+                request.id, release, media_type=request.media_type
+            )
+            if blocked and not rejection_override:
+                if selection_source == "rule":
+                    continue
+                raise RuntimeError(
+                    blocked.reason
+                    or "Release was previously rejected; explicit confirmation is required"
+                )
+            validated.append(release)
+        usable_releases = validated
         if selection_source == "rule":
             zero_seeder_releases = [release for release in usable_releases if release.seeders <= 0]
             if zero_seeder_releases:
@@ -659,6 +743,9 @@ class StagingService:
                         score=release.score,
                         selection_source=selection_source,
                         commit=False,
+                        source_release=release,
+                        identity_override=identity_override,
+                        rejection_override=rejection_override,
                     )
                     staged_ids.append(staged.id)
                     logger.debug(
@@ -733,11 +820,67 @@ class StagingService:
                 raise RuntimeError(f"Failed to send '{release.title}' to qBittorrent.")
 
             added_hashes.append(torrent_hash)
-            await record_release_fact(
-                self.db,
-                release,
-                selection_source=selection_source,
+            normalized_hash = (
+                torrent_hash.lower()
+                if isinstance(torrent_hash, str)
+                and re.fullmatch(r"[0-9a-fA-F]{40}|[0-9a-fA-F]{64}", torrent_hash)
+                else release_hash(release)
             )
+            tracked = None
+            if normalized_hash:
+                tracked = (
+                    await self.db.execute(
+                        select(StagedTorrent).where(
+                            StagedTorrent.request_id == request.id,
+                            StagedTorrent.info_hash == normalized_hash,
+                            StagedTorrent.status == "approved",
+                        )
+                    )
+                ).scalar_one_or_none()
+            if tracked is None:
+                # qBit can acknowledge a URL add with "Ok." before metadata is
+                # visible. Keep it trackable by name, never store that response
+                # as a hash, and reuse the pending-identity row on a retry.
+                tracked = (
+                    await self.db.execute(
+                        select(StagedTorrent)
+                        .where(
+                            StagedTorrent.request_id == request.id,
+                            StagedTorrent.status == "approved",
+                            StagedTorrent.info_hash.is_(None),
+                            StagedTorrent.title == release.title,
+                            StagedTorrent.size == release.size,
+                            StagedTorrent.indexer == release.indexer,
+                        )
+                        .limit(1)
+                    )
+                ).scalar_one_or_none()
+            if tracked is None:
+                tracked = StagedTorrent(
+                    request_id=request.id,
+                    torrent_path="",
+                    json_path="",
+                    original_filename=release.title,
+                    title=release.title,
+                    size=release.size,
+                    indexer=release.indexer,
+                    score=release.score,
+                    magnet_url=release.magnet_url,
+                    info_hash=normalized_hash,
+                    selection_source=selection_source,
+                    status="approved",
+                    source_release_id=release.id if isinstance(release.id, int) else None,
+                    seeders_snapshot=release.seeders,
+                    rule_evidence_snapshot=release.rule_evidence,
+                    target_scope=release_target_scope(release, media_type=request.media_type),
+                    identity_override=identity_override,
+                    rejection_override=rejection_override,
+                )
+                self.db.add(tracked)
+                await self.db.flush()
+            elif normalized_hash:
+                tracked.info_hash = normalized_hash
+            await record_staged_release_fact(self.db, tracked)
             activity_log = ActivityLogService(self.db)
             await activity_log.log(
                 EventType.RELEASE_APPROVED,
@@ -836,6 +979,15 @@ class StagingService:
         if missing:
             raise RuntimeError(f"Missing releases for episode(s): {', '.join(map(str, missing))}.")
 
+        dispositions = ReleaseDispositionService(self.db)
+        for release in release_by_episode.values():
+            identity = identity_warning(request, release)
+            if identity:
+                raise RuntimeError(identity.message)
+            blocked = await dispositions.blocked(request.id, release, media_type=request.media_type)
+            if blocked:
+                raise RuntimeError(blocked.reason or "Release was previously rejected")
+
         active_staged = await _get_active_staged_torrents(self.db, request.id)
         superseded_packs = [
             staged
@@ -858,6 +1010,7 @@ class StagingService:
                 score=release.score,
                 selection_source="manual",
                 commit=False,
+                source_release=release,
             )
             staged_ids.append(staged.id)
             await self._apply_release_to_episodes(release, RequestStatus.STAGED)

@@ -638,7 +638,10 @@ def test_dashboard_tv_large_search_uses_scope_modal_and_supports_cancel(
     assert "function countUnavailableTvSeasons(data = window.currentDetailsData)" in js
     assert "unavailableSeasonCount < 5" in js
     assert "function chooseLargeTvSearch(choice)" in js
-    assert "window.confirm(" not in js
+    large_search_prompt = js.split("async function confirmLargeTvSearch", 1)[1].split(
+        "function chooseLargeTvSearch", 1
+    )[0]
+    assert "window.confirm(" not in large_search_prompt
     assert "searchChoice === 'packs'" in js
     assert "await window.searchAllSeasonPacks(requestId)" in js
     assert "'/search/cancel'" in js

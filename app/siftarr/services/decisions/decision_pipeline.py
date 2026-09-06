@@ -95,6 +95,16 @@ async def add_to_pending_queue(
 # ── Release selection helpers ─────────────────────────────────────────
 
 
+def release_rank_key(evaluation: ReleaseEvaluation) -> tuple[int, int, str, str]:
+    """Sort quality-adjusted scores first, then reported swarm size consistently."""
+    return (
+        -evaluation.total_score,
+        -max(0, evaluation.release.seeders),
+        evaluation.release.title.casefold(),
+        evaluation.release.indexer.casefold(),
+    )
+
+
 def get_best_passing(
     all_evaluated: Sequence[ReleaseEvaluation],
 ) -> ReleaseEvaluation | None:
@@ -102,14 +112,7 @@ def get_best_passing(
     passed = [e for e in all_evaluated if e.passed]
     if not passed:
         return None
-    passed.sort(
-        key=lambda e: (
-            -e.total_score,
-            -e.release.seeders,
-            e.release.title.casefold(),
-            e.release.indexer.casefold(),
-        )
-    )
+    passed.sort(key=release_rank_key)
     return passed[0]
 
 

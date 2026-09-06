@@ -1,6 +1,7 @@
 """Helpers for persisting searched releases."""
 
 import logging
+from datetime import datetime
 from typing import Any, cast
 
 from sqlalchemy import delete, func, select
@@ -61,6 +62,8 @@ async def clear_release_search_cache(db: AsyncSession) -> dict[str, int]:
 
 def build_prowlarr_release(release: Release) -> ProwlarrRelease:
     """Rebuild a Prowlarr release object from a stored search result."""
+    metadata = release.release_parse_metadata or {}
+    paths = metadata.get("file_paths")
     return ProwlarrRelease(
         title=release.title,
         size=release.size,
@@ -76,7 +79,46 @@ def build_prowlarr_release(release: Release) -> ProwlarrRelease:
         release_group=release.release_group,
         files=release.files,
         uploaded_by=release.uploaded_by,
+        file_paths=tuple(path for path in paths if isinstance(path, str))
+        if isinstance(paths, list) and all(isinstance(p, str) for p in paths)
+        else None,
+        file_metadata_observed_at=_parse_observation_time(
+            metadata.get("file_metadata_observed_at")
+        ),
+        seeders_observed_at=stored_seeders_observed_at(release),
     )
+
+
+def _parse_observation_time(value: object) -> datetime | None:
+    if isinstance(value, datetime):
+        return value
+    if isinstance(value, str):
+        try:
+            return datetime.fromisoformat(value)
+        except ValueError:
+            pass
+    return None
+
+
+def stored_seeders_observed_at(release: Release) -> datetime | None:
+    metadata = release.release_parse_metadata or {}
+    if "seeders_observed_at" in metadata:
+        return _parse_observation_time(metadata["seeders_observed_at"])
+    # Legacy rows have no observation field. Creation is a conservative bound,
+    # not a new observation made when this row is loaded or staged.
+    return _parse_observation_time(release.created_at)
+
+
+def _observation_metadata(release: ProwlarrRelease) -> dict[str, object]:
+    return {
+        "file_paths": list(release.file_paths) if release.file_paths is not None else None,
+        "file_metadata_observed_at": release.file_metadata_observed_at.isoformat()
+        if release.file_metadata_observed_at
+        else None,
+        "seeders_observed_at": release.seeders_observed_at.isoformat()
+        if release.seeders_observed_at
+        else None,
+    }
 
 
 async def store_search_results(
@@ -149,6 +191,7 @@ async def store_search_results(
             "episode_number": parsed.episode_number,
             "season_numbers": list(coverage.season_numbers),
             "is_complete_series": coverage.is_complete_series,
+            **_observation_metadata(release),
         }
 
         existing = existing_by_key.get(dedupe_key)
@@ -357,6 +400,14 @@ async def persist_manual_release(
         )
         record.search_source = "manual"
 
+    record.rule_evidence = compact_rule_evidence(evaluation)
+    record.release_parse_metadata = {
+        "season_number": parsed.season_number,
+        "episode_number": parsed.episode_number,
+        "season_numbers": list(coverage.season_numbers),
+        "is_complete_series": coverage.is_complete_series,
+        **_observation_metadata(release),
+    }
     await db.commit()
     await db.refresh(record)
     return record

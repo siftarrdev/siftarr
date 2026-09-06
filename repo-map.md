@@ -70,6 +70,7 @@ Primary flow:
 - `CONTRIBUTING.md` — developer prerequisites, local setup, dependency management, migrations, tests, quality gates, and PR workflow
 - `docs/README.md` — documentation index and guidance for where detailed docs should live
 - `docs/stats-metrics.md` — stats metric contract, support audit, and immutable metrics persistence notes
+- `docs/release-selection.md` — structural and swarm-health preferences, trusted TV aliases, confirmation/recovery settings, and targeted existing-rule corrections
 - `app/siftarr/README.md` — application package boundaries, runtime flow, extension points, and package-level testing guidance
 - `app/siftarr/routers/README.md` — route-layer responsibilities, extension points, and router testing guidance
 - `app/siftarr/services/README.md` — service/integration responsibilities, extension points, and service testing guidance
@@ -117,10 +118,13 @@ Database entities and enums.
 
 - `request.py` — media request state, request metadata, and shared lifecycle status groupings/predicates
 - `release.py` — searched/candidate releases, including persisted compact rule evidence/parse metadata and request-scoped detail-view indexes
+- `release_disposition.py` — durable request/scoped rejection and expiring failed-release suppression, independent of disposable search results
+- `download_health.py` — one persistent health observation per approved download attempt, including no-progress timers, missing-client evidence, and confirmed recovery state
 - `search_history.py` — request search-run history and compact candidate snapshots
 - `rule.py` — rule definitions for filtering/scoring
 - `season.py` / `episode.py` — TV coverage and availability tracking
 - `staged_torrent.py` — staged torrent persistence; indexed on `request_id` and `status`; includes move tracking columns (`move_status`, `moved_path`, `move_error`, `moved_at`)
+- Staged rows also track direct-download handoffs, source release provenance, selection evidence, explicit overrides, target scope, and replacement links.
 - `activity_log.py` — activity/audit history; indexed on `event_type`
 - `stats_metrics.py` — immutable stats metric tables for selected release facts, rule outcomes, and timing events
 - `app_setting.py` — key-value store for runtime-configurable settings, generated API key, and Plex SSO claim metadata (persisted across restarts)
@@ -139,6 +143,7 @@ HTTP route layer.
 - `settings.py` — settings UI (connection test/save/reset, scheduler interval save/reset, staging toggle, Plex rescan, Overseerr sync, cache/reseed actions, SSE progress streams, API key management, Plex SSO status, non-secret settings backup preview/restore, qBit mover enable/paths/retention settings and manual trigger, and Settings-hosted background job status/manual triggers); Overseerr reconciliation keys imports by request ID so repeat requests and cross-provider media-ID collisions remain distinct, uses SettingsStore for DB-backed persistence, and keeps the SSO-managed Plex token out of connection saves/resets/backups
 - `stats.py` — protected Stats page and JSON data endpoint for all-time, preset, and custom date ranges, including chart-ready time-series payloads
 - `staged.py` — staged torrent review/approval endpoints, staged-alternative comparison API, session/API-key staging decision-log API, and download-status endpoint returning move tracking fields (status, path, error) for dashboard visibility
+- `download_health.py` — protected persisted-health listing and explicitly confirmed recovery API; recovery leaves qBittorrent torrents and files untouched
 - `webhooks.py` — inbound webhook handling; validates movie/TV media types and requires a positive TMDB or TVDB identifier before request creation
 
 ### `app/siftarr/services/`
@@ -172,6 +177,8 @@ Business logic and integrations, organized into thematic subpackages:
 
 **`decisions/`** — Rule engine and decision pipeline
 - `rule_engine.py` — release filtering and scoring evaluation; module-level rule version cache (`_rule_version`)
+- `release_quality.py` — bounded score-only file-count, archive-evidence, and small-swarm preferences; exact single-item scoping excludes packs from file-count hints
+- `release_fallback.py` — conditional exact-episode size fallback after identity/disposition filtering, without overriding other eligibility failures
 - `rule_engine_provider.py` — shared cached rule-engine loading from database rules
 - `rule_service.py` — CRUD/order logic for rules, export/import validation, existing-vs-imported diff preview and selected merge/replace application, and empty-database default-rule seeding from configured `rules.json`
 - `decision_pipeline.py` — shared decision pipeline helpers (activity logging, pending queue, best-release selection)
@@ -192,6 +199,7 @@ Business logic and integrations, organized into thematic subpackages:
 - `episode_derive.py` — canonical derivation functions for TV episode/season/request statuses
 - `episode_sync_service.py` — syncing episode availability from Overseerr and Plex
 - `download_completion_service.py` — completion detection via qBit torrent list matching; qBit-finished torrents stay active until targeted Plex checks confirm availability
+- `download_health_service.py` — strict client observations, suspended-time-aware stall warnings, and user-confirmed cooldown/recovery scoped to failed coverage; missing torrents are not completion evidence
 - `download_queue_service.py` — active download deletion/reset workflow: removes qBit torrent data, marks Siftarr torrent discarded, and returns affected movie/TV request state to pending
 - `qbit_move_service.py` — qBit move and retention service: selects eligible completed torrents (managed first, optional unmanaged fallback), computes safe destinations using Siftarr metadata then regex fallback, moves via qBittorrent `set_location(move=True)`, updates move tracking fields on managed torrents, performs retention cleanup (remove old completed torrents by seeding_time, keep files); called from scheduler's download-completion loop
 - `overseerr_sync_service.py` — best-effort lifecycle sync back to Overseerr (approval evidence)
@@ -202,6 +210,7 @@ Business logic and integrations, organized into thematic subpackages:
 - `release_serializers.py` — API-facing serialization helpers
 - `release_storage.py` — release persistence and reconstruction helpers; `store_search_results()` scopes cleanup by search source
 - `staging_service.py` — stage/send workflows, staged torrent handling, torrent download/validation, release handoff
+- `release_disposition_service.py` / `release_validation_service.py` — identity keys and target scopes, durable rejection matching, and shared identity/disposition handoff checks
 
 **`utils/`** — Shared utility modules
 - `http_client.py` — shared HTTP client lifecycle
@@ -209,6 +218,7 @@ Business logic and integrations, organized into thematic subpackages:
 - `type_utils.py` — type conversion utilities
 - `media_helpers.py` — media title/year extraction
 - `torrent_identity.py` / `safe_names.py` — shared torrent hash/name parsing and safe filename/folder helpers
+- `torrent_metainfo.py` — bounded, non-extracting BEP 3/BEP 52 file-path inspection for structural evidence; malformed metadata stays unknown
 - `background_tasks.py` — background orchestration (DETAILS_SYNC_TASKS)
 
 ### `app/siftarr/templates/`
@@ -234,6 +244,7 @@ Static assets.
 - `css/tailwind-input.css` — Tailwind CSS v4 input with CSS-based theme configuration and custom component classes
 - `js/dashboard.js` and `js/dashboard/` — generated browser assets for the dashboard entrypoint and its migrated TypeScript modules (details modal, releases, filters, staged actions, modals, search SSE, core utilities/state, and column resizing); canonical sources live under `frontend-src/dashboard/`
 - `js/staging_decision_log.js` — generated client-side fetching, URL-backed filters, pagination, and raw JSON expansion for the Rules decision-log page; source is `frontend-src/staging_decision_log.ts`
+- `frontend-src/dashboard/download_health.ts` — dashboard health warnings and explicit non-destructive recovery confirmation
 - `js/stats.js` — generated Stats API fetch/range handling and lightweight bar/time-series chart rendering; source is `frontend-src/stats.ts`
 - favicon assets
 

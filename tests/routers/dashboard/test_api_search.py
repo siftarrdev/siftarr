@@ -20,6 +20,14 @@ from app.siftarr.services.dashboard.search_service import SearchService
 from app.siftarr.services.integrations.prowlarr_service import ProwlarrRelease, ProwlarrSearchResult
 
 
+@pytest.fixture(autouse=True)
+def _isolate_disposition_queries(monkeypatch):
+    async def passthrough(_db, _request, evaluations):
+        return evaluations
+
+    monkeypatch.setattr(search_service, "apply_dispositions", passthrough)
+
+
 @pytest.mark.asyncio
 async def test_process_request_search_persists_search_completed_duration(monkeypatch):
     engine = create_async_engine("sqlite+aiosqlite:///:memory:")

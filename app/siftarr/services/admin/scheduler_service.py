@@ -29,6 +29,7 @@ from app.siftarr.services.integrations.plex_service import PlexService
 from app.siftarr.services.integrations.prowlarr_service import ProwlarrService
 from app.siftarr.services.integrations.qbittorrent_service import QbittorrentService
 from app.siftarr.services.lifecycle.download_completion_service import DownloadCompletionService
+from app.siftarr.services.lifecycle.download_health_service import DownloadHealthService
 from app.siftarr.services.lifecycle.lifecycle_service import LifecycleService
 from app.siftarr.services.lifecycle.pending_queue_service import PendingQueueService
 from app.siftarr.services.lifecycle.qbit_move_service import QbitMoveResult, QbitMoveService
@@ -467,6 +468,12 @@ class SchedulerService:
                     plex = PlexService(settings=runtime_settings)
                     qbittorrent = QbittorrentService(settings=runtime_settings)
                     plex_polling = PlexPollingService(db, plex)
+                    try:
+                        await DownloadHealthService(db, qbittorrent).observe()
+                    except Exception:
+                        # Health observations must never prevent the existing
+                        # completion and move workflow from running.
+                        logger.warning("Download health observation failed", exc_info=True)
                     service = DownloadCompletionService(db, qbittorrent, plex_polling)
                     completed = await service.check_downloading_requests()
                     if completed:

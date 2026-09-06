@@ -23,6 +23,7 @@ from app.siftarr.services.releases.release_storage import (
     get_release_persistence_key,
     store_search_results,
 )
+from app.siftarr.services.releases.release_validation_service import apply_dispositions
 from app.siftarr.services.releases.staging_service import StagingService
 from app.siftarr.services.search_history_service import SearchHistoryService
 from app.siftarr.services.staging_decision_log import log_evaluations
@@ -203,6 +204,7 @@ class MovieDecisionService:
                 evaluation.passed = False
                 evaluation.rejection_reason = identity_rejection
             all_evaluated.append(evaluation)
+        await apply_dispositions(self.db, request, all_evaluated)
         stored_releases_by_key = await store_search_results(self.db, request.id, all_evaluated)
         await record_rule_outcomes(
             self.db,

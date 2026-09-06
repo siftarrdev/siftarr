@@ -84,8 +84,10 @@ class TestDownloadCompletionService:
         assert result == 0
 
     @pytest.mark.asyncio
-    async def test_torrent_not_in_qbit_treated_as_done(self, mock_db, mock_qbit, mock_plex_polling):
-        """A torrent not found in qBit is treated as completed."""
+    async def test_torrent_not_in_qbit_is_not_treated_as_done(
+        self, mock_db, mock_qbit, mock_plex_polling
+    ):
+        """A torrent not found in qBit cannot prove completion."""
         from app.siftarr.models.request import MediaType, RequestStatus
         from app.siftarr.services.admin.plex_polling_service import CheckRequestResult
 
@@ -121,9 +123,9 @@ class TestDownloadCompletionService:
 
         service = DownloadCompletionService(mock_db, mock_qbit, mock_plex_polling)
         result = await service.check_downloading_requests()
-        # Plex returned None, so not completed
+        # Missing qBit evidence must not trigger a Plex check.
         assert result == 0
-        mock_plex_polling.check_request.assert_called_once_with(10)
+        mock_plex_polling.check_request.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_qbit_completed_uses_targeted_plex_wait_check_with_tv_coverage(
@@ -164,7 +166,16 @@ class TestDownloadCompletionService:
                 return await self._check_completed_download_waiting_for_plex(*args, **kwargs)
 
         plex_polling = TargetedPlexPolling()
-        mock_qbit.get_all_active_torrents = AsyncMock(return_value=[])
+        mock_qbit.get_all_active_torrents = AsyncMock(
+            return_value=[
+                {
+                    "hash": "da39a3ee5e6b4b0d3255bfef95601890afd80709",
+                    "name": torrent.title,
+                    "progress": 1.0,
+                    "state": "seeding",
+                }
+            ]
+        )
         mock_db.execute.side_effect = [
             _rows_result([(torrent, request)]),
             _request_id_rows([]),
@@ -207,7 +218,16 @@ class TestDownloadCompletionService:
                 return await self._check_completed_download_waiting_for_plex(*args, **kwargs)
 
         plex_polling = TargetedPlexPolling()
-        mock_qbit.get_all_active_torrents = AsyncMock(return_value=[])
+        mock_qbit.get_all_active_torrents = AsyncMock(
+            return_value=[
+                {
+                    "hash": "da39a3ee5e6b4b0d3255bfef95601890afd80709",
+                    "name": torrent.title,
+                    "progress": 1.0,
+                    "state": "seeding",
+                }
+            ]
+        )
         mock_db.execute.side_effect = [
             _rows_result([(torrent, request)]),
             _request_id_rows([]),
@@ -364,7 +384,16 @@ class TestDownloadCompletionService:
                 reason="Found on Plex",
             )
         )
-        mock_qbit.get_all_active_torrents = AsyncMock(return_value=[])
+        mock_qbit.get_all_active_torrents = AsyncMock(
+            return_value=[
+                {
+                    "hash": "da39a3ee5e6b4b0d3255bfef95601890afd80709",
+                    "name": torrent.title,
+                    "progress": 1.0,
+                    "state": "seeding",
+                }
+            ]
+        )
 
         mock_db.execute.side_effect = [
             _rows_result([(torrent, request)]),
@@ -407,7 +436,16 @@ class TestDownloadCompletionService:
                 reason="All episodes found on Plex",
             )
         )
-        mock_qbit.get_all_active_torrents = AsyncMock(return_value=[])
+        mock_qbit.get_all_active_torrents = AsyncMock(
+            return_value=[
+                {
+                    "hash": "da39a3ee5e6b4b0d3255bfef95601890afd80709",
+                    "name": torrent.title,
+                    "progress": 1.0,
+                    "state": "seeding",
+                }
+            ]
+        )
 
         mock_db.execute.side_effect = [
             _rows_result([(torrent, request)]),
@@ -450,7 +488,16 @@ class TestDownloadCompletionService:
                 reason="All episodes found on Plex",
             )
         )
-        mock_qbit.get_all_active_torrents = AsyncMock(return_value=[])
+        mock_qbit.get_all_active_torrents = AsyncMock(
+            return_value=[
+                {
+                    "hash": "da39a3ee5e6b4b0d3255bfef95601890afd80709",
+                    "name": torrent.title,
+                    "progress": 1.0,
+                    "state": "seeding",
+                }
+            ]
+        )
 
         mock_db.execute.side_effect = [
             _rows_result([(torrent, request)]),

@@ -1422,11 +1422,20 @@ async function submitReleaseAction(btn, approveNow = false) {
       formData.append(key, String(value));
     }
     if (approveNow) formData.append('approve_now', 'true');
-    const resp = await fetch(url, {
+    let resp = await fetch(url, {
       method: 'POST',
       headers: { Accept: 'application/json' },
       body: formData,
     });
+    if (resp.status === 409) {
+      const conflict = await resp.json().catch(() => null);
+      const warnings = conflict?.detail?.warnings || [];
+      for (const warning of warnings) {
+        if (!window.confirm(`${warning.message}\n\nContinue with this exact release?`)) return;
+        if (warning.code) formData.append(`confirm_${warning.code}`, 'true');
+      }
+      resp = await fetch(url, { method: 'POST', headers: { Accept: 'application/json' }, body: formData });
+    }
     if (!resp.ok) {
       const errData = await resp.json().catch(() => null);
       throw new Error(errData?.detail || errData?.message || `HTTP ${resp.status}`);
@@ -1487,10 +1496,22 @@ async function stageIndividualEpisodes(btn, requestId, seasonNumber) {
   btn.disabled = true;
   btn.textContent = 'Staging…';
   try {
-    const resp = await fetch('/requests/' + requestId + '/seasons/' + seasonNumber + '/stage-individual-episodes', {
+    const actionUrl = '/requests/' + requestId + '/seasons/' + seasonNumber + '/stage-individual-episodes';
+    const formData = new FormData();
+    let resp = await fetch(actionUrl, {
       method: 'POST',
       headers: { Accept: 'application/json' },
+      body: formData,
     });
+    if (resp.status === 409) {
+      const conflict = await resp.json().catch(() => null);
+      const warnings = conflict?.detail?.warnings || [];
+      for (const warning of warnings) {
+        if (!window.confirm(`${warning.message}\n\nContinue?`)) return;
+        if (warning.code) formData.append(`confirm_${warning.code}`, 'true');
+      }
+      resp = await fetch(actionUrl, { method: 'POST', headers: { Accept: 'application/json' }, body: formData });
+    }
     if (!resp.ok) {
       const errData = await resp.json().catch(() => null);
       throw new Error(errData?.detail || `HTTP ${resp.status}`);
@@ -1524,11 +1545,20 @@ async function inlineStagedAction(actionUrl, btn = null) {
   try {
     const formData = new FormData();
     formData.append('redirect_to', '/?tab=staged');
-    const response = await fetch(actionUrl, {
+    let response = await fetch(actionUrl, {
       method: 'POST',
       headers: { Accept: 'application/json' },
       body: formData,
     });
+    if (response.status === 409) {
+      const conflict = await response.json().catch(() => null);
+      const warnings = conflict?.detail?.warnings || [];
+      for (const warning of warnings) {
+        if (!window.confirm(`${warning.message}\n\nApprove anyway?`)) return;
+        if (warning.code) formData.append(`confirm_${warning.code}`, 'true');
+      }
+      response = await fetch(actionUrl, { method: 'POST', headers: { Accept: 'application/json' }, body: formData });
+    }
     if (!response.ok) {
       const errorData = await response.json().catch(() => null);
       throw new Error(errorData?.detail || errorData?.message || `Server error: ${response.status}`);

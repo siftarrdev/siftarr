@@ -74,6 +74,18 @@ def _normalize_name(name: str) -> str:
     return normalize_torrent_name(name)
 
 
+def _qbit_progress(value: object) -> float | None:
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int | float | str):
+        try:
+            parsed = float(value)
+        except ValueError:
+            return None
+        return parsed if 0 <= parsed <= 1 else None
+    return None
+
+
 class DownloadCompletionService:
     """Checks finished downloads and reconciles request availability via Plex."""
 
@@ -97,7 +109,7 @@ class DownloadCompletionService:
         Steps:
         1. Query StagedTorrents with status=="approved" whose Request is non-terminal.
         2. For each torrent determine qBit progress (via hash or name fragment).
-        3. Mark torrents as qBit-done when progress >= 1.0 or not found in qBit.
+        3. Mark torrents as qBit-done only when qBit confirms progress >= 1.0.
         4. When ANY approved torrent for a request is qBit-done, check Plex.
         5. If Plex confirms availability, reuse Plex polling reconciliation for the request.
 
@@ -132,7 +144,19 @@ class DownloadCompletionService:
 
         # 2 & 3. Determine per-torrent qBit progress and which are "done"
         # Batch-fetch all qBittorrent torrents once for local matching
-        all_torrents = await self.qbittorrent.get_all_active_torrents()
+        # The swallowing adapter returns [] for both an outage and an empty
+        # qBit instance.  Completion must use the strict method so an outage
+        # cannot masquerade as a missing completed torrent.
+        strict_getter = getattr(type(self.qbittorrent), "get_all_active_torrents_or_raise", None)
+        try:
+            all_torrents = (
+                await strict_getter(self.qbittorrent)
+                if strict_getter is not None
+                else await self.qbittorrent.get_all_active_torrents()
+            )
+        except Exception:
+            logger.warning("DownloadCompletionService: qBittorrent unavailable; skipping cycle")
+            return 0
         by_hash: dict[str, dict[str, Any]] = {}
         by_name: dict[str, dict[str, Any]] = {}
         for t in all_torrents:
@@ -152,7 +176,11 @@ class DownloadCompletionService:
             # a fake hash that would break JSON serialisation.
             torrent_hash = _extract_hash(torrent.magnet_url, torrent.torrent_path)
             stored_hash = getattr(torrent, "info_hash", None)
-            if isinstance(stored_hash, str) and stored_hash:
+            if (
+                isinstance(stored_hash, str)
+                and stored_hash
+                and stored_hash.strip().casefold() != "ok."
+            ):
                 torrent_hash = stored_hash
             info: dict[str, Any] | None = None
             progress: float | None = None
@@ -173,19 +201,11 @@ class DownloadCompletionService:
                     info = matched
                     progress = info.get("progress")
 
-            # A torrent is "done" in qBittorrent only when we can confirm it:
-            #   a) progress >= 1.0, or
-            #   b) we identified it by hash and it's gone from qBittorrent.
-            # We do NOT treat "not found by name matching" as done — the name
-            # heuristic is unreliable and would falsely trigger the Plex check
-            # while the torrent is still downloading.
-            if progress is not None:
-                qbit_done = progress >= 1.0
-            elif torrent_hash and info is None:
-                # Identified by hash but no longer in qBittorrent → removed after completion
-                qbit_done = True
-            else:
-                qbit_done = False
+            # A missing torrent is not completion evidence.  It may have been
+            # deleted, lost, or hidden by an outage.  Only an observed progress
+            # value at 100% can start Plex reconciliation.
+            numeric_progress = _qbit_progress(progress)
+            qbit_done = numeric_progress is not None and numeric_progress >= 1.0
             qbit_evidence_by_torrent_id[torrent.id] = {
                 "torrent_id": torrent.id,
                 "title": torrent.title,

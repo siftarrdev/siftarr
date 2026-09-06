@@ -34,7 +34,9 @@ from app.siftarr.services.decisions.decision_pipeline import (
     add_to_pending_queue,
     log_release_staged,
     log_rule_evaluation,
+    release_rank_key,
 )
+from app.siftarr.services.decisions.release_fallback import apply_episode_size_fallback
 from app.siftarr.services.decisions.rule_engine import (
     ReleaseEvaluation,
     RuleEngine,
@@ -62,6 +64,7 @@ from app.siftarr.services.releases.release_storage import (
     get_release_persistence_key,
     store_search_results,
 )
+from app.siftarr.services.releases.release_validation_service import apply_dispositions
 from app.siftarr.services.releases.staging_service import StagingService
 from app.siftarr.services.search_history_service import SearchHistoryService
 from app.siftarr.services.staging_decision_log import log_evaluations
@@ -976,6 +979,8 @@ class TVDecisionService:
                 cancellation_check=cancellation_check,
             )
             all_evaluated_releases.extend(pack_evaluations)
+            await apply_dispositions(self.db, request, pack_evaluations)
+            pack_passing = [evaluation for evaluation in pack_evaluations if evaluation.passed]
             all_search_errors.extend(pack_errors)
             await self._publish_result_batch(
                 request.id, all_evaluated_releases, len(pack_evaluations), progress_callback
@@ -994,7 +999,7 @@ class TVDecisionService:
                 pack_candidates.append((evaluation, coverage))
 
         for evaluation, coverage in sorted(
-            pack_candidates, key=lambda item: (len(item[1]), item[0].total_score), reverse=True
+            pack_candidates, key=lambda item: (-len(item[1]), release_rank_key(item[0]))
         ):
             uncovered_coverage = coverage - covered_seasons
             if not uncovered_coverage:
@@ -1021,19 +1026,28 @@ class TVDecisionService:
                 cancellation_check=cancellation_check,
             )
             all_evaluated_releases.extend(exact_evaluations)
+            await apply_dispositions(self.db, request, exact_evaluations)
+            fallback_evaluations = apply_episode_size_fallback(exact_evaluations, rule_engine)
+            fallback_by_release = {id(item.release): item for item in fallback_evaluations}
+            exact_candidates = [
+                (season, episode, fallback_by_release.get(id(evaluation.release), evaluation))
+                for season, episode, evaluation in exact_candidates
+            ]
             all_search_errors.extend(exact_errors)
             await self._publish_result_batch(
                 request.id, all_evaluated_releases, len(exact_evaluations), progress_callback
             )
             episode_evaluations.extend(exact_candidates)
             for season, episode, evaluation in exact_candidates:
+                if not evaluation.passed:
+                    continue
                 if evaluation.release.seeders <= 0:
                     continue
                 key = (season, episode)
                 if key not in actionable_target_keys:
                     continue
                 existing = best_episodes_by_key.get(key)
-                if existing is None or evaluation.total_score > existing.total_score:
+                if existing is None or release_rank_key(evaluation) < release_rank_key(existing):
                     best_episodes_by_key[key] = evaluation
 
         if (
@@ -1061,6 +1075,8 @@ class TVDecisionService:
                 progress_callback=progress_callback,
             )
             all_evaluated_releases.extend(pack_evaluations)
+            await apply_dispositions(self.db, request, pack_evaluations)
+            pack_passing = [evaluation for evaluation in pack_evaluations if evaluation.passed]
             all_search_errors.extend(pack_errors)
             await self._publish_result_batch(
                 request.id, all_evaluated_releases, len(pack_evaluations), progress_callback
@@ -1079,7 +1095,7 @@ class TVDecisionService:
                 pack_candidates.append((evaluation, coverage))
 
             for evaluation, coverage in sorted(
-                pack_candidates, key=lambda item: (len(item[1]), item[0].total_score), reverse=True
+                pack_candidates, key=lambda item: (-len(item[1]), release_rank_key(item[0]))
             ):
                 uncovered_coverage = coverage - covered_seasons
                 if not uncovered_coverage:

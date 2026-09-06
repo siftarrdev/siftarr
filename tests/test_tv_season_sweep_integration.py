@@ -90,7 +90,9 @@ class FakeIPTProwlarr(ProwlarrService):
 
 
 class RejectNamedRuleEngine(RuleEngine):
-    def evaluate(self, release: ProwlarrRelease) -> ReleaseEvaluation:
+    def evaluate(
+        self, release: ProwlarrRelease, *, allow_episode_size_fallback: bool = False
+    ) -> ReleaseEvaluation:
         if "REJECT" in release.title:
             return ReleaseEvaluation(
                 release=release,

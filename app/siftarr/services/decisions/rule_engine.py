@@ -1,6 +1,7 @@
 import re
 from collections.abc import Sequence
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 from app.siftarr.models.rule import TVTarget
 from app.siftarr.services.integrations.prowlarr_service import ProwlarrRelease
@@ -8,6 +9,9 @@ from app.siftarr.services.releases.release_parser import (
     cached_parse_release_coverage,
     is_exact_single_episode_release,
 )
+
+if TYPE_CHECKING:
+    from app.siftarr.services.decisions.release_quality import ReleaseQualityPolicy
 
 # ── Rule version (cache invalidation) ─────────────────────────────────
 
@@ -65,7 +69,7 @@ class SizeLimitRule:
 class RuleMatch:
     """Result of matching a release against a rule."""
 
-    rule_id: int
+    rule_id: int | None
     rule_name: str
     matched: bool
     score_delta: int = 0
@@ -107,6 +111,7 @@ class RuleEngine:
         requirement_patterns: list[tuple[int, str, str]] | None = None,  # (id, name, pattern)
         scorer_patterns: list[tuple[int, str, str, int]]
         | None = None,  # (id, name, pattern, score)
+        quality_policy: ReleaseQualityPolicy | None = None,
     ):
         self.size_limit_rules = [
             rule if isinstance(rule, SizeLimitRule) else SizeLimitRule(*rule)
@@ -115,6 +120,7 @@ class RuleEngine:
         self.exclusion_patterns = exclusion_patterns or []
         self.requirement_patterns = requirement_patterns or []
         self.scorer_patterns = scorer_patterns or []
+        self.quality_policy = quality_policy
 
         self._compiled_exclusion: list[tuple[int, str, re.Pattern[str]]] = []
         self._compiled_requirement: list[tuple[int, str, re.Pattern[str]]] = []
@@ -334,7 +340,9 @@ class RuleEngine:
         gib = size_bytes / 1024 / 1024 / 1024
         return f"{gib:.2f} GB"
 
-    def evaluate(self, release: ProwlarrRelease) -> ReleaseEvaluation:
+    def evaluate(
+        self, release: ProwlarrRelease, *, allow_episode_size_fallback: bool = False
+    ) -> ReleaseEvaluation:
         """
         Evaluate a single release against all rules.
 
@@ -371,6 +379,23 @@ class RuleEngine:
                 )
                 break
             if max_size_bytes is not None and comparable_size > max_size_bytes:
+                fallback_limit = getattr(self.quality_policy, "episode_fallback_max_size_bytes", 0)
+                is_episode_rule = self._normalize_tv_target(rule.tv_target) == TVTarget.EPISODE
+                if (
+                    allow_episode_size_fallback
+                    and is_episode_rule
+                    and comparable_size <= fallback_limit
+                ):
+                    matches.append(
+                        RuleMatch(
+                            rule_id=rule.rule_id,
+                            rule_name=f"{rule.rule_name} (episode fallback)",
+                            matched=True,
+                            rule_type="size_limit",
+                            effect="size_fallback",
+                        )
+                    )
+                    continue
                 passed = False
                 rejection_reason = (
                     f"Size {self._format_size_gb(comparable_size)} above maximum "
@@ -474,6 +499,22 @@ class RuleEngine:
                         matched=False,
                         rule_type="scorer",
                         effect="allow",
+                    )
+                )
+
+        if self.quality_policy is not None:
+            from app.siftarr.services.decisions.release_quality import quality_signals
+
+            for signal in quality_signals(release, self.quality_policy):
+                total_score += signal.score_delta
+                matches.append(
+                    RuleMatch(
+                        rule_id=None,
+                        rule_name=signal.name,
+                        matched=True,
+                        score_delta=signal.score_delta,
+                        rule_type="quality",
+                        effect="score",
                     )
                 )
 

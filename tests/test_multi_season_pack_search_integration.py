@@ -77,7 +77,9 @@ class FakePackProwlarr(ProwlarrService):
 
 
 class PassAllRuleEngine(RuleEngine):
-    def evaluate(self, release: ProwlarrRelease) -> ReleaseEvaluation:
+    def evaluate(
+        self, release: ProwlarrRelease, *, allow_episode_size_fallback: bool = False
+    ) -> ReleaseEvaluation:
         return ReleaseEvaluation(
             release=release,
             passed=True,

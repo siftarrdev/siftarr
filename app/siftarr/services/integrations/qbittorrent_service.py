@@ -219,6 +219,7 @@ class QbittorrentService:
             "category": getattr(torrent, "category", None),
             "ratio": getattr(torrent, "ratio", None),
             "added_on": getattr(torrent, "added_on", None),
+            "last_activity": getattr(torrent, "last_activity", None),
             "completed_on": getattr(torrent, "completed_on", None),
             "save_path": getattr(torrent, "save_path", None),
             "download_location": getattr(torrent, "download_location", None),

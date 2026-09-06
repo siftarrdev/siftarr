@@ -176,6 +176,30 @@ class TestProwlarrService:
 
         assert release.files == 1
 
+    @pytest.mark.parametrize("value", [False, -1, 1.5, "2"])
+    def test_parse_release_info_rejects_unsafe_file_counts(self, value) -> None:
+        service = ProwlarrService()
+        release = service._parse_release_info(
+            {"title": "Movie", "indexer": "Test", "fileCount": value}
+        )
+        assert release.files is None
+        assert release.file_metadata_observed_at is None
+
+    def test_parse_release_info_preserves_zero_and_safe_file_paths(self) -> None:
+        service = ProwlarrService()
+        release = service._parse_release_info(
+            {
+                "title": "Movie",
+                "indexer": "Test",
+                "files": 0,
+                "fileCount": 3,
+                "filePaths": ["Movie/movie.mkv", "Movie/movie.nfo"],
+            }
+        )
+        assert release.files == 0
+        assert release.file_paths == ("Movie/movie.mkv", "Movie/movie.nfo")
+        assert release.file_metadata_observed_at is not None
+
     def test_parse_release_info_prefers_api_release_group(self) -> None:
         """_parse_release_info should prefer the API's releaseGroup field over title parsing."""
         service = ProwlarrService()
