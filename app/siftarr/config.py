@@ -91,6 +91,25 @@ def resolve_session_secret() -> str:
     return generated
 
 
+def normalize_full_sync_frequency(value: str | None) -> str:
+    """Return ``daily`` or ``weekly``; anything else becomes ``daily``."""
+    normalized = (value or "daily").strip().lower()
+    return normalized if normalized in {"daily", "weekly"} else "daily"
+
+
+def normalize_full_sync_time(value: str | None) -> str:
+    """Return *value* as zero-padded ``HH:MM``; invalid input becomes ``03:00``."""
+    try:
+        hour_str, minute_str = (value or "03:00").strip().split(":", maxsplit=1)
+        hour = int(hour_str)
+        minute = int(minute_str)
+    except AttributeError, TypeError, ValueError:
+        return "03:00"
+    if 0 <= hour <= 23 and 0 <= minute <= 59:
+        return f"{hour:02d}:{minute:02d}"
+    return "03:00"
+
+
 class Settings(BaseSettings):
     """Application settings loaded from environment variables."""
 
@@ -221,21 +240,12 @@ class Settings(BaseSettings):
     @field_validator("plex_full_sync_frequency")
     @classmethod
     def _validate_plex_full_sync_frequency(cls, value: str) -> str:
-        normalized = (value or "daily").strip().lower()
-        return normalized if normalized in {"daily", "weekly"} else "daily"
+        return normalize_full_sync_frequency(value)
 
     @field_validator("plex_full_sync_time")
     @classmethod
     def _validate_plex_full_sync_time(cls, value: str) -> str:
-        try:
-            hour_str, minute_str = (value or "03:00").strip().split(":", maxsplit=1)
-            hour = int(hour_str)
-            minute = int(minute_str)
-        except TypeError, ValueError:
-            return "03:00"
-        if 0 <= hour <= 23 and 0 <= minute <= 59:
-            return f"{hour:02d}:{minute:02d}"
-        return "03:00"
+        return normalize_full_sync_time(value)
 
 
 @lru_cache

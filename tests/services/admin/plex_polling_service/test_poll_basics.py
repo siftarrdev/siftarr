@@ -1,5 +1,4 @@
 import asyncio
-from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -28,7 +27,7 @@ async def test_poll_movie(
     await db.commit()
     mock_plex.check_movie_available.return_value = on_plex
 
-    completed = await service.poll(priority_only=False)
+    completed = await service.poll()
 
     assert completed == expected_completed
     assert await request_status(db, req) == expected_status
@@ -44,7 +43,7 @@ async def test_poll_movie_overseerr_sync_failure_does_not_block(db, service, moc
         new_callable=AsyncMock,
         return_value=False,
     ):
-        completed = await service.poll(priority_only=False)
+        completed = await service.poll()
 
     assert completed == 1
     assert await request_status(db, req) == COMPLETED
@@ -99,7 +98,7 @@ async def test_poll_tv(
     mock_plex.get_show_by_tvdb.return_value = tvdb_show
     mock_plex.get_episode_availability.return_value = availability
 
-    completed = await service.poll(priority_only=False)
+    completed = await service.poll()
 
     assert completed == expected_completed
     assert await request_status(db, req) == expected_request
@@ -120,7 +119,7 @@ async def test_poll_one_probe_error_does_not_block_other_requests(db, service, m
 
     mock_plex.check_movie_available.side_effect = check_movie_available
 
-    completed = await service.poll(priority_only=False)
+    completed = await service.poll()
 
     assert completed == 1
     assert await request_status(db, failing) == PENDING
@@ -153,7 +152,7 @@ async def test_poll_caps_probe_concurrency(db, service, mock_plex):
 
     mock_plex.check_movie_available.side_effect = check_movie_available
 
-    poll_task = asyncio.create_task(service.poll(priority_only=False))
+    poll_task = asyncio.create_task(service.poll())
     await asyncio.wait_for(first_batch_ready.wait(), timeout=1)
     await asyncio.sleep(0)
 
@@ -181,7 +180,7 @@ async def test_poll_progress_includes_tv_detail_and_concurrency(db, service, moc
     async def collect(payload):
         events.append(payload)
 
-    completed = await service.poll(on_progress=collect, priority_only=False)
+    completed = await service.poll(on_progress=collect)
 
     assert completed == 0
     details = [event for event in events if event.get("detail")]
@@ -194,23 +193,3 @@ async def test_poll_progress_includes_tv_detail_and_concurrency(db, service, moc
     assert any(
         event.get("media_type") == "tv" and event.get("title") == "Show" for event in details
     )
-
-
-async def test_default_poll_only_probes_downloading_or_recently_updated_requests(
-    db, service, mock_plex
-):
-    stale = datetime.now(UTC) - timedelta(days=3)
-    recent = await make_request(db, external_id="1", tmdb_id=1)
-    downloading = await make_request(
-        db, external_id="2", tmdb_id=2, status=RequestStatus.DOWNLOADING, updated_at=stale
-    )
-    skipped = await make_request(db, external_id="3", tmdb_id=3, updated_at=stale)
-    await db.commit()
-    mock_plex.check_movie_available.return_value = True
-
-    completed = await service.poll()
-
-    assert completed == 2
-    assert await request_status(db, recent) == COMPLETED
-    assert await request_status(db, downloading) == COMPLETED
-    assert await request_status(db, skipped) == PENDING

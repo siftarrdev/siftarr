@@ -13,7 +13,7 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.interval import IntervalTrigger
 
-from app.siftarr.config import get_settings
+from app.siftarr.config import get_settings, normalize_full_sync_time
 from app.siftarr.models.request import MediaType, Request, RequestStatus
 from app.siftarr.services.admin import settings_service
 from app.siftarr.services.admin.plex_polling_service import (
@@ -44,15 +44,8 @@ MAX_TARGETED_PLEX_WAIT_SECONDS = 60
 
 
 def _parse_full_sync_time(value: str) -> tuple[int, int]:
-    try:
-        hour_str, minute_str = value.split(":", maxsplit=1)
-        hour = int(hour_str)
-        minute = int(minute_str)
-    except ValueError, AttributeError:
-        return 3, 0
-    if 0 <= hour <= 23 and 0 <= minute <= 59:
-        return hour, minute
-    return 3, 0
+    hour_str, minute_str = normalize_full_sync_time(value).split(":")
+    return int(hour_str), int(minute_str)
 
 
 @dataclass(frozen=True)
@@ -419,7 +412,7 @@ class SchedulerService:
                 runtime_settings = get_settings()
                 plex = PlexService(settings=runtime_settings)
                 polling_service = PlexPollingService(db, plex)
-                count = await polling_service.poll(priority_only=False)
+                count = await polling_service.poll()
                 return PlexPollResult(completed_requests=count)
 
         return await self._run_guarded_plex_scan_job(
