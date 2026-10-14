@@ -2,8 +2,9 @@
 
 import asyncio
 import logging
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
+from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -166,16 +167,17 @@ async def _search_request_generator(request_id: int, db: AsyncSession, *, search
         async def progress_callback(payload: dict) -> None:
             await progress_queue.put(payload)
 
+        is_tv = request.media_type == MediaType.TV
         search_task = asyncio.create_task(
             _run_request_search_detached(
                 request_id,
                 db,
-                progress_callback=progress_callback if request.media_type == MediaType.TV else None,
+                progress_callback=progress_callback if is_tv else None,
                 search_mode=search_mode,
                 cancellation_check=cancel_event.is_set,
             )
         )
-        if request.media_type == MediaType.TV:
+        if is_tv:
             mode_label = _tv_search_mode_label(search_mode)
             logger.info(
                 "TV %s stream started: request_id=%s title=%s source=prowlarr",
@@ -183,35 +185,6 @@ async def _search_request_generator(request_id: int, db: AsyncSession, *, search
                 request_id,
                 request.title,
             )
-        if request.media_type != MediaType.TV:
-            yield serialize_sse(
-                build_sse_progress(
-                    "starting",
-                    percent=5,
-                    message=f"Starting search for {request.title}…",
-                )
-            )
-        if (
-            request.media_type != MediaType.TV
-            and request.year is None
-            and (request.tmdb_id or request.tvdb_id)
-        ):
-            yield serialize_sse(
-                build_sse_progress(
-                    "backfilling",
-                    percent=15,
-                )
-            )
-        if request.media_type != MediaType.TV:
-            yield serialize_sse(
-                build_sse_progress(
-                    "searching",
-                    percent=50,
-                    message="Querying indexers and evaluating releases…",
-                )
-            )
-
-        if request.media_type == MediaType.TV:
             while not search_task.done():
                 try:
                     payload = await asyncio.wait_for(progress_queue.get(), timeout=0.1)
@@ -221,9 +194,7 @@ async def _search_request_generator(request_id: int, db: AsyncSession, *, search
             while not progress_queue.empty():
                 yield serialize_sse(progress_queue.get_nowait())
 
-        result = await asyncio.shield(search_task)
-        if request.media_type == MediaType.TV:
-            mode_label = _tv_search_mode_label(search_mode)
+            result = await asyncio.shield(search_task)
             complete_message = (
                 result.get("message")
                 if result.get("cancelled")
@@ -239,9 +210,6 @@ async def _search_request_generator(request_id: int, db: AsyncSession, *, search
                 request.title,
                 result.get("status"),
             )
-        else:
-            complete_message = result.get("message", "Search complete")
-        if request.media_type == MediaType.TV:
             yield serialize_sse(
                 build_sse_progress(
                     "complete",
@@ -253,11 +221,35 @@ async def _search_request_generator(request_id: int, db: AsyncSession, *, search
                 )
             )
             return
+
+        yield serialize_sse(
+            build_sse_progress(
+                "starting",
+                percent=5,
+                message=f"Starting search for {request.title}…",
+            )
+        )
+        if request.year is None and (request.tmdb_id or request.tvdb_id):
+            yield serialize_sse(
+                build_sse_progress(
+                    "backfilling",
+                    percent=15,
+                )
+            )
+        yield serialize_sse(
+            build_sse_progress(
+                "searching",
+                percent=50,
+                message="Querying indexers and evaluating releases…",
+            )
+        )
+
+        result = await asyncio.shield(search_task)
         yield serialize_sse(
             build_sse_progress(
                 "complete",
                 percent=100,
-                message=complete_message,
+                message=result.get("message", "Search complete"),
                 result=result,
             )
         )
@@ -343,8 +335,20 @@ async def _bulk_search_generator(
         )
 
 
-async def _tv_season_pack_generator(request_id: int, season_number: int, db: AsyncSession):
-    """Stream a targeted season-pack search."""
+async def _tv_targeted_search_generator(
+    request_id: int,
+    db: AsyncSession,
+    search: Callable[
+        [SearchService, RequestModel, Callable[[dict], Awaitable[None]]], Awaitable[Any]
+    ],
+    error_log: tuple[Any, ...],
+    *,
+    include_known_total_seasons: bool = False,
+):
+    """Stream a targeted TV search (season pack, multi-season, or single episode).
+
+    ``error_log`` is ``(format, *args)`` for the failure log message.
+    """
     try:
         progress_queue: asyncio.Queue[dict] = asyncio.Queue()
 
@@ -357,122 +361,84 @@ async def _tv_season_pack_generator(request_id: int, season_number: int, db: Asy
             validate_tv_request(request)
             yield serialize_sse(build_sse_progress("searching", percent=50))
             service = SearchService(session)
-            data = await service.search_season_packs(
-                request, season_number=season_number, progress_callback=progress_callback
-            )
+            data = await search(service, request, progress_callback)
             serialized = serialize_tv_search_response(data)
         while not progress_queue.empty():
             yield serialize_sse(progress_queue.get_nowait())
+        extra: dict[str, Any] = (
+            {"known_total_seasons": serialized.get("known_total_seasons")}
+            if include_known_total_seasons
+            else {}
+        )
         yield serialize_sse(
             build_sse_progress(
                 "complete",
                 percent=100,
                 releases=serialized.get("releases", []),
                 scope=serialized.get("scope"),
+                **extra,
             )
         )
     except Exception as exc:
-        logger.exception(
+        logger.exception(*error_log)
+        yield serialize_sse(
+            build_sse_progress(
+                "error",
+                percent=100,
+                message=str(exc),
+            )
+        )
+
+
+def _tv_season_pack_generator(request_id: int, season_number: int, db: AsyncSession):
+    """Stream a targeted season-pack search."""
+    return _tv_targeted_search_generator(
+        request_id,
+        db,
+        lambda service, request, progress_callback: service.search_season_packs(
+            request, season_number=season_number, progress_callback=progress_callback
+        ),
+        (
             "SSE season-pack search failed for request_id=%s season=%s",
             request_id,
             season_number,
-        )
-        yield serialize_sse(
-            build_sse_progress(
-                "error",
-                percent=100,
-                message=str(exc),
-            )
-        )
+        ),
+    )
 
 
-async def _tv_multi_season_generator(request_id: int, db: AsyncSession):
+def _tv_multi_season_generator(request_id: int, db: AsyncSession):
     """Stream a targeted multi-season pack search."""
-    try:
-        progress_queue: asyncio.Queue[dict] = asyncio.Queue()
-
-        async def progress_callback(payload: dict) -> None:
-            await progress_queue.put(payload)
-
-        yield serialize_sse(build_sse_progress("starting", percent=5))
-        async with _stream_session(db) as session:
-            request = await load_request_or_404(session, request_id)
-            validate_tv_request(request)
-            yield serialize_sse(build_sse_progress("searching", percent=50))
-            service = SearchService(session)
-            data = await service.search_multi_season_packs(
-                request, request_id=request_id, progress_callback=progress_callback
-            )
-            serialized = serialize_tv_search_response(data)
-        while not progress_queue.empty():
-            yield serialize_sse(progress_queue.get_nowait())
-        yield serialize_sse(
-            build_sse_progress(
-                "complete",
-                percent=100,
-                releases=serialized.get("releases", []),
-                scope=serialized.get("scope"),
-                known_total_seasons=serialized.get("known_total_seasons"),
-            )
-        )
-    except Exception as exc:
-        logger.exception("SSE multi-season search failed for request_id=%s", request_id)
-        yield serialize_sse(
-            build_sse_progress(
-                "error",
-                percent=100,
-                message=str(exc),
-            )
-        )
+    return _tv_targeted_search_generator(
+        request_id,
+        db,
+        lambda service, request, progress_callback: service.search_multi_season_packs(
+            request, request_id=request_id, progress_callback=progress_callback
+        ),
+        ("SSE multi-season search failed for request_id=%s", request_id),
+        include_known_total_seasons=True,
+    )
 
 
-async def _tv_episode_generator(
+def _tv_episode_generator(
     request_id: int, season_number: int, episode_number: int, db: AsyncSession
 ):
     """Stream a targeted single-episode search."""
-    try:
-        progress_queue: asyncio.Queue[dict] = asyncio.Queue()
-
-        async def progress_callback(payload: dict) -> None:
-            await progress_queue.put(payload)
-
-        yield serialize_sse(build_sse_progress("starting", percent=5))
-        async with _stream_session(db) as session:
-            request = await load_request_or_404(session, request_id)
-            validate_tv_request(request)
-            yield serialize_sse(build_sse_progress("searching", percent=50))
-            service = SearchService(session)
-            data = await service.search_episode(
-                request,
-                season_number=season_number,
-                episode_number=episode_number,
-                progress_callback=progress_callback,
-            )
-            serialized = serialize_tv_search_response(data)
-        while not progress_queue.empty():
-            yield serialize_sse(progress_queue.get_nowait())
-        yield serialize_sse(
-            build_sse_progress(
-                "complete",
-                percent=100,
-                releases=serialized.get("releases", []),
-                scope=serialized.get("scope"),
-            )
-        )
-    except Exception as exc:
-        logger.exception(
+    return _tv_targeted_search_generator(
+        request_id,
+        db,
+        lambda service, request, progress_callback: service.search_episode(
+            request,
+            season_number=season_number,
+            episode_number=episode_number,
+            progress_callback=progress_callback,
+        ),
+        (
             "SSE episode search failed for request_id=%s season=%s episode=%s",
             request_id,
             season_number,
             episode_number,
-        )
-        yield serialize_sse(
-            build_sse_progress(
-                "error",
-                percent=100,
-                message=str(exc),
-            )
-        )
+        ),
+    )
 
 
 @router.get("/bulk/search/stream")
