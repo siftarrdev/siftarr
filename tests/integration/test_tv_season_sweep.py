@@ -1,5 +1,7 @@
 """Integration-style validation for TV season sweeps."""
 
+from unittest.mock import MagicMock
+
 import pytest
 from fastapi import BackgroundTasks
 from sqlalchemy import select
@@ -9,6 +11,7 @@ from app.siftarr.models.episode import Episode
 from app.siftarr.models.release import Release
 from app.siftarr.models.request import MediaType, RequestStatus
 from app.siftarr.services.dashboard.detail_service import DetailService
+from app.siftarr.services.decisions import tv_decision_service
 from app.siftarr.services.decisions.rule_engine import ReleaseEvaluation, RuleEngine
 from app.siftarr.services.decisions.tv_decision_service import TVDecisionService
 from app.siftarr.services.integrations.prowlarr_service import (
@@ -17,6 +20,8 @@ from app.siftarr.services.integrations.prowlarr_service import (
     ProwlarrService,
 )
 from app.siftarr.services.integrations.qbittorrent_service import QbittorrentService
+from app.siftarr.services.releases import staging_service
+from app.siftarr.services.releases.release_storage import get_release_persistence_key
 from tests.factories import make_episode, make_request, make_season
 
 Key = tuple[int, int]
@@ -89,16 +94,12 @@ class RejectNamedRuleEngine(RuleEngine):
 
 
 @pytest.fixture
-def make_service(db, monkeypatch):
-    class FakeStagingService:
-        def __init__(self, _db):
-            pass
-
-        async def use_releases(self, _request, _releases, *, selection_source: str):
-            return {"status": "staged", "message": "staged"}
-
+def make_service(db, monkeypatch, tmp_path):
+    # Run the real StagingService in staging mode; only the staging directory
+    # and runtime settings are replaced.
+    monkeypatch.setattr(staging_service, "STAGING_DIR", tmp_path)
     monkeypatch.setattr(
-        "app.siftarr.services.decisions.tv_decision_service.StagingService", FakeStagingService
+        staging_service, "get_settings", lambda: MagicMock(staging_mode_enabled=True)
     )
 
     def build(prowlarr: ScriptedProwlarr) -> TVDecisionService:
@@ -289,3 +290,31 @@ async def test_capped_sweep_episodes_persist_and_stay_visible_when_paginated(
     # TV buckets use the complete filtered result set, not the generic
     # paginated release page, so season/pack rows remain visible.
     assert visible <= bucketed
+
+
+async def test_selection_missing_after_persistence_is_not_marked_staged(
+    db, make_service, monkeypatch
+) -> None:
+    request = await make_request(db, media_type=MediaType.TV, title="Show", year=2024)
+    season = await make_season(db, request, 1, episodes=2)
+    lost = _release("Show.S01E02.1080p", "exact-s01e02")
+    real_store = tv_decision_service.store_search_results
+
+    async def store_dropping_lost(*args, **kwargs):
+        stored = await real_store(*args, **kwargs)
+        stored.pop(get_release_persistence_key(title=lost.title, info_hash=lost.info_hash), None)
+        return stored
+
+    monkeypatch.setattr(tv_decision_service, "store_search_results", store_dropping_lost)
+    prowlarr = ScriptedProwlarr(
+        exact={(1, 1): [_release("Show.S01E01.1080p", "exact-s01e01")], (1, 2): [lost]},
+    )
+
+    result = await make_service(prowlarr).process_request(request.id)
+
+    assert result["status"] == "staged"
+    statuses = await _episode_statuses(db)
+    assert [statuses[(season.id, n)] for n in (1, 2)] == [
+        RequestStatus.STAGED,
+        RequestStatus.PENDING,
+    ]

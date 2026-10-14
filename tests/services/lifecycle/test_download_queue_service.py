@@ -6,6 +6,7 @@ import pytest
 from app.siftarr.models.episode import Episode
 from app.siftarr.models.request import MediaType, Request, RequestStatus
 from app.siftarr.models.season import Season
+from app.siftarr.services.integrations.qbittorrent_service import QbittorrentService
 from app.siftarr.services.lifecycle.download_queue_service import DownloadQueueService
 
 
@@ -36,9 +37,9 @@ def _torrent(**kwargs):
     ],
 )
 async def test_delete_download_outcomes(qbit_info, delete_ok, success, status, moved_path):
-    qb = AsyncMock()
-    qb.get_torrent_info.return_value = qbit_info
-    qb.get_torrent_info_by_name.return_value = None
+    qb = AsyncMock(spec=QbittorrentService)
+    qb.get_torrent_info_or_raise.return_value = qbit_info
+    qb.get_torrent_info_by_name_or_raise.return_value = None
     qb.delete_torrent.return_value = delete_ok
     torrent = _torrent()
 
@@ -57,9 +58,9 @@ async def test_delete_download_outcomes(qbit_info, delete_ok, success, status, m
 async def test_delete_download_lookup_failure_keeps_torrent_and_request_unchanged(
     monkeypatch: pytest.MonkeyPatch,
 ):
-    qb = AsyncMock()
-    qb.get_torrent_info.side_effect = RuntimeError("qbit unavailable")
-    qb.get_torrent_info_by_name.return_value = None
+    qb = AsyncMock(spec=QbittorrentService)
+    qb.get_torrent_info_or_raise.side_effect = RuntimeError("qbit unavailable")
+    qb.get_torrent_info_by_name_or_raise.return_value = None
     request = Request(
         external_id="req-99",
         media_type=MediaType.MOVIE,

@@ -586,31 +586,6 @@ class TVDecisionService:
                 counts[season] += 1
         return {season: counts.get(season, 0) for season in requested_seasons}
 
-    async def _set_episode_status(
-        self, request_id: int, season_number: int, episode_number: int, status: RequestStatus
-    ) -> None:
-        """Set a single episode's status."""
-        result = await self.db.execute(
-            select(Episode)
-            .join(Season, Episode.season_id == Season.id)
-            .where(
-                Season.request_id == request_id,
-                Season.season_number == season_number,
-                Episode.episode_number == episode_number,
-            )
-        )
-        episode = result.scalar_one_or_none()
-        if episode:
-            episode.status = status
-
-    async def _set_episodes_for_season(
-        self, request_id: int, season_number: int, status: RequestStatus
-    ) -> None:
-        """Set all **aired** episodes in a season to the given status."""
-        aired = await self._get_unresolved_aired_db_episodes_for_season(request_id, season_number)
-        for ep_num in aired:
-            await self._set_episode_status(request_id, season_number, ep_num, status)
-
     async def _recompute_tv_statuses(self, request: Request) -> None:
         """Recompute Season.status and Request.status from episode ground truth."""
         all_episodes: list[Episode] = []
@@ -1097,40 +1072,6 @@ class TVDecisionService:
                     },
                 ),
             )
-
-            # ── Episode status updates ────────────────────────────────
-            # Episode status is the ground truth.  Set each episode covered
-            # by the selected releases, then derive season/request statuses.
-            if action_result.get("status") in ("completed", "downloading", "staged"):
-                status_map = {
-                    "completed": RequestStatus.COMPLETED,
-                    "downloading": RequestStatus.DOWNLOADING,
-                    "staged": RequestStatus.STAGED,
-                }
-                action_status: str = str(action_result.get("status", ""))
-                new_status = status_map[action_status]
-
-                # Set episode statuses from pack releases
-                for _, covered_seasons_set in selected_pack_releases:
-                    for season_num in covered_seasons_set:
-                        await self._set_episodes_for_season(request.id, season_num, new_status)
-
-                # Set episode statuses from individual episode releases
-                for season, episode in best_episodes_by_key:
-                    await self._set_episode_status(request.id, season, episode, new_status)
-
-                # Recompute season and request statuses from episode ground truth
-                await self.db.flush()
-                # Reload with episodes for recomputation
-                reload_result = await self.db.execute(
-                    select(Request)
-                    .where(Request.id == request.id)
-                    .options(selectinload(Request.seasons).selectinload(Season.episodes))
-                )
-                reloaded = reload_result.scalar_one_or_none()
-                if reloaded:
-                    await self._recompute_tv_statuses(reloaded)
-                await self.db.flush()
 
             return {
                 "status": action_result["status"],

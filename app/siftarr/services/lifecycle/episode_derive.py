@@ -58,15 +58,11 @@ def unaired_undated_episodes(
 
 
 def episodes_are_unreleased(episodes: Sequence[Episode]) -> bool:
-    """Return whether any episode has a future air date.
-
-    Silently skips episodes where ``air_date`` is not a ``date`` instance
-    (e.g. MagicMock in tests).
-    """
+    """Return whether any episode has a future air date."""
     today = datetime.now(UTC).date()
     for ep in episodes:
         air_date = ep.air_date
-        if isinstance(air_date, date) and air_date > today:
+        if air_date is not None and air_date > today:
             return True
     return False
 

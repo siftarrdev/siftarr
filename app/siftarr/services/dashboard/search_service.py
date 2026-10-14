@@ -47,7 +47,6 @@ from app.siftarr.services.releases.release_storage import (
     build_prowlarr_release,
     get_release_persistence_key,
     persist_manual_release,
-    release_columns,
     store_search_results,
 )
 from app.siftarr.services.releases.release_validation_service import (
@@ -376,8 +375,6 @@ class SearchService:
         self, request_id: int, *, season_number: int | None = None
     ) -> list[Release]:
         """Load stored TV releases for request/season cache reuse."""
-        if type(self.db).__module__.startswith("unittest.mock"):
-            return []
         try:
             result = await self.db.execute(
                 select(Release).where(Release.request_id == request_id).order_by(Release.id)
@@ -425,33 +422,17 @@ class SearchService:
         scope: dict[str, object],
     ) -> list[Release]:
         engine = await self._build_rule_engine(media_type="tv")
-        evaluations = [
-            self._evaluation_for_release(engine.evaluate(release), release) for release in releases
-        ]
+        evaluations = [engine.evaluate(release) for release in releases]
         for evaluation in evaluations:
             identity = identity_warning(request, evaluation.release)
             if identity:
                 evaluation.passed = False
                 evaluation.rejection_reason = identity.message
         await apply_dispositions(self.db, request, evaluations)
-        try:
-            stored_by_key = await store_search_results(
-                self.db, request.id, evaluations, scope=scope, source="adhoc"
-            )
-        except StopAsyncIteration, StopIteration:
-            return [
-                self._transient_release_from_evaluation(request.id, evaluation)
-                for evaluation in evaluations
-            ]
-        return self._dedupe_stored_releases(list(stored_by_key.values()))
-
-    def _transient_release_from_evaluation(
-        self, request_id: int, evaluation: ReleaseEvaluation
-    ) -> Release:
-        return Release(
-            request_id=request_id,
-            **release_columns(evaluation.release, evaluation, source="adhoc"),
+        stored_by_key = await store_search_results(
+            self.db, request.id, evaluations, scope=scope, source="adhoc"
         )
+        return self._dedupe_stored_releases(list(stored_by_key.values()))
 
     def _filter_serialize_stored_tv_releases(
         self,
@@ -534,8 +515,6 @@ class SearchService:
     async def _auto_stage_best_stored_episode(
         self, request: Any, releases: list[Release], *, scope: dict[str, object]
     ) -> None:
-        if type(self.db).__module__.startswith("unittest.mock"):
-            return
         candidates = [
             release
             for release in releases
@@ -558,14 +537,6 @@ class SearchService:
                 request.id,
                 stored_release.title,
             )
-
-    def _evaluation_for_release(
-        self, evaluation: ReleaseEvaluation, release: ProwlarrRelease
-    ) -> ReleaseEvaluation:
-        """Return an evaluation object bound to the release, isolating shared mocks."""
-        bound = copy(evaluation)
-        bound.release = release
-        return bound
 
     async def _search_tv_episode_exact(
         self,
@@ -621,11 +592,8 @@ class SearchService:
         """
         runtime_settings = get_settings()
         prowlarr = ProwlarrService(settings=runtime_settings)
-        search = getattr(prowlarr, "search_tv_packs_broad", None)
-        if search is None:
-            return None
         try:
-            result = await search(
+            result = await prowlarr.search_tv_packs_broad(
                 title=request.title,
                 cacheable=False,
                 request_id=getattr(request, "id", None),
@@ -643,21 +611,14 @@ class SearchService:
         return self._filter_tv_identity(request, result)
 
     async def _requested_season_numbers(self, request: Any) -> list[int]:
-        seasons_load_failed = False
         try:
             seasons = getattr(request, "seasons", None) or []
         except Exception:
-            seasons = []
-            seasons_load_failed = True
-        seasons_are_mocked = type(seasons).__module__.startswith("unittest.mock")
-        if seasons_are_mocked:
             seasons = []
         values = [getattr(season, "season_number", None) for season in seasons]
         season_numbers = sorted({season for season in values if isinstance(season, int)})
         if season_numbers:
             return season_numbers
-        if not seasons_load_failed and seasons_are_mocked:
-            return []
         request_id = getattr(request, "id", None)
         if request_id is None:
             return []

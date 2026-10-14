@@ -147,13 +147,8 @@ class DownloadCompletionService:
         # The swallowing adapter returns [] for both an outage and an empty
         # qBit instance.  Completion must use the strict method so an outage
         # cannot masquerade as a missing completed torrent.
-        strict_getter = getattr(type(self.qbittorrent), "get_all_active_torrents_or_raise", None)
         try:
-            all_torrents = (
-                await strict_getter(self.qbittorrent)
-                if strict_getter is not None
-                else await self.qbittorrent.get_all_active_torrents()
-            )
+            all_torrents = await self.qbittorrent.get_all_active_torrents_or_raise()
         except Exception:
             logger.warning("DownloadCompletionService: qBittorrent unavailable; skipping cycle")
             return 0
@@ -172,15 +167,9 @@ class DownloadCompletionService:
         for torrent, _request in rows:
             # Prefer the stored info_hash (most reliable), then fall back to
             # extracting from magnet URI or computing from the .torrent file.
-            # Use getattr + isinstance so MagicMock in tests doesn't auto-create
-            # a fake hash that would break JSON serialisation.
             torrent_hash = _extract_hash(torrent.magnet_url, torrent.torrent_path)
-            stored_hash = getattr(torrent, "info_hash", None)
-            if (
-                isinstance(stored_hash, str)
-                and stored_hash
-                and stored_hash.strip().casefold() != "ok."
-            ):
+            stored_hash = torrent.info_hash
+            if stored_hash and stored_hash.strip().casefold() != "ok.":
                 torrent_hash = stored_hash
             info: dict[str, Any] | None = None
             progress: float | None = None
@@ -353,12 +342,10 @@ class DownloadCompletionService:
         request: Request,
         done_torrents: list[StagedTorrent],
     ):
-        if hasattr(type(self.plex_polling), "check_completed_download_waiting_for_plex"):
-            return await self.plex_polling.check_completed_download_waiting_for_plex(
-                request,
-                episode_keys=self._covered_episode_keys(request, done_torrents),
-            )
-        return await self.plex_polling.check_request(request.id)
+        return await self.plex_polling.check_completed_download_waiting_for_plex(
+            request,
+            episode_keys=self._covered_episode_keys(request, done_torrents),
+        )
 
     def _covered_episode_keys(
         self,
