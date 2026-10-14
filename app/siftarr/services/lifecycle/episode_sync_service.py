@@ -14,8 +14,8 @@ from app.siftarr.models.season import Season
 from app.siftarr.services.integrations.overseerr_service import OverseerrService
 from app.siftarr.services.integrations.plex_service import PlexService
 from app.siftarr.services.lifecycle.episode_derive import (
+    apply_synced_request_status,
     derive_episode_status,
-    derive_request_status_from_episodes,
     derive_season_status,
 )
 from app.siftarr.services.utils.async_utils import gather_limited
@@ -68,7 +68,7 @@ async def persist_episode_availability(
         await db.flush()
         season.status = derive_season_status(episodes)
 
-    request.status = derive_request_status_from_episodes(request_episodes)
+    apply_synced_request_status(request, request_episodes)
     await db.commit()
     return seasons
 
@@ -297,7 +297,7 @@ class EpisodeSyncService:
                 synced_episodes.extend(season_episodes)
 
         # Derive request-level status from episode states (cached summary)
-        request.status = derive_request_status_from_episodes(synced_episodes)
+        apply_synced_request_status(request, synced_episodes)
 
         await self.db.commit()
 

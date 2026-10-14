@@ -2,10 +2,12 @@
 
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import httpx
 import pytest
 
 from app.siftarr.services.integrations import overseerr_service
 from app.siftarr.services.integrations.overseerr_service import (
+    OverseerrFetchError,
     OverseerrService,
     build_overseerr_media_url,
     build_poster_url,
@@ -153,28 +155,92 @@ class TestOverseerrService:
 
             mock_client.get.assert_called_once()
 
+    @staticmethod
+    def _configured_service_with_responses(*responses):
+        mock_settings = MagicMock()
+        mock_settings.overseerr_url = "http://localhost:5055"
+        mock_settings.overseerr_api_key = "test"
+        service = OverseerrService(settings=mock_settings)
+        mock_client = AsyncMock()
+        mock_client.get = AsyncMock(side_effect=list(responses))
+        return service, mock_client
+
+    @staticmethod
+    def _response(status_code, payload=None):
+        response = MagicMock()
+        response.status_code = status_code
+        response.json.return_value = payload
+        return response
+
     @pytest.mark.asyncio
     async def test_get_all_requests_paginates(self):
-        """Test get_all_requests aggregates paginated responses."""
+        """get_all_requests aggregates pages until a short page."""
+        service, mock_client = self._configured_service_with_responses(
+            self._response(200, {"results": [{"id": 1}]}),
+            self._response(200, {"results": [{"id": 2}]}),
+            self._response(200, {"results": []}),
+        )
         with patch(
-            "app.siftarr.services.integrations.overseerr_service.get_settings"
-        ) as mock_get_settings:
-            mock_settings = MagicMock()
-            mock_settings.overseerr_url = "http://localhost:5055"
-            mock_settings.overseerr_api_key = "test"
-            mock_get_settings.return_value = mock_settings
+            "app.siftarr.services.integrations.overseerr_service.get_shared_client",
+            return_value=mock_client,
+        ):
+            result = await service.get_all_requests(status=None, page_size=1)
 
-            service = OverseerrService()
+        assert result == [{"id": 1}, {"id": 2}]
 
-            with patch.object(
-                service,
-                "get_requests",
-                new=AsyncMock(side_effect=[[{"id": 1}], [{"id": 2}], []]),
-            ) as mock_get_requests:
-                result = await service.get_all_requests(status=None, page_size=1)
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "failure",
+        [
+            httpx.ConnectTimeout("timeout"),
+            MagicMock(status_code=500),
+        ],
+    )
+    async def test_get_all_requests_raises_when_a_later_page_fails(self, failure):
+        """A failed page must not be returned as a shorter, complete-looking list."""
+        first_page = self._response(200, {"results": [{"id": 1}]})
+        service, mock_client = self._configured_service_with_responses(first_page, failure)
+        with (
+            patch(
+                "app.siftarr.services.integrations.overseerr_service.get_shared_client",
+                return_value=mock_client,
+            ),
+            pytest.raises(OverseerrFetchError),
+        ):
+            await service.get_all_requests(status=None, page_size=1)
 
-                assert result == [{"id": 1}, {"id": 2}]
-                assert mock_get_requests.await_count == 3
+    @pytest.mark.asyncio
+    async def test_get_all_requests_raises_when_page_limit_is_reached(self):
+        service, mock_client = self._configured_service_with_responses(
+            self._response(200, {"results": [{"id": 1}]}),
+            self._response(200, {"results": [{"id": 2}]}),
+        )
+        with (
+            patch(
+                "app.siftarr.services.integrations.overseerr_service.get_shared_client",
+                return_value=mock_client,
+            ),
+            pytest.raises(OverseerrFetchError),
+        ):
+            await service.get_all_requests(status=None, page_size=1, max_pages=2)
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("outcome", "expected"),
+        [
+            (MagicMock(status_code=200), True),
+            (MagicMock(status_code=404), False),
+            (MagicMock(status_code=500), None),
+            (httpx.ConnectTimeout("timeout"), None),
+        ],
+    )
+    async def test_request_exists_only_reports_missing_on_404(self, outcome, expected):
+        service, mock_client = self._configured_service_with_responses(outcome)
+        with patch(
+            "app.siftarr.services.integrations.overseerr_service.get_shared_client",
+            return_value=mock_client,
+        ):
+            assert await service.request_exists(42) is expected
 
     def test_normalize_media_status_numeric(self):
         """Test numeric media statuses are normalized."""
