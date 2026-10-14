@@ -11,6 +11,7 @@ from app.siftarr.models.staged_torrent import StagedTorrent
 from app.siftarr.services.integrations.prowlarr_service import ProwlarrRelease
 from app.siftarr.services.releases.release_disposition_service import ReleaseDispositionService
 from app.siftarr.services.releases.staging_service import StagingService
+from app.siftarr.services.utils.safe_names import safe_staging_filename
 
 
 @pytest.fixture(autouse=True)
@@ -39,8 +40,8 @@ class TestStagingServiceUnit:
         ],
         ids=["colon", "slash", "wildcards", "quotes", "pipe", "repeated-spaces", "truncated"],
     )
-    def test_sanitize_filename(self, mock_db, title, expected):
-        assert StagingService(mock_db)._sanitize_filename(title) == expected
+    def test_sanitize_filename(self, title, expected):
+        assert safe_staging_filename(title) == expected
 
     @pytest.mark.parametrize("group", ["RARBG", None], ids=["with-group", "without-group"])
     def test_generate_filename(self, mock_db, group):

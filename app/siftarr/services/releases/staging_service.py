@@ -77,13 +77,7 @@ async def _get_active_staged_torrents(
 
 
 def _target_scope_from_title(title: str) -> dict[str, object]:
-    coverage = cached_parse_release_coverage(title)
-    return serialize_target_scope(
-        media_type=MediaType.TV,
-        title=title,
-        season_number=coverage.season_number,
-        episode_number=coverage.episode_number,
-    )
+    return serialize_target_scope(media_type=MediaType.TV, title=title)
 
 
 def _filter_active_staged_torrents_for_release(
@@ -115,22 +109,6 @@ def _is_pack_scope_overlapping_season(scope: dict[str, object], season_number: i
     )
 
 
-def _should_delete_superseded_staged_torrents(
-    request: Request,
-    selection_source: str,
-) -> bool:
-    """Return whether this selection must remove other active stages in scope.
-
-    Note: The caller already filters active staged torrents via
-    ``_filter_active_staged_torrents_for_release()`` so only overlapping
-    (in-scope) torrents reach this function.  This guard just ensures we
-    don't delete for auto-staged selections on TV requests.
-    """
-    if request.media_type == MediaType.MOVIE:
-        return True
-    return selection_source == "manual"
-
-
 def _staged_selection_outcome(
     *,
     selection_source: str,
@@ -152,44 +130,6 @@ def _staged_selection_outcome(
         "manual_staged",
         f"Manually staged {staged_count} release(s) for approval.",
     )
-
-
-async def _delete_superseded_staged_torrents(
-    db: AsyncSession,
-    staging_service: StagingService,
-    torrents: list[StagedTorrent],
-) -> bool:
-    """Delete superseded staged rows and any local staging files."""
-    deleted_any = False
-    for torrent in torrents:
-        await staging_service.delete_staged_files(torrent)
-        await db.delete(torrent)
-        deleted_any = True
-    return deleted_any
-
-
-async def _set_request_status(
-    db: AsyncSession,
-    request: Request,
-    new_status: RequestStatus,
-    *,
-    commit: bool = True,
-) -> None:
-    """Persist the request status.
-
-    For **movies** this is the authoritative field.
-    For **TV** this is a derived cache — prefer setting episode statuses
-    and calling :func:`_recompute_tv_statuses` instead.
-    """
-    if request.media_type == MediaType.MOVIE:
-        if request.status == new_status:
-            return
-        request.status = new_status
-        request.updated_at = datetime.now(UTC)
-        if commit:
-            await db.commit()
-    # For TV, request.status is derived from episodes — this is a no-op.
-    # Callers should set episode statuses and recompute instead.
 
 
 def _set_unless_available(episode: Episode, status: RequestStatus) -> None:
@@ -225,14 +165,6 @@ class StagingService:
 
     # ── Filename helpers ──
 
-    def _sanitize_filename(self, title: str) -> str:
-        """
-        Sanitize a title for use in filenames.
-
-        Removes/replaces characters that are problematic in filenames.
-        """
-        return safe_staging_filename(title)
-
     def _generate_filename(
         self,
         title: str,
@@ -240,7 +172,7 @@ class StagingService:
         request_id: int,
     ) -> str:
         """Generate a human-readable filename."""
-        sanitized = self._sanitize_filename(title)
+        sanitized = safe_staging_filename(title)
         if release_group:
             return f"{sanitized}_{release_group}_{request_id}"
         return f"{sanitized}_{request_id}"
@@ -262,8 +194,8 @@ class StagingService:
         """
         Save a release to staging.
 
-        Creates a sidecar JSON with metadata. Torrent files are not downloaded
-        by default; approval can use the magnet URL or stored download URL.
+        Creates a sidecar JSON with metadata. Torrent files are not downloaded;
+        approval can use the magnet URL or stored download URL.
 
         Args:
             release: The Prowlarr release to stage.
@@ -424,6 +356,12 @@ class StagingService:
         except OSError:
             return False
 
+    async def _delete_superseded_staged_torrents(self, torrents: list[StagedTorrent]) -> None:
+        """Delete superseded staged rows and any local staging files."""
+        for torrent in torrents:
+            await self.delete_staged_files(torrent)
+            await self.db.delete(torrent)
+
     # ── Episode-centric TV helpers ─────────────────────────────────
 
     async def _recompute_tv_statuses(self, request_id: int) -> None:
@@ -485,6 +423,25 @@ class StagingService:
         result = await self.db.execute(query)
         for episode in result.scalars().all():
             _set_unless_available(episode, status)
+
+    async def _set_status_for_releases(
+        self,
+        request: Request,
+        releases: list[Release],
+        status: RequestStatus,
+    ) -> None:
+        """Set the status for the releases' coverage, without committing.
+
+        TV: set covered episode statuses, then recompute the cached summaries.
+        Movies: the request status is the authoritative field.
+        """
+        if request.media_type == MediaType.TV:
+            for release in releases:
+                await self._apply_release_to_episodes(release, status)
+            await self._recompute_tv_statuses(request.id)
+        elif request.status != status:
+            request.status = status
+            request.updated_at = datetime.now(UTC)
 
     # ── Release handoff (use_releases) ──
 
@@ -555,7 +512,6 @@ class StagingService:
         if runtime_settings.staging_mode_enabled and not force_download:
             staged_ids: list[int] = []
             replaced_active_selection = False
-            deleted_superseded = False
 
             logger.info(
                 "Staging releases: request_id=%s release_count=%s selection_source=%s",
@@ -600,30 +556,19 @@ class StagingService:
                     staged_ids.append(existing.id)
                     preserved_stage_id = existing.id
 
-                if _should_delete_superseded_staged_torrents(request, selection_source):
+                # The active stages were already filtered to this release's scope, so
+                # this only skips deletion for auto-staged selections on TV requests.
+                if request.media_type == MediaType.MOVIE or selection_source == "manual":
                     superseded = [
                         current
                         for current in relevant_active_staged
                         if current.id != preserved_stage_id
                     ]
                     if superseded:
-                        deleted_superseded = (
-                            await _delete_superseded_staged_torrents(
-                                self.db,
-                                self,
-                                superseded,
-                            )
-                            or deleted_superseded
-                        )
+                        await self._delete_superseded_staged_torrents(superseded)
                         replaced_active_selection = True
 
-            if request.media_type == MediaType.TV:
-                # Episode-centric: set covered episode statuses, then recompute
-                for release in usable_releases:
-                    await self._apply_release_to_episodes(release, RequestStatus.STAGED)
-                await self._recompute_tv_statuses(request.id)
-            else:
-                await _set_request_status(self.db, request, RequestStatus.STAGED, commit=False)
+            await self._set_status_for_releases(request, usable_releases, RequestStatus.STAGED)
             await queue_service.remove_from_queue(request.id)
             await self.db.commit()
             action, message = _staged_selection_outcome(
@@ -764,19 +709,9 @@ class StagingService:
                 ):
                     superseded_by_id[staged.id] = staged
             if superseded_by_id:
-                await _delete_superseded_staged_torrents(
-                    self.db,
-                    self,
-                    list(superseded_by_id.values()),
-                )
+                await self._delete_superseded_staged_torrents(list(superseded_by_id.values()))
 
-        if request.media_type == MediaType.TV:
-            # Episode-centric: set covered episode statuses, then recompute
-            for release in usable_releases:
-                await self._apply_release_to_episodes(release, RequestStatus.DOWNLOADING)
-            await self._recompute_tv_statuses(request.id)
-        else:
-            await _set_request_status(self.db, request, RequestStatus.DOWNLOADING, commit=False)
+        await self._set_status_for_releases(request, usable_releases, RequestStatus.DOWNLOADING)
         await queue_service.remove_from_queue(request.id, commit=False)
         await self.db.commit()
         logger.info(
@@ -844,11 +779,8 @@ class StagingService:
                 _target_scope_from_title(staged.title), season_number
             )
         ]
-        replaced_active_selection = await _delete_superseded_staged_torrents(
-            self.db,
-            self,
-            superseded_packs,
-        )
+        await self._delete_superseded_staged_torrents(superseded_packs)
+        replaced_active_selection = bool(superseded_packs)
 
         staged_ids: list[int] = []
         for release in release_by_episode.values():
