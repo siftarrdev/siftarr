@@ -22,8 +22,16 @@ from app.siftarr.config import (
 from app.siftarr.models.app_setting import AppSetting
 from app.siftarr.models.request import MediaType, RequestStatus
 from app.siftarr.models.request import Request as RequestModel
+from app.siftarr.models.request_overseerr_link import RequestOverseerrLink
 from app.siftarr.services.lifecycle.lifecycle_service import LifecycleService
 from app.siftarr.services.lifecycle.pending_queue_service import PendingQueueService
+from app.siftarr.services.lifecycle.request_link_service import (
+    add_overseerr_link,
+    attach_overseerr_request,
+    find_request_for_media,
+    get_linked_overseerr_request_ids,
+    linked_overseerr_request_ids,
+)
 from app.siftarr.version import __version__
 
 OVERSEERR_LAST_SYNC_SUCCESS_KEY = "overseerr_last_sync_success_at"
@@ -1251,46 +1259,49 @@ async def import_overseerr_requests(
     overseerr_service = overseerr_service_cls(settings=runtime_settings)
 
     async def cleanup_stale_overseerr_requests(upstream_request_ids: set[int]) -> int:
-        """Mark locally-linked requests missing upstream as denied/non-actionable."""
+        """Drop Seerr links that are gone upstream; deny requests that lose every link."""
         result = await db.execute(
-            select(RequestModel.id, RequestModel.overseerr_request_id)
-            .where(RequestModel.overseerr_request_id.is_not(None))
-            .where(
-                RequestModel.status.in_(STALE_OVERSEERR_CLEANUP_STATUSES),
-            )
+            select(RequestModel).where(RequestModel.status.in_(STALE_OVERSEERR_CLEANUP_STATUSES))
         )
-        candidates = [
-            (row[0], row[1])
-            for row in result.fetchall()
-            if row[1] is not None and row[1] not in upstream_request_ids
-        ]
-        # The list fetch can miss requests, so only deny a request after Overseerr
-        # confirms it is gone. Timeouts and other errors leave the request alone.
-        stale_request_ids = [
-            request_id
-            for request_id, overseerr_request_id in candidates
-            if await overseerr_service.request_exists(overseerr_request_id) is False
-        ]
-        if not stale_request_ids:
-            return 0
-
         queue_service = PendingQueueService(db)
         lifecycle_service = LifecycleService(db)
-        for request_id in stale_request_ids:
-            await queue_service.remove_from_queue(request_id, commit=False)
-            # Keep overseerr_request_id so a later sync recognizes the request
-            # and does not import it again as a new row.
+        denied_count = 0
+        for request in result.scalars().all():
+            linked_ids = await get_linked_overseerr_request_ids(db, request)
+            missing_ids = [i for i in linked_ids if i not in upstream_request_ids]
+            if not missing_ids:
+                continue
+            # The list fetch can miss requests, so only drop a link after Overseerr
+            # confirms it is gone. Timeouts and other errors leave the link alone.
+            gone_ids = [
+                i for i in missing_ids if await overseerr_service.request_exists(i) is False
+            ]
+            if not gone_ids:
+                continue
+            remaining_ids = [i for i in linked_ids if i not in gone_ids]
+            if remaining_ids:
+                await db.execute(
+                    sa_delete(RequestOverseerrLink).where(
+                        RequestOverseerrLink.overseerr_request_id.in_(gone_ids)
+                    )
+                )
+                if request.overseerr_request_id in gone_ids:
+                    request.overseerr_request_id = remaining_ids[0]
+                continue
+
+            await queue_service.remove_from_queue(request.id, commit=False)
+            # Keep the links so a later sync recognizes the request and does not
+            # import it again as a new row.
             await lifecycle_service.transition(
-                request_id,
+                request.id,
                 RequestStatus.DENIED,
                 reason="Removed from Overseerr",
                 commit=False,
             )
-        logger.info(
-            "Cleaned up %d stale Overseerr-linked request(s)",
-            len(stale_request_ids),
-        )
-        return len(stale_request_ids)
+            denied_count += 1
+        if denied_count:
+            logger.info("Cleaned up %d stale Overseerr-linked request(s)", denied_count)
+        return denied_count
 
     async def emit(payload: dict[str, Any]) -> None:
         if on_event is None:
@@ -1328,12 +1339,9 @@ async def import_overseerr_requests(
             await db.commit()
             return 0, 0
 
-        result = await db.execute(
-            select(RequestModel.external_id, RequestModel.overseerr_request_id)
-        )
-        existing_rows = result.fetchall()
-        existing_external_ids = {row[0] for row in existing_rows}
-        existing_request_ids = {row[1] for row in existing_rows if row[1] is not None}
+        result = await db.execute(select(RequestModel.external_id))
+        existing_external_ids = {row[0] for row in result.fetchall()}
+        existing_request_ids = await linked_overseerr_request_ids(db)
 
         actionable_requests = []
         for index, ov_req in enumerate(overseerr_requests, start=1):
@@ -1449,6 +1457,36 @@ async def import_overseerr_requests(
                     skipped_count += 1
                     continue
 
+                # Another Seerr request for media we already track (for example a
+                # later season request) links to the existing row.
+                existing_request = (
+                    await find_request_for_media(
+                        db, prepared.media_type, prepared.tmdb_id, prepared.tvdb_id
+                    )
+                    if prepared.overseerr_request_id is not None
+                    else None
+                )
+                if existing_request is not None and prepared.overseerr_request_id is not None:
+                    reactivated = await attach_overseerr_request(
+                        db, existing_request, prepared.overseerr_request_id
+                    )
+                    # Episode sync rewrites episode statuses, so only resync a row
+                    # that was reactivated. An active show already tracks every season.
+                    if reactivated:
+                        await evaluate_imported_request_func(
+                            db,
+                            overseerr_service,
+                            existing_request,
+                            logger=logger,
+                            prefetched_media_details=prepared.media_details,
+                            local_episodes=(),
+                        )
+                        if prepared.media_type == MediaType.TV:
+                            new_tv_requests.append(existing_request)
+                    existing_request_ids.add(prepared.overseerr_request_id)
+                    synced_count += 1
+                    continue
+
                 external_id = prepared.external_id
                 if external_id in existing_external_ids:
                     external_id = f"{external_id}-{prepared.overseerr_request_id}"
@@ -1474,6 +1512,8 @@ async def import_overseerr_requests(
                 )
                 db.add(new_request)
                 await db.flush()
+                if prepared.overseerr_request_id is not None:
+                    await add_overseerr_link(db, new_request, prepared.overseerr_request_id)
                 await evaluate_imported_request_func(
                     db,
                     overseerr_service,

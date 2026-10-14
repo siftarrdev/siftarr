@@ -117,6 +117,7 @@ The old duplicated developer guide and stale product specification under `docs/`
 Database entities and enums.
 
 - `request.py` — media request state, request metadata, and shared lifecycle status groupings/predicates
+- `request_overseerr_link.py` — links each Seerr request ID to the single local request for that movie or show
 - `release.py` — searched/candidate releases, including persisted compact rule evidence/parse metadata and request-scoped detail-view indexes
 - `release_disposition.py` — durable request/scoped rejection and expiring failed-release suppression, independent of disposable search results
 - `download_health.py` — one persistent health observation per approved download attempt, including no-progress timers, missing-client evidence, and confirmed recovery state
@@ -202,7 +203,8 @@ Business logic and integrations, organized into thematic subpackages:
 - `download_health_service.py` — strict client observations, suspended-time-aware stall warnings, and user-confirmed cooldown/recovery scoped to failed coverage; missing torrents are not completion evidence
 - `download_queue_service.py` — active download deletion/reset workflow: removes qBit torrent data, marks Siftarr torrent discarded, and returns affected movie/TV request state to pending
 - `qbit_move_service.py` — qBit move and retention service: selects eligible completed torrents (managed first, optional unmanaged fallback), computes safe destinations using Siftarr metadata then regex fallback, moves via qBittorrent `set_location(move=True)`, updates move tracking fields on managed torrents, performs retention cleanup (remove old completed torrents by seeding_time, keep files); called from scheduler's download-completion loop
-- `overseerr_sync_service.py` — best-effort lifecycle sync back to Overseerr (approval evidence)
+- `overseerr_sync_service.py` — best-effort lifecycle sync back to Overseerr (approves every linked Seerr request)
+- `request_link_service.py` — one local request per movie/show: finds the row for a media ID, links new Seerr requests, and reactivates denied/failed/completed rows
 - `unreleased_service.py` — unreleased content handling
 
 **`releases/`** — Release processing and staging

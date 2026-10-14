@@ -18,6 +18,17 @@ _real_require_release_confirmations = dashboard_actions._require_release_confirm
 
 
 @pytest.fixture(autouse=True)
+def _linked_overseerr_ids_from_primary(monkeypatch):
+    """Resolve linked Seerr IDs from the mock request's primary ID without DB queries."""
+
+    async def fake_linked_ids(_db, request):
+        primary = request.overseerr_request_id
+        return [primary] if isinstance(primary, int) else []
+
+    monkeypatch.setattr(dashboard_actions, "get_linked_overseerr_request_ids", fake_linked_ids)
+
+
+@pytest.fixture(autouse=True)
 def _stable_release_preflight(monkeypatch):
     """Keep legacy route-shape tests focused on their original concern."""
     evaluation = MagicMock(passed=True, total_score=0, rejection_reason=None, matches=[])

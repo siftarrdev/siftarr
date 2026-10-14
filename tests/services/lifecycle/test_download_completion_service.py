@@ -48,6 +48,19 @@ class TestExtractHash:
 
 
 class TestDownloadCompletionService:
+    @pytest.fixture(autouse=True)
+    def _linked_overseerr_ids_from_primary(self, monkeypatch):
+        """Resolve linked Seerr IDs from the request's primary ID without DB queries."""
+        from app.siftarr.services.lifecycle import overseerr_sync_service
+
+        async def fake_linked_ids(_db, request):
+            primary = request.overseerr_request_id
+            return [primary] if isinstance(primary, int) and primary > 0 else []
+
+        monkeypatch.setattr(
+            overseerr_sync_service, "get_linked_overseerr_request_ids", fake_linked_ids
+        )
+
     @pytest.fixture
     def mock_db(self):
         db = AsyncMock()

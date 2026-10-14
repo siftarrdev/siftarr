@@ -21,6 +21,12 @@ from app.siftarr.services.integrations.plex_service import PlexService
 from app.siftarr.services.integrations.prowlarr_service import ProwlarrService
 from app.siftarr.services.integrations.qbittorrent_service import QbittorrentService
 from app.siftarr.services.lifecycle.episode_sync_service import EpisodeSyncService
+from app.siftarr.services.lifecycle.request_link_service import (
+    add_overseerr_link,
+    attach_overseerr_request,
+    find_request_for_media,
+    linked_overseerr_request_ids,
+)
 from app.siftarr.services.lifecycle.unreleased_service import UnreleasedEvaluator
 from app.siftarr.services.utils.media_helpers import extract_media_title_and_year
 
@@ -100,16 +106,22 @@ async def receive_overseerr_webhook(
     # Deduplication: if both mediarequested and mediaapproved fire for the same
     # Overseerr request, skip creating a duplicate.
     if payload.request and payload.request.id:
-        existing = await db.execute(
-            select(Request).where(
-                Request.overseerr_request_id == payload.request.id,
-            )
-        )
-        if existing.scalar_one_or_none() is not None:
+        if payload.request.id in await linked_overseerr_request_ids(db):
             return {
                 "status": "duplicate",
                 "message": f"Request for overseerr_request_id={payload.request.id} already exists",
             }
+        # Another Seerr request for media we already track (for example a later
+        # season request) links to the existing row instead of adding a duplicate.
+        existing_request = await find_request_for_media(
+            db, media_type, payload.media.tmdbid, payload.media.tvdbid
+        )
+        if existing_request is not None:
+            reactivated = await attach_overseerr_request(db, existing_request, payload.request.id)
+            await db.commit()
+            if reactivated:
+                background_tasks.add_task(process_request_background, existing_request.id)
+            return {"status": "linked", "request_id": existing_request.id}
     else:
         existing = await db.execute(select(Request).where(Request.external_id == external_id))
         if existing.scalar_one_or_none() is not None:
@@ -151,6 +163,9 @@ async def receive_overseerr_webhook(
         created_at=created_at,
     )
     db.add(request)
+    await db.flush()
+    if payload.request and payload.request.id:
+        await add_overseerr_link(db, request, payload.request.id)
     await db.commit()
     await db.refresh(request)
 

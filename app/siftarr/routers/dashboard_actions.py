@@ -30,6 +30,7 @@ from app.siftarr.services.lifecycle.episode_derive import (
 )
 from app.siftarr.services.lifecycle.lifecycle_service import LifecycleService
 from app.siftarr.services.lifecycle.pending_queue_service import PendingQueueService
+from app.siftarr.services.lifecycle.request_link_service import get_linked_overseerr_request_ids
 from app.siftarr.services.releases.release_disposition_service import ReleaseDispositionService
 from app.siftarr.services.releases.release_parser import (
     cached_parse_release_coverage,
@@ -269,23 +270,23 @@ async def _deny_request_record(
     lifecycle_service = LifecycleService(db)
     queue_service = PendingQueueService(db)
 
-    if request.overseerr_request_id:
+    for overseerr_request_id in await get_linked_overseerr_request_ids(db, request):
         try:
             declined = await overseerr_service.decline_request(
-                request.overseerr_request_id,
+                overseerr_request_id,
                 reason=reason,
             )
             if not declined:
                 logger.warning(
                     "Overseerr decline returned false for request_id=%s overseerr_request_id=%s; continuing local deny cleanup",
                     request.id,
-                    request.overseerr_request_id,
+                    overseerr_request_id,
                 )
         except Exception:
             logger.warning(
                 "Overseerr decline failed for request_id=%s overseerr_request_id=%s; continuing local deny cleanup",
                 request.id,
-                request.overseerr_request_id,
+                overseerr_request_id,
                 exc_info=True,
             )
 

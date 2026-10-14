@@ -8,6 +8,7 @@ from app.siftarr.models.episode import Episode
 from app.siftarr.models.release import Release
 from app.siftarr.models.release_disposition import ReleaseDisposition
 from app.siftarr.models.request import MediaType, Request, RequestStatus
+from app.siftarr.models.request_overseerr_link import RequestOverseerrLink
 from app.siftarr.models.rule import Rule, RuleType
 from app.siftarr.models.search_history import SearchRun, SearchRunCandidate
 from app.siftarr.models.season import Season
@@ -27,6 +28,7 @@ __all__ = [
     "EventType",
     "MediaType",
     "Request",
+    "RequestOverseerrLink",
     "RequestStatus",
     "Release",
     "ReleaseDisposition",

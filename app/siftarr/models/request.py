@@ -12,6 +12,7 @@ from app.siftarr.models._base import Base, utc_now  # noqa: PLC0414
 
 if TYPE_CHECKING:
     from app.siftarr.models.release import Release
+    from app.siftarr.models.request_overseerr_link import RequestOverseerrLink
     from app.siftarr.models.season import Season
 
 
@@ -133,6 +134,12 @@ class Request(Base):
     )
     seasons: Mapped[list[Season]] = relationship(
         "Season", back_populates="request", cascade="all, delete-orphan"
+    )
+    overseerr_links: Mapped[list[RequestOverseerrLink]] = relationship(
+        "RequestOverseerrLink",
+        back_populates="request",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
     )
 
     def __repr__(self) -> str:

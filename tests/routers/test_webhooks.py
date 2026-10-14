@@ -71,8 +71,12 @@ async def test_invalid_media_returns_422_without_side_effects(webhook_app, media
         ({"media_type": "tv", "tmdbid": 123, "tvdbid": 456}, MediaType.TV, "123-7"),
     ],
 )
-async def test_valid_media_creates_request(webhook_app, event, media, expected_type, expected_id):
+async def test_valid_media_creates_request(
+    webhook_app, monkeypatch, event, media, expected_type, expected_id
+):
     app, db, metadata, process = webhook_app
+    monkeypatch.setattr(webhooks, "linked_overseerr_request_ids", AsyncMock(return_value=set()))
+    monkeypatch.setattr(webhooks, "find_request_for_media", AsyncMock(return_value=None))
     async with httpx.AsyncClient(
         transport=httpx.ASGITransport(app=app), base_url="http://test"
     ) as client:
@@ -82,9 +86,10 @@ async def test_valid_media_creates_request(webhook_app, event, media, expected_t
 
     assert response.status_code == 200
     assert response.json() == {"status": "accepted", "request_id": 42}
-    request = db.add.call_args.args[0]
+    request, link = (call.args[0] for call in db.add.call_args_list)
     assert request.media_type == expected_type
     assert request.external_id == expected_id
+    assert link.overseerr_request_id == 7
     assert request.title == "Example"
     db.commit.assert_awaited_once()
     metadata.assert_awaited_once()

@@ -466,7 +466,13 @@ async def test_scan_recent_targeted_check_completes_active_download_absent_from_
         assert reason == "Found on Plex"
         req.status = status
 
-    with patch.object(service.lifecycle, "transition", AsyncMock(side_effect=transition)):
+    with (
+        patch.object(service.lifecycle, "transition", AsyncMock(side_effect=transition)),
+        patch(
+            "app.siftarr.services.lifecycle.overseerr_sync_service.get_linked_overseerr_request_ids",
+            AsyncMock(return_value=[]),
+        ),
+    ):
         result = await service.scan_recent()
 
     assert result.completed_requests == 1
