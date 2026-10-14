@@ -1,6 +1,5 @@
 """Dashboard router for main UI."""
 
-import json
 import logging
 from datetime import UTC, date, datetime, timedelta
 
@@ -39,6 +38,9 @@ from app.siftarr.services.dashboard.tv_details_service import (
 )
 from app.siftarr.services.integrations.overseerr_service import OverseerrService
 from app.siftarr.services.integrations.qbittorrent_service import QbittorrentService
+from app.siftarr.services.lifecycle.download_completion_service import (
+    download_completed_torrent_ids,
+)
 from app.siftarr.services.lifecycle.episode_derive import derive_tv_display_label
 from app.siftarr.services.lifecycle.lifecycle_service import LifecycleService
 from app.siftarr.services.releases.release_parser import movie_release_identity_rejection_reason
@@ -49,26 +51,6 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["dashboard"])
 templates = configure_templates(Jinja2Templates(directory="app/siftarr/templates"))
-
-
-def _download_completed_torrent_ids(details: str | None) -> set[int]:
-    if not details:
-        return set()
-    try:
-        payload = json.loads(details)
-    except TypeError, ValueError:
-        return set()
-    if not isinstance(payload, dict):
-        return set()
-
-    torrent_ids: set[int] = set()
-    torrent_id = payload.get("torrent_id")
-    if isinstance(torrent_id, int):
-        torrent_ids.add(torrent_id)
-    for item in payload.get("done_torrents") or []:
-        if isinstance(item, dict) and isinstance(item.get("torrent_id"), int):
-            torrent_ids.add(item["torrent_id"])
-    return torrent_ids
 
 
 def _is_actionable_workflow_torrent(
@@ -240,7 +222,7 @@ async def dashboard(
         for request_id, details in download_completed_result.all():
             if request_id is None:
                 continue
-            torrent_ids = _download_completed_torrent_ids(details)
+            torrent_ids = download_completed_torrent_ids(details)
             if torrent_ids:
                 downloading_waiting_plex_torrent_ids.update(torrent_ids)
             else:
