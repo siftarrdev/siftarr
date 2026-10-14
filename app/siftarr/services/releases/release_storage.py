@@ -8,7 +8,6 @@ from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.siftarr.models.release import Release
-from app.siftarr.models.request import Request
 from app.siftarr.services.decisions.rule_engine import ReleaseEvaluation
 from app.siftarr.services.integrations.prowlarr_service import ProwlarrRelease
 from app.siftarr.services.releases.release_parser import (
@@ -309,41 +308,3 @@ def _release_matches_persistence_scope(release: Release, scope: dict[str, object
             or season_number in coverage.season_numbers
         )
     return True
-
-
-async def persist_manual_release(
-    db: AsyncSession,
-    request: Request,
-    release: ProwlarrRelease,
-    evaluation: ReleaseEvaluation,
-) -> Release:
-    """Persist or update a manually selected release for reuse by selection flows."""
-    if not (release.magnet_url or release.download_url):
-        raise RuntimeError(f"Release '{release.title}' has no usable download source.")
-
-    if release.info_hash:
-        filters = [Release.request_id == request.id, Release.info_hash == release.info_hash]
-    else:
-        filters = [
-            Release.request_id == request.id,
-            Release.title == release.title,
-            Release.info_hash.is_(None),
-        ]
-
-    existing_result = await db.execute(select(Release).where(*filters))
-    record = existing_result.scalar_one_or_none()
-
-    columns = {
-        **release_columns(release, evaluation, source="manual"),
-        **_evidence_columns(release, evaluation),
-    }
-    if record is None:
-        record = Release(request_id=request.id, **columns)
-        db.add(record)
-    else:
-        for name, value in columns.items():
-            setattr(record, name, value)
-
-    await db.commit()
-    await db.refresh(record)
-    return record
