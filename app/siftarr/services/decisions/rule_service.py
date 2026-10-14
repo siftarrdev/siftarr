@@ -51,17 +51,14 @@ class RuleService:
     def __init__(self, db: AsyncSession):
         self.db = db
 
+    @staticmethod
+    def _notify_changed() -> None:
+        """Invalidate search and rule-engine caches after the rule set changes."""
+        clear_search_cache()
+        increment_rule_version()
+
     async def get_all_rules(self) -> list[Rule]:
         result = await self.db.execute(select(Rule).order_by(Rule.priority, Rule.id))
-        return list(result.scalars().all())
-
-    async def get_rules_by_type(self, rule_type: RuleType) -> list[Rule]:
-        result = await self.db.execute(
-            select(Rule)
-            .where(Rule.rule_type == rule_type)
-            .where(Rule.is_enabled.is_(True))
-            .order_by(Rule.priority)
-        )
         return list(result.scalars().all())
 
     async def get_all_rules_by_type(self, rule_type: RuleType) -> list[Rule]:
@@ -104,8 +101,7 @@ class RuleService:
         self.db.add(rule)
         await self.db.commit()
         await self.db.refresh(rule)
-        clear_search_cache()
-        increment_rule_version()
+        self._notify_changed()
         return rule
 
     async def update_rule(
@@ -146,8 +142,7 @@ class RuleService:
 
         await self.db.commit()
         await self.db.refresh(rule)
-        clear_search_cache()
-        increment_rule_version()
+        self._notify_changed()
         return rule
 
     async def delete_rule(self, rule_id: int) -> bool:
@@ -156,8 +151,7 @@ class RuleService:
             return False
         await self.db.delete(rule)
         await self.db.commit()
-        clear_search_cache()
-        increment_rule_version()
+        self._notify_changed()
         return True
 
     async def seed_default_rules(self) -> list[Rule]:
@@ -190,8 +184,7 @@ class RuleService:
         rule.is_enabled = not rule.is_enabled
         await self.db.commit()
         await self.db.refresh(rule)
-        clear_search_cache()
-        increment_rule_version()
+        self._notify_changed()
         return rule
 
     @staticmethod
@@ -361,19 +354,7 @@ class RuleService:
                 raise ValueError(f"Rule {index} must be an object.")
             raw_rule = cast(dict[str, Any], raw_rule)
 
-            allowed_fields = {
-                "name",
-                "rule_type",
-                "media_scope",
-                "tv_target",
-                "pattern",
-                "score",
-                "min_size_gb",
-                "max_size_gb",
-                "priority",
-                "is_enabled",
-                "description",
-            }
+            allowed_fields = set(COMPARABLE_RULE_FIELDS)
             unknown_fields = sorted(set(raw_rule) - allowed_fields)
             if unknown_fields:
                 raise ValueError(
@@ -588,8 +569,7 @@ class RuleService:
         await self.db.commit()
         for rule in created:
             await self.db.refresh(rule)
-        clear_search_cache()
-        increment_rule_version()
+        self._notify_changed()
         return created
 
     async def replace_rules_from_preview(self, preview: RuleImportPreview) -> list[Rule]:

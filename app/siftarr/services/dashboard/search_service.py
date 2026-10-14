@@ -185,7 +185,6 @@ class SearchService:
             # unresolved episodes are covered in a single search pass.
             result = await decision_service.process_request(
                 request.id,
-                search_episodes=True,
                 progress_callback=progress_callback,
                 search_mode=search_mode,
                 cancellation_check=cancellation_check,

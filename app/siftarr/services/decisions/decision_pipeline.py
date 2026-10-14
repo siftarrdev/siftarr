@@ -13,62 +13,9 @@ from __future__ import annotations
 import logging
 from collections.abc import Sequence
 
-from sqlalchemy.ext.asyncio import AsyncSession
-
-from app.siftarr.models.activity_log import EventType
 from app.siftarr.services.decisions.rule_engine import ReleaseEvaluation
-from app.siftarr.services.lifecycle.activity_log_service import ActivityLogService
-from app.siftarr.services.lifecycle.pending_queue_service import PendingQueueService
 
 logger = logging.getLogger(__name__)
-
-
-# ── Rule engine ───────────────────────────────────────────────────────
-
-
-# ── Activity logging ──────────────────────────────────────────────────
-
-
-async def log_rule_evaluation(
-    db: AsyncSession,
-    request_id: int,
-    **details: object,
-) -> None:
-    """Log a :attr:`EventType.RULE_EVALUATION` activity entry."""
-    activity_log = ActivityLogService(db)
-    await activity_log.log(
-        EventType.RULE_EVALUATION,
-        request_id=request_id,
-        details=details,
-    )
-
-
-async def log_release_staged(
-    db: AsyncSession,
-    request_id: int,
-    **details: object,
-) -> None:
-    """Log a :attr:`EventType.RELEASE_STAGED` activity entry."""
-    activity_log = ActivityLogService(db)
-    await activity_log.log(
-        EventType.RELEASE_STAGED,
-        request_id=request_id,
-        details=details,
-    )
-
-
-# ── Pending queue ─────────────────────────────────────────────────────
-
-
-async def add_to_pending_queue(
-    db: AsyncSession,
-    request_id: int,
-    *,
-    error_message: str | None = None,
-) -> None:
-    """Add a request to the pending/retry queue."""
-    queue_service = PendingQueueService(db)
-    await queue_service.add_to_queue(request_id, error_message=error_message)
 
 
 # ── Release selection helpers ─────────────────────────────────────────

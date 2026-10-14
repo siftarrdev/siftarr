@@ -4,13 +4,11 @@ from collections import Counter
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.siftarr.models.activity_log import EventType
 from app.siftarr.models.request import MediaType, Request, RequestStatus
 from app.siftarr.services.decisions.decision_pipeline import (
-    add_to_pending_queue,
     collect_rejection_reasons,
     get_best_passing,
-    log_release_staged,
-    log_rule_evaluation,
 )
 from app.siftarr.services.decisions.rule_engine import (
     RuleEngine,
@@ -18,6 +16,8 @@ from app.siftarr.services.decisions.rule_engine import (
 from app.siftarr.services.decisions.rule_engine_provider import get_rule_engine
 from app.siftarr.services.integrations.prowlarr_service import ProwlarrService
 from app.siftarr.services.integrations.qbittorrent_service import QbittorrentService
+from app.siftarr.services.lifecycle.activity_log_service import ActivityLogService
+from app.siftarr.services.lifecycle.pending_queue_service import PendingQueueService
 from app.siftarr.services.releases.release_parser import movie_release_identity_rejection_reason
 from app.siftarr.services.releases.release_storage import (
     get_release_persistence_key,
@@ -122,8 +122,7 @@ class MovieDecisionService:
         if search_result.error:
             request.status = RequestStatus.PENDING
             await self.db.commit()
-            await add_to_pending_queue(
-                self.db,
+            await PendingQueueService(self.db).add_to_queue(
                 request.id,
                 error_message=f"Prowlarr search failed: {search_result.error}",
             )
@@ -163,7 +162,7 @@ class MovieDecisionService:
             request.status = RequestStatus.PENDING
             await self.db.commit()
 
-            await add_to_pending_queue(self.db, request.id)
+            await PendingQueueService(self.db).add_to_queue(request.id)
             log_evaluations(
                 request=request,
                 event_type="no_results",
@@ -223,12 +222,14 @@ class MovieDecisionService:
             len([e for e in all_evaluated if e.passed]),
         )
 
-        await log_rule_evaluation(
-            self.db,
+        await ActivityLogService(self.db).log(
+            EventType.RULE_EVALUATION,
             request_id=request_id,
-            evaluated=len(all_evaluated),
-            passed=len([e for e in all_evaluated if e.passed]),
-            best_score=best.total_score if best else None,
+            details={
+                "evaluated": len(all_evaluated),
+                "passed": len([e for e in all_evaluated if e.passed]),
+                "best_score": best.total_score if best else None,
+            },
         )
 
         if best:
@@ -253,14 +254,16 @@ class MovieDecisionService:
                 selection_source="rule",
             )
 
-            await log_release_staged(
-                self.db,
+            await ActivityLogService(self.db).log(
+                EventType.RELEASE_STAGED,
                 request_id=request_id,
-                title=best.release.title,
-                score=best.total_score,
-                indexer=best.release.indexer,
-                size=best.release.size,
-                action=action_result.get("status"),
+                details={
+                    "title": best.release.title,
+                    "score": best.total_score,
+                    "indexer": best.release.indexer,
+                    "size": best.release.size,
+                    "action": action_result.get("status"),
+                },
             )
             log_evaluations(
                 request=request,
@@ -311,8 +314,7 @@ class MovieDecisionService:
 
         rejection_reasons = collect_rejection_reasons(all_evaluated)
 
-        await add_to_pending_queue(
-            self.db,
+        await PendingQueueService(self.db).add_to_queue(
             request.id,
             error_message="; ".join(set(rejection_reasons))[:500]
             if rejection_reasons

@@ -567,15 +567,14 @@ class TestProcessRequest:
                 return_value=mock_staging,
             ),
             patch(
-                "app.siftarr.services.decisions.tv_decision_service.add_to_pending_queue",
-                new_callable=AsyncMock,
+                "app.siftarr.services.decisions.tv_decision_service.PendingQueueService",
             ) as pending_mock,
         ):
             result = await service.process_request(1, search_mode="full")
 
         assert result["status"] == "completed"
         mock_staging.use_releases.assert_not_awaited()
-        pending_mock.assert_not_awaited()
+        pending_mock.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_full_search_broad_pack_can_stage_only_actionable_coverage(

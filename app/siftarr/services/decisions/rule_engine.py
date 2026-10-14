@@ -1,17 +1,14 @@
 import re
 from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
 
 from app.siftarr.models.rule import TVTarget
+from app.siftarr.services.decisions.release_quality import ReleaseQualityPolicy, quality_signals
 from app.siftarr.services.integrations.prowlarr_service import ProwlarrRelease
 from app.siftarr.services.releases.release_parser import (
     cached_parse_release_coverage,
     is_exact_single_episode_release,
 )
-
-if TYPE_CHECKING:
-    from app.siftarr.services.decisions.release_quality import ReleaseQualityPolicy
 
 # ── Rule version (cache invalidation) ─────────────────────────────────
 
@@ -118,28 +115,24 @@ class RuleEngine:
         self._compiled_scorer: list[tuple[int, str, re.Pattern[str], int]] = []
 
         for rule_id, rule_name, pattern in self.exclusion_patterns:
-            try:
-                self._compiled_exclusion.append(
-                    (rule_id, rule_name, re.compile(pattern, re.IGNORECASE))
-                )
-            except re.error:
-                continue
+            if (compiled := self._compile_pattern(pattern)) is not None:
+                self._compiled_exclusion.append((rule_id, rule_name, compiled))
 
         for rule_id, rule_name, pattern in self.requirement_patterns:
-            try:
-                self._compiled_requirement.append(
-                    (rule_id, rule_name, re.compile(pattern, re.IGNORECASE))
-                )
-            except re.error:
-                continue
+            if (compiled := self._compile_pattern(pattern)) is not None:
+                self._compiled_requirement.append((rule_id, rule_name, compiled))
 
         for rule_id, rule_name, pattern, score in self.scorer_patterns:
-            try:
-                self._compiled_scorer.append(
-                    (rule_id, rule_name, re.compile(pattern, re.IGNORECASE), score)
-                )
-            except re.error:
-                continue
+            if (compiled := self._compile_pattern(pattern)) is not None:
+                self._compiled_scorer.append((rule_id, rule_name, compiled, score))
+
+    @staticmethod
+    def _compile_pattern(pattern: str) -> re.Pattern[str] | None:
+        """Compile a rule pattern case-insensitively, or return None if it is invalid."""
+        try:
+            return re.compile(pattern, re.IGNORECASE)
+        except re.error:
+            return None
 
     @staticmethod
     def _matches_any_field(compiled: re.Pattern, release: ProwlarrRelease) -> bool:
@@ -238,11 +231,9 @@ class RuleEngine:
         )
         if tv_target == TVTarget.EPISODE:
             return is_single_episode
-        if tv_target == TVTarget.SEASON_PACK:
-            return not is_single_episode and bool(
-                coverage.season_numbers or coverage.is_complete_series
-            )
-        return True
+        return not is_single_episode and bool(
+            coverage.season_numbers or coverage.is_complete_series
+        )
 
     @staticmethod
     def _size_for_rule(rule: SizeLimitRule, release: ProwlarrRelease) -> int:
@@ -401,55 +392,36 @@ class RuleEngine:
 
         # Check exclusion patterns (reject immediately)
         for rule_id, rule_name, compiled in self._compiled_exclusion:
-            if self._matches_any_field(compiled, release):
+            matched = self._matches_any_field(compiled, release)
+            matches.append(
+                RuleMatch(
+                    rule_id=rule_id,
+                    rule_name=rule_name,
+                    matched=matched,
+                    rule_type="exclusion",
+                    effect="disallow",
+                )
+            )
+            if matched:
                 passed = False
                 rejection_reason = f"Matched exclusion pattern: {rule_name}"
-                matches.append(
-                    RuleMatch(
-                        rule_id=rule_id,
-                        rule_name=rule_name,
-                        matched=True,
-                        rule_type="exclusion",
-                        effect="disallow",
-                    )
-                )
                 break
-            else:
-                matches.append(
-                    RuleMatch(
-                        rule_id=rule_id,
-                        rule_name=rule_name,
-                        matched=False,
-                        rule_type="exclusion",
-                        effect="disallow",
-                    )
-                )
 
         # Check requirement patterns (all must match at least one)
         if passed and self._compiled_requirement:
             any_matched = False
             for rule_id, rule_name, compiled in self._compiled_requirement:
-                if self._matches_any_field(compiled, release):
-                    any_matched = True
-                    matches.append(
-                        RuleMatch(
-                            rule_id=rule_id,
-                            rule_name=rule_name,
-                            matched=True,
-                            rule_type="requirement",
-                            effect="allow",
-                        )
+                matched = self._matches_any_field(compiled, release)
+                any_matched = any_matched or matched
+                matches.append(
+                    RuleMatch(
+                        rule_id=rule_id,
+                        rule_name=rule_name,
+                        matched=matched,
+                        rule_type="requirement",
+                        effect="allow",
                     )
-                else:
-                    matches.append(
-                        RuleMatch(
-                            rule_id=rule_id,
-                            rule_name=rule_name,
-                            matched=False,
-                            rule_type="requirement",
-                            effect="allow",
-                        )
-                    )
+                )
 
             if not any_matched:
                 passed = False
@@ -457,32 +429,21 @@ class RuleEngine:
 
         # Calculate score for scorer patterns
         for rule_id, rule_name, compiled, score in self._compiled_scorer:
-            if self._matches_any_field(compiled, release):
+            matched = self._matches_any_field(compiled, release)
+            if matched:
                 total_score += score
-                matches.append(
-                    RuleMatch(
-                        rule_id=rule_id,
-                        rule_name=rule_name,
-                        matched=True,
-                        score_delta=score,
-                        rule_type="scorer",
-                        effect="allow",
-                    )
+            matches.append(
+                RuleMatch(
+                    rule_id=rule_id,
+                    rule_name=rule_name,
+                    matched=matched,
+                    score_delta=score if matched else 0,
+                    rule_type="scorer",
+                    effect="allow",
                 )
-            else:
-                matches.append(
-                    RuleMatch(
-                        rule_id=rule_id,
-                        rule_name=rule_name,
-                        matched=False,
-                        rule_type="scorer",
-                        effect="allow",
-                    )
-                )
+            )
 
         if self.quality_policy is not None:
-            from app.siftarr.services.decisions.release_quality import quality_signals
-
             for signal in quality_signals(release, self.quality_policy):
                 total_score += signal.score_delta
                 matches.append(
