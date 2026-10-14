@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from 'vitest';
-import { renderReleaseCard, renderSeasonAccordion } from '/static/js/dashboard/releases.js';
+import { renderReleaseCard, renderSeasonAccordion } from '../../frontend-src/dashboard/releases.ts';
 
 describe('dashboard release rendering', () => {
   beforeEach(() => {

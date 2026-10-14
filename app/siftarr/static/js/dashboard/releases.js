@@ -1,10 +1,10 @@
-import { escapeHtml } from './core.js';
+import { escapeHtml, postWithConfirm, promptEachWarning } from './core.js';
 import { dashboardState } from './core/state.js';
 function renderAnnotation(value, toneClass = 'text-gray-400', dataAttr = '') {
   if (!value) return '';
   return `<span class="${toneClass}" ${dataAttr}>${escapeHtml(value)}</span>`;
 }
-function renderSearchLoadingState(message) {
+export function renderSearchLoadingState(message) {
   return (
     '<div class="dashboard-search-loading" role="status" aria-live="polite">' +
     '<svg class="animate-spin h-4 w-4 shrink-0" aria-hidden="true" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>' +
@@ -14,7 +14,7 @@ function renderSearchLoadingState(message) {
     '</div>'
   );
 }
-function renderMovieSearchLoadingState() {
+export function renderMovieSearchLoadingState() {
   return (
     '<div class="dashboard-details-search-loading" role="status" aria-live="polite">' +
     '<div class="flex items-start gap-3">' +
@@ -86,7 +86,7 @@ function releaseAnnotationTone(release, field) {
   }
   return 'text-gray-400';
 }
-function formatRelativePublishAge(publishDate) {
+export function formatRelativePublishAge(publishDate) {
   if (!publishDate) return '';
   const publishedAt = new Date(publishDate);
   if (Number.isNaN(publishedAt.getTime())) return '';
@@ -169,7 +169,7 @@ function renderIconAction(kind, label, attrs = '', disabled = false) {
     '</button>'
   );
 }
-function renderReleaseCard(release, requestId, options = {}) {
+export function renderReleaseCard(release, requestId, options = {}) {
   const bucket = !!(options && options.bucket);
   const releaseScope = release.target_scope || {};
   const isScopedEpisodeRelease = releaseScope.type === 'single_episode';
@@ -411,7 +411,7 @@ function isMultiSeasonRelease(release) {
     coveredSeasons.length > 1
   );
 }
-function isEpisodeComplete(episode) {
+export function isEpisodeComplete(episode) {
   const status = episode && episode.status;
   return status === 'available' || status === 'completed';
 }
@@ -783,7 +783,7 @@ function renderScopeChip(requestId, value, label, count, activeScope) {
     '</span></button>'
   );
 }
-function renderSeasonAccordion(data) {
+export function renderSeasonAccordion(data) {
   const tvInfo = data.tv_info;
   const requestId = data.request.id;
   const syncState = tvInfo.sync_state || {};
@@ -1074,7 +1074,7 @@ function renderSeasonAccordion(data) {
     '</div>';
   return '<div class="space-y-4">' + scopeChipBar + allSection + seasonPacksSection + completeSeriesSection + '</div>';
 }
-async function markEpisodeAvailable(requestId, episodeId) {
+export async function markEpisodeAvailable(requestId, episodeId) {
   try {
     var response = await fetch('/requests/' + requestId + '/episodes/' + episodeId + '/mark-available', {
       method: 'POST',
@@ -1085,7 +1085,7 @@ async function markEpisodeAvailable(requestId, episodeId) {
     console.error('Failed to mark episode available:', e);
   }
 }
-async function markSeasonAvailable(requestId, seasonId) {
+export async function markSeasonAvailable(requestId, seasonId) {
   try {
     var response = await fetch('/requests/' + requestId + '/seasons/' + seasonId + '/mark-all-available', {
       method: 'POST',
@@ -1096,7 +1096,7 @@ async function markSeasonAvailable(requestId, seasonId) {
     console.error('Failed to mark season available:', e);
   }
 }
-function searchSeasonPacks(requestId, seasonNumber) {
+export function searchSeasonPacks(requestId, seasonNumber) {
   return new Promise(function (resolve) {
     var containers = document.querySelectorAll('[data-season-pack-results="' + requestId + '-' + seasonNumber + '"]');
     if (!containers.length) return resolve();
@@ -1132,7 +1132,7 @@ function searchSeasonPacks(requestId, seasonNumber) {
     );
   });
 }
-function searchMultiSeasonPacks(requestId) {
+export function searchMultiSeasonPacks(requestId) {
   return new Promise(function (resolve) {
     var containers = document.querySelectorAll('[data-multi-season-pack-results="' + requestId + '"]');
     if (!containers.length) return resolve();
@@ -1163,7 +1163,7 @@ function searchMultiSeasonPacks(requestId) {
     );
   });
 }
-async function searchAllSeasonPacks(requestId, btn = null) {
+export async function searchAllSeasonPacks(requestId, btn = null) {
   var data = window.currentDetailsData;
   var seasons = ((data && data.tv_info && data.tv_info.seasons) || []).filter(isSeasonPackEligible);
   if (!seasons.length) return;
@@ -1184,7 +1184,7 @@ async function searchAllSeasonPacks(requestId, btn = null) {
     }
   }
 }
-async function searchEpisode(requestId, seasonNumber, episodeNumber) {
+export async function searchEpisode(requestId, seasonNumber, episodeNumber) {
   var details = document.getElementById('episode-details-' + requestId + '-' + seasonNumber + '-' + episodeNumber);
   var container = document.getElementById('episode-search-' + requestId + '-' + seasonNumber + '-' + episodeNumber);
   if (!container) return;
@@ -1218,25 +1218,12 @@ async function submitReleaseAction(btn, approveNow = false) {
       formData.append(key, String(value));
     }
     if (approveNow) formData.append('approve_now', 'true');
-    let resp = await fetch(url, {
-      method: 'POST',
-      headers: { Accept: 'application/json' },
-      body: formData,
-    });
-    if (resp.status === 409) {
-      const conflict = await resp.json().catch(() => null);
-      const warnings = conflict?.detail?.warnings || [];
-      for (const warning of warnings) {
-        if (
-          !window.confirm(`${warning.message}
-
-Continue with this exact release?`)
-        )
-          return;
-        if (warning.code) formData.append(`confirm_${warning.code}`, 'true');
-      }
-      resp = await fetch(url, { method: 'POST', headers: { Accept: 'application/json' }, body: formData });
-    }
+    const { response: resp, cancelled } = await postWithConfirm(
+      url,
+      formData,
+      promptEachWarning('Continue with this exact release?'),
+    );
+    if (cancelled) return;
     if (!resp.ok) {
       const errData = await resp.json().catch(() => null);
       throw new Error(errData?.detail || errData?.message || `HTTP ${resp.status}`);
@@ -1259,13 +1246,13 @@ Continue with this exact release?`)
     window.showToast('Error: ' + err.message);
   }
 }
-async function stageRelease(btn) {
+export async function stageRelease(btn) {
   return submitReleaseAction(btn, false);
 }
-async function approveRelease(btn) {
+export async function approveRelease(btn) {
   return submitReleaseAction(btn, true);
 }
-async function rejectRelease(btn, requestId, releaseId) {
+export async function rejectRelease(btn, requestId, releaseId) {
   btn.disabled = true;
   btn.setAttribute('aria-busy', 'true');
   btn.classList.add('opacity-50');
@@ -1288,32 +1275,15 @@ async function rejectRelease(btn, requestId, releaseId) {
     window.showToast('Error: ' + err.message);
   }
 }
-async function stageIndividualEpisodes(btn, requestId, seasonNumber) {
+export async function stageIndividualEpisodes(btn, requestId, seasonNumber) {
   const originalText = btn.textContent;
   btn.disabled = true;
   btn.textContent = 'Staging…';
   try {
     const actionUrl = '/requests/' + requestId + '/seasons/' + seasonNumber + '/stage-individual-episodes';
     const formData = new FormData();
-    let resp = await fetch(actionUrl, {
-      method: 'POST',
-      headers: { Accept: 'application/json' },
-      body: formData,
-    });
-    if (resp.status === 409) {
-      const conflict = await resp.json().catch(() => null);
-      const warnings = conflict?.detail?.warnings || [];
-      for (const warning of warnings) {
-        if (
-          !window.confirm(`${warning.message}
-
-Continue?`)
-        )
-          return;
-        if (warning.code) formData.append(`confirm_${warning.code}`, 'true');
-      }
-      resp = await fetch(actionUrl, { method: 'POST', headers: { Accept: 'application/json' }, body: formData });
-    }
+    const { response: resp, cancelled } = await postWithConfirm(actionUrl, formData, promptEachWarning('Continue?'));
+    if (cancelled) return;
     if (!resp.ok) {
       const errData = await resp.json().catch(() => null);
       throw new Error(errData?.detail || `HTTP ${resp.status}`);
@@ -1328,7 +1298,7 @@ Continue?`)
     window.showToast('Error: ' + err.message);
   }
 }
-async function inlineStagedAction(actionUrl, btn = null) {
+export async function inlineStagedAction(actionUrl, btn = null) {
   const originalContent = btn ? btn.innerHTML : '';
   const approvedEpisodeDetailsId = actionUrl.endsWith('/approve')
     ? btn?.closest?.('details[id^="episode-details-"]')?.id || null
@@ -1341,25 +1311,8 @@ async function inlineStagedAction(actionUrl, btn = null) {
   try {
     const formData = new FormData();
     formData.append('redirect_to', '/?tab=staged');
-    let response = await fetch(actionUrl, {
-      method: 'POST',
-      headers: { Accept: 'application/json' },
-      body: formData,
-    });
-    if (response.status === 409) {
-      const conflict = await response.json().catch(() => null);
-      const warnings = conflict?.detail?.warnings || [];
-      for (const warning of warnings) {
-        if (
-          !window.confirm(`${warning.message}
-
-Approve anyway?`)
-        )
-          return;
-        if (warning.code) formData.append(`confirm_${warning.code}`, 'true');
-      }
-      response = await fetch(actionUrl, { method: 'POST', headers: { Accept: 'application/json' }, body: formData });
-    }
+    const { response, cancelled } = await postWithConfirm(actionUrl, formData, promptEachWarning('Approve anyway?'));
+    if (cancelled) return;
     if (!response.ok) {
       const errorData = await response.json().catch(() => null);
       throw new Error(errorData?.detail || errorData?.message || `Server error: ${response.status}`);
@@ -1388,14 +1341,14 @@ Approve anyway?`)
     window.showToast('Error: ' + err.message);
   }
 }
-function captureDetailsAccordionState() {
+export function captureDetailsAccordionState() {
   const state = {};
   document.querySelectorAll('#request-details-releases details[id]').forEach(function (details) {
     state[details.id] = !!details.open;
   });
   return state;
 }
-function restoreDetailsAccordionState(state) {
+export function restoreDetailsAccordionState(state) {
   if (!state) return;
   document.querySelectorAll('#request-details-releases details[id]').forEach(function (details) {
     if (Object.prototype.hasOwnProperty.call(state, details.id)) {
@@ -1442,21 +1395,21 @@ function setTvAccordionNodesOpen(nodes, open) {
   });
   updateTvAccordionControls();
 }
-function toggleTvDetailsAll(requestId) {
+export function toggleTvDetailsAll(requestId) {
   var nodes = tvDetailsNodesForRequest(requestId);
   var shouldOpen = nodes.some(function (details) {
     return !details.open;
   });
   setTvAccordionNodesOpen(nodes, shouldOpen);
 }
-function toggleTvSeasonDetails(requestId, seasonNumber) {
+export function toggleTvSeasonDetails(requestId, seasonNumber) {
   var nodes = tvSeasonNodes(requestId, seasonNumber);
   var shouldOpen = nodes.some(function (details) {
     return !details.open;
   });
   setTvAccordionNodesOpen(nodes, shouldOpen);
 }
-function focusTvEpisode(requestId, seasonNumber, episodeNumber) {
+export function focusTvEpisode(requestId, seasonNumber, episodeNumber) {
   if (!requestId || !seasonNumber || !episodeNumber) return;
   const seasonDetails = document.getElementById('season-details-' + requestId + '-' + seasonNumber);
   const targetDetails = document.getElementById(
@@ -1475,7 +1428,7 @@ function focusTvEpisode(requestId, seasonNumber, episodeNumber) {
   }
   updateTvAccordionControls();
 }
-function focusStagedTvScope(requestId, scope) {
+export function focusStagedTvScope(requestId, scope) {
   if (!scope || scope.type !== 'single_episode') return;
   focusTvEpisode(requestId, scope.season_number, scope.episode_number);
 }
@@ -1488,13 +1441,13 @@ function parseSingleEpisodeScopeFromTitle(title) {
     episode_number: Number(match[2]),
   };
 }
-function openStagedRequestDetailsFromElement(element) {
+export function openStagedRequestDetailsFromElement(element) {
   const requestId = Number(element?.dataset?.requestId || 0);
   if (!requestId) return;
   const focusTvScope = parseSingleEpisodeScopeFromTitle(element.dataset.title || element.textContent || '');
   window.openRequestDetails(requestId, null, { focusTvScope });
 }
-function updateTvAccordionControls() {
+export function updateTvAccordionControls() {
   document.querySelectorAll('[data-tv-accordion-toggle]').forEach(function (button) {
     var requestId = button.dataset.requestId;
     var nodes =
@@ -1510,34 +1463,6 @@ function updateTvAccordionControls() {
     button.setAttribute('aria-expanded', allOpen ? 'true' : 'false');
   });
 }
-
-export {
-  renderReleaseCard,
-  renderSearchLoadingState,
-  renderMovieSearchLoadingState,
-  renderSeasonAccordion,
-  formatRelativePublishAge,
-  isEpisodeComplete,
-  markEpisodeAvailable,
-  markSeasonAvailable,
-  searchSeasonPacks,
-  searchMultiSeasonPacks,
-  searchAllSeasonPacks,
-  searchEpisode,
-  stageRelease,
-  approveRelease,
-  rejectRelease,
-  stageIndividualEpisodes,
-  inlineStagedAction,
-  focusTvEpisode,
-  focusStagedTvScope,
-  openStagedRequestDetailsFromElement,
-  captureDetailsAccordionState,
-  restoreDetailsAccordionState,
-  toggleTvDetailsAll,
-  toggleTvSeasonDetails,
-  updateTvAccordionControls,
-};
 Object.assign(window, {
   renderReleaseCard,
   renderSearchLoadingState,

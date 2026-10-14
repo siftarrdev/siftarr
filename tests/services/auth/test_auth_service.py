@@ -14,248 +14,121 @@ from app.siftarr.services.auth_service import (
 )
 
 
-class TestExtractApiKey:
-    """Tests for _extract_api_key."""
-
-    def test_x_api_key_header(self):
-        """Should extract from X-API-Key header."""
-        request = Request(
-            scope={
-                "type": "http",
-                "headers": [(b"x-api-key", b"my-key")],
-            }
-        )
-        assert _extract_api_key(request) == "my-key"
-
-    def test_authorization_bearer(self):
-        """Should extract from Authorization: Bearer header."""
-        request = Request(
-            scope={
-                "type": "http",
-                "headers": [(b"authorization", b"Bearer my-token")],
-            }
-        )
-        assert _extract_api_key(request) == "my-token"
-
-    def test_no_header_returns_none(self):
-        """Should return None when no auth header present."""
-        request = Request(scope={"type": "http", "headers": []})
-        assert _extract_api_key(request) is None
+def make_request(**scope) -> Request:
+    return Request(scope={"type": "http", **scope})
 
 
-class TestGetSessionUser:
-    """Tests for get_session_user."""
-
-    def test_no_session_returns_none(self):
-        """Should return None when no session data."""
-        request = Request(scope={"type": "http", "session": {}})
-        assert get_session_user(request) is None
-
-    def test_with_session_returns_user(self):
-        """Should return user dict from session."""
-        request = Request(
-            scope={
-                "type": "http",
-                "session": {
-                    "plex_user_id": "123",
-                    "plex_username": "testuser",
-                    "plex_thumb": "http://example.com/thumb.jpg",
-                },
-            }
-        )
-        user = get_session_user(request)
-        assert user is not None
-        assert user["plex_user_id"] == "123"
-        assert user["plex_username"] == "testuser"
-
-    def test_session_without_user_id_returns_none(self):
-        """Should return None when plex_user_id is missing from session."""
-        request = Request(
-            scope={
-                "type": "http",
-                "session": {"other_key": "value"},
-            }
-        )
-        assert get_session_user(request) is None
+@pytest.fixture
+def auth_settings():
+    with patch("app.siftarr.services.auth_service.get_settings") as mock_get_settings:
+        settings = mock_get_settings.return_value
+        settings.auth_enabled = True
+        settings.api_key = "secret"
+        yield settings
 
 
-class TestRequireAuth:
-    """Tests for require_auth."""
+@pytest.mark.parametrize(
+    ("headers", "expected"),
+    [
+        ([(b"x-api-key", b"my-key")], "my-key"),
+        ([(b"authorization", b"Bearer my-token")], "my-token"),
+        ([], None),
+    ],
+    ids=["x_api_key", "bearer", "absent"],
+)
+def test_extract_api_key(headers, expected):
+    assert _extract_api_key(make_request(headers=headers)) == expected
 
-    @patch("app.siftarr.services.auth_service.get_settings")
-    async def test_auth_disabled_passes(self, mock_get_settings):
-        """Should pass when auth is disabled."""
-        mock_get_settings.return_value.auth_enabled = False
-        request = Request(
-            scope={"type": "http", "session": {}, "headers": [(b"accept", b"application/json")]}
-        )
+
+@pytest.mark.parametrize(
+    "session",
+    [{}, {"other_key": "value"}],
+    ids=["empty_session", "missing_user_id"],
+)
+def test_get_session_user_without_user_returns_none(session):
+    assert get_session_user(make_request(session=session)) is None
+
+
+def test_get_session_user_returns_user():
+    request = make_request(session={"plex_user_id": "123", "plex_username": "testuser"})
+
+    user = get_session_user(request)
+
+    assert user is not None
+    assert user["plex_user_id"] == "123"
+    assert user["plex_username"] == "testuser"
+
+
+def test_stale_session_is_cleared(monkeypatch):
+    """Session user id must match the claimed admin id."""
+    monkeypatch.setenv("PLEX_CLAIMED_ID", "admin")
+    session = {"plex_user_id": "other", "plex_username": "intruder"}
+
+    assert get_session_user(make_request(session=session)) is None
+    assert session == {}
+
+
+async def test_auth_disabled_passes(auth_settings):
+    auth_settings.auth_enabled = False
+    await require_auth(make_request(session={}, headers=[(b"accept", b"application/json")]))
+
+
+@pytest.mark.parametrize(
+    "scope",
+    [
+        {"session": {"plex_user_id": "123"}},
+        {"session": {}, "headers": [(b"x-api-key", b"secret")]},
+        {"session": {}, "headers": [(b"authorization", b"Bearer secret")]},
+        {
+            "method": "GET",
+            "path": "/settings/api/rescan-plex/stream",
+            "session": {"plex_user_id": "123", "initial_plex_sync_required": True},
+            "headers": [(b"accept", b"text/event-stream")],
+        },
+    ],
+    ids=["session", "x_api_key", "bearer_api_key", "initial_sync_allows_sync_stream"],
+)
+async def test_require_auth_accepts(auth_settings, scope):
+    await require_auth(make_request(**scope))
+
+
+@pytest.mark.parametrize(
+    ("api_key", "headers", "path"),
+    [
+        ("secret", [(b"accept", b"application/json")], "/api/x"),
+        ("correct-key", [(b"x-api-key", b"wrong-key")], "/api/x"),
+        ("dev-key-change-me", [(b"x-api-key", b"dev-key-change-me")], "/api/x"),
+        ("secret", [(b"accept", b"*/*")], "/requests/1/details"),
+    ],
+    ids=["no_credentials", "wrong_key", "placeholder_key_rejected", "api_route_wildcard_accept"],
+)
+async def test_require_auth_rejects_with_401(auth_settings, api_key, headers, path):
+    auth_settings.api_key = api_key
+    request = make_request(method="GET", path=path, session={}, headers=headers)
+
+    with pytest.raises(HTTPException) as exc:
         await require_auth(request)
 
-    @patch("app.siftarr.services.auth_service.get_settings")
-    async def test_valid_session_passes(self, mock_get_settings):
-        """Should pass when valid session exists."""
-        mock_get_settings.return_value.auth_enabled = True
-        request = Request(
-            scope={
-                "type": "http",
-                "session": {"plex_user_id": "123"},
-            }
-        )
+    assert exc.value.status_code == 401
+
+
+@pytest.mark.parametrize(
+    ("session", "headers", "path", "error"),
+    [
+        ({}, [(b"accept", b"text/html")], "/dashboard", BrowserAuthRequired),
+        (
+            {"plex_user_id": "123", "initial_plex_sync_required": True},
+            [(b"accept", b"text/html")],
+            "/dashboard",
+            InitialPlexSyncRequired,
+        ),
+    ],
+    ids=["browser_redirects_to_login", "initial_sync_blocks_dashboard"],
+)
+async def test_require_auth_browser_gates(auth_settings, session, headers, path, error):
+    request = make_request(
+        method="GET", path=path, query_string=b"tab=all", session=session, headers=headers
+    )
+
+    with pytest.raises(error):
         await require_auth(request)
-
-    @patch("app.siftarr.services.auth_service.get_settings")
-    async def test_initial_sync_gate_blocks_dashboard(self, mock_get_settings):
-        """First-claim sessions should not access protected pages until sync completes."""
-        mock_get_settings.return_value.auth_enabled = True
-        request = Request(
-            scope={
-                "type": "http",
-                "method": "GET",
-                "path": "/dashboard",
-                "session": {"plex_user_id": "123", "initial_plex_sync_required": True},
-                "headers": [(b"accept", b"text/html")],
-            }
-        )
-
-        with pytest.raises(InitialPlexSyncRequired):
-            await require_auth(request)
-
-    @patch("app.siftarr.services.auth_service.get_settings")
-    async def test_initial_sync_gate_allows_full_sync_stream(self, mock_get_settings):
-        """The blocking sync page must be able to open the Plex SSE stream."""
-        mock_get_settings.return_value.auth_enabled = True
-        request = Request(
-            scope={
-                "type": "http",
-                "method": "GET",
-                "path": "/settings/api/rescan-plex/stream",
-                "session": {"plex_user_id": "123", "initial_plex_sync_required": True},
-                "headers": [(b"accept", b"text/event-stream")],
-            }
-        )
-
-        await require_auth(request)
-
-    @patch("app.siftarr.services.auth_service.get_settings")
-    async def test_valid_api_key_passes(self, mock_get_settings):
-        """Should pass when valid API key is provided."""
-        mock_get_settings.return_value.auth_enabled = True
-        mock_get_settings.return_value.api_key = "secret"
-        request = Request(
-            scope={
-                "type": "http",
-                "session": {},
-                "headers": [(b"x-api-key", b"secret")],
-            }
-        )
-        await require_auth(request)
-
-    @patch("app.siftarr.services.auth_service.get_settings")
-    async def test_valid_bearer_api_key_passes(self, mock_get_settings):
-        """Should pass when valid API key is provided via Authorization header."""
-        mock_get_settings.return_value.auth_enabled = True
-        mock_get_settings.return_value.api_key = "secret"
-        request = Request(
-            scope={
-                "type": "http",
-                "session": {},
-                "headers": [(b"authorization", b"Bearer secret")],
-            }
-        )
-        await require_auth(request)
-
-    @patch("app.siftarr.services.auth_service.get_settings")
-    async def test_no_session_no_key_raises(self, mock_get_settings):
-        """Should raise 401 when no session and no API key."""
-        mock_get_settings.return_value.auth_enabled = True
-        mock_get_settings.return_value.api_key = "secret"
-        request = Request(
-            scope={
-                "type": "http",
-                "session": {},
-                "headers": [(b"accept", b"application/json")],
-            }
-        )
-        with pytest.raises(HTTPException) as exc:
-            await require_auth(request)
-        assert exc.value.status_code == 401
-
-    @patch("app.siftarr.services.auth_service.get_settings")
-    async def test_wrong_api_key_raises(self, mock_get_settings):
-        """Should raise 401 when API key doesn't match."""
-        mock_get_settings.return_value.auth_enabled = True
-        mock_get_settings.return_value.api_key = "correct-key"
-        request = Request(
-            scope={
-                "type": "http",
-                "session": {},
-                "headers": [(b"x-api-key", b"wrong-key")],
-            }
-        )
-        with pytest.raises(HTTPException) as exc:
-            await require_auth(request)
-        assert exc.value.status_code == 401
-
-    @patch("app.siftarr.services.auth_service.get_settings")
-    async def test_placeholder_api_key_is_rejected(self, mock_get_settings):
-        """The development placeholder must never authenticate requests."""
-        mock_get_settings.return_value.auth_enabled = True
-        mock_get_settings.return_value.api_key = "dev-key-change-me"
-        request = Request(
-            scope={
-                "type": "http",
-                "session": {},
-                "headers": [(b"x-api-key", b"dev-key-change-me")],
-            }
-        )
-
-        with pytest.raises(HTTPException) as exc:
-            await require_auth(request)
-        assert exc.value.status_code == 401
-
-    @patch("app.siftarr.services.auth_service.get_settings")
-    async def test_browser_request_redirects_to_login(self, mock_get_settings):
-        """Unauthenticated HTML requests should trigger login redirect handling."""
-        mock_get_settings.return_value.auth_enabled = True
-        mock_get_settings.return_value.api_key = "secret"
-        request = Request(
-            scope={
-                "type": "http",
-                "method": "GET",
-                "path": "/dashboard",
-                "query_string": b"tab=all",
-                "session": {},
-                "headers": [(b"accept", b"text/html")],
-            }
-        )
-
-        with pytest.raises(BrowserAuthRequired):
-            await require_auth(request)
-
-    @patch("app.siftarr.services.auth_service.get_settings")
-    async def test_api_route_with_wildcard_accept_gets_401(self, mock_get_settings):
-        """API-like route prefixes should not be classified as browser redirects."""
-        mock_get_settings.return_value.auth_enabled = True
-        mock_get_settings.return_value.api_key = "secret"
-        request = Request(
-            scope={
-                "type": "http",
-                "method": "GET",
-                "path": "/requests/1/details",
-                "session": {},
-                "headers": [(b"accept", b"*/*")],
-            }
-        )
-
-        with pytest.raises(HTTPException) as exc:
-            await require_auth(request)
-        assert exc.value.status_code == 401
-
-    async def test_stale_session_is_cleared(self, monkeypatch):
-        """Session user id must match the claimed admin id."""
-        monkeypatch.setenv("PLEX_CLAIMED_ID", "admin")
-        session = {"plex_user_id": "other", "plex_username": "intruder"}
-        request = Request(scope={"type": "http", "session": session})
-
-        assert get_session_user(request) is None
-        assert session == {}

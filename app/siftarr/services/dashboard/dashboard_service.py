@@ -64,12 +64,6 @@ class RequestDetailsData:
 
 
 @dataclass(slots=True)
-class RequestSearchData:
-    request: DashboardRequestSummary
-    releases: list[dict[str, object]]
-
-
-@dataclass(slots=True)
 class TVSearchData:
     releases: list[dict[str, object]]
     known_total_seasons: int | None = None
@@ -121,19 +115,6 @@ def serialize_request_details_response(data: RequestDetailsData) -> dict[str, ob
             "aggregate_counts": data.tv_info.aggregate_counts,
         }
     return payload
-
-
-def serialize_request_search_response(data: RequestSearchData) -> dict[str, object]:
-    """Convert movie-search service DTOs into JSON-ready payloads."""
-    return {
-        "releases": data.releases,
-        "request": {
-            "id": data.request.id,
-            "title": data.request.title,
-            "status": data.request.status,
-            "media_type": data.request.media_type,
-        },
-    }
 
 
 def serialize_tv_search_response(data: TVSearchData) -> dict[str, object]:

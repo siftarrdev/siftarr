@@ -4,7 +4,6 @@ import httpx
 import pytest
 
 from app.siftarr.services.integrations.plex_service import (
-    PlexLibraryScanResult,
     PlexTransientScanError,
 )
 
@@ -134,15 +133,12 @@ async def test_scan_cycle_caches_section_listing_and_lookup_results(service, moc
         assert active_service is service
         first = await service.lookup_movie_by_tmdb(444)
         second = await service.lookup_movie_by_tmdb(444)
-        cached_item = service.get_cached_item_by_rating_key("900")
 
     assert first.item is not None
     assert first.authoritative is True
     assert second.item is not None
     assert second.item["rating_key"] == "900"
     assert mock_client.get.await_count == 4
-    assert cached_item is not None
-    assert cached_item["title"] == "Cached Movie"
 
 
 @pytest.mark.asyncio
@@ -151,32 +147,3 @@ async def test_iter_section_items_raises_transient_error_on_http_failure(service
 
     with pytest.raises(PlexTransientScanError):
         [item async for item in service.iter_section_items("5")]
-
-
-@pytest.mark.asyncio
-async def test_scan_library_items_reports_partial_failure_authoritatively(service, monkeypatch):
-    async def get_sections(media_type: str, *, strict: bool):
-        assert media_type == "movie"
-        assert strict is True
-        return [{"key": "1", "type": "movie"}, {"key": "2", "type": "movie"}]
-
-    async def iter_section_items(section_key: str, **kwargs):
-        del kwargs
-        if section_key == "1":
-            yield {"rating_key": "101", "type": "movie", "Media": [{"id": 1}]}
-            return
-        raise PlexTransientScanError("boom")
-        if False:
-            yield {}
-
-    monkeypatch.setattr(service, "_get_library_sections_metadata", get_sections)
-    monkeypatch.setattr(service, "iter_section_items", iter_section_items)
-
-    result = await service.scan_library_items("movie")
-
-    assert result == PlexLibraryScanResult(
-        media_type="movie",
-        items=({"rating_key": "101", "type": "movie", "Media": [{"id": 1}]},),
-        authoritative=False,
-        failed_sections=("2",),
-    )

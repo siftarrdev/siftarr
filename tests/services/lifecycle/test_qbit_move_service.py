@@ -7,14 +7,12 @@ from unittest.mock import AsyncMock
 
 import pytest
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from app.siftarr.config import Settings
-from app.siftarr.models._base import Base
 from app.siftarr.models.activity_log import ActivityLog, EventType
-from app.siftarr.models.request import MediaType, Request, RequestStatus
-from app.siftarr.models.staged_torrent import StagedTorrent
+from app.siftarr.models.request import MediaType, RequestStatus
 from app.siftarr.services.lifecycle.qbit_move_service import QbitMoveService
+from tests.factories import make_request, make_staged_torrent
 
 
 def _settings(**overrides: Any) -> Settings:
@@ -30,39 +28,18 @@ def _settings(**overrides: Any) -> Settings:
     return Settings(**values)  # type: ignore[arg-type]
 
 
-@pytest.fixture
-async def session_maker():
-    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-    maker = async_sessionmaker(engine, expire_on_commit=False)
-    try:
-        yield maker
-    finally:
-        await engine.dispose()
-
-
 async def _add_managed(session, *, media_type=MediaType.TV, title="Example Show"):
-    request = Request(
-        external_id=f"{media_type.value}-1",
-        media_type=media_type,
-        title=title,
-        status=RequestStatus.DOWNLOADING,
+    request = await make_request(
+        session, media_type=media_type, title=title, status=RequestStatus.DOWNLOADING
     )
-    session.add(request)
-    await session.flush()
-    staged = StagedTorrent(
-        request_id=request.id,
-        torrent_path="/tmp/test.torrent",
-        json_path="/tmp/test.json",
-        original_filename="test.torrent",
+    staged = await make_staged_torrent(
+        session,
+        request,
         title=f"{title}.S01.1080p" if media_type == MediaType.TV else title,
         size=1,
-        indexer="idx",
         status="approved",
         info_hash="abc123",
     )
-    session.add(staged)
     await session.commit()
     return request, staged
 
@@ -140,8 +117,8 @@ async def test_managed_destination_sanitizes_path_like_titles(session_maker):
         qbit.get_completed_torrents.return_value = [
             {"hash": "abc123", "name": "Escape.S01E01", "save_path": "/downloads"}
         ]
-
         qbit.set_torrent_location.return_value = True
+
         result = await QbitMoveService(session, qbit, _settings()).run()
 
         assert result.moved == 1

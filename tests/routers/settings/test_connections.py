@@ -137,39 +137,6 @@ async def test_toggle_staging_mode_flips_runtime_setting(monkeypatch, mock_db):
 
 
 @pytest.mark.asyncio
-async def test_get_connections_api_returns_effective_connection_settings(monkeypatch, mock_db):
-    """Connections API should expose the effective settings subset."""
-
-    # Mock SettingsStore.get_effective_dict to return test data
-    expected = {
-        "overseerr_url": "https://overseerr",
-        "overseerr_api_key": "ov-key",
-        "prowlarr_url": "https://prowlarr",
-        "prowlarr_api_key": "pr-key",
-        "qbittorrent_url": "https://qb",
-        "qbittorrent_api_key": "qbt_test_key",
-        "plex_url": "https://plex",
-        "plex_token": "plex-token",
-        "tz": "UTC",
-    }
-    store = AsyncMock()
-    store.get_effective_dict.return_value = expected
-    monkeypatch.setattr(settings, "SettingsStore", lambda db: store)
-
-    payload = await settings.get_connections_api(db=mock_db)
-
-    assert payload == {
-        "overseerr_url": "https://overseerr",
-        "overseerr_api_key": "ov-key",
-        "prowlarr_url": "https://prowlarr",
-        "prowlarr_api_key": "pr-key",
-        "qbittorrent_url": "https://qb",
-        "qbittorrent_api_key": "qbt_test_key",
-        "tz": "UTC",
-    }
-
-
-@pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("route_name", "tester_name", "service_name"),
     [

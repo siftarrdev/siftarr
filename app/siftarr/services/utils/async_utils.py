@@ -1,6 +1,7 @@
 """Async helper utilities shared by sync flows."""
 
 import asyncio
+import inspect
 from collections.abc import Awaitable, Callable, Iterable
 from typing import Literal, overload
 
@@ -43,3 +44,9 @@ async def gather_limited[T, R](
         *(run(item) for item in items),
         return_exceptions=return_exceptions,
     )
+
+
+async def maybe_await(value: object) -> None:
+    """Await a callback result when the callback was async; ignore it otherwise."""
+    if inspect.isawaitable(value):
+        await value

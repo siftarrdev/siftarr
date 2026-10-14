@@ -28,16 +28,6 @@ class PlexLookupResult:
 
 
 @dataclass(slots=True)
-class PlexLibraryScanResult:
-    """Result for a full/recent library scan with authoritative status."""
-
-    media_type: str
-    items: tuple[dict[str, Any], ...]
-    authoritative: bool
-    failed_sections: tuple[str, ...] = ()
-
-
-@dataclass(slots=True)
 class PlexEpisodeAvailabilityResult:
     """Episode availability with authoritative status."""
 

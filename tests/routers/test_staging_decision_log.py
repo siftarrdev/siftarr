@@ -1,4 +1,4 @@
-"""Tests for staged decision-log API."""
+"""Tests for the staged decision-log API and its Rules-area page."""
 
 import json
 import os
@@ -139,19 +139,20 @@ def test_pagination_filters_legacy_links_corrupt_and_retention(client):
 
     headers = {"X-API-Key": "valid-api-key"}
     page = client.get("/staged/decision-log?page_size=1", headers=headers).json()
-    assert page["total"] == 3
+    # Expired, legacy (unversioned), and corrupt entries are all skipped.
+    assert page["total"] == 2
     assert page["has_next"] is True
 
     assert client.get("/staged/decision-log?media_type=tv", headers=headers).json()["total"] == 1
     assert (
         client.get("/staged/decision-log?event_type=replacement", headers=headers).json()["total"]
-        == 1
+        == 0
     )
     assert (
         client.get("/staged/decision-log?selection_source=manual", headers=headers).json()["total"]
         == 1
     )
-    assert client.get("/staged/decision-log?request_id=3", headers=headers).json()["total"] == 1
+    assert client.get("/staged/decision-log?request_id=3", headers=headers).json()["total"] == 0
     assert client.get("/staged/decision-log?title=great", headers=headers).json()["total"] == 1
     assert (
         client.get("/staged/decision-log?rule_name=preferred", headers=headers).json()["total"] == 2
@@ -161,3 +162,24 @@ def test_pagination_filters_legacy_links_corrupt_and_retention(client):
     item = client.get("/staged/decision-log?request_id=0", headers=headers).json()["items"][0]
     assert item["selected_release"]["download_url"] == "https://full/link"
     assert item["selected_release"]["magnet_url"].startswith("magnet:")
+
+
+def test_decision_log_page_is_protected(client):
+    response = client.get(
+        "/rules/decision-log", headers={"accept": "text/html"}, follow_redirects=False
+    )
+
+    assert response.status_code == 303
+    assert response.headers["location"].startswith("/auth/login?next=%2Frules%2Fdecision-log")
+
+
+def test_decision_log_page_renders_with_session(client):
+    session_data = b64encode(json.dumps({"plex_user_id": "admin-id"}).encode("utf-8"))
+    client.cookies.set("session", TimestampSigner("test-secret").sign(session_data).decode("utf-8"))
+
+    response = client.get("/rules/decision-log")
+
+    assert response.status_code == 200
+    assert "Staging Decision Log" in response.text
+    assert "/static/js/staging_decision_log.js" in response.text
+    assert 'name="date_from"' in response.text

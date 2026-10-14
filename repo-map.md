@@ -60,10 +60,10 @@ Primary flow:
 - `ty.toml` — static type checker configuration (Python version target)
 - `uv.lock` — locked dependency graph for `uv`
 - `package.json` — Tailwind and incremental TypeScript builds plus frontend format, lint, typecheck, and test scripts
-- `tsconfig.json`: strict no-emit TypeScript config used by `bun run typecheck:frontend`
-- `bun.lock`: locked frontend dependency graph for Bun (replaces `package-lock.json`)
-- `bunfig.toml`: runs package.json scripts and their CLIs on Bun
-- `eslint.config.mjs` / `.prettierrc.json` — JavaScript linting and formatting policy for browser code under `app/siftarr/static/js/`
+- `tsconfig.json` — strict no-emit TypeScript config used by `bun run typecheck:frontend`
+- `bun.lock` — locked frontend dependency graph for Bun (replaces `package-lock.json`)
+- `bunfig.toml` — runs package.json scripts and their CLIs on Bun
+- `frontend-src/eslint.config.mjs` / `frontend-tests/eslint.config.mjs` / `.prettierrc.json` — TypeScript and test linting plus formatting policy; generated `app/siftarr/static/js/` output is not linted directly
 - `node_modules/` — JavaScript dependencies (gitignored)
 
 ## Documentation map
@@ -137,15 +137,17 @@ Database entities and enums.
 
 HTTP route layer.
 
+- `_responses.py` — shared JSON-or-303-redirect helpers for form actions (`wants_json`, `finalize_action_response`); redirect targets go through `request_service.safe_local_redirect_url`
+
 - `auth_router.py` — Plex SSO auth endpoints (login page, first-login admin claim, initial Plex sync gate page/completion, same-admin token refresh, guarded full Plex sync kick-off after later successful admin sign-in, non-admin denial UX, logout, session info); included without global auth dependency
 - `dashboard.py` — main dashboard page routes; `GET /api/downloads` (unfinished) and `GET /api/torrents/completed` (live completed) both return qBittorrent torrents grouped by owning Siftarr request with per-group totals, lifecycle actions limited to matched Siftarr rows
 - `dashboard_api.py` — dashboard JSON endpoints for details/search/history data, including validated detail-release filter/sort query controls
 - `dashboard_actions.py` — dashboard-triggered actions and mutations, including per-release staging, direct approval, and manual candidate rejection
-- `search_sse.py` — SSE streaming endpoints for live search progress and post-commit `results_updated` notifications; `/requests/{id}/search/stream` supports TV `search_mode=new|full`, while TV scope-specific streams remain compatibility/debug inspect paths
+- `search_sse.py` — SSE streaming endpoints for live search progress and post-commit `results_updated` notifications; `/requests/{id}/search/stream` supports TV `search_mode=new|full`, and TV season-pack, multi-season, and episode scope streams back the targeted dashboard searches
 - `rules.py` — rule management UI/API, including unified rule listing, multi-title testing, modal create/edit actions, export, import preview/apply flows that merge explicit keep selections from existing and imported rules, and the Rules-area staging decision-log page for rule tuning
 - `settings.py` — settings UI (connection test/save/reset, scheduler interval save/reset, staging toggle, Plex rescan, Overseerr sync, cache/reseed actions, SSE progress streams, API key management, Plex SSO status, non-secret settings backup preview/restore, qBit mover enable/paths/retention settings and manual trigger, and Settings-hosted background job status/manual triggers); Overseerr reconciliation keys imports by request ID so repeat requests and cross-provider media-ID collisions remain distinct, uses SettingsStore for DB-backed persistence, and keeps the SSO-managed Plex token out of connection saves/resets/backups
 - `stats.py` — protected Stats page and JSON data endpoint for all-time, preset, and custom date ranges, including chart-ready time-series payloads
-- `staged.py` — staged torrent review/approval endpoints, staged-alternative comparison API, session/API-key staging decision-log API, and download-status endpoint returning move tracking fields (status, path, error) for dashboard visibility
+- `staged.py` — staged torrent review/approval endpoints, staged-alternative comparison API, and session/API-key staging decision-log API
 - `download_health.py` — protected persisted-health listing and explicitly confirmed recovery API; recovery leaves qBittorrent torrents and files untouched
 - `webhooks.py` — inbound webhook handling; validates movie/TV media types and requires a positive TMDB or TVDB identifier before request creation
 
@@ -160,10 +162,10 @@ Business logic and integrations, organized into thematic subpackages:
 - `stats_service.py` — read-side Stats aggregation and date-range validation for cards, splits, rule outcomes, timing charts, and chart-ready time series (downloads, failures, rule rejections, indexer behavior)
 - `stats_metrics_service.py` — write-only instrumentation helpers for immutable stats metric facts/events consumed by the Stats service/API
 - `search_history_service.py` — records/finalizes request search runs, stores compact candidate/rule evidence snapshots, and serves paginated search history plus staged alternative comparisons
-- `staging_decision_log.py` — append/read/normalize the JSONL staging decision log used for rule-tuning diagnostics, including retention and legacy entry compatibility
+- `staging_decision_log.py` — append/read/normalize the JSONL staging decision log used for rule-tuning diagnostics, including retention; entries without `schema_version` are skipped
 
 **`auth/`** — Plex SSO authentication
-- `plex_oauth_service.py` — `PlexOAuthService` wrapping plex.tv API calls (PIN flow, user identity, token validation)
+- `plex_oauth_service.py` — `PlexOAuthService` wrapping plex.tv API calls (token validation and user identity; the PIN flow runs in the browser)
 
 **`admin/`** — Config, scheduling, polling
 - `settings_service.py` — SettingsStore (DB-backed settings persistence, startup API key generation, runtime env loading, sync success timestamps, Plex SSO claim/token status without exposing token, versioned non-secret settings backup/export/preview/restore), SSE progress, scheduled job helpers/status helpers, Plex rescan/Overseerr import orchestration
@@ -213,12 +215,13 @@ Business logic and integrations, organized into thematic subpackages:
 - `release_parser.py` — parse release names; classifies exact episodes, season/multi-season/complete-series packs, multi-episode packs; `cached_parse_release_coverage` (lru_cache, maxsize=4096)
 - `release_serializers.py` — API-facing serialization helpers
 - `release_storage.py` — release persistence and reconstruction helpers; `store_search_results()` scopes cleanup by search source
-- `staging_service.py` — stage/send workflows, staged torrent handling, torrent download/validation, release handoff
+- `staging_service.py` — stage/send workflows, staged torrent handling, and release handoff; sets TV episode statuses for handed-off releases without downgrading COMPLETED episodes
 - `release_disposition_service.py` / `release_validation_service.py` — identity keys and target scopes, durable rejection matching, and shared identity/disposition handoff checks
 
 **`utils/`** — Shared utility modules
 - `http_client.py` — shared HTTP client lifecycle
-- `async_utils.py` — `gather_limited` and async helpers
+- `async_utils.py` — `gather_limited` and `maybe_await` for optional async callbacks
+- `sse.py` — `sse_response()` with the standard no-cache, no-buffering SSE headers
 - `type_utils.py` — type conversion utilities
 - `media_helpers.py` — media title/year extraction
 - `torrent_identity.py` / `safe_names.py` — shared torrent hash/name parsing and safe filename/folder helpers
@@ -249,6 +252,7 @@ Static assets.
 - `js/dashboard.js` and `js/dashboard/` — generated browser assets for the dashboard entrypoint and its migrated TypeScript modules (details modal, releases, filters, staged actions, modals, search SSE, core utilities/state, and column resizing); canonical sources live under `frontend-src/dashboard/`
 - `js/staging_decision_log.js` — generated client-side fetching, URL-backed filters, pagination, and raw JSON expansion for the Rules decision-log page; source is `frontend-src/staging_decision_log.ts`
 - `frontend-src/dashboard/download_health.ts` — dashboard health warnings and explicit non-destructive recovery confirmation
+- `js/progress_stream.js` — generated Settings Overseerr sync / Plex rescan SSE progress bar handling; source is `frontend-src/progress_stream.ts`
 - `js/stats.js` — generated Stats API fetch/range handling and lightweight bar/time-series chart rendering; source is `frontend-src/stats.ts`
 - favicon assets
 
@@ -262,7 +266,7 @@ Tests mirror the service subpackage organization under `tests/services/`:
 - `tests/routers/dashboard/` — dashboard page/API/action coverage, including details controls and SSE search streams
 - `tests/routers/settings/` — settings page, connections, maintenance, and jobs coverage
 - `tests/routers/stats/` — Stats page/API coverage, including protection, range validation, and JSON payload shape
-- `tests/services/auth/` — PlexOAuthService unit tests and auth_service (require_auth, get_session_user) tests
+- `tests/services/auth/` — PlexOAuthService token validation and auth_service (require_auth, get_session_user) tests
 - `tests/services/admin/` — settings, scheduler, and Plex polling service tests
 - `tests/services/decisions/` — rule engine, rule service (including import/export-backed default seeding), TV/movie decision service tests
 - `tests/services/integrations/` — Prowlarr, qBittorrent, Overseerr, Plex service tests
@@ -271,8 +275,12 @@ Tests mirror the service subpackage organization under `tests/services/`:
 - `tests/services/test_search_history_service.py` — search history persistence, summary, and candidate snapshot tests
 - `tests/services/releases/` — release parser, serializers, staging, and release selection tests
 - `tests/services/utils/` — type utils tests
-- Top-level `tests/test_*.py` — integration tests (season sweep, torrent helpers, API, router-level, config)
-- `frontend-tests/unit/dashboard-regressions.test.js` — stat refresh, safe replace-title handling, and stale search-history response guards; rendered-title escaping also has coverage in `tests/routers/dashboard/test_template.py`
+- `tests/routers/test_staged.py`, `test_rules.py`, `test_staging_decision_log.py`, `test_staged_check_now.py` — staged, rules, and decision-log router coverage
+- `tests/integration/` — end-to-end TV season sweep and multi-season pack search flows on a real SQLite DB
+- `tests/conftest.py` — shared `session_maker`/`db` in-memory SQLite fixtures; `tests/factories.py` — persisted model factories
+- `tests/services/integrations/conftest.py` — shared Overseerr/qBittorrent/Prowlarr service fixtures and an `httpx.MockTransport` stub
+- Top-level `tests/test_*.py` — cross-cutting checks (config, database/migrations, auth app flow, approval validation, version)
+- `frontend-tests/unit/dashboard-regressions.test.js` — stat refresh, safe replace-title handling, and stale search-history response guards; replace-button title escaping also has coverage in `tests/routers/dashboard/test_template.py`
 
 ## CI/CD Workflows
 

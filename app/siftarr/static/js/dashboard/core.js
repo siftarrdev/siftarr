@@ -8,6 +8,35 @@ export function escapeHtml(value) {
     .replaceAll('"', '&quot;')
     .replaceAll("'", '&#39;');
 }
+export async function postWithConfirm(url, formData, buildPrompts) {
+  const post = () => fetch(url, { method: 'POST', headers: { Accept: 'application/json' }, body: formData });
+  let response = await post();
+  if (response.status === 409) {
+    const conflict = await response.json().catch(() => null);
+    const codes = new Set();
+    for (const prompt of buildPrompts(conflict?.detail?.warnings || [])) {
+      if (!window.confirm(prompt.text)) return { response, cancelled: true };
+      if (prompt.code) codes.add(prompt.code);
+    }
+    codes.forEach((code) => formData.append(`confirm_${code}`, 'true'));
+    response = await post();
+  }
+  return { response, cancelled: false };
+}
+export function promptEachWarning(suffix) {
+  return (warnings) =>
+    warnings.map((warning) => ({
+      text: `${warning.message}
+
+${suffix}`,
+      code: warning.code,
+    }));
+}
+export async function fetchPageDoc() {
+  const response = await fetch(window.location.pathname, { headers: { Accept: 'text/html' } });
+  if (!response.ok) return null;
+  return new DOMParser().parseFromString(await response.text(), 'text/html');
+}
 export function setActiveTab(tabName) {
   const url = new URL(window.location);
   url.searchParams.set('tab', tabName);
@@ -211,11 +240,8 @@ export async function refreshCurrentTabContent() {
   const tabName = activeTabEl.id.replace('content-', '');
   const restore = window.saveTabState(tabName);
   try {
-    const response = await fetch(window.location.pathname, { headers: { Accept: 'text/html' } });
-    if (!response.ok) return;
-    const html = await response.text();
-    const parser = new DOMParser();
-    const doc = parser.parseFromString(html, 'text/html');
+    const doc = await fetchPageDoc();
+    if (!doc) return;
     const newTabContent = doc.getElementById('content-' + tabName);
     if (newTabContent) {
       activeTabEl.innerHTML = newTabContent.innerHTML;

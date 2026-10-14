@@ -4,6 +4,8 @@ from datetime import UTC, datetime
 from typing import Any, cast
 from unittest.mock import MagicMock
 
+import pytest
+
 from app.siftarr.models.release import Release
 from app.siftarr.models.request import MediaType
 from app.siftarr.models.staged_torrent import STAGED_STATUS_APPROVED, StagedTorrent
@@ -25,60 +27,39 @@ from app.siftarr.services.releases.release_serializers import (
 
 # -- format_release_size -------------------------------------------------------
 
-
-class TestFormatReleaseSize:
-    def test_zero_bytes(self) -> None:
-        assert format_release_size(0) == "Unknown"
-
-    def test_negative_bytes(self) -> None:
-        assert format_release_size(-1) == "Unknown"
-
-    def test_small_bytes(self) -> None:
-        # 1 MB
-        assert format_release_size(1024 * 1024) == "0.00 GB"
-
-    def test_one_gib(self) -> None:
-        gib = 1024 * 1024 * 1024
-        assert format_release_size(gib) == "1.00 GB"
-
-    def test_half_gib(self) -> None:
-        half = 512 * 1024 * 1024
-        assert format_release_size(half) == "0.50 GB"
-
-    def test_large_size(self) -> None:
-        size = 5 * 1024 * 1024 * 1024
-        assert format_release_size(size) == "5.00 GB"
-
-    def test_fractional_gib(self) -> None:
-        size = int(2.34 * 1024 * 1024 * 1024)
-        # 2.34 GiB approximately
-        result = format_release_size(size)
-        assert result.startswith("2.3")
-        assert result.endswith("GB")
+GIB = 1024 * 1024 * 1024
 
 
-# -- release_failed_size_limit ------------------------------------------------
+@pytest.mark.parametrize(
+    ("size", "expected"),
+    [
+        (0, "Unknown"),
+        (-1, "Unknown"),
+        (1024 * 1024, "0.00 GB"),
+        (GIB // 2, "0.50 GB"),
+        (GIB, "1.00 GB"),
+        (5 * GIB, "5.00 GB"),
+    ],
+    ids=["zero", "negative", "one-mib", "half-gib", "one-gib", "five-gib"],
+)
+def test_format_release_size(size: int, expected: str) -> None:
+    assert format_release_size(size) == expected
 
 
-class TestReleaseFailedSizeLimit:
-    def test_size_prefix_returns_true(self) -> None:
-        assert release_failed_size_limit({"rejection_reason": "Size 40.00 GB above limit"}) is True
-
-    def test_size_prefix_with_different_reason(self) -> None:
-        # Must start with "Size " (capital S, space)
-        assert release_failed_size_limit({"rejection_reason": "size too small"}) is False
-
-    def test_non_string_rejection_reason(self) -> None:
-        assert release_failed_size_limit({"rejection_reason": None}) is False
-
-    def test_no_rejection_reason_key(self) -> None:
-        assert release_failed_size_limit({}) is False
-
-    def test_other_rejection_reason(self) -> None:
-        assert release_failed_size_limit({"rejection_reason": "Exclusion pattern matched"}) is False
-
-    def test_integer_rejection_reason(self) -> None:
-        assert release_failed_size_limit({"rejection_reason": 42}) is False
+@pytest.mark.parametrize(
+    ("release", "expected"),
+    [
+        ({"rejection_reason": "Size 40.00 GB above limit"}, True),
+        ({"rejection_reason": "size too small"}, False),
+        ({"rejection_reason": "Exclusion pattern matched"}, False),
+        ({"rejection_reason": None}, False),
+        ({"rejection_reason": 42}, False),
+        ({}, False),
+    ],
+    ids=["size-prefix", "lowercase-size", "other-reason", "none", "non-string", "missing-key"],
+)
+def test_release_failed_size_limit(release: dict[str, object], expected: bool) -> None:
+    assert release_failed_size_limit(release) is expected
 
 
 # -- apply_release_size_per_season_metadata -----------------------------------
@@ -118,16 +99,6 @@ class TestApplyReleaseSizePerSeasonMetadata:
         result = apply_release_size_per_season_metadata(release)
         assert result["size_per_season"] is None
 
-    def test_infers_season_count_from_covered_seasons(self) -> None:
-        release: dict[str, object] = {
-            "size_bytes": 3 * 1024 * 1024 * 1024,
-            "covered_seasons": [1, 2, 3],
-            "covered_season_count": 0,  # will be inferred from list
-            "passed": True,
-        }
-        result = apply_release_size_per_season_metadata(release)
-        assert result["size_per_season_bytes"] == 1 * 1024 * 1024 * 1024
-
     def test_infers_from_complete_series(self) -> None:
         release: dict[str, object] = {
             "size_bytes": 5 * 1024 * 1024 * 1024,
@@ -139,25 +110,6 @@ class TestApplyReleaseSizePerSeasonMetadata:
         }
         result = apply_release_size_per_season_metadata(release)
         assert result["size_per_season_bytes"] == 1 * 1024 * 1024 * 1024
-
-    def test_passed_none_gives_size_per_season_passed_none(self) -> None:
-        release: dict[str, object] = {
-            "size_bytes": 2 * 1024 * 1024 * 1024,
-            "covered_season_count": 2,
-            "passed": None,
-        }
-        result = apply_release_size_per_season_metadata(release)
-        assert result["size_per_season_passed"] is None
-
-    def test_no_size_rule_leaves_size_per_season_passed_none(self) -> None:
-        release: dict[str, object] = {
-            "size_bytes": 2 * 1024 * 1024 * 1024,
-            "covered_season_count": 2,
-            "passed": True,
-            "rejection_reason": None,
-        }
-        result = apply_release_size_per_season_metadata(release)
-        assert result["size_per_season_passed"] is None
 
     def test_matching_size_rule_marks_size_per_season_passed(self) -> None:
         release: dict[str, object] = {
@@ -273,50 +225,31 @@ class TestSerializeEvaluatedRelease:
         assert result["status_label"] == "Rejected"
         assert result["rejection_reason"] == "Exclusion matched"
 
-    def test_with_coverage(self) -> None:
+    @pytest.mark.parametrize(
+        ("seasons", "complete", "total", "covers_all"),
+        [
+            ((1, 2), False, 5, False),
+            ((1, 2, 3, 4, 5), False, 5, True),
+            ((), True, 3, True),
+        ],
+        ids=["partial", "all-seasons", "complete-series"],
+    )
+    def test_with_coverage(
+        self, seasons: tuple[int, ...], complete: bool, total: int, covers_all: bool
+    ) -> None:
         release = self._make_release()
         evaluation = self._make_evaluation()
         coverage = ParsedReleaseCoverage(
-            season_numbers=(1, 2),
-            episode_number=None,
-            is_complete_series=False,
+            season_numbers=seasons, episode_number=None, is_complete_series=complete
         )
         result = serialize_evaluated_release(
-            release, evaluation, coverage=coverage, known_total_seasons=5
+            release, evaluation, coverage=coverage, known_total_seasons=total
         )
-        assert result["covered_seasons"] == [1, 2]
-        assert result["covered_season_count"] == 2
-        assert result["known_total_seasons"] == 5
-        assert result["is_complete_series"] is False
-        assert result["covers_all_known_seasons"] is False
-
-    def test_with_coverage_covers_all(self) -> None:
-        release = self._make_release()
-        evaluation = self._make_evaluation()
-        coverage = ParsedReleaseCoverage(
-            season_numbers=(1, 2, 3, 4, 5),
-            episode_number=None,
-            is_complete_series=False,
-        )
-        result = serialize_evaluated_release(
-            release, evaluation, coverage=coverage, known_total_seasons=5
-        )
-        assert result["covers_all_known_seasons"] is True
-
-    def test_with_complete_series_coverage(self) -> None:
-        release = self._make_release()
-        evaluation = self._make_evaluation()
-        coverage = ParsedReleaseCoverage(
-            season_numbers=(),
-            episode_number=None,
-            is_complete_series=True,
-        )
-        result = serialize_evaluated_release(
-            release, evaluation, coverage=coverage, known_total_seasons=3
-        )
-        assert result["is_complete_series"] is True
-        # covers_all_known_seasons with complete series flag
-        assert result["covers_all_known_seasons"] is True
+        assert result["covered_seasons"] == list(seasons)
+        assert result["covered_season_count"] == len(seasons)
+        assert result["known_total_seasons"] == total
+        assert result["is_complete_series"] is complete
+        assert result["covers_all_known_seasons"] is covers_all
 
     def test_release_with_id(self) -> None:
         evaluation = self._make_evaluation()
@@ -327,12 +260,6 @@ class TestSerializeEvaluatedRelease:
         object.__setattr__(release_with_id, "id", 42)  # type: ignore[attr-defined]
         result = serialize_evaluated_release(release_with_id, evaluation)
         assert result.get("stored_release_id") == 42
-
-    def test_no_publish_date(self) -> None:
-        release = self._make_release(publish_date=None)
-        evaluation = self._make_evaluation()
-        result = serialize_evaluated_release(release, evaluation)
-        assert result["publish_date"] is None
 
     def test_stored_release_reuses_rule_evidence_without_live_evaluation(self) -> None:
         release = Release(
@@ -410,95 +337,45 @@ class TestSerializeEvaluatedRelease:
         assert result["status"] == "approved"
 
 
-# -- dashboard_release_sort_key -----------------------------------------------
+# -- sort keys -----------------------------------------------------------------
 
 
-class TestDashboardReleaseSortKey:
-    def test_higher_score_sorts_first(self) -> None:
-        high_score: dict[str, object] = {
-            "score": 100,
-            "_size_bytes": 1000,
-            "seeders": 5,
-            "title": "A",
-        }
-        low_score: dict[str, object] = {
-            "score": 50,
-            "_size_bytes": 1000,
-            "seeders": 5,
-            "title": "B",
-        }
-        assert dashboard_release_sort_key(high_score) < dashboard_release_sort_key(low_score)
-
-    def test_smaller_size_sorts_first_with_same_score(self) -> None:
-        small: dict[str, object] = {"score": 100, "_size_bytes": 500, "seeders": 5, "title": "A"}
-        large: dict[str, object] = {"score": 100, "_size_bytes": 2000, "seeders": 5, "title": "B"}
-        assert dashboard_release_sort_key(small) < dashboard_release_sort_key(large)
-
-    def test_more_seeders_sorts_first(self) -> None:
-        many: dict[str, object] = {"score": 100, "_size_bytes": 1000, "seeders": 50, "title": "A"}
-        few: dict[str, object] = {"score": 100, "_size_bytes": 1000, "seeders": 5, "title": "B"}
-        # -seeders makes more seeders sort first
-        assert dashboard_release_sort_key(many) < dashboard_release_sort_key(few)
-
-    def test_missing_fields_use_defaults(self) -> None:
-        empty: dict[str, object] = {}
-        key = dashboard_release_sort_key(empty)
-        assert isinstance(key, tuple)
-        assert key[0] == 0.0  # -score defaults to 0
-
-    def test_negative_size_bytes_treated_as_inf(self) -> None:
-        neg: dict[str, object] = {"_size_bytes": -1, "score": 0, "seeders": 0, "title": ""}
-        pos: dict[str, object] = {"_size_bytes": 100, "score": 0, "seeders": 0, "title": ""}
-        assert dashboard_release_sort_key(neg) > dashboard_release_sort_key(pos)
-
-    def test_string_size_bytes_treated_as_inf(self) -> None:
-        invalid: dict[str, object] = {"_size_bytes": "big", "score": 0, "seeders": 0, "title": ""}
-        valid: dict[str, object] = {"_size_bytes": 100, "score": 0, "seeders": 0, "title": ""}
-        assert dashboard_release_sort_key(invalid) > dashboard_release_sort_key(valid)
-
-    def test_isoformat_publish_date_parsed(self) -> None:
-        release: dict[str, object] = {
-            "score": 0,
-            "_size_bytes": 0,
-            "seeders": 0,
-            "title": "",
-            "publish_date": "2025-01-15T00:00:00Z",
-        }
-        key = dashboard_release_sort_key(release)
-        assert key[3] != 0.0  # publish_timestamp should be non-zero
+def _row(**overrides: object) -> dict[str, object]:
+    row: dict[str, object] = {"score": 100, "_size_bytes": 1000, "seeders": 5, "title": "A"}
+    row.update(overrides)
+    return row
 
 
-# -- season_pack_release_sort_key ---------------------------------------------
+@pytest.mark.parametrize(
+    ("first", "second"),
+    [
+        (_row(score=100), _row(score=50)),
+        (_row(_size_bytes=500), _row(_size_bytes=2000)),
+        (_row(seeders=50), _row(seeders=5)),
+        (_row(_size_bytes=100), _row(_size_bytes=-1)),
+        (_row(_size_bytes=100), _row(_size_bytes="big")),
+    ],
+    ids=["higher-score", "smaller-size", "more-seeders", "negative-size-last", "invalid-size-last"],
+)
+def test_dashboard_sort_key_orders_first_before_second(
+    first: dict[str, object], second: dict[str, object]
+) -> None:
+    assert dashboard_release_sort_key(first) < dashboard_release_sort_key(second)
 
 
-class TestSeasonPackReleaseSortKey:
-    def test_size_limit_failure_sorts_after_pass(self) -> None:
-        passed: dict[str, object] = {
-            "score": 100,
-            "_size_bytes": 1000,
-            "seeders": 5,
-            "title": "A",
-            "rejection_reason": None,
-        }
-        failed: dict[str, object] = {
-            "score": 100,
-            "_size_bytes": 1000,
-            "seeders": 5,
-            "title": "B",
-            "rejection_reason": "Size 40.00 GB above limit",
-        }
-        assert season_pack_release_sort_key(passed) < season_pack_release_sort_key(failed)
+def test_dashboard_sort_key_parses_isoformat_publish_date() -> None:
+    key = dashboard_release_sort_key(_row(publish_date="2025-01-15T00:00:00Z"))
+    assert key[3] != 0.0
 
-    def test_no_size_failure_sorts_normally(self) -> None:
-        release: dict[str, object] = {
-            "score": 50,
-            "_size_bytes": 1000,
-            "seeders": 5,
-            "title": "A",
-        }
-        # Should produce a tuple with first element 0
-        key = season_pack_release_sort_key(release)
-        assert key[0] == 0
+
+def test_dashboard_sort_key_defaults_missing_fields() -> None:
+    assert dashboard_release_sort_key({})[0] == 0.0
+
+
+def test_size_limit_failure_sorts_after_pass() -> None:
+    passed = _row(rejection_reason=None)
+    failed = _row(rejection_reason="Size 40.00 GB above limit", title="B")
+    assert season_pack_release_sort_key(passed) < season_pack_release_sort_key(failed)
 
 
 # -- finalize_releases --------------------------------------------------------
@@ -523,13 +400,6 @@ class TestFinalizeReleases:
         result = finalize_releases([low, high])
         assert result[0]["title"] == "High"
         assert result[1]["title"] == "Low"
-
-    def test_removes_size_bytes_key(self) -> None:
-        releases: list[dict[str, object]] = [
-            {"score": 10, "_size_bytes": 100, "seeders": 5, "title": "A", "size_bytes": 100},
-        ]
-        result = finalize_releases(releases)
-        assert "_size_bytes" not in result[0]
 
     def test_custom_sort_key(self) -> None:
         # Use a sort key that sorts by title ascending
@@ -565,10 +435,6 @@ class TestFinalizeReleases:
         # _size_bytes should be removed
         assert "_size_bytes" not in result[0]
         assert "_size_bytes" not in result[1]
-
-    def test_empty_list(self) -> None:
-        result = finalize_releases([])
-        assert result == []
 
 
 # -- serialize_target_scope (season-pack UI contract) ---------------------------

@@ -1,1182 +1,305 @@
-"""Tests for dashboard page routes."""
+"""Tests for the dashboard page route and the /api/downloads endpoint."""
 
 import json
-from datetime import UTC, datetime
+from types import SimpleNamespace
+from typing import cast
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from app.siftarr.models import ActivityLog, StagedTorrent
+from app.siftarr.models.activity_log import EventType
 from app.siftarr.models.request import MediaType, RequestStatus
 from app.siftarr.routers import dashboard
+from app.siftarr.routers.dashboard import _is_actionable_workflow_torrent
+from tests.factories import make_episode, make_request, make_season, make_staged_torrent
+
+P, S, C, U = (
+    RequestStatus.PENDING,
+    RequestStatus.SEARCHING,
+    RequestStatus.COMPLETED,
+    RequestStatus.UNRELEASED,
+)
 
 
-def test_dashboard_details_modal_includes_release_controls(dashboard_template_path):
-    body = dashboard_template_path.read_text()
-
-    assert 'id="release-controls"' in body
-    assert 'id="release-resolution-filter"' in body
-    assert 'id="release-sort-key"' in body
-    assert 'id="release-sort-direction"' in body
-    assert 'id="release-results-count"' in body
-
-
-def test_staged_js_refreshes_approval_targets_and_current_stat_cards(dashboard_template_path):
-    js_path = dashboard_template_path.parents[1] / "static/js/dashboard/staged.js"
-    js = js_path.read_text()
-
-    assert "await refreshStagedTabData();" in js
-    assert "await refreshDownloadingTabData();" in js
-    assert "data.message || 'Staged torrent updated'" in js
-    assert ".md\\\\:grid-cols-7" not in js
-    assert "[data-dashboard-stat-cards]" in js
-
-
-def test_downloading_poll_uses_current_qbit_queue_endpoint(dashboard_template_path):
-    js_path = dashboard_template_path.parents[1] / "static/js/dashboard/staged.js"
-    js = js_path.read_text()
-    template = dashboard_template_path.read_text()
-
-    assert "'/api/torrents/completed' : '/api/downloads'" in js
-    assert "function renderQbitDownloads(groups)" in js
-    assert "const groups = data.groups || [];" in js
-    assert "Not managed by Siftarr" in js
-    assert (
-        '<th class="px-5 py-3 text-left text-xs font-medium uppercase tracking-wider'
-        ' text-gray-500" data-col-key="size" style="position: relative;">'
-        '<span class="sort-title">Size</span><div class="resize-handle"></div></th>' in template
-    )
-    assert "((torrent.size or 0) / 1024 / 1024 / 1024)|round(2)" in template
-
-
-@pytest.mark.asyncio
-async def test_pending_requests_include_searching_requests(mock_db, monkeypatch):
-    """Pending tab should keep in-flight searches visible."""
-    active_request = MagicMock()
-    active_request.id = 1
-    active_request.status = RequestStatus.SEARCHING
-    active_request.overseerr_request_id = 10
-    active_request.title = "The Rookie"
-    active_request.media_type.value = "tv"
-    active_request.created_at = MagicMock()
-
-    lifecycle_service = AsyncMock()
-    lifecycle_service.get_active_requests.return_value = [active_request]
-    lifecycle_service.get_requests_by_status.return_value = []
-    lifecycle_service.get_requests_stats.return_value = {
-        "by_status": {},
-    }
-    monkeypatch.setattr(dashboard, "LifecycleService", lambda db: lifecycle_service)
-
+@pytest.fixture(autouse=True)
+def _dashboard_env(monkeypatch):
+    """Settings, a failing qBittorrent client, and an Overseerr stub that reports a future air date."""
     monkeypatch.setattr(
         dashboard,
         "get_settings",
         lambda: MagicMock(
             overseerr_url="http://overseerr.test",
-            staging_mode_enabled=False,
+            staging_mode_enabled=True,
             qbittorrent_url="http://qb.test",
         ),
     )
+    overseerr = AsyncMock()
+    overseerr.get_media_details.return_value = {"nextEpisodeToAir": {"airDate": "2026-05-01"}}
+    monkeypatch.setattr(dashboard, "OverseerrService", lambda settings: overseerr)
+    # qBittorrent is down: the managed queue is shown and labelled unavailable.
+    qbit = AsyncMock()
+    qbit.get_unfinished_torrents_or_raise.side_effect = RuntimeError("connection refused")
+    monkeypatch.setattr(dashboard, "QbittorrentService", lambda settings: qbit)
 
-    mock_db.execute.return_value = MagicMock(
-        scalars=MagicMock(return_value=MagicMock(all=MagicMock(return_value=[])))
-    )
 
-    response = await dashboard.dashboard(MagicMock(), db=mock_db)
+async def _render(db):
+    await db.commit()
+    return await dashboard.dashboard(MagicMock(), db=db)
+
+
+def _tabs(context, request) -> set[str]:
+    """Names of the context lists that hold ``request``."""
+    names = ("active_requests", "pending_requests", "unreleased_requests", "completed_requests")
+    return {name for name in names if any(r.id == request.id for r in context[name])}
+
+
+@pytest.mark.parametrize(
+    ("media_type", "status", "episode_statuses", "expected_tabs"),
+    [
+        # Persisted UNRELEASED never leaks into active or finished.
+        (MediaType.TV, U, [], {"unreleased_requests"}),
+        # Pending episodes keep a partially available show on the pending tab.
+        (MediaType.TV, P, [C, P], {"active_requests", "pending_requests"}),
+        # Only completed and unreleased episodes left: unreleased tab only.
+        (MediaType.TV, P, [C, U], {"unreleased_requests"}),
+        # A finished show that gains an unreleased episode leaves the finished tab.
+        (MediaType.TV, C, [C, U], {"unreleased_requests"}),
+        (MediaType.TV, S, [], {"active_requests", "pending_requests"}),
+        (MediaType.MOVIE, C, [], {"completed_requests"}),
+    ],
+)
+async def test_request_lands_on_one_tab(db, media_type, status, episode_statuses, expected_tabs):
+    req = await make_request(db, media_type=media_type, status=status, title="Subject")
+    if episode_statuses:
+        season = await make_season(db, req, 1)
+        for number, episode_status in enumerate(episode_statuses, start=1):
+            await make_episode(db, season, number, status=episode_status)
+
+    response = await _render(db)
 
     context = response.context
-    assert active_request in context["pending_requests"]
+    tabs = _tabs(context, req)
+    if "pending_requests" in expected_tabs:
+        # The finished query returns every TV request; the template ignores non-completed ones.
+        tabs.discard("completed_requests")
+    assert tabs == expected_tabs
+    assert "Subject" in response.body.decode()
+    stats = context["stats"]
+    assert stats["unreleased"] == int("unreleased_requests" in expected_tabs)
+    assert stats["pending"] == int("pending_requests" in expected_tabs)
+    if "pending_requests" not in expected_tabs:
+        assert stats["completed"] == int("completed_requests" in expected_tabs)
+    if "unreleased_requests" in expected_tabs:
+        assert context["unreleased_release_dates"][req.id] == "2026-05-01"
+
+
+async def test_pending_tab_shows_tv_completion_progress(db):
+    show = await make_request(db, media_type=MediaType.TV, status=S, title="Severance")
+    await make_season(db, show, 1, episodes=1, status=C)
+    season_two = await make_season(db, show, 2, episodes=1, status=C)
+    await make_episode(db, season_two, 2, status=P)
+
+    rendered = (await _render(db)).body.decode()
 
-
-@pytest.mark.asyncio
-async def test_dashboard_marks_qbit_finished_waiting_for_plex(mock_db, monkeypatch):
-    """Downloads should warn when qBit finished but the request is still DOWNLOADING."""
-    torrent = MagicMock()
-    torrent.id = 2
-    torrent.request_id = 40
-    torrent.title = "The Cheetah Girls 2003"
-    torrent.status = "approved"
-    torrent.size = 1024 * 1024 * 1024
-    torrent.indexer = "TestIndexer"
-    torrent.score = 99
-    torrent.created_at = datetime(2026, 4, 1, 12, 0, tzinfo=UTC)
-    torrent.replaced_by_id = None
-
-    lifecycle_service = AsyncMock()
-    lifecycle_service.get_active_requests.return_value = []
-    lifecycle_service.get_requests_by_status.return_value = []
-    lifecycle_service.get_unreleased_requests.return_value = []
-    monkeypatch.setattr(dashboard, "LifecycleService", lambda db: lifecycle_service)
-
-    monkeypatch.setattr(
-        dashboard,
-        "get_settings",
-        lambda: MagicMock(
-            overseerr_url="http://overseerr.test",
-            staging_mode_enabled=False,
-            qbittorrent_url="http://qb.test",
-        ),
-    )
-
-    mock_db.execute.side_effect = [
-        MagicMock(scalars=MagicMock(return_value=MagicMock(all=MagicMock(return_value=[torrent])))),
-        MagicMock(all=MagicMock(return_value=[(40, RequestStatus.DOWNLOADING)])),
-        MagicMock(
-            all=MagicMock(return_value=[(40, json.dumps({"done_torrents": [{"torrent_id": 2}]}))])
-        ),
-        MagicMock(scalars=MagicMock(return_value=MagicMock(all=MagicMock(return_value=[])))),
-    ]
-
-    response = await dashboard.dashboard(MagicMock(), db=mock_db)
-
-    context = response.context
-    assert context["downloading_torrents"] == [torrent]
-    assert context["downloading_waiting_plex_torrent_ids"] == {2}
-    assert context["completed_requests"] == []
-    rendered = response.body.decode()
-    assert "qBittorrent finished; waiting for Plex" in rendered
-    assert "RAR-packed or otherwise unimportable" in rendered
-    assert 'data-requeststate="downloading"' in rendered
-    assert "No finished requests." in rendered
-
-
-@pytest.mark.asyncio
-async def test_dashboard_downloads_show_move_status_and_path(mock_db, monkeypatch):
-    torrent = MagicMock()
-    torrent.id = 7
-    torrent.request_id = 41
-    torrent.title = "Moved Movie 2026"
-    torrent.status = "approved"
-    torrent.size = 1024 * 1024 * 1024
-    torrent.indexer = "TestIndexer"
-    torrent.score = 95
-    torrent.created_at = datetime(2026, 4, 1, 12, 0, tzinfo=UTC)
-    torrent.replaced_by_id = None
-    torrent.move_status = "moved"
-    torrent.moved_path = "/media/movies"
-
-    lifecycle_service = AsyncMock()
-    lifecycle_service.get_active_requests.return_value = []
-    lifecycle_service.get_requests_by_status.return_value = []
-    lifecycle_service.get_unreleased_requests.return_value = []
-    monkeypatch.setattr(dashboard, "LifecycleService", lambda db: lifecycle_service)
-    monkeypatch.setattr(
-        dashboard,
-        "get_settings",
-        lambda: MagicMock(
-            overseerr_url="http://overseerr.test",
-            staging_mode_enabled=False,
-            qbittorrent_url="http://qb.test",
-        ),
-    )
-
-    mock_db.execute.side_effect = [
-        MagicMock(scalars=MagicMock(return_value=MagicMock(all=MagicMock(return_value=[torrent])))),
-        MagicMock(
-            all=MagicMock(
-                return_value=[(41, RequestStatus.DOWNLOADING, MediaType.MOVIE, "Moved Movie", 2026)]
-            )
-        ),
-        MagicMock(all=MagicMock(return_value=[])),
-        MagicMock(scalars=MagicMock(return_value=MagicMock(all=MagicMock(return_value=[])))),
-    ]
-
-    response = await dashboard.dashboard(MagicMock(), db=mock_db)
-    rendered = response.body.decode()
-
-    assert 'data-movestatus="moved"' in rendered
-    assert "data-move-status>moved</span>" in rendered
-    assert "/media/movies" in rendered
-
-
-@pytest.mark.asyncio
-async def test_dashboard_marks_only_completed_episode_waiting_for_plex(mock_db, monkeypatch):
-    """Per-torrent completion evidence should not fan out to sibling TV episode rows."""
-    torrents = []
-    for torrent_id, title in [(2, "Test Show S01E01"), (3, "Test Show S01E02")]:
-        torrent = MagicMock()
-        torrent.id = torrent_id
-        torrent.request_id = 40
-        torrent.title = title
-        torrent.status = "approved"
-        torrent.size = 1024 * 1024 * 1024
-        torrent.indexer = "TestIndexer"
-        torrent.score = 99
-        torrent.created_at = datetime(2026, 4, 1, 12, 0, tzinfo=UTC)
-        torrent.replaced_by_id = None
-        torrents.append(torrent)
-
-    lifecycle_service = AsyncMock()
-    lifecycle_service.get_active_requests.return_value = []
-    lifecycle_service.get_requests_by_status.return_value = []
-    lifecycle_service.get_unreleased_requests.return_value = []
-    monkeypatch.setattr(dashboard, "LifecycleService", lambda db: lifecycle_service)
-    monkeypatch.setattr(
-        dashboard,
-        "get_settings",
-        lambda: MagicMock(
-            overseerr_url="http://overseerr.test",
-            staging_mode_enabled=False,
-            qbittorrent_url="http://qb.test",
-        ),
-    )
-
-    mock_db.execute.side_effect = [
-        MagicMock(scalars=MagicMock(return_value=MagicMock(all=MagicMock(return_value=torrents)))),
-        MagicMock(all=MagicMock(return_value=[(40, RequestStatus.DOWNLOADING)])),
-        MagicMock(
-            all=MagicMock(return_value=[(40, json.dumps({"done_torrents": [{"torrent_id": 2}]}))])
-        ),
-        MagicMock(scalars=MagicMock(return_value=MagicMock(all=MagicMock(return_value=[])))),
-    ]
-
-    response = await dashboard.dashboard(MagicMock(), db=mock_db)
-
-    rendered = response.body.decode()
-    assert response.context["downloading_waiting_plex_torrent_ids"] == {2}
-    assert 'data-torrent-id="2"' in rendered
-    assert 'data-torrent-id="3"' in rendered
-    assert rendered.count('data-qbit-finished-waiting-plex="true"') == 2
-    assert rendered.count('data-qbit-finished-waiting-plex="false"') == 2
-
-
-@pytest.mark.asyncio
-async def test_dashboard_includes_multiple_bulk_approved_movie_torrents(mock_db, monkeypatch):
-    """Downloading tab should show every approved movie from one bulk approval."""
-    torrents = []
-    for torrent_id, request_id, title in [
-        (21, 121, "First Bulk Movie 2026"),
-        (22, 122, "Second Bulk Movie 2026"),
-    ]:
-        torrent = MagicMock()
-        torrent.id = torrent_id
-        torrent.request_id = request_id
-        torrent.title = title
-        torrent.status = "approved"
-        torrent.size = 1024 * 1024 * 1024
-        torrent.indexer = "TestIndexer"
-        torrent.score = 88
-        torrent.created_at = datetime(2026, 4, 1, 12, 0, tzinfo=UTC)
-        torrent.replaced_by_id = None
-        torrents.append(torrent)
-
-    lifecycle_service = AsyncMock()
-    lifecycle_service.get_active_requests.return_value = []
-    lifecycle_service.get_requests_by_status.return_value = []
-    lifecycle_service.get_unreleased_requests.return_value = []
-    monkeypatch.setattr(dashboard, "LifecycleService", lambda db: lifecycle_service)
-    monkeypatch.setattr(
-        dashboard,
-        "get_settings",
-        lambda: MagicMock(
-            overseerr_url="http://overseerr.test",
-            staging_mode_enabled=False,
-            qbittorrent_url="http://qb.test",
-        ),
-    )
-
-    mock_db.execute.side_effect = [
-        MagicMock(scalars=MagicMock(return_value=MagicMock(all=MagicMock(return_value=torrents)))),
-        MagicMock(
-            all=MagicMock(
-                return_value=[
-                    (121, RequestStatus.DOWNLOADING, MediaType.MOVIE, "First Bulk Movie", 2026),
-                    (122, RequestStatus.DOWNLOADING, MediaType.MOVIE, "Second Bulk Movie", 2026),
-                ]
-            )
-        ),
-        MagicMock(all=MagicMock(return_value=[])),
-        MagicMock(scalars=MagicMock(return_value=MagicMock(all=MagicMock(return_value=[])))),
-    ]
-
-    response = await dashboard.dashboard(MagicMock(), db=mock_db)
-
-    rendered = response.body.decode()
-    assert response.context["downloading_torrents"] == torrents
-    assert response.context["downloading_request_statuses"] == {
-        121: RequestStatus.DOWNLOADING.value,
-        122: RequestStatus.DOWNLOADING.value,
-    }
-    assert response.context["stats"]["downloading"] == 2
-    assert 'data-torrent-id="21"' in rendered
-    assert 'data-torrent-id="22"' in rendered
-
-
-@pytest.mark.asyncio
-async def test_dashboard_warns_for_staged_movie_identity_mismatch(mock_db, monkeypatch):
-    torrent = MagicMock()
-    torrent.id = 5
-    torrent.request_id = 40
-    torrent.title = "The.Cheetah.Girls.2.2005.1080p.WEB-DL"
-    torrent.status = "staged"
-    torrent.size = 1024 * 1024 * 1024
-    torrent.indexer = "TestIndexer"
-    torrent.score = 99
-    torrent.created_at = datetime(2026, 4, 1, 12, 0, tzinfo=UTC)
-    torrent.replaced_by_id = None
-
-    lifecycle_service = AsyncMock()
-    lifecycle_service.get_active_requests.return_value = []
-    lifecycle_service.get_requests_by_status.return_value = []
-    lifecycle_service.get_unreleased_requests.return_value = []
-    monkeypatch.setattr(dashboard, "LifecycleService", lambda db: lifecycle_service)
-    monkeypatch.setattr(
-        dashboard,
-        "get_settings",
-        lambda: MagicMock(
-            overseerr_url="http://overseerr.test",
-            staging_mode_enabled=False,
-            qbittorrent_url="http://qb.test",
-        ),
-    )
-
-    mock_db.execute.side_effect = [
-        MagicMock(scalars=MagicMock(return_value=MagicMock(all=MagicMock(return_value=[torrent])))),
-        MagicMock(
-            all=MagicMock(
-                return_value=[
-                    (40, RequestStatus.STAGED, MediaType.MOVIE, "The Cheetah Girls", 2003)
-                ]
-            )
-        ),
-        MagicMock(scalars=MagicMock(return_value=MagicMock(all=MagicMock(return_value=[])))),
-    ]
-
-    response = await dashboard.dashboard(MagicMock(), db=mock_db)
-
-    rendered = response.body.decode()
-    assert "Possible wrong movie" in rendered
-    assert "The.Cheetah.Girls.2" in rendered
-    assert response.context["movie_identity_mismatch_warnings"][5]
-
-
-@pytest.mark.asyncio
-async def test_dashboard_does_not_warn_for_matching_staged_movie(mock_db, monkeypatch):
-    torrent = MagicMock()
-    torrent.id = 6
-    torrent.request_id = 41
-    torrent.title = "Blade.Runner.2049.2017.1080p.WEB-DL"
-    torrent.status = "staged"
-    torrent.size = 1024 * 1024 * 1024
-    torrent.indexer = "TestIndexer"
-    torrent.score = 99
-    torrent.created_at = datetime(2026, 4, 1, 12, 0, tzinfo=UTC)
-    torrent.replaced_by_id = None
-
-    lifecycle_service = AsyncMock()
-    lifecycle_service.get_active_requests.return_value = []
-    lifecycle_service.get_requests_by_status.return_value = []
-    lifecycle_service.get_unreleased_requests.return_value = []
-    monkeypatch.setattr(dashboard, "LifecycleService", lambda db: lifecycle_service)
-    monkeypatch.setattr(
-        dashboard,
-        "get_settings",
-        lambda: MagicMock(
-            overseerr_url="http://overseerr.test",
-            staging_mode_enabled=False,
-            qbittorrent_url="http://qb.test",
-        ),
-    )
-
-    mock_db.execute.side_effect = [
-        MagicMock(scalars=MagicMock(return_value=MagicMock(all=MagicMock(return_value=[torrent])))),
-        MagicMock(
-            all=MagicMock(
-                return_value=[
-                    (41, RequestStatus.STAGED, MediaType.MOVIE, "Blade Runner 2049", 2017)
-                ]
-            )
-        ),
-        MagicMock(scalars=MagicMock(return_value=MagicMock(all=MagicMock(return_value=[])))),
-    ]
-
-    response = await dashboard.dashboard(MagicMock(), db=mock_db)
-
-    assert response.context["movie_identity_mismatch_warnings"] == {}
-    assert "Possible wrong movie" not in response.body.decode()
-
-
-@pytest.mark.asyncio
-async def test_dashboard_restores_unreleased_tab_and_requests(mock_db, monkeypatch):
-    """Dashboard should expose unreleased requests and stats for the tab."""
-    unreleased_request = MagicMock()
-    unreleased_request.id = 42
-    unreleased_request.status = RequestStatus.UNRELEASED
-    unreleased_request.overseerr_request_id = 10
-    unreleased_request.title = "The Rookie"
-    unreleased_request.media_type = MediaType.TV
-    unreleased_request.created_at = datetime(2026, 4, 1, 12, 0, tzinfo=UTC)
-    unreleased_request.requester_username = "lucas"
-    unreleased_request.year = 2025
-    unreleased_request.tmdb_id = 123
-    unreleased_request.tvdb_id = 456
-
-    lifecycle_service = AsyncMock()
-    lifecycle_service.get_active_requests.return_value = [unreleased_request]
-    lifecycle_service.get_requests_by_status.return_value = []
-    lifecycle_service.get_unreleased_requests.return_value = [unreleased_request]
-    lifecycle_service.get_requests_stats.return_value = {
-        "by_status": {RequestStatus.UNRELEASED.value: 1},
-    }
-    monkeypatch.setattr(dashboard, "LifecycleService", lambda db: lifecycle_service)
-
-    monkeypatch.setattr(
-        dashboard,
-        "get_settings",
-        lambda: MagicMock(
-            overseerr_url="http://overseerr.test",
-            staging_mode_enabled=False,
-            qbittorrent_url="http://qb.test",
-        ),
-    )
-
-    fake_overseerr = AsyncMock()
-    fake_overseerr.get_media_details.return_value = {"nextEpisodeToAir": {"airDate": "2026-05-01"}}
-    monkeypatch.setattr(dashboard, "OverseerrService", lambda settings: fake_overseerr)
-
-    execute_results = [
-        MagicMock(scalars=MagicMock(return_value=MagicMock(all=MagicMock(return_value=[])))),
-        MagicMock(scalars=MagicMock(return_value=MagicMock(all=MagicMock(return_value=[])))),
-    ]
-    mock_db.execute.side_effect = execute_results
-
-    response = await dashboard.dashboard(MagicMock(), db=mock_db)
-
-    context = response.context
-    assert context["unreleased_requests"] == [unreleased_request]
-    assert unreleased_request not in context["active_requests"]
-    assert unreleased_request not in context["completed_requests"]
-    assert context["stats"]["active"] == 0
-    assert context["unreleased_release_dates"][42] == "2026-05-01"
-    assert context["stats"]["unreleased"] == 1
-    rendered = response.body.decode()
-    assert "tab-unreleased" in rendered
-    assert "content-unreleased" in rendered
-    assert "The Rookie" in rendered
-    assert "No unreleased requests." not in rendered
-
-
-@pytest.mark.asyncio
-async def test_dashboard_places_future_unreleased_tv_in_unreleased_only(mock_db, monkeypatch):
-    """Future/no-date TV seasons persisted as unreleased should not leak to active/finished."""
-    future_request = MagicMock()
-    future_request.id = 43
-    future_request.status = RequestStatus.UNRELEASED
-    future_request.overseerr_request_id = 13
-    future_request.title = "Future Season"
-    future_request.media_type = MediaType.TV
-    future_request.created_at = datetime(2026, 4, 1, 12, 0, tzinfo=UTC)
-    future_request.requester_username = "lucas"
-    future_request.year = 2026
-    future_request.tmdb_id = 789
-    future_request.tvdb_id = 987
-
-    lifecycle_service = AsyncMock()
-    lifecycle_service.get_active_requests.return_value = [future_request]
-    lifecycle_service.get_requests_by_status.return_value = [future_request]
-    lifecycle_service.get_unreleased_requests.return_value = [future_request]
-    lifecycle_service.get_requests_stats.return_value = {
-        "by_status": {RequestStatus.UNRELEASED.value: 1},
-    }
-    monkeypatch.setattr(dashboard, "LifecycleService", lambda db: lifecycle_service)
-
-    monkeypatch.setattr(
-        dashboard,
-        "get_settings",
-        lambda: MagicMock(
-            overseerr_url="http://overseerr.test",
-            staging_mode_enabled=False,
-            qbittorrent_url="http://qb.test",
-        ),
-    )
-
-    fake_overseerr = AsyncMock()
-    fake_overseerr.get_media_details.return_value = {"nextEpisodeToAir": {"airDate": None}}
-    monkeypatch.setattr(dashboard, "OverseerrService", lambda settings: fake_overseerr)
-
-    mock_db.execute.side_effect = [
-        MagicMock(scalars=MagicMock(return_value=MagicMock(all=MagicMock(return_value=[])))),
-        MagicMock(scalars=MagicMock(return_value=MagicMock(all=MagicMock(return_value=[])))),
-        MagicMock(scalars=MagicMock(return_value=MagicMock(all=MagicMock(return_value=[])))),
-    ]
-
-    response = await dashboard.dashboard(MagicMock(), db=mock_db)
-
-    context = response.context
-    assert context["unreleased_requests"] == [future_request]
-    assert future_request not in context["active_requests"]
-    assert future_request not in context["completed_requests"]
-    assert context["stats"]["active"] == 0
-    assert context["stats"]["completed"] == 0
-    assert context["stats"]["unreleased"] == 1
-    rendered = response.body.decode()
-    assert "Future Season" in rendered
-
-
-@pytest.mark.asyncio
-async def test_dashboard_separates_mixed_pending_from_true_unreleased(mock_db, monkeypatch):
-    """TV shows with pending episodes should stay out of the Unreleased tab."""
-    mixed_request = MagicMock()
-    mixed_request.id = 7
-    mixed_request.status = RequestStatus.PENDING
-    mixed_request.overseerr_request_id = 11
-    mixed_request.title = "High Potential"
-    mixed_request.media_type = MediaType.TV
-    mixed_request.created_at = datetime(2026, 4, 1, 12, 0, tzinfo=UTC)
-    mixed_request.requester_username = "lucas"
-    mixed_request.year = 2025
-    mixed_request.tmdb_id = 123
-    mixed_request.tvdb_id = 456
-
-    unreleased_request = MagicMock()
-    unreleased_request.id = 8
-    unreleased_request.status = RequestStatus.UNRELEASED
-    unreleased_request.overseerr_request_id = 12
-    unreleased_request.title = "The Rookie"
-    unreleased_request.media_type = MediaType.TV
-    unreleased_request.created_at = datetime(2026, 4, 1, 13, 0, tzinfo=UTC)
-    unreleased_request.requester_username = "lucas"
-    unreleased_request.year = 2025
-    unreleased_request.tmdb_id = 124
-    unreleased_request.tvdb_id = 457
-
-    lifecycle_service = AsyncMock()
-    lifecycle_service.get_active_requests.return_value = [mixed_request, unreleased_request]
-    lifecycle_service.get_requests_by_status.return_value = []
-    lifecycle_service.get_unreleased_requests.return_value = [
-        mixed_request,
-        unreleased_request,
-    ]
-    lifecycle_service.get_requests_stats.return_value = {
-        "by_status": {
-            RequestStatus.UNRELEASED.value: 1,
-            RequestStatus.PENDING.value: 1,
-        },
-    }
-    monkeypatch.setattr(dashboard, "LifecycleService", lambda db: lifecycle_service)
-
-    monkeypatch.setattr(
-        dashboard,
-        "get_settings",
-        lambda: MagicMock(
-            overseerr_url="http://overseerr.test",
-            staging_mode_enabled=False,
-            qbittorrent_url="http://qb.test",
-        ),
-    )
-
-    fake_overseerr = AsyncMock()
-    fake_overseerr.get_media_details.return_value = {"nextEpisodeToAir": {"airDate": "2026-05-01"}}
-    monkeypatch.setattr(dashboard, "OverseerrService", lambda settings: fake_overseerr)
-
-    execute_results = [
-        MagicMock(scalars=MagicMock(return_value=MagicMock(all=MagicMock(return_value=[])))),
-        MagicMock(scalars=MagicMock(return_value=MagicMock(all=MagicMock(return_value=[])))),
-        MagicMock(scalars=MagicMock(return_value=MagicMock(all=MagicMock(return_value=[])))),
-        MagicMock(scalars=MagicMock(return_value=MagicMock(all=MagicMock(return_value=[])))),
-    ]
-    mock_db.execute.side_effect = execute_results
-
-    seasons = [MagicMock(id=1, season_number=8, synced_at=None)]
-    episodes = [
-        MagicMock(status=RequestStatus.COMPLETED),
-        MagicMock(status=RequestStatus.COMPLETED),
-        MagicMock(status=RequestStatus.PENDING),
-        MagicMock(status=RequestStatus.PENDING),
-    ]
-    monkeypatch.setattr(
-        dashboard,
-        "load_tv_seasons_with_episodes_bulk",
-        AsyncMock(return_value={mixed_request.id: (seasons, episodes)}),
-    )
-
-    response = await dashboard.dashboard(MagicMock(), db=mock_db)
-
-    context = response.context
-    assert mixed_request in context["active_requests"]
-    assert unreleased_request not in context["active_requests"]
-    assert mixed_request in context["pending_requests"]
-    assert mixed_request not in context["unreleased_requests"]
-    assert unreleased_request in context["unreleased_requests"]
-    assert context["stats"]["active"] == 1
-    assert context["stats"]["pending"] == 1
-    assert context["stats"]["unreleased"] == 1
-    rendered = response.body.decode()
-    assert "High Potential" in rendered
-    assert "No pending items." not in rendered
-
-
-@pytest.mark.asyncio
-async def test_pending_tab_shows_tv_completion_progress(mock_db, monkeypatch):
-    """Pending TV rows show completed seasons and the one unfinished season."""
-    tv_request = MagicMock()
-    tv_request.id = 9
-    tv_request.status = RequestStatus.SEARCHING
-    tv_request.overseerr_request_id = 13
-    tv_request.title = "Severance"
-    tv_request.media_type = MediaType.TV
-    tv_request.created_at = datetime(2026, 4, 1, 12, 0, tzinfo=UTC)
-    tv_request.requester_username = "lucas"
-    tv_request.year = 2022
-
-    lifecycle_service = AsyncMock()
-    lifecycle_service.get_active_requests.return_value = [tv_request]
-    lifecycle_service.get_requests_by_status.return_value = []
-    lifecycle_service.get_unreleased_requests.return_value = []
-    monkeypatch.setattr(dashboard, "LifecycleService", lambda db: lifecycle_service)
-    monkeypatch.setattr(
-        dashboard,
-        "get_settings",
-        lambda: MagicMock(
-            overseerr_url="http://overseerr.test",
-            staging_mode_enabled=False,
-            qbittorrent_url=None,
-        ),
-    )
-    empty = MagicMock(scalars=MagicMock(return_value=MagicMock(all=MagicMock(return_value=[]))))
-    mock_db.execute.return_value = empty
-
-    seasons = [MagicMock(id=1, season_number=1), MagicMock(id=2, season_number=2)]
-    episodes = [
-        MagicMock(season_id=1, status=RequestStatus.COMPLETED),
-        MagicMock(season_id=2, status=RequestStatus.COMPLETED),
-        MagicMock(season_id=2, status=RequestStatus.PENDING),
-    ]
-    load_bulk = AsyncMock(return_value={tv_request.id: (seasons, episodes)})
-    monkeypatch.setattr(dashboard, "load_tv_seasons_with_episodes_bulk", load_bulk)
-
-    response = await dashboard.dashboard(MagicMock(), db=mock_db)
-
-    load_bulk.assert_awaited_once_with(mock_db, {tv_request.id})
-    rendered = response.body.decode()
     assert "1/2 seasons" in rendered
     assert "S02: 1/2 episodes" in rendered
 
 
-@pytest.mark.asyncio
-async def test_dashboard_classifies_completed_with_future_unreleased_tv_as_unreleased_only(
-    mock_db, monkeypatch
-):
-    request = MagicMock()
-    request.id = 18
-    request.status = RequestStatus.PENDING
-    request.overseerr_request_id = 18
-    request.title = "Only Future Left"
-    request.media_type = MediaType.TV
-    request.created_at = datetime(2026, 4, 1, 12, 0, tzinfo=UTC)
-    request.requester_username = "lucas"
-    request.year = 2026
-    request.tmdb_id = 1818
-    request.tvdb_id = 1819
-
-    lifecycle_service = AsyncMock()
-    lifecycle_service.get_active_requests.return_value = [request]
-    lifecycle_service.get_requests_by_status.return_value = []
-    lifecycle_service.get_unreleased_requests.return_value = [request]
-    lifecycle_service.get_requests_stats.return_value = {
-        "by_status": {RequestStatus.PENDING.value: 1}
-    }
-    monkeypatch.setattr(dashboard, "LifecycleService", lambda db: lifecycle_service)
-    monkeypatch.setattr(
-        dashboard,
-        "get_settings",
-        lambda: MagicMock(
-            overseerr_url="http://overseerr.test",
-            staging_mode_enabled=False,
-            qbittorrent_url="http://qb.test",
-        ),
+async def test_downloading_and_staged_tabs_split_by_torrent_and_request_status(db):
+    """Approved rows stay for any non-terminal request, including a TV request that
+    derives back to PENDING mid-download. Staged rows stay even for PENDING/SEARCHING
+    requests and for torrents with no request."""
+    downloading = await make_request(
+        db, status=RequestStatus.DOWNLOADING, title="Downloading Movie", external_id="1"
     )
-
-    fake_overseerr = AsyncMock()
-    fake_overseerr.get_media_details.return_value = {"nextEpisodeToAir": {"airDate": "2026-05-01"}}
-    monkeypatch.setattr(dashboard, "OverseerrService", lambda settings: fake_overseerr)
-    mock_db.execute.side_effect = [
-        MagicMock(scalars=MagicMock(return_value=MagicMock(all=MagicMock(return_value=[])))),
-        MagicMock(scalars=MagicMock(return_value=MagicMock(all=MagicMock(return_value=[])))),
-        MagicMock(scalars=MagicMock(return_value=MagicMock(all=MagicMock(return_value=[])))),
+    finished = await make_request(db, status=C, title="Finished Movie", external_id="2")
+    tv_pending = await make_request(
+        db, media_type=MediaType.TV, status=P, title="Mixed Show", external_id="3"
+    )
+    tv_searching = await make_request(
+        db, media_type=MediaType.TV, status=S, title="Searching Show", external_id="4"
+    )
+    staged_movie = await make_request(
+        db, status=RequestStatus.STAGED, title="Staged Movie", external_id="5"
+    )
+    active = await make_staged_torrent(
+        db, downloading, status="approved", title="Downloading Movie 2025"
+    )
+    hidden = await make_staged_torrent(db, finished, status="approved", title="Hidden Torrent")
+    tv_approved = await make_staged_torrent(
+        db, tv_pending, status="approved", title="Mixed Show S01E01 1080p"
+    )
+    staged = [
+        await make_staged_torrent(db, tv_searching, title="Searching Show S02 1080p"),
+        await make_staged_torrent(db, staged_movie, title="Staged Movie 2025"),
+        await make_staged_torrent(db, None, title="Manual Torrent"),
     ]
-    monkeypatch.setattr(
-        dashboard,
-        "load_tv_seasons_with_episodes_bulk",
-        AsyncMock(
-            return_value={
-                request.id: (
-                    [MagicMock(id=1, season_number=1, synced_at=None)],
-                    [
-                        MagicMock(status=RequestStatus.COMPLETED),
-                        MagicMock(status=RequestStatus.UNRELEASED),
-                    ],
-                )
-            }
-        ),
-    )
 
-    response = await dashboard.dashboard(MagicMock(), db=mock_db)
+    response = await _render(db)
 
     context = response.context
-    assert request in context["unreleased_requests"]
-    assert request not in context["pending_requests"]
-    assert request not in context["active_requests"]
-    assert context["stats"]["pending"] == 0
-    assert context["stats"]["unreleased"] == 1
-
-
-@pytest.mark.asyncio
-async def test_dashboard_hides_completed_ongoing_tv_from_finished_when_unreleased(
-    mock_db, monkeypatch
-):
-    """Finished-tab rows reclassified as unreleased should move out of completed results."""
-    completed_tv = MagicMock()
-    completed_tv.id = 21
-    completed_tv.status = RequestStatus.COMPLETED
-    completed_tv.overseerr_request_id = 99
-    completed_tv.title = "The Rookie"
-    completed_tv.media_type = MediaType.TV
-    completed_tv.created_at = datetime(2026, 4, 1, 12, 0, tzinfo=UTC)
-    completed_tv.requester_username = "lucas"
-    completed_tv.year = 2025
-    completed_tv.tmdb_id = 123
-    completed_tv.tvdb_id = 456
-
-    lifecycle_service = AsyncMock()
-    lifecycle_service.get_active_requests.return_value = []
-    lifecycle_service.get_requests_by_status.return_value = [completed_tv]
-    lifecycle_service.get_unreleased_requests.return_value = [completed_tv]
-    lifecycle_service.get_requests_stats.return_value = {
-        "by_status": {
-            RequestStatus.COMPLETED.value: 1,
-            RequestStatus.UNRELEASED.value: 1,
-        }
+    assert {t.id for t in context["staged_torrents"]} == {t.id for t in staged}
+    assert {t.id for t in context["downloading_torrents"]} == {active.id, tv_approved.id}
+    assert hidden not in context["downloading_torrents"]
+    assert context["stats"]["staged"] == 3
+    assert context["downloading_request_statuses"] == {
+        downloading.id: RequestStatus.DOWNLOADING.value,
+        tv_pending.id: P.value,
     }
-    monkeypatch.setattr(dashboard, "LifecycleService", lambda db: lifecycle_service)
-
-    monkeypatch.setattr(
-        dashboard,
-        "get_settings",
-        lambda: MagicMock(
-            overseerr_url="http://overseerr.test",
-            staging_mode_enabled=False,
-            qbittorrent_url="http://qb.test",
-        ),
-    )
-
-    fake_overseerr = AsyncMock()
-    fake_overseerr.get_media_details.return_value = {"nextEpisodeToAir": {"airDate": "2026-05-01"}}
-    monkeypatch.setattr(dashboard, "OverseerrService", lambda settings: fake_overseerr)
-
-    mock_db.execute.side_effect = [
-        MagicMock(scalars=MagicMock(return_value=MagicMock(all=MagicMock(return_value=[])))),
-        MagicMock(scalars=MagicMock(return_value=MagicMock(all=MagicMock(return_value=[])))),
-        MagicMock(scalars=MagicMock(return_value=MagicMock(all=MagicMock(return_value=[])))),
-    ]
-    monkeypatch.setattr(
-        dashboard,
-        "load_tv_seasons_with_episodes_bulk",
-        AsyncMock(
-            return_value={
-                completed_tv.id: (
-                    [MagicMock(id=1, season_number=8, synced_at=None)],
-                    [
-                        MagicMock(status=RequestStatus.COMPLETED),
-                        MagicMock(status=RequestStatus.UNRELEASED),
-                    ],
-                )
-            }
-        ),
-    )
-
-    response = await dashboard.dashboard(MagicMock(), db=mock_db)
-
-    context = response.context
-    assert completed_tv in context["unreleased_requests"]
-    assert completed_tv not in context["active_requests"]
-    assert completed_tv not in context["completed_requests"]
-    assert context["stats"]["completed"] == 0
-    assert context["stats"]["unreleased"] == 1
-
-
-@pytest.mark.asyncio
-async def test_dashboard_renders_staged_torrents_for_refresh(mock_db, monkeypatch):
-    """Dashboard should include staged torrents in the staged tab HTML."""
-    lifecycle_service = AsyncMock()
-    lifecycle_service.get_active_requests.return_value = []
-    lifecycle_service.get_requests_by_status.return_value = []
-    lifecycle_service.get_unreleased_requests.return_value = []
-    lifecycle_service.get_requests_stats.return_value = {"by_status": {}}
-    monkeypatch.setattr(dashboard, "LifecycleService", lambda db: lifecycle_service)
-
-    monkeypatch.setattr(
-        dashboard,
-        "get_settings",
-        lambda: MagicMock(
-            overseerr_url="http://overseerr.test",
-            staging_mode_enabled=False,
-            qbittorrent_url="http://qb.test",
-        ),
-    )
-
-    staged_torrent = MagicMock()
-    staged_torrent.id = 1
-    staged_torrent.request_id = None
-    staged_torrent.title = "Test Torrent"
-    staged_torrent.status = "staged"
-    staged_torrent.size = 123
-    staged_torrent.indexer = "Indexer"
-    staged_torrent.score = 42
-    staged_torrent.created_at = datetime(2026, 4, 1, 12, 0, tzinfo=UTC)
-    staged_torrent.replaced_by_id = None
-    staged_torrent.replacement_reason = None
-
-    staged_result = MagicMock(
-        scalars=MagicMock(return_value=MagicMock(all=MagicMock(return_value=[staged_torrent])))
-    )
-    empty_result = MagicMock(
-        scalars=MagicMock(return_value=MagicMock(all=MagicMock(return_value=[])))
-    )
-    mock_db.execute.side_effect = [staged_result, empty_result, empty_result, empty_result]
-
-    response = await dashboard.dashboard(MagicMock(), db=mock_db)
-
     body = response.body.decode()
-    assert "staged-torrents-body" in body
-    assert "Test Torrent" in body
+    assert "Manual Torrent" in body
+    assert "Mixed Show S01E01 1080p" in body
+    assert "Hidden Torrent" not in body
 
 
-@pytest.mark.asyncio
-async def test_dashboard_splits_staged_downloading_and_hides_stale_torrents(mock_db, monkeypatch):
-    """Staged and actively downloading torrents should have separate context/stats."""
-    lifecycle_service = AsyncMock()
-    lifecycle_service.get_active_requests.return_value = []
-    lifecycle_service.get_requests_by_status.return_value = []
-    lifecycle_service.get_unreleased_requests.return_value = []
-    lifecycle_service.get_requests_stats.return_value = {"by_status": {}}
-    monkeypatch.setattr(dashboard, "LifecycleService", lambda db: lifecycle_service)
-
-    monkeypatch.setattr(
-        dashboard,
-        "get_settings",
-        lambda: MagicMock(
-            overseerr_url="http://overseerr.test",
-            staging_mode_enabled=False,
-            qbittorrent_url="http://qb.test",
-        ),
+async def test_tv_staged_rows_stay_approvable_after_one_episode_is_approved(db):
+    show = await make_request(
+        db, media_type=MediaType.TV, status=RequestStatus.DOWNLOADING, title="Example Show"
     )
+    await make_staged_torrent(db, show, status="approved", title="Example Show S01E01")
+    staged = [await make_staged_torrent(db, show, title=f"Example Show S01E0{n}") for n in (2, 3)]
 
-    active_torrent = MagicMock()
-    active_torrent.id = 1
-    active_torrent.request_id = 100
-    active_torrent.title = "Still Downloading"
-    active_torrent.status = "approved"
-    active_torrent.size = 123
-    active_torrent.indexer = "Indexer"
-    active_torrent.score = 50
-    active_torrent.created_at = datetime(2026, 4, 1, 12, 0, tzinfo=UTC)
-    active_torrent.replaced_by_id = None
-    active_torrent.replacement_reason = None
+    response = await _render(db)
 
-    completed_torrent = MagicMock()
-    completed_torrent.id = 2
-    completed_torrent.request_id = 101
-    completed_torrent.title = "Already Completed"
-    completed_torrent.status = "approved"
-    completed_torrent.size = 123
-    completed_torrent.indexer = "Indexer"
-    completed_torrent.score = 45
-    completed_torrent.created_at = datetime(2026, 4, 1, 11, 0, tzinfo=UTC)
-    completed_torrent.replaced_by_id = None
-    completed_torrent.replacement_reason = None
+    assert response.context["replace_staged_torrent_ids"] == set()
+    body = response.body.decode()
+    for torrent in staged:
+        assert f"postStagedAction('/staged/{torrent.id}/approve', '/?tab=staged')" in body
+        assert f"openReplaceModal({torrent.id}" not in body
 
-    pending_torrent = MagicMock()
-    pending_torrent.id = 3
-    pending_torrent.request_id = 102
-    pending_torrent.title = "Still Pending"
-    pending_torrent.status = "approved"
-    pending_torrent.size = 123
-    pending_torrent.indexer = "Indexer"
-    pending_torrent.score = 40
-    pending_torrent.created_at = datetime(2026, 4, 1, 10, 0, tzinfo=UTC)
-    pending_torrent.replaced_by_id = None
-    pending_torrent.replacement_reason = None
 
-    staged_torrent = MagicMock()
-    staged_torrent.id = 4
-    staged_torrent.request_id = 103
-    staged_torrent.title = "Ready To Review"
-    staged_torrent.status = "staged"
-    staged_torrent.size = 123
-    staged_torrent.indexer = "Indexer"
-    staged_torrent.score = 55
-    staged_torrent.created_at = datetime(2026, 4, 1, 9, 0, tzinfo=UTC)
-    staged_torrent.replaced_by_id = None
-    staged_torrent.replacement_reason = None
-
-    staged_result = MagicMock(
-        scalars=MagicMock(
-            return_value=MagicMock(
-                all=MagicMock(
-                    return_value=[
-                        active_torrent,
-                        completed_torrent,
-                        pending_torrent,
-                        staged_torrent,
-                    ]
-                )
+async def test_downloading_tab_lists_every_bulk_approved_movie_with_move_status(db):
+    torrents = []
+    for n, title in enumerate(("First Bulk Movie", "Second Bulk Movie"), start=1):
+        req = await make_request(
+            db, status=RequestStatus.DOWNLOADING, title=title, external_id=str(n)
+        )
+        torrents.append(
+            await make_staged_torrent(
+                db,
+                req,
+                status="approved",
+                title=f"{title} 2025",
+                move_status="moved" if n == 1 else None,
+                moved_path="/media/movies" if n == 1 else None,
             )
         )
-    )
-    request_status_result = MagicMock()
-    request_status_result.all.return_value = [
-        (100, RequestStatus.DOWNLOADING),
-        (101, RequestStatus.COMPLETED),
-        (102, RequestStatus.PENDING),
-        (103, RequestStatus.STAGED),
-    ]
-    empty_result = MagicMock(
-        scalars=MagicMock(return_value=MagicMock(all=MagicMock(return_value=[])))
-    )
-    empty_log_result = MagicMock(all=MagicMock(return_value=[]))
-    mock_db.execute.side_effect = [
-        staged_result,
-        request_status_result,
-        empty_log_result,
-        empty_result,
-    ]
 
-    response = await dashboard.dashboard(MagicMock(), db=mock_db)
+    response = await _render(db)
 
-    context = response.context
-    assert context["staged_torrents"] == [staged_torrent]
-    # Approved torrents stay visible for any non-terminal request status; TV
-    # requests can derive back to PENDING while an episode is downloading.
-    assert context["downloading_torrents"] == [active_torrent, pending_torrent]
-    assert context["stats"]["staged"] == 1
-    assert context["stats"]["downloading"] == 2
-    assert context["downloading_request_statuses"] == {
-        100: RequestStatus.DOWNLOADING.value,
-        102: RequestStatus.PENDING.value,
-    }
+    assert {t.id for t in response.context["downloading_torrents"]} == {t.id for t in torrents}
+    assert response.context["stats"]["downloading"] == 2
     body = response.body.decode()
-    assert "Ready To Review" in body
-    assert "content-downloading" in body
-    assert "downloading-torrents-body" in body
-    assert "Still Downloading" in body
-    assert "Already Completed" not in body
-    assert "Still Pending" in body
+    assert 'data-movestatus="moved"' in body
+    assert "data-move-status>moved</span>" in body
+    assert "/media/movies" in body
 
 
-@pytest.mark.asyncio
-async def test_dashboard_keeps_tv_staged_approve_actions_after_one_episode_is_approved(
-    mock_db, monkeypatch
-):
-    """TV staged rows for one request should stay individually approvable after one is sent."""
-    lifecycle_service = AsyncMock()
-    lifecycle_service.get_active_requests.return_value = []
-    lifecycle_service.get_requests_by_status.return_value = []
-    lifecycle_service.get_unreleased_requests.return_value = []
-    lifecycle_service.get_requests_stats.return_value = {"by_status": {}}
-    monkeypatch.setattr(dashboard, "LifecycleService", lambda db: lifecycle_service)
-
-    monkeypatch.setattr(
-        dashboard,
-        "get_settings",
-        lambda: MagicMock(
-            overseerr_url="http://overseerr.test",
-            staging_mode_enabled=True,
-            qbittorrent_url="http://qb.test",
-        ),
+async def test_only_the_completed_episode_torrent_is_marked_waiting_for_plex(db):
+    show = await make_request(
+        db, media_type=MediaType.TV, status=RequestStatus.DOWNLOADING, title="Test Show"
     )
-
-    approved_torrent = MagicMock()
-    approved_torrent.id = 10
-    approved_torrent.request_id = 300
-    approved_torrent.title = "Example Show S01E01 1080p WEB-DL"
-    approved_torrent.status = "approved"
-    approved_torrent.size = 1024 * 1024 * 1024
-    approved_torrent.indexer = "Indexer"
-    approved_torrent.score = 90
-    approved_torrent.created_at = datetime(2026, 4, 1, 12, 0, tzinfo=UTC)
-    approved_torrent.replaced_by_id = None
-    approved_torrent.replacement_reason = None
-
-    staged_torrents = []
-    for torrent_id, title in [
-        (11, "Example Show S01E02 1080p WEB-DL"),
-        (12, "Example Show S01E03 1080p WEB-DL"),
-    ]:
-        torrent = MagicMock()
-        torrent.id = torrent_id
-        torrent.request_id = 300
-        torrent.title = title
-        torrent.status = "staged"
-        torrent.size = 1024 * 1024 * 1024
-        torrent.indexer = "Indexer"
-        torrent.score = 80
-        torrent.created_at = datetime(2026, 4, 1, 12, torrent_id, tzinfo=UTC)
-        torrent.replaced_by_id = None
-        torrent.replacement_reason = None
-        staged_torrents.append(torrent)
-
-    staged_result = MagicMock(
-        scalars=MagicMock(
-            return_value=MagicMock(all=MagicMock(return_value=[approved_torrent, *staged_torrents]))
+    done = await make_staged_torrent(db, show, status="approved", title="Test Show S01E01")
+    other = await make_staged_torrent(db, show, status="approved", title="Test Show S01E02")
+    db.add(
+        ActivityLog(
+            request_id=show.id,
+            event_type=EventType.DOWNLOAD_COMPLETED.value,
+            details=json.dumps({"done_torrents": [{"torrent_id": done.id}]}),
         )
     )
-    request_status_result = MagicMock()
-    request_status_result.all.return_value = [
-        (300, RequestStatus.DOWNLOADING, MediaType.TV, "Example Show", 2026)
-    ]
-    empty_log_result = MagicMock(all=MagicMock(return_value=[]))
-    denied_result = MagicMock(
-        scalars=MagicMock(return_value=MagicMock(all=MagicMock(return_value=[])))
-    )
-    mock_db.execute.side_effect = [
-        staged_result,
-        request_status_result,
-        empty_log_result,
-        denied_result,
-    ]
 
-    response = await dashboard.dashboard(MagicMock(), db=mock_db)
+    response = await _render(db)
 
-    context = response.context
-    assert context["staged_torrents"] == staged_torrents
-    assert context["downloading_torrents"] == [approved_torrent]
-    assert context["replace_staged_torrent_ids"] == set()
-    body = response.body.decode()
-    assert "postStagedAction('/staged/11/approve', '/?tab=staged')" in body
-    assert "postStagedAction('/staged/12/approve', '/?tab=staged')" in body
-    assert "openReplaceModal(11" not in body
-    assert "openReplaceModal(12" not in body
+    assert response.context["downloading_waiting_plex_torrent_ids"] == {done.id}
+    rendered = response.body.decode()
+    assert f'data-torrent-id="{other.id}"' in rendered
+    assert "qBittorrent finished; waiting for Plex" in rendered
+    # Each torrent renders in a mobile and a desktop layout.
+    assert rendered.count('data-qbit-finished-waiting-plex="true"') == 2
+    assert rendered.count('data-qbit-finished-waiting-plex="false"') == 2
 
 
-@pytest.mark.asyncio
-async def test_dashboard_shows_approved_tv_torrent_when_request_derives_pending(
-    mock_db, monkeypatch
+@pytest.mark.parametrize(
+    ("request_title", "year", "release_title", "warns"),
+    [
+        ("The Cheetah Girls", 2003, "The.Cheetah.Girls.2.2005.1080p.WEB-DL", True),
+        ("Blade Runner 2049", 2017, "Blade.Runner.2049.2017.1080p.WEB-DL", False),
+    ],
+)
+async def test_staged_movie_identity_mismatch_warning(
+    db, request_title, year, release_title, warns
 ):
-    """An approved TV episode torrent stays in Downloads while siblings are PENDING.
+    req = await make_request(db, status=RequestStatus.STAGED, title=request_title, year=year)
+    torrent = await make_staged_torrent(db, req, title=release_title)
 
-    Regression test: with mixed episode statuses (one DOWNLOADING, others
-    PENDING) the request-level status derives to PENDING, which previously
-    hid the actively downloading approved torrent from the Downloads tab.
-    """
-    lifecycle_service = AsyncMock()
-    lifecycle_service.get_active_requests.return_value = []
-    lifecycle_service.get_requests_by_status.return_value = []
-    lifecycle_service.get_unreleased_requests.return_value = []
-    lifecycle_service.get_requests_stats.return_value = {"by_status": {}}
-    monkeypatch.setattr(dashboard, "LifecycleService", lambda db: lifecycle_service)
+    response = await _render(db)
 
-    monkeypatch.setattr(
-        dashboard,
-        "get_settings",
-        lambda: MagicMock(
-            overseerr_url="http://overseerr.test",
-            staging_mode_enabled=True,
-            qbittorrent_url="http://qb.test",
-        ),
-    )
-
-    approved_torrent = MagicMock()
-    approved_torrent.id = 1
-    approved_torrent.request_id = 400
-    approved_torrent.title = "Example Show S01E01 1080p WEB-DL"
-    approved_torrent.status = "approved"
-    approved_torrent.size = 1024 * 1024 * 1024
-    approved_torrent.indexer = "Indexer"
-    approved_torrent.score = 90
-    approved_torrent.created_at = datetime(2026, 4, 1, 12, 0, tzinfo=UTC)
-    approved_torrent.replaced_by_id = None
-    approved_torrent.replacement_reason = None
-
-    staged_result = MagicMock(
-        scalars=MagicMock(return_value=MagicMock(all=MagicMock(return_value=[approved_torrent])))
-    )
-    request_status_result = MagicMock()
-    request_status_result.all.return_value = [
-        (400, RequestStatus.PENDING, MediaType.TV, "Example Show", 2026)
-    ]
-    denied_result = MagicMock(
-        scalars=MagicMock(return_value=MagicMock(all=MagicMock(return_value=[])))
-    )
-    mock_db.execute.side_effect = [
-        staged_result,
-        request_status_result,
-        denied_result,
-    ]
-
-    response = await dashboard.dashboard(MagicMock(), db=mock_db)
-
-    context = response.context
-    assert context["downloading_torrents"] == [approved_torrent]
-    assert context["downloading_request_statuses"] == {400: RequestStatus.PENDING.value}
-    assert context["stats"]["downloading"] == 1
-    body = response.body.decode()
-    assert "Example Show S01E01 1080p WEB-DL" in body
+    warnings = response.context["movie_identity_mismatch_warnings"]
+    assert (torrent.id in warnings) is warns
+    assert ("Possible wrong movie" in response.body.decode()) is warns
 
 
-@pytest.mark.asyncio
-async def test_dashboard_includes_tv_staged_rows_when_request_aggregate_inactive(
-    mock_db, monkeypatch
+@pytest.mark.parametrize(
+    ("status", "torrent_status", "expected"),
+    [
+        (P, "staged", True),
+        (RequestStatus.DOWNLOADING, "approved", True),
+        # A TV request can derive back to PENDING while an approved torrent downloads.
+        (P, "approved", True),
+        (C, "approved", False),
+    ],
+)
+def test_actionable_workflow_torrent(status, torrent_status, expected):
+    torrent = cast(StagedTorrent, SimpleNamespace(request_id=42, status=torrent_status))
+
+    assert _is_actionable_workflow_torrent(torrent, {42: status}) is expected
+
+
+@pytest.mark.parametrize(
+    ("status", "managed"),
+    [(P, True), (RequestStatus.DOWNLOADING, True), (C, False)],
+)
+async def test_downloads_api_matches_managed_torrents_unless_request_is_terminal(
+    db, monkeypatch, status, managed
 ):
-    """TV staged rows remain actionable even if aggregate request status is pending."""
-    lifecycle_service = AsyncMock()
-    lifecycle_service.get_active_requests.return_value = []
-    lifecycle_service.get_requests_by_status.return_value = []
-    lifecycle_service.get_unreleased_requests.return_value = []
-    lifecycle_service.get_requests_stats.return_value = {"by_status": {}}
-    monkeypatch.setattr(dashboard, "LifecycleService", lambda db: lifecycle_service)
-
+    """A single-episode approval derives a TV request back to PENDING, but the torrent is
+    still downloading and must stay managed. Terminal requests drop to unmanaged."""
+    show = await make_request(db, media_type=MediaType.TV, status=status, title="Managed Show")
+    torrent = await make_staged_torrent(
+        db, show, status="approved", info_hash="abc123", title="Managed Release"
+    )
+    qbit = SimpleNamespace(
+        get_unfinished_torrents_or_raise=AsyncMock(
+            return_value=[
+                {"hash": "abc123", "name": "Managed Release", "progress": 0.5},
+                {"hash": "manual", "name": "Manual", "progress": 0.25},
+            ]
+        )
+    )
     monkeypatch.setattr(
-        dashboard,
-        "get_settings",
-        lambda: MagicMock(
-            overseerr_url="http://overseerr.test",
-            staging_mode_enabled=True,
-            qbittorrent_url="http://qb.test",
-        ),
+        dashboard, "get_settings", lambda: SimpleNamespace(qbittorrent_url="http://qb")
     )
+    monkeypatch.setattr(dashboard, "QbittorrentService", lambda settings: qbit)
+    await db.commit()
 
-    staged_torrents = []
-    for torrent_id, title in enumerate(
-        [
-            "Example Show S01E01 1080p WEB-DL",
-            "Example Show S02 1080p WEB-DL",
-            "Example Show S03-S04 1080p WEB-DL",
-        ],
-        start=1,
-    ):
-        torrent = MagicMock()
-        torrent.id = torrent_id
-        torrent.request_id = 200 + torrent_id
-        torrent.title = title
-        torrent.status = "staged"
-        torrent.size = 1024 * 1024 * 1024
-        torrent.indexer = "Indexer"
-        torrent.score = 90 - torrent_id
-        torrent.created_at = datetime(2026, 4, 1, 12, torrent_id, tzinfo=UTC)
-        torrent.replaced_by_id = None
-        torrent.replacement_reason = None
-        staged_torrents.append(torrent)
+    payload = await dashboard.qbit_downloads_api(db=db)
 
-    staged_result = MagicMock(
-        scalars=MagicMock(return_value=MagicMock(all=MagicMock(return_value=staged_torrents)))
-    )
-    request_status_result = MagicMock()
-    request_status_result.all.return_value = [
-        (201, RequestStatus.PENDING, MediaType.TV, "Example Show", 2026),
-        (202, RequestStatus.SEARCHING, MediaType.TV, "Example Show", 2026),
-        (203, RequestStatus.PENDING, MediaType.TV, "Example Show", 2026),
-    ]
-    denied_result = MagicMock(
-        scalars=MagicMock(return_value=MagicMock(all=MagicMock(return_value=[])))
-    )
-    mock_db.execute.side_effect = [staged_result, request_status_result, denied_result]
-
-    response = await dashboard.dashboard(MagicMock(), db=mock_db)
-
-    context = response.context
-    assert context["staged_torrents"] == staged_torrents
-    assert context["stats"]["staged"] == 3
-    body = response.body.decode()
-    assert "Example Show S01E01 1080p WEB-DL" in body
-    assert "Example Show S02 1080p WEB-DL" in body
-    assert "Example Show S03-S04 1080p WEB-DL" in body
+    assert payload["qbit_unavailable"] is False
+    groups = payload["groups"]
+    if managed:
+        assert [group["title"] for group in groups] == ["Managed Show", "Unmanaged"]
+        assert groups[0]["request_id"] == show.id
+        assert groups[0]["media_type"] == "tv"
+        assert groups[0]["torrents"][0]["managed"] == {
+            "id": torrent.id,
+            "request_id": show.id,
+            "move_status": "pending",
+            "moved_path": None,
+        }
+    else:
+        assert [group["unmanaged"] for group in groups] == [True]
+        assert {t["managed"] for t in groups[0]["torrents"]} == {None}
+    assert groups[-1]["unmanaged"] is True
+    assert groups[-1]["torrents"][0]["managed"] is None

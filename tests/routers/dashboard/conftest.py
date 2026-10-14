@@ -1,6 +1,5 @@
 """Shared fixtures for dashboard router tests."""
 
-from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -35,8 +34,3 @@ def clear_details_sync_tasks():
     DETAILS_SYNC_TASKS.clear()
     yield
     DETAILS_SYNC_TASKS.clear()
-
-
-@pytest.fixture
-def dashboard_template_path() -> Path:
-    return Path(__file__).resolve().parents[3] / "app/siftarr/templates/dashboard.html"

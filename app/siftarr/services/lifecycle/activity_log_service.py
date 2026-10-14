@@ -1,21 +1,14 @@
 """Service for creating and querying activity log entries."""
 
-import inspect
-import json
 import logging
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.siftarr.models import ActivityLog, EventType
-from app.siftarr.services.stats_metrics_service import record_timing_event
+from app.siftarr.services.stats_metrics_service import json_dumps_safe, record_timing_event
 
 logger = logging.getLogger(__name__)
-
-
-def _json_dumps_safe(value: dict) -> str:
-    """Serialize log details without failing on test doubles."""
-    return json.dumps(value, default=str)
 
 
 class ActivityLogService:
@@ -37,18 +30,13 @@ class ActivityLogService:
         rolls back only the log entry, not the caller's transaction.
         """
         try:
-            transaction = self.db.begin_nested()
-            if inspect.isawaitable(transaction):
-                transaction = await transaction
-            async with transaction:
+            async with self.db.begin_nested():
                 entry = ActivityLog(
                     event_type=event_type.value,
                     request_id=request_id,
-                    details=_json_dumps_safe(details) if details is not None else None,
+                    details=json_dumps_safe(details) if details is not None else None,
                 )
-                add_result = self.db.add(entry)
-                if inspect.isawaitable(add_result):
-                    await add_result
+                self.db.add(entry)
                 await self.db.flush()
                 if event_type in {
                     EventType.SEARCH_STARTED,

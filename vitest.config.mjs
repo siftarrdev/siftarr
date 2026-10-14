@@ -4,7 +4,8 @@ import { fileURLToPath, URL } from 'node:url';
 export default defineConfig({
   resolve: {
     alias: {
-      '/static/js': fileURLToPath(new URL('./app/siftarr/static/js', import.meta.url)),
+      // Browser import paths resolve to the TypeScript sources, not generated output.
+      '/static/js': fileURLToPath(new URL('./frontend-src', import.meta.url)),
     },
   },
   test: {

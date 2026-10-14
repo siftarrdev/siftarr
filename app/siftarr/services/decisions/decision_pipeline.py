@@ -16,8 +16,7 @@ from collections.abc import Sequence
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.siftarr.models.activity_log import EventType
-from app.siftarr.services.decisions.rule_engine import ReleaseEvaluation, RuleEngine
-from app.siftarr.services.decisions.rule_engine_provider import get_rule_engine
+from app.siftarr.services.decisions.rule_engine import ReleaseEvaluation
 from app.siftarr.services.lifecycle.activity_log_service import ActivityLogService
 from app.siftarr.services.lifecycle.pending_queue_service import PendingQueueService
 
@@ -25,26 +24,6 @@ logger = logging.getLogger(__name__)
 
 
 # ── Rule engine ───────────────────────────────────────────────────────
-
-
-async def build_rule_engine(
-    db: AsyncSession,
-    media_type: str,
-    cached_engine: RuleEngine | None = None,
-) -> RuleEngine:
-    """Load rules from the database and build a :class:`RuleEngine`.
-
-    Args:
-        db: Active database session.
-        media_type: ``"movie"`` or ``"tv"`` — used to scope rules.
-        cached_engine: If provided, returned directly without a DB query.
-
-    Returns:
-        A configured :class:`RuleEngine`.
-    """
-    if cached_engine is not None:
-        return cached_engine
-    return await get_rule_engine(db, media_type)
 
 
 # ── Activity logging ──────────────────────────────────────────────────

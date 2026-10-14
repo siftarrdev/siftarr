@@ -11,7 +11,7 @@ const liveDetailsRefresh = window.liveDetailsRefresh || {
 let detailsControlHandlersReady = false;
 let detailsControlDebounce = null;
 let searchHistoryLoadGeneration = 0;
-function cancelLiveDetailsRefresh(requestId = null) {
+export function cancelLiveDetailsRefresh(requestId = null) {
   const state = liveDetailsRefresh;
   if (requestId !== null && state.requestId !== requestId) return;
   clearTimeout(state.timer);
@@ -19,7 +19,7 @@ function cancelLiveDetailsRefresh(requestId = null) {
   state.pending = false;
   state.requestId = null;
 }
-function scheduleLiveDetailsRefresh(requestId) {
+export function scheduleLiveDetailsRefresh(requestId) {
   const modal = document.getElementById('request-details-modal');
   if (!modal || modal.classList.contains('hidden') || window.activeDetailsRequestId !== requestId) return;
   const state = liveDetailsRefresh;
@@ -42,7 +42,7 @@ function scheduleLiveDetailsRefresh(requestId) {
     }
   }, 1250);
 }
-async function reloadOpenDetailsIfActive(requestId) {
+export async function reloadOpenDetailsIfActive(requestId) {
   if (window.activeDetailsRequestId !== requestId) return;
   cancelLiveDetailsRefresh(requestId);
   await openRequestDetails(requestId, dashboardState.currentDetailsIndex, { preserveUiState: true });
@@ -56,11 +56,11 @@ function getDetailsControls(requestId) {
   }
   return detailsControlState[requestId];
 }
-function resetDetailsControls(requestId, options = {}) {
+export function resetDetailsControls(requestId, options = {}) {
   detailsControlState[requestId] = defaultDetailsControls();
   if (options.updateInputs) applyDetailsControls(detailsControlState[requestId]);
 }
-function buildDetailsUrl(requestId) {
+export function buildDetailsUrl(requestId) {
   const controls = getDetailsControls(requestId);
   const params = new URLSearchParams();
   if (controls.title) params.set('title', controls.title);
@@ -70,7 +70,7 @@ function buildDetailsUrl(requestId) {
   const suffix = params.toString();
   return `/requests/${requestId}/details${suffix ? '?' + suffix : ''}`;
 }
-function applyDetailsControls(controls) {
+export function applyDetailsControls(controls) {
   const filterInput = document.getElementById('release-filter-input');
   const resolutionSelect = document.getElementById('release-resolution-filter');
   const sortSelect = document.getElementById('release-sort-key');
@@ -84,7 +84,7 @@ function applyDetailsControls(controls) {
     directionBtn.textContent = direction === 'asc' ? 'Asc' : 'Desc';
   }
 }
-function updateReleaseCountText(data) {
+export function updateReleaseCountText(data) {
   const countEl = document.getElementById('release-results-count');
   if (!countEl) return;
   const filtered = data.filtered_total_releases ?? (data.releases || []).length;
@@ -112,7 +112,7 @@ function compareReleasesForDetails(a, b, controls) {
   if (primaryA > primaryB) return 1 * direction;
   return String(a.title || '').localeCompare(String(b.title || ''), undefined, { sensitivity: 'base' });
 }
-function applyLocalReleaseSort() {
+export function applyLocalReleaseSort() {
   if (!dashboardState.currentRequestId) return false;
   const releasesEl = document.getElementById('request-details-releases');
   if (!releasesEl) return false;
@@ -165,12 +165,12 @@ function reloadDetailsWithControls(debounceMs = 0) {
     run();
   }
 }
-function setDetailsScope(requestId, scope) {
+export function setDetailsScope(requestId, scope) {
   const controls = getDetailsControls(requestId);
   controls.scope = scope;
   applyLocalReleaseSort();
 }
-function ensureDetailsControlHandlers() {
+export function ensureDetailsControlHandlers() {
   if (detailsControlHandlersReady) return;
   detailsControlHandlersReady = true;
   const filterInput = document.getElementById('release-filter-input');
@@ -209,7 +209,7 @@ function ensureDetailsControlHandlers() {
       reloadDetailsWithControls();
     });
 }
-async function openRequestDetails(requestId, explicitIndex = null, options = {}) {
+export async function openRequestDetails(requestId, explicitIndex = null, options = {}) {
   if (window.activeDetailsRequestId && window.activeDetailsRequestId !== requestId) {
     cancelLiveDetailsRefresh(window.activeDetailsRequestId);
   }
@@ -404,7 +404,7 @@ async function openRequestDetails(requestId, explicitIndex = null, options = {})
       '<div class="text-red-400 text-sm">Failed to load request details. Check that Overseerr is reachable.</div>';
   }
 }
-function renderDetailsStats(data) {
+export function renderDetailsStats(data) {
   const statsEl = document.getElementById('request-details-stats');
   if (!statsEl) return;
   const releases = Array.isArray(data && data.releases) ? data.releases : [];
@@ -446,7 +446,7 @@ function formatDetailsLastSearch(timeline) {
   const relative = window.formatRelativePublishAge ? window.formatRelativePublishAge(latestCreatedAt) : '';
   return relative || '—';
 }
-function renderRuleEvidence(evidence) {
+export function renderRuleEvidence(evidence) {
   const matches = (evidence && evidence.matches) || [];
   if (!matches.length) return '<span class="text-gray-500">No rule details</span>';
   return matches
@@ -458,7 +458,7 @@ function renderRuleEvidence(evidence) {
     })
     .join(' ');
 }
-async function loadSearchHistory() {
+export async function loadSearchHistory() {
   if (!dashboardState.currentRequestId) return;
   const requestId = dashboardState.currentRequestId;
   const generation = ++searchHistoryLoadGeneration;
@@ -521,7 +521,7 @@ function countUnavailableTvSeasons(data = window.currentDetailsData) {
     });
   }).length;
 }
-async function confirmLargeTvSearch(requestId = dashboardState.currentRequestId) {
+export async function confirmLargeTvSearch(requestId = dashboardState.currentRequestId) {
   let data = window.currentDetailsData;
   if (!data || data.request?.id !== requestId) {
     const response = await fetch(buildDetailsUrl(requestId));
@@ -543,7 +543,7 @@ async function confirmLargeTvSearch(requestId = dashboardState.currentRequestId)
     modal.querySelector(`[onclick="chooseLargeTvSearch('all')"]`)?.focus();
   });
 }
-function chooseLargeTvSearch(choice) {
+export function chooseLargeTvSearch(choice) {
   const modal = document.getElementById('large-tv-search-modal');
   if (modal) modal.classList.add('hidden');
   const resolve = window.pendingLargeTvSearchChoice;
@@ -551,7 +551,7 @@ function chooseLargeTvSearch(choice) {
   window.isLargeTvSearchChoiceOpen = false;
   if (resolve) resolve(choice);
 }
-async function searchTvRequest(mode = 'new', _options = {}) {
+export async function searchTvRequest(mode = 'new', _options = {}) {
   if (!dashboardState.currentRequestId) return;
   const requestId = dashboardState.currentRequestId;
   const fullSearch = mode === 'full';
@@ -628,16 +628,13 @@ async function searchTvRequest(mode = 'new', _options = {}) {
     '/requests/' + requestId + '/search/cancel',
   );
 }
-async function searchTvRequestNew(options = {}) {
+export async function searchTvRequestNew(options = {}) {
   return searchTvRequest('new', options);
 }
-async function searchTvRequestFull(options = {}) {
+export async function searchTvRequestFull(options = {}) {
   return searchTvRequest('full', options);
 }
-async function searchTvRequestAll() {
-  return searchTvRequestNew();
-}
-async function refreshPlexAndReload() {
+export async function refreshPlexAndReload() {
   if (!dashboardState.currentRequestId) return;
   const btn = document.getElementById('request-details-refresh-plex');
   if (btn) {
@@ -658,7 +655,7 @@ async function refreshPlexAndReload() {
     }
   }
 }
-async function searchRequestFromDetails() {
+export async function searchRequestFromDetails() {
   if (!dashboardState.currentRequestId) return;
   const btn = document.getElementById('request-details-search-btn');
   const originalText = btn ? btn.innerHTML : '';
@@ -795,7 +792,7 @@ function renderTimeline(timelineData, options = {}) {
     })
     .join('');
 }
-function isActivityPanelOpen() {
+export function isActivityPanelOpen() {
   const panel = document.getElementById('activity-panel');
   return !!panel && !panel.classList.contains('hidden');
 }
@@ -814,16 +811,13 @@ function setActivityPanelOpen(open) {
     toggle.focus();
   }
 }
-function openActivityPanel() {
-  setActivityPanelOpen(true);
-}
-function closeActivityPanel() {
+export function closeActivityPanel() {
   setActivityPanelOpen(false);
 }
-function toggleActivityPanel() {
+export function toggleActivityPanel() {
   setActivityPanelOpen(!isActivityPanelOpen());
 }
-function toggleMobileFilter() {
+export function toggleMobileFilter() {
   const controls = document.getElementById('release-controls');
   if (!controls) return;
   const chip = document.querySelector('[onclick="toggleMobileFilter()"]');
@@ -831,36 +825,6 @@ function toggleMobileFilter() {
   controls.classList.toggle('hidden', !willShow);
   if (chip) chip.setAttribute('aria-expanded', willShow ? 'true' : 'false');
 }
-
-export {
-  applyDetailsControls,
-  applyLocalReleaseSort,
-  buildDetailsUrl,
-  cancelLiveDetailsRefresh,
-  chooseLargeTvSearch,
-  closeActivityPanel,
-  confirmLargeTvSearch,
-  ensureDetailsControlHandlers,
-  isActivityPanelOpen,
-  loadSearchHistory,
-  openActivityPanel,
-  openRequestDetails,
-  refreshPlexAndReload,
-  reloadOpenDetailsIfActive,
-  renderDetailsStats,
-  renderRuleEvidence,
-  resetDetailsControls,
-  scheduleLiveDetailsRefresh,
-  searchRequestFromDetails,
-  searchTvRequest,
-  searchTvRequestAll,
-  searchTvRequestFull,
-  searchTvRequestNew,
-  setDetailsScope,
-  toggleActivityPanel,
-  toggleMobileFilter,
-  updateReleaseCountText,
-};
 Object.assign(window, {
   detailsControlState,
   detailsAutoSearchStarted,
@@ -875,7 +839,6 @@ Object.assign(window, {
   ensureDetailsControlHandlers,
   isActivityPanelOpen,
   loadSearchHistory,
-  openActivityPanel,
   openRequestDetails,
   refreshPlexAndReload,
   reloadOpenDetailsIfActive,
@@ -885,7 +848,6 @@ Object.assign(window, {
   scheduleLiveDetailsRefresh,
   searchRequestFromDetails,
   searchTvRequest,
-  searchTvRequestAll,
   searchTvRequestFull,
   searchTvRequestNew,
   setDetailsScope,

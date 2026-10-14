@@ -6,8 +6,9 @@ discover.
 
 ## Organization
 
-- `tests/test_*.py` covers cross-cutting integration flows and small focused
-  regressions that do not fit a larger package area.
+- `tests/test_*.py` covers cross-cutting checks such as config, migrations, and the auth
+  app flow.
+- `tests/integration/` covers end-to-end search and selection flows on a real database.
 - `tests/routers/auth/` covers Plex SSO login, session, and auth boundary behavior.
 - `tests/routers/dashboard/` covers dashboard pages, JSON APIs, details endpoints,
   search behavior, and user-triggered actions.
@@ -28,9 +29,13 @@ discover.
 - Shared fixtures live in the nearest `conftest.py`. Prefer the most specific scope
   possible, such as a router or service subdirectory, instead of adding broad global
   fixtures.
-- Most database-facing tests use `unittest.mock.AsyncMock` for async SQLAlchemy
-  sessions. Configure awaited methods such as `execute`, `commit`, `flush`, and
-  `refresh` explicitly in the test that needs them.
+- Database-facing tests should use the shared `db` (or `session_maker`) fixture from
+  `tests/conftest.py`, an in-memory SQLite database with the full schema, and build rows
+  with the factories in `tests/factories.py`. Assert on persisted rows rather than on
+  mocked `execute`/`commit` calls. Some older tests still use `AsyncMock` sessions.
+- Prefer `pytest.mark.parametrize` tables with `ids=` over near-duplicate tests.
+- Do not assert on source text of templates, JS, or CSS. Render the template or use the
+  Vitest suite for browser behavior.
 - Use `monkeypatch`, `patch`, `MagicMock`, and `AsyncMock` to isolate external
   services. Tests should not require live Overseerr, Prowlarr, qBittorrent, or Plex
   instances.
@@ -60,7 +65,7 @@ Run a file, directory, class, or single test:
 uv run pytest tests/services/decisions/test_rule_engine.py
 uv run pytest tests/routers/dashboard/
 uv run pytest tests/services/decisions/test_rule_service.py::TestRuleService
-uv run pytest tests/services/decisions/test_rule_service.py::TestRuleService::test_get_all_rules
+uv run pytest tests/services/decisions/test_rule_service.py::TestRuleService::test_create_and_query_rules
 ```
 
 Run tests matching a name expression:

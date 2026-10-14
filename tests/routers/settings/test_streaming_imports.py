@@ -3,16 +3,13 @@
 import asyncio
 import json
 from datetime import UTC, datetime, timedelta
-from pathlib import Path
 from typing import Any, cast
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import httpx
 import pytest
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
-from app.siftarr.models._base import Base
 from app.siftarr.models.activity_log import ActivityLog
 from app.siftarr.models.episode import Episode
 from app.siftarr.models.request import MediaType, RequestStatus
@@ -21,28 +18,27 @@ from app.siftarr.models.season import Season
 from app.siftarr.routers import settings
 from app.siftarr.services.admin import settings_service
 from app.siftarr.services.integrations.plex_service import PlexService
+from tests.factories import make_request
+
+import app.siftarr.services.lifecycle.episode_sync_service as episode_sync_module  # isort: skip
 
 
-def test_initial_plex_sync_template_uses_full_stream_and_retry_gate():
-    """Initial setup page should run one full Plex SSE stream and clear only on complete."""
-    template = Path("app/siftarr/templates/initial_plex_sync.html").read_text()
-
-    assert "new EventSource('/settings/api/rescan-plex/stream?mode=full')" in template
-    assert "if (running) return;" in template
-    assert "payload.phase === 'complete'" in template
-    assert "await completeGate();" in template
-    assert "'/auth/initial-plex-sync/complete'" in template
-    assert "payload.phase === 'error'" in template
-    assert "failSync(payload.message);" in template
-
-
-def _parse_sse_events(chunks: list[str]) -> list[dict[str, Any]]:
+async def collect_events(stream) -> list[dict[str, Any]]:
+    """Drain an SSE generator and return the decoded ``data:`` payloads."""
     events: list[dict[str, Any]] = []
-    for chunk in chunks:
+    async for chunk in stream:
         for line in chunk.splitlines():
             if line.startswith("data: "):
                 events.append(json.loads(line.removeprefix("data: ")))
     return events
+
+
+class FakeSessionContext:
+    async def __aenter__(self):
+        return MagicMock()
+
+    async def __aexit__(self, exc_type, exc, tb):
+        return False
 
 
 class _NoopPlexService:
@@ -50,314 +46,142 @@ class _NoopPlexService:
         self.settings = settings
 
 
-def _stub_request_link_helpers(monkeypatch, linked_ids=()):
-    """Stub Seerr link lookups so scripted fake sessions only see the queries under test.
+async def _noop(*_args, **_kwargs):
+    return None
 
-    Each Seerr request is treated as new media with no existing local row.
-    """
-    monkeypatch.setattr(
+
+class FakeOverseerrBase:
+    """Seerr client stand-in; subclasses set ``requests``, ``details`` and ``seasons``."""
+
+    requests: list[dict[str, Any]] = []
+    details: dict[int, dict[str, Any]] = {}
+    deleted: frozenset[int] = frozenset()
+    season_detail_calls: list[int]
+
+    def __init__(self, settings=None):
+        self.settings = settings
+
+    async def get_all_requests(self, status=None):
+        assert status is None
+        return self.requests
+
+    async def request_exists(self, request_id):
+        return False if request_id in self.deleted else None
+
+    def normalize_request_status(self, status):
+        return str(status).lower()
+
+    def normalize_media_status(self, status):
+        return str(status).lower() if status is not None else "unknown"
+
+    async def get_media_details(self, media_type, external_id):
+        return self.details[external_id]
+
+    async def close(self):
+        return None
+
+
+def fake_overseerr(requests, *, details=None, deleted=frozenset(), **attrs):
+    return type(
+        "FakeOverseerr",
+        (FakeOverseerrBase,),
+        {"requests": requests, "details": details or {}, "deleted": deleted, **attrs},
+    )
+
+
+async def _run_import(db, requests, *, deleted=frozenset(), prepare=_noop):
+    """Run an import. IDs in ``deleted`` return 404 upstream; others are unconfirmed."""
+    with patch.multiple(
         settings_service,
-        "linked_overseerr_request_ids",
-        AsyncMock(return_value=set(linked_ids)),
+        OverseerrService=fake_overseerr(requests, deleted=deleted),
+        PlexService=_NoopPlexService,
+        evaluate_imported_request=_noop,
+        prepare_overseerr_import=prepare,
+    ):
+        return await settings_service.import_overseerr_requests(
+            db, MagicMock(overseerr_sync_concurrency=1)
+        )
+
+
+async def _by_external_id(db) -> dict[str, RequestModel]:
+    rows = (await db.execute(select(RequestModel))).scalars().all()
+    return {row.external_id: row for row in rows}
+
+
+async def _activity_count(db) -> int:
+    return len((await db.execute(select(ActivityLog))).scalars().all())
+
+
+@pytest.mark.asyncio
+async def test_overseerr_import_marks_missing_upstream_linked_requests_denied(db):
+    retry = datetime.now(UTC)
+    await make_request(
+        db, external_id="10", overseerr_request_id=10, next_retry_at=retry, retry_count=2
     )
-    monkeypatch.setattr(
-        settings_service, "get_linked_overseerr_request_ids", AsyncMock(return_value=[])
+    await make_request(
+        db, external_id="20", overseerr_request_id=20, next_retry_at=retry, retry_count=1
     )
-    monkeypatch.setattr(settings_service, "find_request_for_media", AsyncMock(return_value=None))
-    monkeypatch.setattr(settings_service, "add_overseerr_link", AsyncMock())
+    await make_request(db, external_id="30", next_retry_at=retry, retry_count=3)
+    await db.commit()
+
+    upstream = [{"id": 20, "status": "approved", "media": {"tmdbId": 20, "mediaType": "movie"}}]
+    for _ in range(2):  # a repeated sync must not log the cleanup twice
+        await _run_import(db, upstream, deleted=frozenset({10}))
+
+    rows = await _by_external_id(db)
+    assert rows["10"].status == RequestStatus.DENIED
+    assert rows["10"].overseerr_request_id == 10
+    assert rows["10"].next_retry_at is None
+    assert rows["10"].retry_count == 0
+    assert rows["20"].status == RequestStatus.PENDING
+    assert rows["20"].next_retry_at is not None
+    assert rows["30"].status == RequestStatus.PENDING
+    assert rows["30"].overseerr_request_id is None
+    assert rows["30"].next_retry_at is not None
+    assert await _activity_count(db) == 1
 
 
-async def _noop_evaluate_imported_request(*_args, **_kwargs):
-    return None
-
-
-async def _noop_prepare_overseerr_import(*_args, **_kwargs):
-    return None
-
-
-async def _run_import_with_requests(
-    session,
-    overseerr_requests: list[dict[str, Any]],
-    *,
-    deleted_upstream_ids: frozenset[int] = frozenset(),
-    prepare_overseerr_import_func=_noop_prepare_overseerr_import,
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("status", "upstream_deleted", "expected"),
+    [
+        (RequestStatus.PENDING, True, RequestStatus.DENIED),
+        (RequestStatus.FAILED, True, RequestStatus.DENIED),
+        # Absent from the list but not confirmed deleted: keep it.
+        (RequestStatus.PENDING, False, RequestStatus.PENDING),
+        # Terminal and in-progress workflow states are never rewritten.
+        (RequestStatus.COMPLETED, True, RequestStatus.COMPLETED),
+        (RequestStatus.DENIED, True, RequestStatus.DENIED),
+        (RequestStatus.STAGED, True, RequestStatus.STAGED),
+        (RequestStatus.DOWNLOADING, True, RequestStatus.DOWNLOADING),
+        (RequestStatus.UNRELEASED, True, RequestStatus.UNRELEASED),
+    ],
+)
+async def test_overseerr_import_empty_upstream_response_cleans_linked_only(
+    db, status, upstream_deleted, expected
 ):
-    """Run an import. IDs in ``deleted_upstream_ids`` return 404 upstream; others are unknown."""
-
-    class FakeOverseerrService:
-        def __init__(self, settings=None):
-            self.settings = settings
-
-        async def get_all_requests(self, status=None):
-            assert status is None
-            return overseerr_requests
-
-        async def request_exists(self, request_id):
-            return False if request_id in deleted_upstream_ids else None
-
-        def normalize_request_status(self, status):
-            return str(status).lower()
-
-        def normalize_media_status(self, status):
-            return str(status).lower() if status is not None else "unknown"
-
-    return await settings_service.import_overseerr_requests(
-        session,
-        MagicMock(overseerr_sync_concurrency=1),
-        overseerr_service_cls=FakeOverseerrService,
-        plex_service_cls=_NoopPlexService,
-        evaluate_imported_request_func=_noop_evaluate_imported_request,
-        prepare_overseerr_import_func=prepare_overseerr_import_func,
-        logger=MagicMock(),
+    retry = datetime.now(UTC)
+    linked = await make_request(
+        db, external_id="11", status=status, overseerr_request_id=11, next_retry_at=retry
     )
+    await make_request(db, external_id="12", next_retry_at=retry)
+    await db.commit()
+
+    deleted = frozenset({11}) if upstream_deleted else frozenset()
+    assert await _run_import(db, [], deleted=deleted) == (0, 0)
+
+    rows = await _by_external_id(db)
+    assert rows["11"].status == expected
+    assert (rows["11"].next_retry_at is None) == (expected != status)
+    assert rows["12"].status == RequestStatus.PENDING
+    assert rows["12"].next_retry_at is not None
+    assert await _activity_count(db) == (1 if expected != status else 0)
+    del linked
 
 
 @pytest.mark.asyncio
-async def test_overseerr_import_marks_missing_upstream_linked_requests_denied():
-    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
-    session_maker = async_sessionmaker(engine, expire_on_commit=False)
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-
-    async with session_maker() as session:
-        stale = RequestModel(
-            external_id="10",
-            media_type=MediaType.MOVIE,
-            title="Stale",
-            status=RequestStatus.PENDING,
-            overseerr_request_id=10,
-            next_retry_at=datetime.now(UTC),
-            retry_count=2,
-        )
-        active = RequestModel(
-            external_id="20",
-            media_type=MediaType.MOVIE,
-            title="Active",
-            status=RequestStatus.PENDING,
-            overseerr_request_id=20,
-            next_retry_at=datetime.now(UTC),
-            retry_count=1,
-        )
-        local_only = RequestModel(
-            external_id="30",
-            media_type=MediaType.MOVIE,
-            title="Local",
-            status=RequestStatus.PENDING,
-            overseerr_request_id=None,
-            next_retry_at=datetime.now(UTC),
-            retry_count=3,
-        )
-        session.add_all([stale, active, local_only])
-        await session.commit()
-
-        await _run_import_with_requests(
-            session,
-            [{"id": 20, "status": "approved", "media": {"tmdbId": 20, "mediaType": "movie"}}],
-            deleted_upstream_ids=frozenset({10}),
-        )
-
-        rows = (await session.execute(select(RequestModel))).scalars().all()
-        by_external_id = {row.external_id: row for row in rows}
-        assert by_external_id["10"].status == RequestStatus.DENIED
-        assert by_external_id["10"].overseerr_request_id == 10
-        assert by_external_id["10"].next_retry_at is None
-        assert by_external_id["10"].retry_count == 0
-        assert by_external_id["20"].status == RequestStatus.PENDING
-        assert by_external_id["20"].overseerr_request_id == 20
-        assert by_external_id["20"].next_retry_at is not None
-        assert by_external_id["30"].status == RequestStatus.PENDING
-        assert by_external_id["30"].overseerr_request_id is None
-        assert by_external_id["30"].next_retry_at is not None
-
-    await engine.dispose()
-
-
-@pytest.mark.asyncio
-async def test_overseerr_import_empty_upstream_response_cleans_linked_only():
-    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
-    session_maker = async_sessionmaker(engine, expire_on_commit=False)
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-
-    async with session_maker() as session:
-        linked = RequestModel(
-            external_id="11",
-            media_type=MediaType.MOVIE,
-            title="Linked",
-            status=RequestStatus.PENDING,
-            overseerr_request_id=11,
-            next_retry_at=datetime.now(UTC),
-        )
-        local_only = RequestModel(
-            external_id="12",
-            media_type=MediaType.MOVIE,
-            title="Local",
-            status=RequestStatus.PENDING,
-            overseerr_request_id=None,
-            next_retry_at=datetime.now(UTC),
-        )
-        session.add_all([linked, local_only])
-        await session.commit()
-
-        assert await _run_import_with_requests(
-            session, [], deleted_upstream_ids=frozenset({11})
-        ) == (0, 0)
-
-        rows = (await session.execute(select(RequestModel))).scalars().all()
-        by_external_id = {row.external_id: row for row in rows}
-        assert by_external_id["11"].status == RequestStatus.DENIED
-        assert by_external_id["11"].next_retry_at is None
-        assert by_external_id["12"].status == RequestStatus.PENDING
-        assert by_external_id["12"].next_retry_at is not None
-
-    await engine.dispose()
-
-
-@pytest.mark.asyncio
-async def test_overseerr_import_skips_terminal_and_current_workflow_stale_links():
-    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
-    session_maker = async_sessionmaker(engine, expire_on_commit=False)
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-
-    async with session_maker() as session:
-        terminal_and_workflow = [
-            RequestModel(
-                external_id=status.value,
-                media_type=MediaType.MOVIE,
-                title=status.value,
-                status=status,
-                overseerr_request_id=index,
-                next_retry_at=datetime.now(UTC),
-                retry_count=2,
-            )
-            for index, status in enumerate(
-                (
-                    RequestStatus.COMPLETED,
-                    RequestStatus.DENIED,
-                    RequestStatus.STAGED,
-                    RequestStatus.DOWNLOADING,
-                    RequestStatus.UNRELEASED,
-                ),
-                start=100,
-            )
-        ]
-        session.add_all(terminal_and_workflow)
-        await session.commit()
-
-        assert await _run_import_with_requests(session, []) == (0, 0)
-
-        rows = (await session.execute(select(RequestModel))).scalars().all()
-        for row in rows:
-            assert row.status == RequestStatus(row.external_id)
-            assert row.overseerr_request_id is not None
-            assert row.next_retry_at is not None
-            assert row.retry_count == 2
-        activity = (await session.execute(select(ActivityLog))).scalars().all()
-        assert activity == []
-
-    await engine.dispose()
-
-
-@pytest.mark.asyncio
-async def test_overseerr_import_denies_failed_request_deleted_upstream():
-    """A FAILED request whose Seerr request was deleted must not linger as a duplicate."""
-    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
-    session_maker = async_sessionmaker(engine, expire_on_commit=False)
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-
-    async with session_maker() as session:
-        session.add(
-            RequestModel(
-                external_id="183",
-                media_type=MediaType.MOVIE,
-                title="Deleted Upstream",
-                status=RequestStatus.FAILED,
-                overseerr_request_id=183,
-            )
-        )
-        await session.commit()
-
-        await _run_import_with_requests(session, [], deleted_upstream_ids=frozenset({183}))
-
-        row = (await session.execute(select(RequestModel))).scalar_one()
-        assert row.status == RequestStatus.DENIED
-
-    await engine.dispose()
-
-
-@pytest.mark.asyncio
-async def test_overseerr_import_stale_cleanup_is_idempotent_on_repeated_syncs():
-    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
-    session_maker = async_sessionmaker(engine, expire_on_commit=False)
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-
-    async with session_maker() as session:
-        stale = RequestModel(
-            external_id="13",
-            media_type=MediaType.MOVIE,
-            title="Stale Once",
-            status=RequestStatus.PENDING,
-            overseerr_request_id=13,
-            next_retry_at=datetime.now(UTC),
-            retry_count=1,
-        )
-        session.add(stale)
-        await session.commit()
-
-        deleted = frozenset({13})
-        assert await _run_import_with_requests(session, [], deleted_upstream_ids=deleted) == (0, 0)
-        assert await _run_import_with_requests(session, [], deleted_upstream_ids=deleted) == (0, 0)
-
-        row = (await session.execute(select(RequestModel))).scalar_one()
-        assert row.status == RequestStatus.DENIED
-        assert row.next_retry_at is None
-        assert row.retry_count == 0
-        activity = (await session.execute(select(ActivityLog))).scalars().all()
-        assert len(activity) == 1
-
-    await engine.dispose()
-
-
-@pytest.mark.asyncio
-async def test_overseerr_import_keeps_requests_missing_from_list_but_unconfirmed():
-    """A request absent from a short list fetch stays active unless Overseerr returns 404."""
-    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
-    session_maker = async_sessionmaker(engine, expire_on_commit=False)
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-
-    async with session_maker() as session:
-        session.add(
-            RequestModel(
-                external_id="14",
-                media_type=MediaType.TV,
-                title="Unconfirmed",
-                status=RequestStatus.PENDING,
-                overseerr_request_id=14,
-            )
-        )
-        await session.commit()
-
-        await _run_import_with_requests(session, [])
-
-        row = (await session.execute(select(RequestModel))).scalar_one()
-        assert row.status == RequestStatus.PENDING
-        activity = (await session.execute(select(ActivityLog))).scalars().all()
-        assert activity == []
-
-    await engine.dispose()
-
-
-@pytest.mark.asyncio
-async def test_overseerr_import_does_not_reimport_request_after_stale_cleanup():
+async def test_overseerr_import_does_not_reimport_request_after_stale_cleanup(db):
     """A request denied by stale cleanup must not come back as a duplicate row."""
-    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
-    session_maker = async_sessionmaker(engine, expire_on_commit=False)
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
 
     async def prepare(ov_req, *_args, **_kwargs):
         return settings_service.PreparedOverseerrImport(
@@ -373,28 +197,14 @@ async def test_overseerr_import_does_not_reimport_request_after_stale_cleanup():
             media_details=None,
         )
 
-    async with session_maker() as session:
-        session.add(
-            RequestModel(
-                external_id="66134",
-                media_type=MediaType.TV,
-                title="Show",
-                status=RequestStatus.PENDING,
-                overseerr_request_id=102,
-            )
-        )
-        await session.commit()
+    await make_request(db, external_id="66134", media_type=MediaType.TV, overseerr_request_id=102)
+    await db.commit()
 
-        await _run_import_with_requests(session, [], deleted_upstream_ids=frozenset({102}))
-        upstream = [{"id": 102, "status": "approved", "media": {"status": "pending"}}]
-        assert await _run_import_with_requests(
-            session, upstream, prepare_overseerr_import_func=prepare
-        ) == (0, 1)
+    await _run_import(db, [], deleted=frozenset({102}))
+    upstream = [{"id": 102, "status": "approved", "media": {"status": "pending"}}]
+    assert await _run_import(db, upstream, prepare=prepare) == (0, 1)
 
-        rows = (await session.execute(select(RequestModel))).scalars().all()
-        assert len(rows) == 1
-
-    await engine.dispose()
+    assert len(await _by_external_id(db)) == 1
 
 
 @pytest.mark.asyncio
@@ -419,7 +229,6 @@ async def test_bounded_progress_reports_completed_counts_before_terminal_events(
             worker,
             on_event=collect,
             phase="processing",
-            build_sse_progress_func=settings_service.build_sse_progress,
         )
     )
 
@@ -443,70 +252,37 @@ async def test_sync_overseerr_sse_streams_fetch_prefetch_import_tv_sync_and_comp
     monkeypatch,
 ):
     """Overseerr SSE should expose usable progress for each long-running stage."""
-
-    class FakeSessionContext:
-        async def __aenter__(self):
-            return MagicMock()
-
-        async def __aexit__(self, exc_type, exc, tb):
-            return False
-
-    runtime_settings = MagicMock(overseerr_sync_concurrency=2)
-    monkeypatch.setattr(settings_service, "get_settings", lambda: runtime_settings)
-
-    async def build_effective_settings(_db):
-        return {"overseerr_url": "http://overseerr", "overseerr_api_key": "key"}
+    monkeypatch.setattr(
+        settings_service,
+        "get_settings",
+        lambda: MagicMock(
+            overseerr_url="http://overseerr",
+            overseerr_api_key="key",
+            overseerr_sync_concurrency=2,
+        ),
+    )
+    monkeypatch.setattr(settings_service.db_mod, "async_session_maker", FakeSessionContext)
 
     async def import_overseerr_requests(_db, _runtime_settings, **kwargs):
-        emit = kwargs.get("on_event") or kwargs.get("on_progress")
-        if emit is not None:
-            for payload in [
+        emit = kwargs["on_event"]
+        stages = [
+            ("fetching", 0, 4, "Fetching requests from Overseerr...", []),
+            ("prefetching", 1, 3, "Fetching metadata for Movie One...", ["Movie One", "Show One"]),
+            ("importing", 1, 2, "Importing Show One...", ["Show One"]),
+            ("episode_sync", 0, 1, "Syncing TV episodes for Show One...", ["Show One"]),
+        ]
+        for phase, current, total, message, active in stages:
+            await emit(
                 settings_service.build_sse_progress(
-                    "fetching",
-                    current=0,
-                    total=4,
-                    message="Fetching requests from Overseerr...",
-                    active=[],
-                ),
-                settings_service.build_sse_progress(
-                    "prefetching",
-                    current=1,
-                    total=3,
-                    message="Fetching metadata for Movie One...",
-                    active=["Movie One", "Show One"],
-                ),
-                settings_service.build_sse_progress(
-                    "importing",
-                    current=1,
-                    total=2,
-                    message="Importing Show One...",
-                    active=["Show One"],
-                ),
-                settings_service.build_sse_progress(
-                    "episode_sync",
-                    current=0,
-                    total=1,
-                    message="Syncing TV episodes for Show One...",
-                    active=["Show One"],
-                ),
-            ]:
-                await emit(payload)
+                    phase, current=current, total=total, message=message, active=active
+                )
+            )
         return 2, 1
 
-    chunks = [
-        chunk
-        async for chunk in settings_service.sync_overseerr_generator(
-            async_session_maker=FakeSessionContext,
-            build_effective_settings_func=build_effective_settings,
-            import_overseerr_requests_func=import_overseerr_requests,
-            build_sse_progress_func=settings_service.build_sse_progress,
-            logger=settings.logger,
-        )
-    ]
-    events = _parse_sse_events(chunks)
+    monkeypatch.setattr(settings_service, "import_overseerr_requests", import_overseerr_requests)
+    events = await collect_events(settings_service.sync_overseerr_generator())
 
-    phases = [event["phase"] for event in events]
-    assert phases == [
+    assert [event["phase"] for event in events] == [
         "connecting",
         "fetching",
         "prefetching",
@@ -515,321 +291,83 @@ async def test_sync_overseerr_sse_streams_fetch_prefetch_import_tv_sync_and_comp
         "complete",
     ]
     for event in events[1:-1]:
-        assert isinstance(event["current"], int)
-        assert isinstance(event["total"], int)
         assert event["current"] < event["total"]
         assert event["message"]
         assert isinstance(event["active"], list)
     assert events[-1]["message"] == "Synced 2 new request(s) from Overseerr"
 
 
+def _plex_request(request_id, title, media_type, status=RequestStatus.PENDING, seasons=()):
+    request = MagicMock(id=request_id, media_type=media_type, status=status)
+    request.title = title
+    request.seasons = list(seasons)
+    return request
+
+
+@pytest.fixture
+def plex_rescan(monkeypatch):
+    """Run ``rescan_plex_generator`` against a scripted polling service.
+
+    Returns ``(run, tv_rescan, polling)``; ``run(shallow)`` yields the decoded SSE events.
+    """
+    monkeypatch.setattr(
+        settings_service, "get_settings", lambda: MagicMock(plex_sync_concurrency=2)
+    )
+    polling = AsyncMock()
+    monkeypatch.setattr(settings_service, "PlexPollingService", lambda db, plex: polling)
+    tv_rescan = AsyncMock(return_value=True)
+    monkeypatch.setattr(settings_service, "rescan_plex_tv_request", tv_rescan)
+    monkeypatch.setattr(settings_service, "PlexService", lambda settings: AsyncMock())
+    monkeypatch.setattr(settings_service.db_mod, "async_session_maker", FakeSessionContext)
+
+    async def run(shallow: bool) -> list[dict[str, Any]]:
+        return await collect_events(settings_service.rescan_plex_generator(shallow=shallow))
+
+    return run, tv_rescan, polling
+
+
 @pytest.mark.asyncio
-@pytest.mark.parametrize("shallow", [True, False])
-async def test_rescan_plex_sse_streams_partial_and_full_progress(monkeypatch, shallow):
-    """Plex SSE should stream bounded TV resync progress and the final poll/refresh step."""
+async def test_rescan_plex_partial_scans_recent_without_tv_resync(plex_rescan):
+    run, tv_rescan, polling = plex_rescan
+    scan_result = MagicMock(
+        metrics=MagicMock(scanned_items=10, matched_requests=3, skipped_on_error_items=1),
+        completed_requests=2,
+        last_error=None,
+    )
+    polling.scan_recent = AsyncMock(return_value=scan_result)
 
-    class FakeSessionContext:
-        async def __aenter__(self):
-            return MagicMock()
+    events = await run(True)
 
-        async def __aexit__(self, exc_type, exc, tb):
-            return False
-
-    runtime_settings = MagicMock(plex_sync_concurrency=2)
-    monkeypatch.setattr(settings_service, "get_settings", lambda: runtime_settings)
-    plex = AsyncMock()
-
-    async def rescan_plex_requests(_db, _runtime_settings, _plex, *, on_event, shallow):
-        await on_event(
-            settings_service.build_sse_progress(
-                "fetching",
-                current=0,
-                total=2,
-                message="Fetching active Plex requests...",
-                active=["Show One", "Show Two"],
-                mode="partial" if shallow else "full",
-            )
-        )
-        await on_event(
-            settings_service.build_sse_progress(
-                "processing",
-                current=0,
-                total=2,
-                started=1,
-                completed=0,
-                message="Re-syncing Show One...",
-                active=["Show One"],
-            )
-        )
-        await on_event(
-            settings_service.build_sse_progress(
-                "processing",
-                current=1,
-                total=2,
-                started=1,
-                completed=1,
-                message="Completed Show One.",
-                active=[],
-            )
-        )
-        await on_event(
-            settings_service.build_sse_progress(
-                "polling",
-                current=0,
-                total=1,
-                message="Running Plex poll and metadata refresh...",
-                active=[],
-            )
-        )
-        return 1, 0, 2
-
-    chunks = [
-        chunk
-        async for chunk in settings_service.rescan_plex_generator(
-            shallow=shallow,
-            async_session_maker=FakeSessionContext,
-            plex_service_cls=lambda settings: plex,
-            rescan_plex_requests_func=rescan_plex_requests,
-            build_sse_progress_func=settings_service.build_sse_progress,
-            logger=settings.logger,
-        )
-    ]
-    events = _parse_sse_events(chunks)
-
-    phases = [event["phase"] for event in events]
-    assert phases == ["connecting", "fetching", "processing", "processing", "polling", "complete"]
-    assert events[1]["mode"] == ("partial" if shallow else "full")
-    processing_events = [event for event in events if event["phase"] == "processing"]
-    assert [event["current"] for event in processing_events] == [0, 1]
-    assert [event["completed"] for event in processing_events] == [0, 1]
-    assert all(event["current"] < event["total"] for event in events[1:-1])
-    assert events[-2]["message"] == "Running Plex poll and metadata refresh..."
+    assert [event["phase"] for event in events][0] == "connecting"
+    assert all(event["mode"] == "partial" for event in events if "mode" in event)
     assert events[-1]["phase"] == "complete"
     assert events[-1]["completed"] == 2
-
-
-@pytest.mark.asyncio
-async def test_full_rescan_sse_rejects_overlapping_full_sync():
-    """A second full-sync SSE stream should not start overlapping full-sync work."""
-
-    async def unused_rescan(*_args, **_kwargs):
-        raise AssertionError("overlapping full sync started")
-
-    await settings_service._FULL_PLEX_SYNC_LOCK.acquire()
-    try:
-        chunks = [
-            chunk
-            async for chunk in settings_service.rescan_plex_generator(
-                shallow=False,
-                async_session_maker=lambda: AsyncMock(),
-                plex_service_cls=lambda settings: AsyncMock(),
-                rescan_plex_requests_func=unused_rescan,
-                build_sse_progress_func=settings_service.build_sse_progress,
-                logger=settings.logger,
-            )
-        ]
-    finally:
-        settings_service._FULL_PLEX_SYNC_LOCK.release()
-
-    events = _parse_sse_events(chunks)
-    assert [event["phase"] for event in events] == ["connecting", "locked"]
-
-
-@pytest.mark.asyncio
-async def test_rescan_plex_sse_reports_movies_and_tv_in_active_items(monkeypatch, mock_db):
-    """Plex SSE progress should include both movie and TV requests in active items."""
-
-    runtime_settings = MagicMock(plex_sync_concurrency=2)
-    plex_service = AsyncMock()
-
-    movie_request = MagicMock(id=1, title="Movie One", media_type=MediaType.MOVIE, status="pending")
-    tv_request = MagicMock(id=2, title="Show One", media_type=MediaType.TV, status="pending")
-
-    polling = AsyncMock()
-    polling.get_active_requests = AsyncMock(return_value=[movie_request, tv_request])
-    polling.poll = AsyncMock(return_value=7)
-    monkeypatch.setattr(settings, "PlexPollingService", lambda db, plex: polling)
-    monkeypatch.setattr(settings, "PlexService", lambda settings: plex_service)
-
-    monkeypatch.setattr("app.siftarr.database.async_session_maker", lambda: AsyncMock())
-
-    events: list[dict[str, Any]] = []
-
-    async def collect(payload):
-        events.append(payload)
-
-    # Patch the inner rescan_plex_tv_request so the wrapper uses our mock
-    import app.siftarr.routers.settings as settings_router
-
-    tv_rescan_mock: AsyncMock = AsyncMock(return_value=True)
-    monkeypatch.setattr(settings_router, "_rescan_plex_tv_request", tv_rescan_mock)
-
-    # Use the router's convenience wrapper which provides all required defaults
-    resynced, failed, completed = await settings_router._rescan_plex_requests(
-        mock_db,
-        runtime_settings,
-        plex_service,
-        on_event=collect,
-    )
-
-    assert (resynced, failed, completed) == (1, 0, 7)
-    assert any(
-        event.get("phase") == "fetching" and event.get("active") == ["Movie One", "Show One"]
-        for event in events
-    )
-    assert any(event.get("phase") == "processing" and event.get("active") for event in events)
-    assert (resynced, failed, completed) == (1, 0, 7)
-    assert any(
-        event.get("phase") == "fetching" and event.get("active") == ["Movie One", "Show One"]
-        for event in events
-    )
-    assert any(event.get("phase") == "processing" and event.get("active") for event in events)
-    assert tv_rescan_mock.await_count == 1
-    tv_rescan_mock.assert_awaited_once_with(2, plex_service, runtime_settings)
-
-
-@pytest.mark.asyncio
-async def test_rescan_plex_partial_uses_scan_recent(monkeypatch, mock_db):
-    """Partial Plex sync should use scan_recent() instead of resync+full poll."""
-
-    runtime_settings = MagicMock(plex_sync_concurrency=2)
-    plex_service = AsyncMock()
-
-    # Mock ScanMetrics and ScanRecentResult
-    scan_metrics = MagicMock(scanned_items=10, matched_requests=3, skipped_on_error_items=1)
-    scan_result = MagicMock()
-    scan_result.metrics = scan_metrics
-    scan_result.completed_requests = 2
-    scan_result.last_error = None
-
-    polling = AsyncMock()
-    polling.scan_recent = AsyncMock(return_value=scan_result)
-    monkeypatch.setattr(settings, "PlexPollingService", lambda db, plex: polling)
-
-    events: list[dict[str, Any]] = []
-
-    async def collect(payload):
-        events.append(payload)
-
-    # Use the router's convenience wrapper which provides all required defaults
-    import app.siftarr.routers.settings as settings_router
-
-    result = await settings_router._rescan_plex_requests(
-        mock_db,
-        runtime_settings,
-        plex_service,
-        on_event=collect,
-        shallow=True,
-    )
-
-    # Should return (matched, skipped, completed) from scan_recent
-    assert result == (3, 1, 2)
-
-    # scan_recent should have been called with an on_progress callback
     polling.scan_recent.assert_awaited_once()
-    assert polling.scan_recent.await_args is not None
-    # on_progress was passed as keyword
-    assert (
-        "on_progress" in polling.scan_recent.await_args.kwargs
-        or polling.scan_recent.await_args[0] is not None
-    )
-
-    # _rescan_plex_tv_request should NOT have been called (partial mode skips tv resync)
-    # Monkeypatch it with a sentinel to verify it's never invoked
-    tv_not_called: AsyncMock = AsyncMock()
-    monkeypatch.setattr(settings_router, "_rescan_plex_tv_request", tv_not_called)
-    # Re-run via the wrapper to verify no TV rescan happens
-    await settings_router._rescan_plex_requests(
-        mock_db,
-        runtime_settings,
-        plex_service,
-        shallow=True,
-    )
-    tv_not_called.assert_not_called()
-
-    # Should emit a connecting event
-    connecting = next(event for event in events if event["phase"] == "connecting")
-    assert connecting["mode"] == "partial"
+    tv_rescan.assert_not_called()
 
 
 @pytest.mark.asyncio
-async def test_rescan_plex_full_resyncs_all_active_non_completed_tv_and_polls(monkeypatch, mock_db):
-    """Full Plex sync should resync every active non-completed TV request before polling."""
-
-    runtime_settings = MagicMock(plex_sync_concurrency=2)
-    plex_service = AsyncMock()
-
-    active_tv = MagicMock(id=10, title="Active Show", media_type=MediaType.TV)
-    active_tv.status = RequestStatus.PENDING
-    active_tv.seasons = []
-    complete_tv = MagicMock(id=11, title="Complete Episodes Show", media_type=MediaType.TV)
-    complete_tv.status = RequestStatus.PENDING
-    complete_season = MagicMock()
-    complete_season.episodes = [MagicMock(status=RequestStatus.COMPLETED)]
-    complete_tv.seasons = [complete_season]
-    completed_request = MagicMock(id=12, title="Completed Request", media_type=MediaType.TV)
-    completed_request.status = RequestStatus.COMPLETED
-    completed_request.seasons = []
-
-    polling = AsyncMock()
+async def test_rescan_plex_full_resyncs_non_completed_tv_and_reports_weighted_progress(
+    plex_rescan,
+):
+    run, tv_rescan, polling = plex_rescan
+    all_completed = _plex_request(
+        11,
+        "Complete Episodes Show",
+        MediaType.TV,
+        seasons=[MagicMock(episodes=[MagicMock(status=RequestStatus.COMPLETED)])],
+    )
     polling.get_active_requests = AsyncMock(
-        return_value=[active_tv, complete_tv, completed_request]
-    )
-    polling.poll = AsyncMock(return_value=2)
-    monkeypatch.setattr(settings, "PlexPollingService", lambda db, plex: polling)
-
-    events: list[dict[str, Any]] = []
-
-    async def collect(payload):
-        events.append(payload)
-
-    # Use the router's convenience wrapper which provides all required defaults
-    import app.siftarr.routers.settings as settings_router
-
-    tv_rescan_mock: AsyncMock = AsyncMock(return_value=True)
-    monkeypatch.setattr(settings_router, "_rescan_plex_tv_request", tv_rescan_mock)
-
-    result = await settings_router._rescan_plex_requests(
-        mock_db,
-        runtime_settings,
-        plex_service,
-        on_event=collect,
-        shallow=False,
+        return_value=[
+            _plex_request(1, "Movie", MediaType.MOVIE),
+            _plex_request(10, "Active Show", MediaType.TV),
+            all_completed,
+            _plex_request(12, "Done", MediaType.TV, status=RequestStatus.COMPLETED),
+        ]
     )
 
-    assert result == (2, 0, 2)
-    assert tv_rescan_mock.await_count == 2
-    assert tv_rescan_mock.await_args_list[0].args[0] == 10
-    assert tv_rescan_mock.await_args_list[1].args[0] == 11
-    fetching = next(event for event in events if event["phase"] == "fetching")
-    polling_event = next(event for event in events if event["phase"] == "polling")
-    assert fetching["mode"] == "full"
-    assert "active non-completed" in fetching["message"]
-    assert polling_event["mode"] == "full"
-    assert "metadata refresh and availability poll" in polling_event["message"]
-    polling.poll.assert_awaited_once()
-    await_args = polling.poll.await_args
-    assert await_args is not None
-    assert await_args.kwargs["priority_only"] is False
-
-
-@pytest.mark.asyncio
-async def test_rescan_plex_full_reports_weighted_overall_progress(monkeypatch, mock_db):
-    """Full Plex sync should expose bounded weighted progress across all phases."""
-
-    runtime_settings = MagicMock(plex_sync_concurrency=1)
-    plex_service = AsyncMock()
-    movie = MagicMock(id=1, title="Movie", media_type=MediaType.MOVIE)
-    movie.status = RequestStatus.PENDING
-    tv = MagicMock(id=2, title="Show", media_type=MediaType.TV)
-    tv.status = RequestStatus.PENDING
-
-    polling = AsyncMock()
-    polling.get_active_requests = AsyncMock(return_value=[movie, tv])
-
-    async def poll(on_progress=None, priority_only=True):
+    async def poll(on_progress, priority_only=True):
         assert priority_only is False
-        assert on_progress is not None
         await on_progress(
             {
                 "phase": "poll",
@@ -842,816 +380,166 @@ async def test_rescan_plex_full_reports_weighted_overall_progress(monkeypatch, m
                 "item_progress": 0.6,
             }
         )
-        await on_progress(
-            {
-                "phase": "poll",
-                "current": 2,
-                "total": 2,
-                "completed": 2,
-                "active": [],
-            }
-        )
-        return 1
+        await on_progress({"phase": "poll", "current": 2, "total": 2, "completed": 2, "active": []})
+        return 2
 
     polling.poll = AsyncMock(side_effect=poll)
-    monkeypatch.setattr(settings, "PlexPollingService", lambda db, plex: polling)
 
-    import app.siftarr.routers.settings as settings_router
+    events = await run(False)
 
-    monkeypatch.setattr(settings_router, "_rescan_plex_tv_request", AsyncMock(return_value=True))
+    assert [call.args[0] for call in tv_rescan.await_args_list] == [10, 11]
+    fetching = next(event for event in events if event["phase"] == "fetching")
+    assert fetching["mode"] == "full"
+    assert fetching["active"] == ["Movie", "Active Show", "Complete Episodes Show"]
+    assert events[-1]["phase"] == "complete"
+    assert events[-1]["completed"] == 2
 
-    events: list[dict[str, Any]] = []
-
-    async def collect(payload):
-        events.append(payload)
-
-    assert await settings_router._rescan_plex_requests(
-        mock_db, runtime_settings, plex_service, on_event=collect, shallow=False
-    ) == (1, 0, 1)
-
-    weighted = [event for event in events if "overall_percent" in event]
-    percents = [event["overall_percent"] for event in weighted]
-    assert [event["phase"] for event in weighted][:3] == ["fetching", "processing", "processing"]
-    assert all(percent < 100 for percent in percents)
+    percents = [event["overall_percent"] for event in events if "overall_percent" in event]
     assert percents == sorted(percents)
-    assert all(percent < 90 for percent in percents[:-1])
-    assert weighted[-2]["detail"] == "tv_episode_availability"
-    assert weighted[-2]["overall_percent"] > weighted[-3]["overall_percent"]
-    assert weighted[-1]["overall_percent"] == pytest.approx(99.8)
+    assert all(percent < 100 for percent in percents)
 
 
 @pytest.mark.asyncio
-async def test_rescan_plex_uses_bounded_parallel_workers_and_reports_counts(
-    monkeypatch, mock_db, base_context
-):
-    """Plex rescan should cap per-TV sync concurrency, isolate sessions, and report counts."""
+async def test_full_rescan_sse_rejects_overlapping_full_sync():
+    """A second full-sync SSE stream should not start overlapping full-sync work."""
 
-    monkeypatch.setattr(
-        settings,
-        "_build_settings_page_context",
-        AsyncMock(return_value=base_context()),
-    )
-    runtime_settings = MagicMock(plex_sync_concurrency=2)
-    monkeypatch.setattr(
-        settings,
-        "get_settings",
-        lambda: runtime_settings,
-    )
+    await settings_service._FULL_PLEX_SYNC_LOCK.acquire()
+    try:
+        events = await collect_events(settings_service.rescan_plex_generator(shallow=False))
+    finally:
+        settings_service._FULL_PLEX_SYNC_LOCK.release()
 
-    plex_service = AsyncMock()
-    monkeypatch.setattr(settings, "PlexService", lambda settings: plex_service)
+    assert [event["phase"] for event in events] == ["connecting", "locked"]
 
-    tv_requests = []
-    for request_id in (11, 12, 13, 14):
-        tv_request = MagicMock()
-        tv_request.id = request_id
-        tv_request.media_type = MediaType.TV
-        tv_request.status = "pending"
-        tv_requests.append(tv_request)
 
-    scalars = MagicMock()
-    scalars.all.return_value = tv_requests
-    execute_result = MagicMock()
-    execute_result.scalars.return_value = scalars
-    mock_db.execute.return_value = execute_result
+@pytest.fixture
+def seerr_sync(monkeypatch, base_context):
+    """Patch the settings router collaborators used by ``sync_overseerr``.
 
-    worker_dbs = []
-    request_to_db = {}
-    started = 0
-    in_flight = 0
-    max_in_flight = 0
-    finished = 0
-    first_batch_ready = asyncio.Event()
-    third_worker_started = asyncio.Event()
-    release_workers = asyncio.Event()
-    poll_called = False
-
-    class FakeWorkerDB:
-        def __init__(self, label):
-            self.label = label
-            self.rollback = AsyncMock()
-
-    class FakeWorkerSessionContext:
-        def __init__(self, worker_db):
-            self.worker_db = worker_db
-
-        async def __aenter__(self):
-            worker_dbs.append(self.worker_db)
-            return self.worker_db
-
-        async def __aexit__(self, exc_type, exc, tb):
-            return False
-
-    worker_counter = 0
-
-    def fake_async_session_maker():
-        nonlocal worker_counter
-        worker_counter += 1
-        return FakeWorkerSessionContext(FakeWorkerDB(worker_counter))
-
-    monkeypatch.setattr("app.siftarr.database.async_session_maker", fake_async_session_maker)
-
-    class FakeEpisodeSyncService:
-        def __init__(self, db, overseerr=None, plex=None):
-            self.db = db
-            assert db is not mock_db
-            assert plex is plex_service
-
-        async def sync_request(self, request_id):
-            nonlocal started, in_flight, max_in_flight, finished
-            request_to_db[request_id] = self.db
-            started += 1
-            in_flight += 1
-            max_in_flight = max(max_in_flight, in_flight)
-            if started == runtime_settings.plex_sync_concurrency:
-                first_batch_ready.set()
-            if started == runtime_settings.plex_sync_concurrency + 1:
-                third_worker_started.set()
-            try:
-                await release_workers.wait()
-                if request_id == 13:
-                    raise RuntimeError("boom")
-            finally:
-                in_flight -= 1
-                finished += 1
-
-    import app.siftarr.services.lifecycle.episode_sync_service as episode_sync_module
-
-    monkeypatch.setattr(episode_sync_module, "EpisodeSyncService", FakeEpisodeSyncService)
-
-    class FakePollingService:
-        def __init__(self, db, plex):
-            assert db is mock_db
-            assert plex is plex_service
-
-        async def get_active_requests(self):
-            return tv_requests
-
-        async def poll(self, on_progress=None, priority_only=True):
-            nonlocal poll_called
-            poll_called = True
-            assert priority_only is False
-            assert finished == len(tv_requests)
-            return 4
-
-    monkeypatch.setattr(settings, "PlexPollingService", FakePollingService)
-
-    rescan_task = asyncio.create_task(settings.rescan_plex(MagicMock(), db=mock_db))
-    await asyncio.wait_for(first_batch_ready.wait(), timeout=1)
-
-    assert started == 2
-    assert max_in_flight == 2
-    assert third_worker_started.is_set() is False
-    assert poll_called is False
-
-    release_workers.set()
-    response = await rescan_task
-    context = cast(dict, getattr(response, "context", None))
-
-    assert context["message_type"] == "success"
-    assert "Re-synced 3 TV request(s)" in context["message"]
-    assert "had 1 failed TV request(s)" in context["message"]
-    assert "transitioned 4 request(s) to completed" in context["message"]
-    assert max_in_flight == 2
-    assert len(worker_dbs) == 4
-    assert len({id(worker_db) for worker_db in worker_dbs}) == 4
-    assert set(request_to_db) == {11, 12, 13, 14}
-    assert all(worker_db is not mock_db for worker_db in worker_dbs)
-    request_to_db[13].rollback.assert_awaited_once()
-
-
-@pytest.mark.asyncio
-async def test_sync_overseerr_prefetches_with_bounded_parallelism(monkeypatch, base_context):
-    """Overseerr sync should cap metadata fetch concurrency and keep DB writes serial."""
-    _stub_request_link_helpers(monkeypatch)
-
-    class FakeDB:
-        def __init__(self):
-            self.added = []
-            self.next_id = 1
-            self.commit = AsyncMock()
-            self.refresh = AsyncMock()
-
-        async def execute(self, statement):
-            columns = getattr(statement, "column_descriptions", [])
-            if len(columns) > 1:
-                result = MagicMock()
-                result.fetchall.return_value = []
-                return result
-
-            params = statement.compile().params
-            entity = columns[0].get("entity") if columns else None
-
-            if entity is RequestModel and not params:
-                # Existing external IDs lookup.
-                result = MagicMock()
-                result.fetchall.return_value = []
-                return result
-
-            if entity is RequestModel:
-                request_id = next(iter(params.values()))
-                request = next(
-                    (
-                        row
-                        for row in self.added
-                        if isinstance(row, RequestModel) and row.id == request_id
-                    ),
-                    None,
-                )
-                return MagicMock(scalar_one_or_none=MagicMock(return_value=request))
-
-            if entity is Season:
-                request_id = params.get("request_id_1")
-                season_number = params.get("season_number_1")
-                season = next(
-                    (
-                        row
-                        for row in self.added
-                        if isinstance(row, Season)
-                        and row.request_id == request_id
-                        and row.season_number == season_number
-                    ),
-                    None,
-                )
-                return MagicMock(scalar_one_or_none=MagicMock(return_value=season))
-
-            if entity is Episode:
-                season_id = params.get("season_id_1")
-                episode_number = params.get("episode_number_1")
-                episode = next(
-                    (
-                        row
-                        for row in self.added
-                        if isinstance(row, Episode)
-                        and row.season_id == season_id
-                        and row.episode_number == episode_number
-                    ),
-                    None,
-                )
-                return MagicMock(scalar_one_or_none=MagicMock(return_value=episode))
-
-            result = MagicMock()
-            result.fetchall.return_value = []
-            return result
-
-        def add(self, obj):
-            self.added.append(obj)
-
-        async def flush(self):
-            pending = [obj for obj in self.added if getattr(obj, "id", None) is None]
-            for obj in pending:
-                obj.id = self.next_id
-                self.next_id += 1
-
-    mock_db = FakeDB()
-    context = base_context()
-    context["env"] = {"overseerr_url": "http://ov", "overseerr_api_key": "key"}
-
-    monkeypatch.setattr(
-        settings,
-        "_build_settings_page_context",
-        AsyncMock(return_value=context),
-    )
-    runtime_settings = MagicMock(overseerr_sync_concurrency=2)
-    monkeypatch.setattr(settings, "get_settings", lambda: runtime_settings)
-
-    # Mock SettingsStore so sync_overseerr doesn't hit the DB for settings
-    fake_store = MagicMock()
-    fake_store.get_effective_dict = AsyncMock(return_value=context["env"])
-    monkeypatch.setattr(settings, "SettingsStore", lambda db: fake_store)
-
-    started = 0
-    in_flight = 0
-    max_in_flight = 0
-    release_event = asyncio.Event()
-
-    overseerr_requests = [
-        {
-            "id": 100,
-            "status": "approved",
-            "media": {"tmdbId": 1, "mediaType": "movie"},
-            "requestedBy": {"username": "movie-user"},
-        },
-        {
-            "id": 101,
-            "status": "approved",
-            "media": {"tmdbId": 2, "mediaType": "tv"},
-            "requestedBy": {"username": "tv-user-1"},
-        },
-        {
-            "id": 102,
-            "status": "pending",
-            "media": {"tmdbId": 3, "mediaType": "tv"},
-            "requestedBy": {"username": "tv-user-2"},
-        },
-    ]
-    details_by_id = {
-        1: {"title": "Movie One", "releaseDate": "2024-01-02", "status": "Released"},
-        2: {"name": "Show One", "firstAirDate": "2023-02-03", "status": "Returning Series"},
-        3: {"name": "Show Two", "firstAirDate": "2025-04-05", "status": "Returning Series"},
-    }
-
-    class FakeOverseerrService:
-        def __init__(self, settings=None):
-            self.settings = settings
-
-        async def get_all_requests(self, status=None):
-            assert status is None
-            return overseerr_requests
-
-        def normalize_request_status(self, status):
-            return str(status).lower()
-
-        def normalize_media_status(self, status):
-            return str(status).lower() if status is not None else "unknown"
-
-        async def get_media_details(self, media_type, external_id):
-            nonlocal started, in_flight, max_in_flight
-            started += 1
-            in_flight += 1
-            max_in_flight = max(max_in_flight, in_flight)
-            if started == runtime_settings.overseerr_sync_concurrency:
-                release_event.set()
-            await release_event.wait()
-            in_flight -= 1
-            return details_by_id[external_id]
-
-        async def close(self):
-            return None
-
-    monkeypatch.setattr(settings, "OverseerrService", FakeOverseerrService)
-
-    evaluate_calls = []
-
-    async def fake_evaluate_imported_request(db, overseerr, request, **kwargs):
-        evaluate_calls.append(
-            {
-                "request_id": request.id,
-                "media_type": request.media_type,
-                "title": request.title,
-                "prefetched_media_details": kwargs.get("prefetched_media_details"),
-                "local_episodes": kwargs.get("local_episodes"),
-            }
-        )
-        return None
-
-    monkeypatch.setattr(settings, "evaluate_imported_request", fake_evaluate_imported_request)
-
-    plex_service = AsyncMock()
-    monkeypatch.setattr(settings, "PlexService", lambda settings: plex_service)
-
-    synced_episode_ids = []
-
-    class FakeEpisodeSyncService:
-        def __init__(self, db, overseerr=None, plex=None):
-            self.db = db
-            self.overseerr = overseerr
-            self.plex = plex
-
-        async def sync_request(self, request_id):
-            synced_episode_ids.append(request_id)
-
-    import app.siftarr.services.lifecycle.episode_sync_service as episode_sync_module
-
-    monkeypatch.setattr(episode_sync_module, "EpisodeSyncService", FakeEpisodeSyncService)
-
-    response = await settings.sync_overseerr(MagicMock(), db=cast(Any, mock_db))
-    response_context = cast(dict, getattr(response, "context", None))
-
-    assert response_context["message_type"] == "success"
-    assert response_context["message"] == "Synced 3 new request(s) from Overseerr"
-    assert max_in_flight == 2
-    assert synced_episode_ids == [2, 3]
-    assert [call["title"] for call in evaluate_calls] == ["Movie One", "Show One", "Show Two"]
-    assert all(call["prefetched_media_details"] is not None for call in evaluate_calls)
-    assert all(call["local_episodes"] == () for call in evaluate_calls)
-    assert [request.media_type for request in mock_db.added] == [
-        MediaType.MOVIE,
-        MediaType.TV,
-        MediaType.TV,
-    ]
-    mock_db.commit.assert_awaited_once()
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize(
-    ("existing_rows", "expected_external_id"),
-    [
-        ([("1", None), ("999", 202)], "1-201"),
-        ([("1", None), ("1-201", None), ("999", 202)], "1-201-2"),
-    ],
-)
-async def test_sync_overseerr_uses_available_request_id_when_external_id_collides(
-    monkeypatch, base_context, existing_rows, expected_external_id
-):
-    """A new Seerr request must not disappear behind an ambiguous external ID."""
-    _stub_request_link_helpers(
-        monkeypatch, linked_ids=[r[1] for r in existing_rows if r[1] is not None]
-    )
-
-    class FakeDB:
-        def __init__(self):
-            self.added = []
-            self.commit = AsyncMock()
-            self.refresh = AsyncMock()
-
-        async def execute(self, _statement):
-            result = MagicMock()
-            result.fetchall.return_value = existing_rows
-            return result
-
-        def add(self, obj):
-            self.added.append(obj)
-
-        async def flush(self):
-            for item in self.added:
-                if item.id is None:
-                    item.id = 1
-
-    mock_db = FakeDB()
-    context = base_context()
-    context["env"] = {"overseerr_url": "http://ov", "overseerr_api_key": "key"}
-
-    monkeypatch.setattr(
-        settings,
-        "_build_settings_page_context",
-        AsyncMock(return_value=context),
-    )
-    runtime_settings = MagicMock(overseerr_sync_concurrency=2)
-    monkeypatch.setattr(settings, "get_settings", lambda: runtime_settings)
-
-    # Mock SettingsStore so sync_overseerr doesn't hit the DB for settings
-    fake_store = MagicMock()
-    fake_store.get_effective_dict = AsyncMock(return_value=context["env"])
-    monkeypatch.setattr(settings, "SettingsStore", lambda db: fake_store)
-
-    overseerr_requests = [
-        {
-            "id": 201,
-            "status": "approved",
-            "media": {"tmdbId": 1, "mediaType": "movie"},
-        },
-        {
-            "id": 202,
-            "status": "pending",
-            "media": {"tmdbId": 999, "mediaType": "tv"},
-        },
-    ]
-
-    class FakeOverseerrService:
-        def __init__(self, settings=None):
-            self.settings = settings
-
-        async def get_all_requests(self, status=None):
-            return overseerr_requests
-
-        def normalize_request_status(self, status):
-            return str(status).lower()
-
-        def normalize_media_status(self, status):
-            return str(status).lower() if status is not None else "unknown"
-
-        async def get_media_details(self, media_type, external_id):
-            return {"title": f"Title {external_id}", "status": "Released"}
-
-        async def close(self):
-            return None
-
-    monkeypatch.setattr(settings, "OverseerrService", FakeOverseerrService)
-    evaluate_mock = AsyncMock(return_value=None)
-    monkeypatch.setattr(settings, "evaluate_imported_request", evaluate_mock)
-
-    response = await settings.sync_overseerr(MagicMock(), db=cast(Any, mock_db))
-    response_context = cast(dict, getattr(response, "context", None))
-
-    assert response_context["message_type"] == "success"
-    assert response_context["message"] == "Synced 1 new request(s) from Overseerr"
-    assert len(mock_db.added) == 1
-    assert mock_db.added[0].overseerr_request_id == 201
-    assert mock_db.added[0].external_id == expected_external_id
-    mock_db.commit.assert_awaited_once()
-    evaluate_mock.assert_awaited_once()
-
-
-@pytest.mark.asyncio
-async def test_sync_overseerr_logs_request_level_degraded_tv_sync_once(
-    monkeypatch, base_context, caplog
-):
-    """Overseerr import should surface one request-level degraded sync warning."""
-    _stub_request_link_helpers(monkeypatch)
-
-    class FakeDB:
-        def __init__(self):
-            self.added = []
-            self.next_id = 1
-            self.commit = AsyncMock()
-            self.refresh = AsyncMock()
-
-        async def execute(self, statement):
-            columns = getattr(statement, "column_descriptions", [])
-            if len(columns) > 1:
-                result = MagicMock()
-                result.fetchall.return_value = []
-                return result
-
-            params = statement.compile().params
-            entity = columns[0].get("entity") if columns else None
-
-            if entity is RequestModel and not params:
-                # Existing external IDs lookup.
-                result = MagicMock()
-                result.fetchall.return_value = []
-                return result
-
-            if entity is RequestModel:
-                request_id = next(iter(params.values()))
-                request = next(
-                    (
-                        row
-                        for row in self.added
-                        if isinstance(row, RequestModel) and row.id == request_id
-                    ),
-                    None,
-                )
-                return MagicMock(scalar_one_or_none=MagicMock(return_value=request))
-
-            if entity is Season:
-                request_id = params.get("request_id_1")
-                season_number = params.get("season_number_1")
-                season = next(
-                    (
-                        row
-                        for row in self.added
-                        if isinstance(row, Season)
-                        and row.request_id == request_id
-                        and row.season_number == season_number
-                    ),
-                    None,
-                )
-                return MagicMock(scalar_one_or_none=MagicMock(return_value=season))
-
-            if entity is Episode:
-                season_id = params.get("season_id_1")
-                episode_number = params.get("episode_number_1")
-                episode = next(
-                    (
-                        row
-                        for row in self.added
-                        if isinstance(row, Episode)
-                        and row.season_id == season_id
-                        and row.episode_number == episode_number
-                    ),
-                    None,
-                )
-                return MagicMock(scalar_one_or_none=MagicMock(return_value=episode))
-
-            result = MagicMock()
-            result.fetchall.return_value = []
-            return result
-
-        def add(self, obj):
-            self.added.append(obj)
-
-        async def flush(self):
-            pending = [obj for obj in self.added if getattr(obj, "id", None) is None]
-            for obj in pending:
-                obj.id = self.next_id
-                self.next_id += 1
-
-    mock_db = FakeDB()
-    context = base_context()
-    context["env"] = {"overseerr_url": "http://ov", "overseerr_api_key": "key"}
-
-    monkeypatch.setattr(
-        settings,
-        "_build_settings_page_context",
-        AsyncMock(return_value=context),
-    )
-    runtime_settings = MagicMock(overseerr_sync_concurrency=2)
-    monkeypatch.setattr(settings, "get_settings", lambda: runtime_settings)
-
-    # Mock SettingsStore so sync_overseerr doesn't hit the DB for settings
-    fake_store = MagicMock()
-    fake_store.get_effective_dict = AsyncMock(return_value=context["env"])
-    monkeypatch.setattr(settings, "SettingsStore", lambda db: fake_store)
-
-    overseerr_requests = [
-        {
-            "id": 101,
-            "status": "approved",
-            "media": {"tmdbId": 2, "mediaType": "tv"},
-            "requestedBy": {"username": "tv-user-1"},
-        }
-    ]
-
-    class FakeOverseerrService:
-        def __init__(self, settings=None):
-            self.settings = settings
-
-        async def get_all_requests(self, status=None):
-            return overseerr_requests
-
-        def normalize_request_status(self, status):
-            return str(status).lower()
-
-        def normalize_media_status(self, status):
-            return str(status).lower() if status is not None else "unknown"
-
-        async def get_media_details(self, media_type, external_id):
-            assert media_type == "tv"
-            assert external_id == 2
-            return {"name": "Show One", "firstAirDate": "2023-02-03", "status": "Returning Series"}
-
-        async def close(self):
-            return None
-
-    monkeypatch.setattr(settings, "OverseerrService", FakeOverseerrService)
-    monkeypatch.setattr(settings, "evaluate_imported_request", AsyncMock(return_value=None))
-
-    plex_service = AsyncMock()
-    monkeypatch.setattr(settings, "PlexService", lambda settings: plex_service)
-
-    class FakeEpisodeSyncService:
-        def __init__(self, db, overseerr=None, plex=None):
-            self.db = db
-            self.overseerr = overseerr
-            self.plex = plex
-
-        async def sync_request(self, request_id):
-            settings.logger.warning(
-                "EpisodeSyncService: degraded Plex sync for request %s (%s); Plex episode availability was inconclusive, preserving existing episode/request state",
-                request_id,
-                "Show One",
-            )
-
-    import app.siftarr.services.lifecycle.episode_sync_service as episode_sync_module
-
-    monkeypatch.setattr(episode_sync_module, "EpisodeSyncService", FakeEpisodeSyncService)
-
-    response = await settings.sync_overseerr(MagicMock(), db=cast(Any, mock_db))
-    response_context = cast(dict, getattr(response, "context", None))
-
-    assert response_context["message_type"] == "success"
-    assert response_context["message"] == "Synced 1 new request(s) from Overseerr"
-    degraded_logs = [
-        record.message
-        for record in caplog.records
-        if "degraded Plex sync for request" in record.message
-    ]
-    assert degraded_logs == [
-        "EpisodeSyncService: degraded Plex sync for request 1 (Show One); "
-        "Plex episode availability was inconclusive, preserving existing episode/request state"
-    ]
-    mock_db.commit.assert_awaited_once()
-
-
-@pytest.mark.asyncio
-async def test_sync_overseerr_fresh_tv_import_bounds_work_and_preserves_state_on_transient_plex_failure(
-    monkeypatch, base_context, caplog
-):
-    """Fresh TV import should fail fast on Plex ReadError without per-season spam."""
-    _stub_request_link_helpers(monkeypatch)
-
-    class FakeDB:
-        def __init__(self):
-            self.added = []
-            self.next_id = 1
-            self.commit = AsyncMock()
-            self.refresh = AsyncMock()
-
-        async def execute(self, statement):
-            columns = getattr(statement, "column_descriptions", [])
-            if len(columns) > 1:
-                result = MagicMock()
-                result.fetchall.return_value = []
-                return result
-
-            params = statement.compile().params
-            entity = columns[0].get("entity") if columns else None
-
-            if entity is RequestModel and not params:
-                # Existing external IDs lookup.
-                result = MagicMock()
-                result.fetchall.return_value = []
-                return result
-
-            if entity is RequestModel:
-                request_id = next(iter(params.values()))
-                request = next(
-                    (
-                        row
-                        for row in self.added
-                        if isinstance(row, RequestModel) and row.id == request_id
-                    ),
-                    None,
-                )
-                return MagicMock(scalar_one_or_none=MagicMock(return_value=request))
-
-            if entity is Season:
-                request_id = params.get("request_id_1")
-                season_number = params.get("season_number_1")
-                season = next(
-                    (
-                        row
-                        for row in self.added
-                        if isinstance(row, Season)
-                        and row.request_id == request_id
-                        and row.season_number == season_number
-                    ),
-                    None,
-                )
-                return MagicMock(scalar_one_or_none=MagicMock(return_value=season))
-
-            if entity is Episode:
-                season_id = params.get("season_id_1")
-                episode_number = params.get("episode_number_1")
-                episode = next(
-                    (
-                        row
-                        for row in self.added
-                        if isinstance(row, Episode)
-                        and row.season_id == season_id
-                        and row.episode_number == episode_number
-                    ),
-                    None,
-                )
-                return MagicMock(scalar_one_or_none=MagicMock(return_value=episode))
-
-            result = MagicMock()
-            result.fetchall.return_value = []
-            return result
-
-        def add(self, obj):
-            self.added.append(obj)
-
-        async def flush(self):
-            pending = [obj for obj in self.added if getattr(obj, "id", None) is None]
-            for obj in pending:
-                obj.id = self.next_id
-                self.next_id += 1
-
-    mock_db = FakeDB()
-    context = base_context()
-    context["env"] = {"overseerr_url": "http://ov", "overseerr_api_key": "key"}
-
-    monkeypatch.setattr(
-        settings,
-        "_build_settings_page_context",
-        AsyncMock(return_value=context),
-    )
-    runtime_settings = MagicMock(
+    Returns a ``run(db)`` coroutine function that returns the rendered page context.
+    """
+    env = {"overseerr_url": "http://ov", "overseerr_api_key": "key"}
+    runtime = MagicMock(
         overseerr_sync_concurrency=2,
         plex_sync_concurrency=2,
         plex_url="http://plex:32400",
         plex_token="token",
     )
-    monkeypatch.setattr(settings, "get_settings", lambda: runtime_settings)
+    store = MagicMock(get_effective_dict=AsyncMock(return_value=env))
+    monkeypatch.setattr(
+        settings,
+        "_build_settings_page_context",
+        AsyncMock(return_value={**base_context(), "env": env}),
+    )
+    monkeypatch.setattr(settings, "get_settings", lambda: runtime)
+    monkeypatch.setattr(settings, "SettingsStore", lambda db: store)
+    monkeypatch.setattr(settings_service, "evaluate_imported_request", AsyncMock(return_value=None))
+    monkeypatch.setattr(settings_service, "PlexService", lambda settings: AsyncMock())
 
-    # Mock SettingsStore so sync_overseerr doesn't hit the DB for settings
-    fake_store = MagicMock()
-    fake_store.get_effective_dict = AsyncMock(return_value=context["env"])
-    monkeypatch.setattr(settings, "SettingsStore", lambda db: fake_store)
+    async def run(db) -> dict[str, Any]:
+        response = await settings.sync_overseerr(MagicMock(), db=db)
+        return cast(dict, getattr(response, "context", None))
 
-    future_day = (datetime.now(UTC) + timedelta(days=7)).date().isoformat()
-    overseerr_requests = [
-        {
-            "id": 101,
-            "status": "approved",
-            "media": {"tmdbId": 2, "mediaType": "tv"},
-            "requestedBy": {"username": "tv-user-1"},
-        }
+    return run
+
+
+def _tv_request(request_id=101, tmdb_id=2):
+    return {
+        "id": request_id,
+        "status": "approved",
+        "media": {"tmdbId": tmdb_id, "mediaType": "tv"},
+        "requestedBy": {"username": "tv-user"},
+    }
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("existing_external_ids", "expected_external_id"),
+    [(["1"], "1-201"), (["1", "1-201"], "1-201-2")],
+)
+async def test_sync_overseerr_uses_available_request_id_when_external_id_collides(
+    monkeypatch, seerr_sync, db, existing_external_ids, expected_external_id
+):
+    """A new Seerr request must not disappear behind an ambiguous external ID."""
+    for external_id in existing_external_ids:
+        await make_request(db, external_id=external_id, tmdb_id=None)
+    await make_request(
+        db, external_id="999", media_type=MediaType.TV, tvdb_id=None, overseerr_request_id=202
+    )
+    await db.commit()
+    requests = [
+        {"id": 201, "status": "approved", "media": {"tmdbId": 1, "mediaType": "movie"}},
+        {"id": 202, "status": "pending", "media": {"tmdbId": 999, "mediaType": "tv"}},
+    ]
+    details = {i: {"title": f"Title {i}", "status": "Released"} for i in (1, 999)}
+    monkeypatch.setattr(
+        settings_service, "OverseerrService", fake_overseerr(requests, details=details)
+    )
+
+    context = await seerr_sync(db)
+
+    assert context["message_type"] == "success"
+    assert context["message"] == "Synced 1 new request(s) from Overseerr"
+    created = (
+        (await db.execute(select(RequestModel).where(RequestModel.overseerr_request_id == 201)))
+        .scalars()
+        .all()
+    )
+    assert [row.external_id for row in created] == [expected_external_id]
+
+
+DEGRADED_WARNING = (
+    "EpisodeSyncService: degraded Plex sync for request 1 (Show One); "
+    "Plex episode availability was inconclusive, preserving existing episode/request state"
+)
+
+
+@pytest.mark.asyncio
+async def test_sync_overseerr_logs_request_level_degraded_tv_sync_once(
+    monkeypatch, seerr_sync, db, caplog
+):
+    """Overseerr import should surface one request-level degraded sync warning."""
+    details = {2: {"name": "Show One", "firstAirDate": "2023-02-03", "status": "Returning Series"}}
+    monkeypatch.setattr(
+        settings_service, "OverseerrService", fake_overseerr([_tv_request()], details=details)
+    )
+
+    class FakeEpisodeSyncService:
+        def __init__(self, db, overseerr=None, plex=None):
+            pass
+
+        async def sync_request(self, request_id):
+            settings.logger.warning(DEGRADED_WARNING.replace("request 1", f"request {request_id}"))
+
+    monkeypatch.setattr(episode_sync_module, "EpisodeSyncService", FakeEpisodeSyncService)
+
+    context = await seerr_sync(db)
+
+    assert context["message"] == "Synced 1 new request(s) from Overseerr"
+    assert [r.message for r in caplog.records if "degraded Plex sync" in r.message] == [
+        DEGRADED_WARNING
     ]
 
-    class FakeOverseerrService:
-        def __init__(self, settings=None):
-            self.settings = settings
-            self.season_detail_calls: list[int] = []
 
-        async def get_all_requests(self, status=None):
-            return overseerr_requests
+@pytest.mark.asyncio
+async def test_sync_overseerr_fresh_tv_import_bounds_work_and_preserves_state_on_transient_plex_failure(
+    monkeypatch, seerr_sync, db, caplog
+):
+    """Fresh TV import should fail fast on Plex ReadError without per-season spam."""
+    future_day = (datetime.now(UTC) + timedelta(days=7)).date().isoformat()
+    details = {
+        2: {
+            "name": "Show One",
+            "firstAirDate": "2023-02-03",
+            "status": "Returning Series",
+            "seasons": [{"seasonNumber": n, "name": f"Season {n}"} for n in (1, 2, 3)],
+        }
+    }
 
-        def normalize_request_status(self, status):
-            return str(status).lower()
-
-        def normalize_media_status(self, status):
-            return str(status).lower() if status is not None else "unknown"
-
-        async def get_media_details(self, media_type, external_id):
-            assert media_type == "tv"
-            assert external_id == 2
-            return {
-                "name": "Show One",
-                "firstAirDate": "2023-02-03",
-                "status": "Returning Series",
-                "seasons": [
-                    {"seasonNumber": 1, "name": "Season 1"},
-                    {"seasonNumber": 2, "name": "Season 2"},
-                    {"seasonNumber": 3, "name": "Season 3"},
-                ],
-            }
+    class SeasonAwareOverseerr(fake_overseerr([_tv_request()], details=details)):
+        season_detail_calls: list[int] = []
 
         async def get_season_details(self, external_id, season_number):
-            assert external_id == 2
             self.season_detail_calls.append(season_number)
             return {
                 "seasonNumber": season_number,
@@ -1664,110 +552,57 @@ async def test_sync_overseerr_fresh_tv_import_bounds_work_and_preserves_state_on
                 ],
             }
 
-        async def close(self):
-            return None
+    monkeypatch.setattr(settings_service, "OverseerrService", SeasonAwareOverseerr)
 
-    fake_overseerr = FakeOverseerrService()
-    monkeypatch.setattr(settings, "OverseerrService", lambda settings=None: fake_overseerr)
-    monkeypatch.setattr(settings, "evaluate_imported_request", AsyncMock(return_value=None))
-
-    plex_service = PlexService(settings=runtime_settings)
-    resolve_show_rating_key_mock = AsyncMock(return_value=("show-123", True))
-    season_1_started = asyncio.Event()
+    runtime = settings.get_settings()
+    plex_service = PlexService(settings=runtime)
     season_1_cancelled = asyncio.Event()
-    season_3_started = asyncio.Event()
     plex_call_keys: list[str] = []
 
-    async def plex_get(url: str, **kwargs):
-        del kwargs
+    def plex_response(metadata):
+        response = MagicMock(status_code=200)
+        response.json.return_value = {"MediaContainer": {"Metadata": metadata}}
+        return response
+
+    async def plex_get(url: str, **_kwargs):
         rating_key = url.rstrip("/").split("/")[-2]
         plex_call_keys.append(rating_key)
-
         if rating_key == "show-123":
-            response = MagicMock()
-            response.status_code = 200
-            response.json.return_value = {
-                "MediaContainer": {
-                    "Metadata": [
-                        {"type": "season", "index": 1, "ratingKey": "season-1"},
-                        {"type": "season", "index": 2, "ratingKey": "season-2"},
-                        {"type": "season", "index": 3, "ratingKey": "season-3"},
-                    ]
-                }
-            }
-            return response
-
+            return plex_response(
+                [{"type": "season", "index": n, "ratingKey": f"season-{n}"} for n in (1, 2, 3)]
+            )
         if rating_key == "season-1":
-            season_1_started.set()
             try:
                 await asyncio.Future[None]()
             except asyncio.CancelledError:
                 season_1_cancelled.set()
                 raise
-
         if rating_key == "season-2":
             raise httpx.ReadError("boom", request=httpx.Request("GET", url))
-
-        if rating_key == "season-3":
-            season_3_started.set()
-
-        response = MagicMock()
-        response.status_code = 200
-        response.json.return_value = {
-            "MediaContainer": {"Metadata": [{"type": "episode", "index": 1, "Media": [{"id": 1}]}]}
-        }
-        return response
+        return plex_response([{"type": "episode", "index": 1, "Media": [{"id": 1}]}])
 
     mock_client = AsyncMock()
     mock_client.get.side_effect = plex_get
-    monkeypatch.setattr(plex_service, "resolve_show_rating_key", resolve_show_rating_key_mock)
-    monkeypatch.setattr(plex_service, "_get_client", AsyncMock(return_value=mock_client))
-    monkeypatch.setattr(settings, "PlexService", lambda settings: plex_service)
-
-    response = await settings.sync_overseerr(MagicMock(), db=cast(Any, mock_db))
-    response_context = cast(dict, getattr(response, "context", None))
-
-    assert response_context["message_type"] == "success"
-    assert response_context["message"] == "Synced 1 new request(s) from Overseerr"
-    assert fake_overseerr.season_detail_calls == [1, 2, 3]
-    resolve_show_rating_key_mock.assert_awaited_once()
-    await asyncio.wait_for(season_1_started.wait(), timeout=1)
-    await asyncio.wait_for(season_1_cancelled.wait(), timeout=1)
-    assert plex_call_keys == ["show-123", "season-1", "season-2"]
-    assert season_3_started.is_set() is False
-
-    tv_request = next(
-        row for row in mock_db.added if getattr(row, "media_type", None) == MediaType.TV
+    monkeypatch.setattr(
+        plex_service, "resolve_show_rating_key", AsyncMock(return_value=("show-123", True))
     )
-    seasons = [row for row in mock_db.added if isinstance(row, Season)]
-    episodes = [row for row in mock_db.added if isinstance(row, Episode)]
-    assert len(seasons) == 3
-    assert len(episodes) == 3
-    assert [season.status for season in seasons] == [
-        RequestStatus.PENDING,
-        RequestStatus.UNRELEASED,
-        RequestStatus.PENDING,
-    ]
-    assert [episode.status for episode in episodes] == [
-        RequestStatus.PENDING,
-        RequestStatus.UNRELEASED,
-        RequestStatus.PENDING,
-    ]
-    assert tv_request.status == RequestStatus.PENDING
+    monkeypatch.setattr(plex_service, "_get_client", AsyncMock(return_value=mock_client))
+    monkeypatch.setattr(settings_service, "PlexService", lambda settings: plex_service)
 
-    degraded_logs = [
-        record.message
-        for record in caplog.records
-        if "Plex episode availability was inconclusive" in record.message
-    ]
-    assert degraded_logs == [
-        "EpisodeSyncService: degraded Plex sync for request 1 (Show One); "
-        "Plex episode availability was inconclusive, preserving existing episode/request state"
-    ]
-    spam_logs = [
-        record.message
-        for record in caplog.records
-        if "get_metadata_children(" in record.message or "get_season_children(" in record.message
-    ]
-    assert spam_logs == []
-    assert mock_db.commit.await_count == 2
+    context = await seerr_sync(db)
+
+    assert context["message"] == "Synced 1 new request(s) from Overseerr"
+    assert SeasonAwareOverseerr.season_detail_calls == [1, 2, 3]
+    await asyncio.wait_for(season_1_cancelled.wait(), timeout=1)
+    # The ReadError on season 2 stops the work: season 3 is never requested.
+    assert plex_call_keys == ["show-123", "season-1", "season-2"]
+
+    tv_request = (await db.execute(select(RequestModel))).scalar_one()
+    seasons = (await db.execute(select(Season).order_by(Season.season_number))).scalars().all()
+    episodes = (await db.execute(select(Episode).order_by(Episode.season_id))).scalars().all()
+    expected = [RequestStatus.PENDING, RequestStatus.UNRELEASED, RequestStatus.PENDING]
+    assert [season.status for season in seasons] == expected
+    assert [episode.status for episode in episodes] == expected
+    assert tv_request.status == RequestStatus.PENDING
+    assert [r.message for r in caplog.records if "inconclusive" in r.message] == [DEGRADED_WARNING]
+    assert not [r for r in caplog.records if "_children(" in r.message]

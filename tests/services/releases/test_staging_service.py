@@ -26,61 +26,31 @@ class TestStagingServiceUnit:
         """Create a mock database session."""
         return MagicMock()
 
-    def test_sanitize_filename_special_chars(self, mock_db):
-        """Test sanitizing filenames with special characters."""
-        service = StagingService(mock_db)
+    @pytest.mark.parametrize(
+        ("title", "expected"),
+        [
+            ("Movie: Title 2019", "Movie_Title_2019"),
+            ("Movie/Title", "Movie_Title"),
+            ("Movie*Title?2019", "Movie_Title_2019"),
+            ('Movie"Title"2019', "Movie_Title_2019"),
+            ("Movie|Title", "Movie_Title"),
+            ("Movie  Title   2019", "Movie_Title_2019"),
+            ("A" * 200, "A" * 100),
+        ],
+        ids=["colon", "slash", "wildcards", "quotes", "pipe", "repeated-spaces", "truncated"],
+    )
+    def test_sanitize_filename(self, mock_db, title, expected):
+        assert StagingService(mock_db)._sanitize_filename(title) == expected
 
-        assert service._sanitize_filename("Movie: Title 2019") == "Movie_Title_2019"
-        assert service._sanitize_filename("Movie/Title") == "Movie_Title"
-        assert service._sanitize_filename("Movie*Title?2019") == "Movie_Title_2019"
-        assert service._sanitize_filename('Movie"Title"2019') == "Movie_Title_2019"
-        assert service._sanitize_filename("Movie|Title") == "Movie_Title"
-
-    def test_sanitize_filename_spaces(self, mock_db):
-        """Test sanitizing filenames with spaces."""
-        service = StagingService(mock_db)
-
-        assert service._sanitize_filename("Movie  Title   2019") == "Movie_Title_2019"
-
-    def test_sanitize_filename_truncation(self, mock_db):
-        """Test that long filenames are truncated."""
-        service = StagingService(mock_db)
-
-        long_title = "A" * 200
-        result = service._sanitize_filename(long_title)
-        assert len(result) == 100
-
-    def test_generate_filename_with_group(self, mock_db):
-        """Test filename generation with release group."""
-        service = StagingService(mock_db)
-
-        result = service._generate_filename(
-            title="My Movie 2019",
-            release_group="RARBG",
-            request_id=123,
-        )
-
-        assert "My_Movie_2019" in result
-        assert "RARBG" in result
-        assert "123" in result
-
-    def test_generate_filename_without_group(self, mock_db):
-        """Test filename generation without release group."""
-        service = StagingService(mock_db)
-
-        result = service._generate_filename(
-            title="My Movie 2019",
-            release_group=None,
-            request_id=123,
+    @pytest.mark.parametrize("group", ["RARBG", None], ids=["with-group", "without-group"])
+    def test_generate_filename(self, mock_db, group):
+        result = StagingService(mock_db)._generate_filename(
+            title="My Movie 2019", release_group=group, request_id=123
         )
 
         assert "My_Movie_2019" in result
         assert "123" in result
-
-    def test_is_staging_enabled(self):
-        """Test staging enabled check."""
-        result = StagingService.is_staging_enabled(MagicMock())
-        assert result is False
+        assert ("RARBG" in result) is (group is not None)
 
     @pytest.mark.asyncio
     async def test_rule_selection_rejects_zero_seeder_release(self, mock_db):

@@ -45,7 +45,7 @@ function resetProgressPanel() {
     cancelButton.textContent = 'Cancel search';
   }
 }
-function closeSearchProgress() {
+export function closeSearchProgress() {
   if (activeSearchEventSource) {
     activeSearchEventSource.close();
     activeSearchEventSource = null;
@@ -80,7 +80,7 @@ async function _finishSearchEventSource(es, cb, data) {
   es.close();
   await _invokeCallback(cb, data);
 }
-function startSearchProgress(requestId, title, onComplete, onError) {
+export function startSearchProgress(requestId, title, onComplete, onError) {
   closeSearchProgress();
   resetProgressPanel();
   const panel = getProgressPanel();
@@ -177,7 +177,7 @@ function startSearchProgress(requestId, title, onComplete, onError) {
     _invokeCallback(onError, { phase: 'error', message: 'Connection lost' });
   };
 }
-function startBulkSearchProgress(requestIds, titles, onComplete, onError, options) {
+export function startBulkSearchProgress(requestIds, titles, onComplete, onError, options) {
   closeSearchProgress();
   resetProgressPanel();
   const panel = getProgressPanel();
@@ -291,7 +291,7 @@ function startBulkSearchProgress(requestIds, titles, onComplete, onError, option
     _invokeCallback(onError, { phase: 'error', message: 'Connection lost' });
   };
 }
-async function cancelActiveTvSearch() {
+export async function cancelActiveTvSearch() {
   if (!activeTvSearchCancelUrl) return;
   const button = document.getElementById('search-progress-cancel');
   if (button) {
@@ -311,7 +311,7 @@ async function cancelActiveTvSearch() {
     if (status) status.textContent = 'Could not cancel search: ' + error.message;
   }
 }
-function startTvSearchProgress(streamUrl, title, onComplete, onError, cancelUrl = null) {
+export function startTvSearchProgress(streamUrl, title, onComplete, onError, cancelUrl = null) {
   closeSearchProgress();
   resetProgressPanel();
   const panel = getProgressPanel();
@@ -384,7 +384,7 @@ function startTvSearchProgress(streamUrl, title, onComplete, onError, cancelUrl 
     _invokeCallback(onError, { phase: 'error', message: 'Connection lost' });
   };
 }
-function updateRequestRow(requestId, result) {
+export function updateRequestRow(requestId, result) {
   const row = document.querySelector('tr[data-request-id="' + requestId + '"]');
   if (!row) return;
   const status = result.status || '';
@@ -417,15 +417,6 @@ function updateRequestRow(requestId, result) {
   });
   row.setAttribute('data-status', status);
 }
-
-export {
-  closeSearchProgress,
-  cancelActiveTvSearch,
-  startSearchProgress,
-  startBulkSearchProgress,
-  startTvSearchProgress,
-  updateRequestRow,
-};
 Object.assign(window, {
   closeSearchProgress,
   cancelActiveTvSearch,

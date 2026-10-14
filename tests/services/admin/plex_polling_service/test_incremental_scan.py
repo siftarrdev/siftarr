@@ -1,314 +1,87 @@
-from datetime import UTC, datetime
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock
 
 import pytest
 
-from app.siftarr.models.request import MediaType, RequestStatus
+from app.siftarr.models.request import RequestStatus
 from app.siftarr.services.integrations.plex_service import (
     PlexEpisodeAvailabilityResult,
     PlexLookupResult,
     PlexTransientScanError,
 )
+from tests.factories import make_request, make_staged_torrent
 
-from .helpers import make_episode, make_request, make_season, set_request_status
+from .helpers import (
+    episode_statuses,
+    make_tv_request,
+    recent_item,
+    request_status,
+    set_recent_items,
+)
 
-
-@pytest.mark.asyncio
-async def test_scan_recent_applies_completion_updates(service, mock_db, mock_plex):
-    req1 = make_request(
-        id=1,
-        media_type=MediaType.TV,
-        tmdb_id=901,
-        title="Show 1",
-        seasons=[make_season(1, [make_episode(1), make_episode(2)])],
-    )
-    req2 = make_request(
-        id=2,
-        media_type=MediaType.TV,
-        tmdb_id=902,
-        title="Show 2",
-        seasons=[make_season(1, [make_episode(1), make_episode(2)])],
-    )
-    mock_result = MagicMock()
-    mock_result.scalars.return_value.all.return_value = [req1, req2]
-    mock_db.execute.return_value = mock_result
-    mock_plex.settings.plex_sync_concurrency = 2
-
-    async def iter_recently_added_items(media_type: str):
-        if media_type == "show":
-            yield {
-                "type": "show",
-                "rating_key": "show-1",
-                "title": "Show 1",
-                "added_at": int(datetime(2026, 4, 19, 12, 0, tzinfo=UTC).timestamp()),
-                "guids": ("tmdb://901",),
-                "Media": [{"id": 1}],
-            }
-            yield {
-                "type": "show",
-                "rating_key": "show-2",
-                "title": "Show 2",
-                "added_at": int(datetime(2026, 4, 19, 12, 1, tzinfo=UTC).timestamp()),
-                "guids": ("tmdb://902",),
-                "Media": [{"id": 1}],
-            }
-        if False:
-            yield {}
-
-    mock_plex.iter_recently_added_items = iter_recently_added_items
-
-    async def get_episode_availability_result(_: str) -> PlexEpisodeAvailabilityResult:
-        return PlexEpisodeAvailabilityResult(
-            availability={(1, 1): True, (1, 2): True},
-            authoritative=True,
-        )
-
-    async def persist_episode_availability_side_effect(db, req, seasons, availability) -> None:
-        assert seasons == req.seasons
-        assert availability == {(1, 1): True, (1, 2): True}
-        req.status = RequestStatus.COMPLETED
-
-    mock_plex.get_episode_availability_result.side_effect = get_episode_availability_result
-
-    with (
-        patch(
-            "app.siftarr.services.admin.plex_polling_service.persist_episode_availability",
-            side_effect=persist_episode_availability_side_effect,
-        ) as mock_reconcile,
-        patch.object(service.lifecycle, "transition", new_callable=AsyncMock) as mock_transition,
-    ):
-        result = await service.scan_recent()
-
-    assert result.completed_requests == 2
-    assert result.metrics.scanned_items == 2
-    assert result.metrics.matched_requests == 2
-    assert result.metrics.skipped_on_error_items == 0
-    assert mock_reconcile.await_count == 2
-    assert mock_transition.await_count == 0
+COMPLETED = RequestStatus.COMPLETED
+PENDING = RequestStatus.PENDING
+DOWNLOADING = RequestStatus.DOWNLOADING
 
 
-@pytest.mark.asyncio
-async def test_scan_recent_processes_matching_items_without_deduping(service, mock_db, mock_plex):
-    req1 = make_request(id=1, tmdb_id=111, title="Movie A")
-    req2 = make_request(id=2, tmdb_id=111, title="Movie A Duplicate")
-    req3 = make_request(id=3, tmdb_id=222, title="Movie B")
-    mock_result = MagicMock()
-    mock_result.scalars.return_value.all.return_value = [req1, req2, req3]
-    mock_db.execute.return_value = mock_result
+async def test_scan_recent_completes_matches_and_skips_the_rest(db, service, mock_plex):
+    movie = await make_request(db, external_id="a", tmdb_id=111)
+    duplicate = await make_request(db, external_id="b", tmdb_id=111, title="Duplicate")
+    lookup_misses = await make_request(db, external_id="c", tmdb_id=222)
+    lookup_hits = await make_request(db, external_id="d", tmdb_id=333)
+    not_recent = await make_request(db, external_id="e", tmdb_id=999)
+    show = await make_tv_request(db, external_id="f", tmdb_id=444)
+    await db.commit()
 
-    async def iter_recently_added_items(media_type: str):
-        if media_type == "movie":
-            yield {
-                "type": "movie",
-                "rating_key": "movie-111",
-                "title": "Movie A",
-                "added_at": int(datetime(2026, 4, 19, 12, 0, tzinfo=UTC).timestamp()),
-                "guids": ("tmdb://111",),
-                "Media": [{"id": 1}],
-            }
-            yield {
-                "type": "movie",
-                "rating_key": "movie-222",
-                "title": "Movie B",
-                "added_at": int(datetime(2026, 4, 19, 12, 1, tzinfo=UTC).timestamp()),
-                "guids": ("tmdb://222",),
-                "Media": [],
-            }
-        if False:
-            yield {}
-
-    mock_plex.iter_recently_added_items = iter_recently_added_items
-    mock_plex.lookup_movie_by_tmdb = AsyncMock(
-        return_value=PlexLookupResult(item=None, authoritative=True)
+    set_recent_items(
+        mock_plex,
+        movies=[
+            recent_item("movie", 111, minute=0),
+            recent_item("movie", 222, has_media=False, minute=1),
+            recent_item("movie", 333, has_media=False, minute=2),
+            recent_item("movie", 555, minute=3),
+        ],
+        shows=[recent_item("show", 444, minute=4)],
     )
 
-    with patch.object(service.lifecycle, "transition", new_callable=AsyncMock) as mock_transition:
-        result = await service.scan_recent()
+    async def lookup_movie(tmdb_id: int) -> PlexLookupResult:
+        item = {"rating_key": "movie-333", "Media": [{"id": 1}]} if tmdb_id == 333 else None
+        return PlexLookupResult(item=item, authoritative=True)
 
-    assert result.completed_requests == 2
-    assert result.metrics.scanned_items == 2
-    assert result.metrics.matched_requests == 2
-    assert result.metrics.skipped_on_error_items == 0
-    mock_plex.lookup_movie_by_tmdb.assert_awaited_once_with(222)
-    mock_plex.check_movie_available.assert_not_called()
-    mock_transition.assert_any_call(1, RequestStatus.COMPLETED, reason="Found on Plex")
-    mock_transition.assert_any_call(2, RequestStatus.COMPLETED, reason="Found on Plex")
-    assert mock_transition.await_count == 2
-
-
-@pytest.mark.asyncio
-async def test_scan_recent_processes_recent_matches_and_skips_unmatched_items(
-    service, mock_db, mock_plex
-):
-    req1 = make_request(id=1, tmdb_id=111, title="Movie A")
-    req2 = make_request(
-        id=2,
-        media_type=MediaType.TV,
-        tmdb_id=222,
-        title="Show B",
-        seasons=[make_season(1, [make_episode(1)])],
-    )
-    req3 = make_request(id=3, tmdb_id=999, title="Movie C")
-    mock_result = MagicMock()
-    mock_result.scalars.return_value.all.return_value = [req1, req2, req3]
-    mock_db.execute.return_value = mock_result
-
-    async def iter_recently_added_items(media_type: str):
-        if media_type == "movie":
-            yield {
-                "type": "movie",
-                "rating_key": "movie-111",
-                "title": "Movie A",
-                "added_at": int(datetime(2026, 4, 19, 11, 55, tzinfo=UTC).timestamp()),
-                "guids": ("tmdb://111",),
-                "Media": [{"id": 1}],
-            }
-            yield {
-                "type": "movie",
-                "rating_key": "movie-old",
-                "title": "Unmatched",
-                "added_at": int(datetime(2026, 4, 19, 11, 49, tzinfo=UTC).timestamp()),
-                "guids": ("tmdb://555",),
-                "Media": [{"id": 1}],
-            }
-            return
-        yield {
-            "type": "show",
-            "rating_key": "show-222",
-            "title": "Show B",
-            "added_at": int(datetime(2026, 4, 19, 12, 1, tzinfo=UTC).timestamp()),
-            "guids": ("tmdb://222",),
-            "Media": [{"id": 1}],
-        }
-
-    mock_plex.iter_recently_added_items = iter_recently_added_items
+    mock_plex.lookup_movie_by_tmdb = AsyncMock(side_effect=lookup_movie)
     mock_plex.get_episode_availability_result = AsyncMock(
         return_value=PlexEpisodeAvailabilityResult(
-            availability={(1, 1): True},
-            authoritative=True,
+            availability={(1, 1): True, (1, 2): True}, authoritative=True
         )
     )
 
-    async def reconcile_to_completed(db, request, seasons, availability):
-        return await set_request_status(request, RequestStatus.COMPLETED, seasons, availability)
+    events: list[dict] = []
+    result = await service.scan_recent(on_progress=events.append)
 
-    with (
-        patch(
-            "app.siftarr.services.admin.plex_polling_service.persist_episode_availability",
-            new_callable=AsyncMock,
-        ) as mock_reconcile,
-        patch.object(service.lifecycle, "transition", new_callable=AsyncMock) as mock_transition,
-    ):
-        mock_reconcile.side_effect = reconcile_to_completed
-        result = await service.scan_recent()
-
-    assert result.completed_requests == 2
-    assert result.metrics.scanned_items == 3
-    assert result.metrics.matched_requests == 2
+    assert events
+    assert result.completed_requests == 4
+    assert result.metrics.scanned_items == 5
+    assert result.metrics.matched_requests == 4
     assert result.metrics.skipped_on_error_items == 0
-    mock_plex.check_movie_available.assert_not_called()
-    mock_plex.get_episode_availability_result.assert_awaited_once_with("show-222")
-    mock_transition.assert_awaited_once_with(1, RequestStatus.COMPLETED, reason="Found on Plex")
-    mock_reconcile.assert_awaited_once_with(mock_db, req2, req2.seasons, {(1, 1): True})
-
-
-@pytest.mark.asyncio
-async def test_scan_recent_reuses_recent_item_data_before_lookup_fallback(
-    service, mock_db, mock_plex
-):
-    movie_req = make_request(id=1, tmdb_id=111, title="Movie A")
-    tv_req = make_request(
-        id=2,
-        media_type=MediaType.TV,
-        tmdb_id=222,
-        title="Show B",
-        seasons=[make_season(1, [make_episode(1)])],
-    )
-    movie_fallback_req = make_request(id=3, tmdb_id=333, title="Movie C")
-    mock_result = MagicMock()
-    mock_result.scalars.return_value.all.return_value = [movie_req, tv_req, movie_fallback_req]
-    mock_db.execute.return_value = mock_result
-
-    async def iter_recently_added_items(media_type: str):
-        if media_type == "movie":
-            yield {
-                "type": "movie",
-                "rating_key": "movie-111",
-                "title": "Movie A",
-                "added_at": int(datetime(2026, 4, 19, 12, 0, tzinfo=UTC).timestamp()),
-                "guids": ("tmdb://111",),
-                "Media": [{"id": 1}],
-            }
-            yield {
-                "type": "movie",
-                "rating_key": "movie-333",
-                "title": "Movie C",
-                "added_at": int(datetime(2026, 4, 19, 12, 1, tzinfo=UTC).timestamp()),
-                "guids": ("tmdb://333",),
-                "Media": [],
-            }
-            return
-        yield {
-            "type": "show",
-            "rating_key": "show-222",
-            "title": "Show B",
-            "added_at": int(datetime(2026, 4, 19, 12, 2, tzinfo=UTC).timestamp()),
-            "guids": ("tmdb://222",),
-            "Media": [{"id": 1}],
-        }
-
-    mock_plex.iter_recently_added_items = iter_recently_added_items
-    mock_plex.lookup_movie_by_tmdb = AsyncMock(
-        return_value=PlexLookupResult(
-            item={"rating_key": "movie-333", "Media": [{"id": 1}]},
-            authoritative=True,
-        )
-    )
-    mock_plex.get_episode_availability_result = AsyncMock(
-        return_value=PlexEpisodeAvailabilityResult(
-            availability={(1, 1): True},
-            authoritative=True,
-        )
-    )
-
-    async def reconcile_to_completed(db, request, seasons, availability):
-        return await set_request_status(request, RequestStatus.COMPLETED, seasons, availability)
-
-    with (
-        patch(
-            "app.siftarr.services.admin.plex_polling_service.persist_episode_availability",
-            new_callable=AsyncMock,
-        ) as mock_reconcile,
-        patch.object(service.lifecycle, "transition", new_callable=AsyncMock) as mock_transition,
-    ):
-        mock_reconcile.side_effect = reconcile_to_completed
-        result = await service.scan_recent()
-
-    assert result.completed_requests == 3
-    mock_plex.lookup_movie_by_tmdb.assert_awaited_once_with(333)
+    assert result.clean_run is True
+    assert await request_status(db, movie) == COMPLETED
+    assert await request_status(db, duplicate) == COMPLETED
+    assert await request_status(db, lookup_hits) == COMPLETED
+    assert await request_status(db, show) == COMPLETED
+    assert await request_status(db, lookup_misses) == PENDING
+    assert await request_status(db, not_recent) == PENDING
+    # Items with media skip the per-title Plex lookup; only media-less items fall back to it.
+    assert sorted(call.args[0] for call in mock_plex.lookup_movie_by_tmdb.await_args_list) == [
+        222,
+        333,
+    ]
     mock_plex.check_movie_available.assert_not_called()
     mock_plex.get_show_by_tmdb.assert_not_called()
-    mock_plex.get_show_by_tvdb.assert_not_called()
-    mock_plex.get_episode_availability_result.assert_awaited_once_with("show-222")
-    mock_plex.get_episode_availability.assert_not_called()
-    assert mock_transition.await_count == 2
-    mock_reconcile.assert_awaited_once_with(mock_db, tv_req, tv_req.seasons, {(1, 1): True})
 
 
-@pytest.mark.asyncio
-async def test_scan_recent_reports_recent_scan_failure(service, mock_db, mock_plex):
-    req = make_request(id=1, tmdb_id=111, title="Movie A")
-    mock_result = MagicMock()
-    mock_result.scalars.return_value.all.return_value = [req]
-    mock_db.execute.return_value = mock_result
-
-    async def iter_recently_added_items(media_type: str):
-        if media_type == "movie":
-            raise PlexTransientScanError("recently added unavailable")
-        if False:
-            yield {}
-
-    mock_plex.iter_recently_added_items = iter_recently_added_items
+async def test_scan_recent_reports_recent_listing_failure(db, service, mock_plex):
+    req = await make_request(db, tmdb_id=111)
+    await db.commit()
+    set_recent_items(mock_plex, movie_error=PlexTransientScanError("recently added unavailable"))
 
     result = await service.scan_recent()
 
@@ -317,203 +90,111 @@ async def test_scan_recent_reports_recent_scan_failure(service, mock_db, mock_pl
     assert result.metrics.skipped_on_error_items == 1
     assert result.clean_run is False
     assert result.last_error == "recently added unavailable"
+    assert await request_status(db, req) == PENDING
 
 
-@pytest.mark.asyncio
-async def test_scan_recent_reports_request_probe_error(service, mock_db, mock_plex):
-    req = make_request(id=1, tmdb_id=111, title="Movie A")
-    mock_result = MagicMock()
-    mock_result.scalars.return_value.all.return_value = [req]
-    mock_db.execute.return_value = mock_result
-
-    async def iter_recently_added_items(media_type: str):
-        if media_type == "movie":
-            yield {
-                "type": "movie",
-                "rating_key": "movie-111",
-                "title": "Movie A",
-                "added_at": int(datetime(2026, 4, 19, 12, 1, tzinfo=UTC).timestamp()),
-                "guids": ("tmdb://111",),
-                "Media": [],
-            }
-
-    mock_plex.iter_recently_added_items = iter_recently_added_items
-    mock_plex.lookup_movie_by_tmdb = AsyncMock(side_effect=Exception("boom"))
-
-    result = await service.scan_recent()
-
-    assert result.completed_requests == 0
-    assert result.metrics.scanned_items == 1
-    assert result.metrics.matched_requests == 0
-    assert result.metrics.skipped_on_error_items == 1
-    assert result.clean_run is False
-    assert result.last_error == "Recent Plex scan had request probe errors"
+def _movie_lookup_raises(plex):
+    set_recent_items(plex, movies=[recent_item("movie", 111, has_media=False)])
+    plex.lookup_movie_by_tmdb = AsyncMock(side_effect=Exception("boom"))
 
 
-@pytest.mark.asyncio
-async def test_scan_recent_reports_non_authoritative_movie_fallback(service, mock_db, mock_plex):
-    req = make_request(id=1, tmdb_id=111, title="Movie A")
-    mock_result = MagicMock()
-    mock_result.scalars.return_value.all.return_value = [req]
-    mock_db.execute.return_value = mock_result
-
-    async def iter_recently_added_items(media_type: str):
-        if media_type == "movie":
-            yield {
-                "type": "movie",
-                "rating_key": "movie-111",
-                "title": "Movie A",
-                "added_at": int(datetime(2026, 4, 19, 12, 1, tzinfo=UTC).timestamp()),
-                "guids": ("tmdb://111",),
-                "Media": [],
-            }
-
-    mock_plex.iter_recently_added_items = iter_recently_added_items
-    mock_plex.lookup_movie_by_tmdb = AsyncMock(
+def _movie_lookup_not_authoritative(plex):
+    set_recent_items(plex, movies=[recent_item("movie", 111, has_media=False)])
+    plex.lookup_movie_by_tmdb = AsyncMock(
         return_value=PlexLookupResult(item=None, authoritative=False)
     )
 
-    with patch.object(service.lifecycle, "transition", new_callable=AsyncMock) as mock_transition:
-        result = await service.scan_recent()
 
-    assert result.completed_requests == 0
-    assert result.metrics.scanned_items == 1
-    assert result.metrics.matched_requests == 0
-    assert result.metrics.skipped_on_error_items == 1
-    assert result.clean_run is False
-    mock_plex.lookup_movie_by_tmdb.assert_awaited_once_with(111)
-    mock_plex.check_movie_available.assert_not_called()
-    mock_transition.assert_not_awaited()
-
-
-@pytest.mark.asyncio
-async def test_scan_recent_reports_non_authoritative_tv_fallback(service, mock_db, mock_plex):
-    req = make_request(
-        id=2,
-        media_type=MediaType.TV,
-        tmdb_id=222,
-        title="Show B",
-        seasons=[make_season(1, [make_episode(1)])],
-    )
-    mock_result = MagicMock()
-    mock_result.scalars.return_value.all.return_value = [req]
-    mock_db.execute.return_value = mock_result
-
-    async def iter_recently_added_items(media_type: str):
-        if media_type == "show":
-            yield {
-                "type": "show",
-                "title": "Show B",
-                "added_at": int(datetime(2026, 4, 19, 12, 1, tzinfo=UTC).timestamp()),
-                "guids": ("tmdb://222",),
-                "Media": [],
-            }
-
-    mock_plex.iter_recently_added_items = iter_recently_added_items
-    mock_plex.lookup_show_by_tmdb = AsyncMock(
+def _tv_availability_not_authoritative(plex):
+    set_recent_items(plex, shows=[recent_item("show", 111, has_media=False, rating_key=False)])
+    plex.lookup_show_by_tmdb = AsyncMock(
         return_value=PlexLookupResult(
-            item={"rating_key": "show-222", "Media": []},
-            authoritative=True,
+            item={"rating_key": "show-111", "Media": []}, authoritative=True
         )
     )
-    mock_plex.get_episode_availability_result = AsyncMock(
+    plex.get_episode_availability_result = AsyncMock(
         return_value=PlexEpisodeAvailabilityResult(availability={}, authoritative=False)
     )
 
-    with patch.object(service.lifecycle, "transition", new_callable=AsyncMock) as mock_transition:
-        result = await service.scan_recent()
 
-    assert result.completed_requests == 0
-    assert result.metrics.scanned_items == 1
-    assert result.metrics.matched_requests == 0
-    assert result.metrics.skipped_on_error_items == 1
-    assert result.clean_run is False
-    mock_plex.lookup_show_by_tmdb.assert_awaited_once_with(222)
-    mock_plex.get_show_by_tmdb.assert_not_called()
-    mock_plex.get_show_by_tvdb.assert_not_called()
-    mock_plex.get_episode_availability_result.assert_awaited_once_with("show-222")
-    mock_plex.get_episode_availability.assert_not_called()
-    mock_transition.assert_not_awaited()
-
-
-@pytest.mark.asyncio
-async def test_scan_recent_targeted_check_completes_active_download_absent_from_recent(
-    service, mock_db, mock_plex
-):
-    req = make_request(
-        id=50,
-        media_type=MediaType.MOVIE,
-        status=RequestStatus.DOWNLOADING,
-        tmdb_id=5050,
-        title="Downloaded Movie",
-    )
-    active_result = MagicMock()
-    active_result.scalars.return_value.all.return_value = [req]
-    approved_result = MagicMock()
-    approved_result.scalars.return_value.all.return_value = [req.id]
-    mock_db.execute.side_effect = [active_result, approved_result]
-
-    async def iter_recently_added_items(media_type: str):
-        if False:
-            yield {"type": media_type}
-
-    mock_plex.iter_recently_added_items = iter_recently_added_items
-    mock_plex.check_movie_available = AsyncMock(return_value=True)
-
-    async def transition(request_id, status, reason=None):
-        assert request_id == req.id
-        assert status == RequestStatus.COMPLETED
-        assert reason == "Found on Plex"
-        req.status = status
-
-    with (
-        patch.object(service.lifecycle, "transition", AsyncMock(side_effect=transition)),
-        patch(
-            "app.siftarr.services.lifecycle.overseerr_sync_service.get_linked_overseerr_request_ids",
-            AsyncMock(return_value=[]),
+@pytest.mark.parametrize(
+    ("arrange", "is_tv", "expected_error"),
+    [
+        pytest.param(
+            _movie_lookup_raises,
+            False,
+            "Recent Plex scan had request probe errors",
+            id="movie_lookup_raises",
         ),
-    ):
-        result = await service.scan_recent()
-
-    assert result.completed_requests == 1
-    assert result.metrics.scanned_items == 0
-    assert result.metrics.recent_item_matches == 0
-    assert result.metrics.targeted_checks == 1
-    assert result.metrics.targeted_matches == 1
-    assert req.status == RequestStatus.COMPLETED
-
-
-@pytest.mark.asyncio
-async def test_scan_recent_reports_targeted_probe_error(service, mock_db, mock_plex):
-    req = make_request(
-        id=51,
-        media_type=MediaType.MOVIE,
-        status=RequestStatus.DOWNLOADING,
-        tmdb_id=5151,
-        title="Errored Download",
+        pytest.param(_movie_lookup_not_authoritative, False, None, id="movie_not_authoritative"),
+        pytest.param(_tv_availability_not_authoritative, True, None, id="tv_not_authoritative"),
+    ],
+)
+async def test_scan_recent_flags_unreliable_lookups_without_completing(
+    db, service, mock_plex, arrange, is_tv, expected_error
+):
+    req = await (
+        make_tv_request(db, tmdb_id=111, seasons={1: 1}) if is_tv else make_request(db, tmdb_id=111)
     )
-    active_result = MagicMock()
-    active_result.scalars.return_value.all.return_value = [req]
-    approved_result = MagicMock()
-    approved_result.scalars.return_value.all.return_value = [req.id]
-    mock_db.execute.side_effect = [active_result, approved_result]
-
-    async def iter_recently_added_items(media_type: str):
-        if False:
-            yield {"type": media_type}
-
-    mock_plex.iter_recently_added_items = iter_recently_added_items
-    mock_plex.check_movie_available = AsyncMock(side_effect=RuntimeError("plex down"))
+    await db.commit()
+    arrange(mock_plex)
 
     result = await service.scan_recent()
 
     assert result.completed_requests == 0
+    assert result.metrics.scanned_items == 1
+    assert result.metrics.matched_requests == 0
+    assert result.metrics.skipped_on_error_items == 1
+    assert result.clean_run is False
+    if expected_error:
+        assert result.last_error == expected_error
+    assert await request_status(db, req) == PENDING
+    if is_tv:
+        assert set((await episode_statuses(db, req)).values()) == {PENDING}
+
+
+@pytest.mark.parametrize(
+    ("plex_check", "expected_status", "expected_matches", "expected_errors", "expected_error"),
+    [
+        pytest.param(True, COMPLETED, 1, 0, None, id="available_completes"),
+        pytest.param(
+            RuntimeError("plex down"),
+            DOWNLOADING,
+            0,
+            1,
+            "Targeted Plex availability checks had probe errors",
+            id="probe_error_reported",
+        ),
+    ],
+)
+async def test_scan_recent_targeted_check_for_approved_download_absent_from_recent(
+    db,
+    service,
+    mock_plex,
+    plex_check,
+    expected_status,
+    expected_matches,
+    expected_errors,
+    expected_error,
+):
+    req = await make_request(db, status=DOWNLOADING, tmdb_id=5050)
+    await make_staged_torrent(db, req, status="approved")
+    await db.commit()
+    set_recent_items(mock_plex)
+    mock_plex.check_movie_available = AsyncMock(
+        side_effect=plex_check if isinstance(plex_check, Exception) else None,
+        return_value=plex_check,
+    )
+
+    result = await service.scan_recent()
+
+    assert result.completed_requests == expected_matches
     assert result.metrics.scanned_items == 0
     assert result.metrics.recent_item_matches == 0
     assert result.metrics.targeted_checks == 1
-    assert result.metrics.targeted_matches == 0
-    assert result.metrics.targeted_probe_errors == 1
-    assert result.metrics.skipped_on_error_items == 1
-    assert result.metrics.as_dict()["targeted_probe_errors"] == 1
-    assert result.clean_run is False
-    assert result.last_error == "Targeted Plex availability checks had probe errors"
+    assert result.metrics.targeted_matches == expected_matches
+    assert result.metrics.targeted_probe_errors == expected_errors
+    assert result.metrics.skipped_on_error_items == expected_errors
+    assert result.last_error == expected_error
+    assert result.clean_run is (expected_error is None)
+    assert await request_status(db, req) == expected_status

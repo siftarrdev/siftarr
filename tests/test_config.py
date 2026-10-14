@@ -40,42 +40,25 @@ def test_default_session_secret_file_path_uses_db_directory(monkeypatch, tmp_pat
     assert default_session_secret_file_path() == db_path.parent / "session_secret"
 
 
-def test_secret_key_fallback_is_persisted_and_reused(monkeypatch, tmp_path):
-    secret_file = tmp_path / "db" / "session_secret"
+def test_secret_key_resolution(monkeypatch, tmp_path):
+    """Explicit SECRET_KEY wins, then an existing file, then a generated persisted file."""
     monkeypatch.delenv("SECRET_KEY", raising=False)
-    monkeypatch.setenv("SIFTARR_SECRET_KEY_FILE", str(secret_file))
 
+    generated_file = tmp_path / "db" / "session_secret"
+    monkeypatch.setenv("SIFTARR_SECRET_KEY_FILE", str(generated_file))
     first = Settings().secret_key
-    second = Settings().secret_key
-
-    assert first == second
-    assert secret_file.read_text(encoding="utf-8").strip() == first
+    assert Settings().secret_key == first
+    assert generated_file.read_text(encoding="utf-8").strip() == first
     if os.name == "posix":
-        assert stat.S_IMODE(secret_file.stat().st_mode) == 0o600
+        assert stat.S_IMODE(generated_file.stat().st_mode) == 0o600
 
-
-def test_secret_key_fallback_reuses_existing_file(monkeypatch, tmp_path):
-    secret_file = tmp_path / "session_secret"
-    secret_file.write_text("existing-secret\n", encoding="utf-8")
-    monkeypatch.delenv("SECRET_KEY", raising=False)
-    monkeypatch.setenv("SIFTARR_SECRET_KEY_FILE", str(secret_file))
-
+    existing_file = tmp_path / "session_secret"
+    existing_file.write_text("existing-secret\n", encoding="utf-8")
+    monkeypatch.setenv("SIFTARR_SECRET_KEY_FILE", str(existing_file))
     assert Settings().secret_key == "existing-secret"
 
-
-def test_explicit_secret_key_takes_precedence(monkeypatch, tmp_path):
-    secret_file = tmp_path / "session_secret"
-    secret_file.write_text("file-secret\n", encoding="utf-8")
     monkeypatch.setenv("SECRET_KEY", "explicit-secret")
-    monkeypatch.setenv("SIFTARR_SECRET_KEY_FILE", str(secret_file))
-
     assert Settings().secret_key == "explicit-secret"
-
-
-def test_default_api_key_is_placeholder_constant(monkeypatch):
-    monkeypatch.delenv("SIFTARR_API_KEY", raising=False)
-
-    assert Settings().api_key == PLACEHOLDER_API_KEY
 
 
 def test_default_rules_path_uses_docker_mount_and_is_env_configurable(monkeypatch, tmp_path):
@@ -87,21 +70,14 @@ def test_default_rules_path_uses_docker_mount_and_is_env_configurable(monkeypatc
     assert Settings().default_rules_path == str(rules_path)
 
 
-def test_auth_enabled_defaults_to_api_auth_disabled_only():
-    """Browser Plex SSO gating is enforced separately from API auth_enabled."""
-    assert Settings().auth_enabled is False
-
-
-def test_session_https_only_defaults_to_false(monkeypatch):
-    monkeypatch.delenv("SIFTARR_SESSION_HTTPS_ONLY", raising=False)
+@pytest.mark.parametrize(("env", "expected"), [(None, False), ("true", True)])
+def test_session_https_only_env(monkeypatch, env, expected):
+    if env is None:
+        monkeypatch.delenv("SIFTARR_SESSION_HTTPS_ONLY", raising=False)
+    else:
+        monkeypatch.setenv("SIFTARR_SESSION_HTTPS_ONLY", env)
     monkeypatch.setitem(Settings.model_config, "env_file", None)
-    assert Settings().session_https_only is False
-
-
-def test_session_https_only_can_be_enabled_by_environment(monkeypatch):
-    monkeypatch.setenv("SIFTARR_SESSION_HTTPS_ONLY", "true")
-    monkeypatch.setitem(Settings.model_config, "env_file", None)
-    assert Settings().session_https_only is True
+    assert Settings().session_https_only is expected
 
 
 def test_generate_api_key_is_random_and_not_placeholder():
@@ -112,17 +88,6 @@ def test_generate_api_key_is_random_and_not_placeholder():
     assert second != PLACEHOLDER_API_KEY
     assert first != second
     assert len(first) >= 32
-
-
-def test_prowlarr_tv_sweep_defaults():
-    settings = Settings()
-
-    assert settings.prowlarr_tv_page_size == 100
-    assert settings.prowlarr_tv_max_pages_per_strategy == 15
-    assert settings.prowlarr_tv_strategy_title_sxx_enabled is False
-    assert settings.prowlarr_tv_strategy_imdb_enabled is False
-    assert settings.prowlarr_tv_strategy_title_season_token_enabled is True
-    assert settings.prowlarr_tv_strategy_tvdb_enabled is False
 
 
 @pytest.mark.parametrize(

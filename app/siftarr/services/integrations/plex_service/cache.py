@@ -9,7 +9,6 @@ class PlexServiceCache:
     def __init__(self) -> None:
         self._scan_cycle_depth = 0
         self._scan_cycle_guid_cache: MutableMapping[tuple[str, str], PlexLookupResult] = {}
-        self._scan_cycle_rating_key_cache: MutableMapping[str, dict[str, Any]] = {}
         self._scan_cycle_sections_cache: MutableMapping[str, list[dict[str, Any]]] = {}
 
     def _is_available(self, metadata: dict[str, Any]) -> bool:
@@ -29,19 +28,10 @@ class PlexServiceCache:
             if self._scan_cycle_depth == 0:
                 self.clear_scan_cycle_caches()
 
-    @property
-    def scan_cycle_depth(self) -> int:
-        return self._scan_cycle_depth
-
     def clear_scan_cycle_caches(self) -> None:
         """Clear any active per-scan caches."""
         self._scan_cycle_guid_cache.clear()
-        self._scan_cycle_rating_key_cache.clear()
         self._scan_cycle_sections_cache.clear()
-
-    def get_cached_item_by_rating_key(self, rating_key: str) -> dict[str, Any] | None:
-        """Return a scan-cycle cached Plex item by rating key, if present."""
-        return self._scan_cycle_rating_key_cache.get(str(rating_key))
 
     def get_cached_sections(self, media_type: str) -> list[dict[str, Any]] | None:
         cached = self._scan_cycle_sections_cache.get(media_type)
@@ -164,10 +154,6 @@ class PlexServiceCache:
             return
 
         resolved_media_type = str(media_type or normalized.get("type") or "")
-        rating_key = normalized.get("rating_key")
-        if rating_key:
-            self._scan_cycle_rating_key_cache[str(rating_key)] = normalized
-
         if resolved_media_type:
             guid_values = tuple(
                 guid

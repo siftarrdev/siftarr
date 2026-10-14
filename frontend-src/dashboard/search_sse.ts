@@ -60,7 +60,7 @@ function resetProgressPanel() {
   }
 }
 
-function closeSearchProgress() {
+export function closeSearchProgress() {
   if (activeSearchEventSource) {
     activeSearchEventSource.close();
     activeSearchEventSource = null;
@@ -99,7 +99,7 @@ async function _finishSearchEventSource(es, cb, data) {
   await _invokeCallback(cb, data);
 }
 
-function startSearchProgress(requestId, title, onComplete, onError) {
+export function startSearchProgress(requestId, title, onComplete, onError) {
   closeSearchProgress();
   resetProgressPanel();
 
@@ -206,7 +206,7 @@ function startSearchProgress(requestId, title, onComplete, onError) {
   };
 }
 
-function startBulkSearchProgress(requestIds, titles, onComplete, onError, options) {
+export function startBulkSearchProgress(requestIds, titles, onComplete, onError, options) {
   closeSearchProgress();
   resetProgressPanel();
 
@@ -333,7 +333,7 @@ function startBulkSearchProgress(requestIds, titles, onComplete, onError, option
   };
 }
 
-async function cancelActiveTvSearch() {
+export async function cancelActiveTvSearch() {
   if (!activeTvSearchCancelUrl) return;
   const button = document.getElementById('search-progress-cancel');
   if (button) {
@@ -354,7 +354,7 @@ async function cancelActiveTvSearch() {
   }
 }
 
-function startTvSearchProgress(streamUrl, title, onComplete, onError, cancelUrl = null) {
+export function startTvSearchProgress(streamUrl, title, onComplete, onError, cancelUrl = null) {
   closeSearchProgress();
   resetProgressPanel();
 
@@ -437,7 +437,7 @@ function startTvSearchProgress(streamUrl, title, onComplete, onError, cancelUrl 
   };
 }
 
-function updateRequestRow(requestId, result) {
+export function updateRequestRow(requestId, result) {
   const row = document.querySelector('tr[data-request-id="' + requestId + '"]');
   if (!row) return;
 
@@ -473,15 +473,6 @@ function updateRequestRow(requestId, result) {
 
   row.setAttribute('data-status', status);
 }
-
-export {
-  closeSearchProgress,
-  cancelActiveTvSearch,
-  startSearchProgress,
-  startBulkSearchProgress,
-  startTvSearchProgress,
-  updateRequestRow,
-};
 
 Object.assign(window, {
   closeSearchProgress,

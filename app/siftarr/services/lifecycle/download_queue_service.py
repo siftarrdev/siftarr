@@ -112,26 +112,10 @@ class DownloadQueueService:
         )
 
     async def _get_torrent_info(self, torrent_hash: str) -> dict[str, Any] | None:
-        strict_name = "get_torrent_info_or_raise"
-        getter = (
-            getattr(self.qbittorrent, strict_name, None)
-            if hasattr(type(self.qbittorrent), strict_name)
-            else None
-        )
-        if getter is None:
-            getter = self.qbittorrent.get_torrent_info
-        return await getter(torrent_hash)
+        return await self.qbittorrent.get_torrent_info_or_raise(torrent_hash)
 
     async def _get_torrent_info_by_name(self, title: str) -> dict[str, Any] | None:
-        strict_name = "get_torrent_info_by_name_or_raise"
-        getter = (
-            getattr(self.qbittorrent, strict_name, None)
-            if hasattr(type(self.qbittorrent), strict_name)
-            else None
-        )
-        if getter is None:
-            getter = self.qbittorrent.get_torrent_info_by_name
-        return await getter(title)
+        return await self.qbittorrent.get_torrent_info_by_name_or_raise(title)
 
     async def _load_request(self, request_id: int | None) -> Request | None:
         if request_id is None:

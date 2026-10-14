@@ -1,582 +1,264 @@
-from unittest.mock import AsyncMock, MagicMock, patch
+from datetime import date
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+from sqlalchemy import select
 
-from app.siftarr.models.request import MediaType, RequestStatus
+from app.siftarr.models import Episode, Season
+from app.siftarr.models.release import Release
+from app.siftarr.models.request import MediaType, Request, RequestStatus
 from app.siftarr.models.staged_torrent import StagedTorrent
 from app.siftarr.services.releases import staging_service as svc
 from app.siftarr.services.releases.staging_service import StagingService
+from tests.factories import (
+    make_release,
+    make_request,
+    make_season,
+    make_staged_torrent,
+)
+
+pytestmark = pytest.mark.asyncio
 
 
-@patch.object(svc, "PendingQueueService")
-@patch.object(svc, "get_settings")
-@pytest.mark.asyncio
-async def test_use_releases_marks_manual_selection_source(
-    mock_get_settings, mock_pq_cls, mock_db, request_record, selected_release
-):
-    settings = MagicMock(staging_mode_enabled=True)
-    mock_get_settings.return_value = settings
-    queue_service = AsyncMock()
-    mock_pq_cls.return_value = queue_service
+@pytest.fixture(autouse=True)
+def _staging_dir(monkeypatch, tmp_path):
+    monkeypatch.setattr(svc, "STAGING_DIR", tmp_path)
 
-    mock_db.execute.return_value = MagicMock(
-        scalar_one_or_none=MagicMock(return_value=None),
-        scalars=MagicMock(return_value=MagicMock(all=MagicMock(return_value=[]))),
-    )
 
-    # Mock save_release on the real StagingService
-    staged_record = MagicMock(id=33)
-    with patch.object(
-        StagingService, "save_release", new_callable=AsyncMock, return_value=staged_record
-    ) as mock_save:
-        staging = StagingService(mock_db)
-        result = await staging.use_releases(
-            request_record,
-            [selected_release],
-            selection_source="manual",
-        )
+@pytest.fixture
+def qbittorrent(monkeypatch):
+    client = MagicMock()
+    client.add_torrent = AsyncMock(return_value="a" * 40)
+    monkeypatch.setattr(svc, "QbittorrentService", MagicMock(return_value=client))
+    return client
 
-    assert result["status"] == "staged"
+
+def _staging_mode(monkeypatch, enabled: bool) -> None:
+    monkeypatch.setattr(svc, "get_settings", lambda: MagicMock(staging_mode_enabled=enabled))
+
+
+async def _staged_titles(db) -> list[str]:
+    rows = (await db.execute(select(StagedTorrent.title).order_by(StagedTorrent.title))).scalars()
+    return list(rows)
+
+
+async def test_manual_selection_stages_release_and_clears_retry_state(db, monkeypatch):
+    _staging_mode(monkeypatch, True)
+    request = await make_request(db, retry_count=3, next_retry_at=date(2030, 1, 1))
+    release = await make_release(db, request, magnet_url="magnet:?xt=urn:btih:1")
+
+    result = await StagingService(db).use_releases(request, [release], selection_source="manual")
+
+    staged = (await db.execute(select(StagedTorrent))).scalar_one()
     assert result["action"] == "manual_staged"
-    assert result["message"] == "Manually staged 1 release(s) for approval."
-    mock_save.assert_awaited_once()
-    kwargs = mock_save.await_args.kwargs if mock_save.await_args else {}
-    assert kwargs.get("selection_source") == "manual"
-    queue_service.remove_from_queue.assert_awaited_once_with(request_record.id)
+    assert result["staged_ids"] == [staged.id]
+    assert staged.selection_source == "manual"
+    assert request.status == RequestStatus.STAGED
+    assert request.next_retry_at is None
 
 
-@patch.object(svc, "PendingQueueService")
-@patch.object(svc, "get_settings")
-@pytest.mark.asyncio
-async def test_use_releases_batches_staging_commit(
-    mock_get_settings, mock_pq_cls, mock_db, request_record, selected_release
+async def test_staging_disabled_sends_to_qbittorrent_and_tracks_approved_row(
+    db, monkeypatch, qbittorrent
 ):
-    settings = MagicMock(staging_mode_enabled=True)
-    mock_get_settings.return_value = settings
-    queue_service = AsyncMock()
-    mock_pq_cls.return_value = queue_service
-    mock_db.execute.return_value = MagicMock(
-        scalar_one_or_none=MagicMock(return_value=None),
-        scalars=MagicMock(return_value=MagicMock(all=MagicMock(return_value=[]))),
-    )
-    second_release = MagicMock(**selected_release.__dict__)
-    second_release.title = "User Pick 2"
+    _staging_mode(monkeypatch, False)
+    request = await make_request(db)
+    release = await make_release(db, request, magnet_url="magnet:?xt=urn:btih:abc")
 
-    staged_records = [MagicMock(id=33), MagicMock(id=34)]
-    with patch.object(
-        StagingService, "save_release", new_callable=AsyncMock, side_effect=staged_records
-    ) as mock_save:
-        result = await StagingService(mock_db).use_releases(
-            request_record,
-            [selected_release, second_release],
-            selection_source="manual",
-        )
+    result = await StagingService(db).use_releases(request, [release], selection_source="manual")
 
-    assert result["staged_ids"] == [33, 34]
-    assert mock_save.await_count == 2
-    assert all(call.kwargs["commit"] is False for call in mock_save.await_args_list)
-    mock_db.commit.assert_awaited_once()
+    assert result["status"] == "downloading"
+    assert result["torrent_hashes"] == ["a" * 40]
+    qbittorrent.add_torrent.assert_awaited_once()
+    tracked = (await db.execute(select(StagedTorrent))).scalar_one()
+    assert (tracked.status, tracked.info_hash) == ("approved", "a" * 40)
+    assert request.status == RequestStatus.DOWNLOADING
 
 
-@patch.object(svc, "QbittorrentService")
-@patch.object(svc, "PendingQueueService")
-@patch.object(svc, "get_settings")
-@pytest.mark.asyncio
-async def test_use_releases_sends_direct_when_staging_disabled(
-    mock_get_settings, mock_pq_cls, mock_qb_cls, mock_db, request_record, selected_release
+async def test_force_download_bypasses_staging_and_retires_active_stage(
+    db, monkeypatch, qbittorrent
 ):
-    settings = MagicMock(staging_mode_enabled=False)
-    mock_get_settings.return_value = settings
-    queue_service = AsyncMock()
-    mock_pq_cls.return_value = queue_service
-    qbittorrent_service = AsyncMock()
-    qbittorrent_service.add_torrent.return_value = "abc123"
-    mock_qb_cls.return_value = qbittorrent_service
-    mock_db.commit = AsyncMock()
+    _staging_mode(monkeypatch, True)
+    request = await make_request(db)
+    await make_staged_torrent(db, request, title="Example Movie 2025 720p")
+    release = await make_release(db, request, magnet_url="magnet:?xt=urn:btih:abc")
 
-    staging = StagingService(mock_db)
-    result = await staging.use_releases(
-        request_record,
-        [selected_release],
-        selection_source="manual",
+    result = await StagingService(db).use_releases(
+        request, [release], selection_source="manual", force_download=True
     )
 
     assert result["status"] == "downloading"
-    assert result["torrent_hashes"] == ["abc123"]
-    qbittorrent_service.add_torrent.assert_awaited_once()
-    queue_service.remove_from_queue.assert_awaited_once_with(request_record.id)
+    assert "Example Movie 2025 720p" not in await _staged_titles(db)
 
 
-@patch.object(svc, "QbittorrentService")
-@patch.object(svc, "PendingQueueService")
-@patch.object(svc, "get_settings")
-@pytest.mark.asyncio
-async def test_use_releases_force_download_bypasses_enabled_staging(
-    mock_get_settings, mock_pq_cls, mock_qb_cls, mock_db, request_record, selected_release
-):
-    mock_get_settings.return_value = MagicMock(staging_mode_enabled=True)
-    mock_pq_cls.return_value = AsyncMock()
-    qbittorrent_service = AsyncMock()
-    qbittorrent_service.add_torrent.return_value = "abc123"
-    mock_qb_cls.return_value = qbittorrent_service
-    mock_db.execute.return_value = MagicMock(
-        scalars=MagicMock(return_value=MagicMock(all=MagicMock(return_value=[])))
-    )
-
-    with patch.object(StagingService, "save_release", new_callable=AsyncMock) as save_release:
-        result = await StagingService(mock_db).use_releases(
-            request_record,
-            [selected_release],
-            selection_source="manual",
-            force_download=True,
-        )
-
-    assert result["status"] == "downloading"
-    save_release.assert_not_awaited()
-    qbittorrent_service.add_torrent.assert_awaited_once()
-
-
-@patch.object(svc, "PendingQueueService")
-@patch.object(svc, "get_settings")
-@pytest.mark.asyncio
-async def test_use_releases_tv_single_episode_selection_only_replaces_same_episode_stage(
-    mock_get_settings, mock_pq_cls, mock_db
-):
-    settings = MagicMock(staging_mode_enabled=True)
-    mock_get_settings.return_value = settings
-    queue_service = AsyncMock()
-    mock_pq_cls.return_value = queue_service
-
-    request_record = MagicMock()
-    request_record.id = 9
-    request_record.media_type = MediaType.TV
-    request_record.status = RequestStatus.PENDING
-
-    episode_one_release = MagicMock()
-    episode_one_release.id = 101
-    episode_one_release.title = "Show.S01E01.1080p.WEB-DL"
-    episode_one_release.score = 50
-    episode_one_release.size = 1_000
-    episode_one_release.seeders = 10
-    episode_one_release.leechers = 1
-    episode_one_release.indexer = "Indexer A"
-    episode_one_release.magnet_url = "magnet:?xt=urn:btih:e1"
-    episode_one_release.download_url = "https://example.com/e1.torrent"
-    episode_one_release.info_hash = None
-    episode_one_release.publish_date = None
-    episode_one_release.resolution = None
-    episode_one_release.codec = None
-    episode_one_release.release_group = None
-    episode_one_release.uploaded_by = None
-
-    episode_two_release = MagicMock()
-    episode_two_release.id = 102
-    episode_two_release.title = "Show.S01E02.1080p.WEB-DL"
-    episode_two_release.score = 55
-    episode_two_release.size = 1_100
-    episode_two_release.seeders = 12
-    episode_two_release.leechers = 1
-    episode_two_release.indexer = "Indexer A"
-    episode_two_release.magnet_url = "magnet:?xt=urn:btih:e2"
-    episode_two_release.download_url = "https://example.com/e2.torrent"
-    episode_two_release.info_hash = None
-    episode_two_release.publish_date = None
-    episode_two_release.resolution = None
-    episode_two_release.codec = None
-    episode_two_release.release_group = None
-    episode_two_release.uploaded_by = None
-
-    reselection_release = MagicMock()
-    reselection_release.id = 103
-    reselection_release.title = "Show.S01E01.REPACK.1080p.WEB-DL"
-    reselection_release.score = 60
-    reselection_release.size = 1_050
-    reselection_release.seeders = 15
-    reselection_release.leechers = 1
-    reselection_release.indexer = "Indexer B"
-    reselection_release.magnet_url = "magnet:?xt=urn:btih:e1repack"
-    reselection_release.download_url = "https://example.com/e1-repack.torrent"
-    reselection_release.info_hash = None
-    reselection_release.publish_date = None
-    reselection_release.resolution = None
-    reselection_release.codec = None
-    reselection_release.release_group = None
-    reselection_release.uploaded_by = None
-
-    stage_episode_one = StagedTorrent(
-        id=61,
-        request_id=request_record.id,
-        torrent_path="/tmp/e1.torrent",
-        json_path="/tmp/e1.json",
-        original_filename="e1",
-        title=episode_one_release.title,
-        size=episode_one_release.size,
-        indexer=episode_one_release.indexer,
-        score=episode_one_release.score,
-        status="staged",
-        selection_source="manual",
-    )
-    stage_episode_two = StagedTorrent(
-        id=62,
-        request_id=request_record.id,
-        torrent_path="/tmp/e2.torrent",
-        json_path="/tmp/e2.json",
-        original_filename="e2",
-        title=episode_two_release.title,
-        size=episode_two_release.size,
-        indexer=episode_two_release.indexer,
-        score=episode_two_release.score,
-        status="staged",
-        selection_source="manual",
-    )
-    stage_episode_one_replacement = StagedTorrent(
-        id=63,
-        request_id=request_record.id,
-        torrent_path="/tmp/e1-repack.torrent",
-        json_path="/tmp/e1-repack.json",
-        original_filename="e1-repack",
-        title=reselection_release.title,
-        size=reselection_release.size,
-        indexer=reselection_release.indexer,
-        score=reselection_release.score,
-        status="staged",
-        selection_source="manual",
-    )
-
-    active_result_initial = MagicMock()
-    active_result_initial.scalars.return_value.all.return_value = []
-    active_result_after_episode_one = MagicMock()
-    active_result_after_episode_one.scalars.return_value.all.return_value = [stage_episode_one]
-    active_result_before_reselection = MagicMock()
-    active_result_before_reselection.scalars.return_value.all.return_value = [
-        stage_episode_one,
-        stage_episode_two,
-    ]
-    mock_db.execute.side_effect = [
-        active_result_initial,
-        active_result_after_episode_one,
-        active_result_before_reselection,
-        active_result_after_episode_one,
-    ]
-
-    with (
-        patch.object(StagingService, "save_release", new_callable=AsyncMock) as mock_save,
-        _patch_tv_methods(),
-    ):
-        mock_save.side_effect = [
-            stage_episode_one,
-            stage_episode_two,
-            stage_episode_one_replacement,
-        ]
-
-        staging = StagingService(mock_db)
-
-        first_result = await staging.use_releases(
-            request_record,
-            [episode_one_release],
-            selection_source="manual",
-        )
-        second_result = await staging.use_releases(
-            request_record,
-            [episode_two_release],
-            selection_source="manual",
-        )
-        reselection_result = await staging.use_releases(
-            request_record,
-            [reselection_release],
-            selection_source="manual",
-        )
-
-    assert first_result["action"] == "manual_staged"
-    assert second_result["action"] == "manual_staged"
-    assert reselection_result["status"] == "staged"
-    assert reselection_result["action"] == "replaced_active_selection"
-    assert reselection_result["staged_ids"] == [stage_episode_one_replacement.id]
-    mock_db.delete.assert_awaited_with(stage_episode_one)
-    assert stage_episode_two.status == "staged"
-    assert mock_save.await_count == 3
-    queue_service.remove_from_queue.assert_awaited()
-
-
-def _tv_request(rid: int = 9) -> MagicMock:
-    r = MagicMock()
-    r.id = rid
-    r.media_type = MediaType.TV
-    r.status = RequestStatus.PENDING
-    return r
-
-
-def _release(
-    rid: int,
-    title: str,
-    score: int = 50,
-    size: int = 1_000,
-    indexer: str = "Indexer A",
-) -> MagicMock:
-    r = MagicMock()
-    r.id = rid
-    r.title = title
-    r.score = score
-    r.size = size
-    r.seeders = 10
-    r.leechers = 1
-    r.indexer = indexer
-    r.magnet_url = f"magnet:?xt=urn:btih:{rid}"
-    r.download_url = f"https://example.com/{rid}.torrent"
-    r.info_hash = None
-    r.publish_date = None
-    r.resolution = None
-    r.codec = None
-    r.release_group = None
-    r.uploaded_by = None
-    return r
-
-
-def _staged(
-    sid: int,
-    request_id: int,
-    title: str,
-    size: int = 1_000,
-    indexer: str = "Indexer A",
-) -> StagedTorrent:
-    return StagedTorrent(
-        id=sid,
-        request_id=request_id,
-        torrent_path=f"/tmp/{sid}.torrent",
-        json_path=f"/tmp/{sid}.json",
-        original_filename=f"s{sid}",
+def _tv_release(request: Request, number: int, title: str) -> Release:
+    return Release(
+        request_id=request.id,
         title=title,
-        size=size,
-        indexer=indexer,
+        size=1_000,
+        seeders=10,
+        leechers=1,
+        download_url=f"https://example.com/{number}.torrent",
+        magnet_url=f"magnet:?xt=urn:btih:{number}",
+        indexer="Indexer A",
         score=50,
-        status="staged",
-        selection_source="manual",
+        passed_rules=True,
     )
 
 
-def _active_mock(staged: list[StagedTorrent]) -> MagicMock:
-    m = MagicMock()
-    m.scalars.return_value.all.return_value = staged
-    return m
+E01 = "Show.S01E01.1080p.WEB-DL"
+E02 = "Show.S01E02.1080p.WEB-DL"
+E01_REPACK = "Show.S01E01.REPACK.1080p.WEB-DL"
+S01 = "Show.S01.1080p.WEB-DL"
+S01_REPACK = "Show.S01.REPACK.1080p.WEB-DL"
+S02 = "Show.S02.1080p.WEB-DL"
+COMPLETE = "Show.Complete.Series.1080p.WEB-DL"
 
 
-def _patch_tv_methods():
-    """Context manager that patches TV episode-status methods on StagingService.
+@pytest.mark.parametrize(
+    ("selections", "expected_titles", "last_action"),
+    [
+        ([E01, E02, E01_REPACK], [E01_REPACK, E02], "replaced_active_selection"),
+        ([S01, S02], [S01, S02], "manual_staged"),
+        ([S01, S02, S01_REPACK], [S01_REPACK, S02], "replaced_active_selection"),
+        ([S02, E01], [E01, S02], "manual_staged"),
+        ([S01, COMPLETE], [COMPLETE], "replaced_active_selection"),
+    ],
+    ids=[
+        "same-episode-replaced-sibling-kept",
+        "different-season-packs-coexist",
+        "same-season-pack-replaced-other-season-kept",
+        "episode-and-other-season-pack-coexist",
+        "complete-series-replaces-all",
+    ],
+)
+async def test_tv_manual_selection_replaces_only_overlapping_stages(
+    db, monkeypatch, selections, expected_titles, last_action
+):
+    _staging_mode(monkeypatch, True)
+    request = await make_request(db, media_type=MediaType.TV, title="Show")
+    for number in (1, 2):
+        await make_season(db, request, number, episodes=2)
+    service = StagingService(db)
 
-    These tests verify staging/replacement behavior, not episode tracking,
-    so the TV-specific methods are mocked away.
-    """
-    return patch.multiple(
-        StagingService,
-        _apply_release_to_episodes=AsyncMock(),
-        _recompute_tv_statuses=AsyncMock(),
+    result = {}
+    for number, title in enumerate(selections):
+        release = _tv_release(request, number, title)
+        db.add(release)
+        await db.flush()
+        result = await service.use_releases(request, [release], selection_source="manual")
+
+    assert result["action"] == last_action
+    assert await _staged_titles(db) == sorted(expected_titles)
+
+
+async def test_tv_selection_marks_only_covered_episodes_staged(db, monkeypatch):
+    _staging_mode(monkeypatch, True)
+    request = await make_request(db, media_type=MediaType.TV, title="Show")
+    await make_season(db, request, 1, episodes=2)
+    release = _tv_release(request, 1, E02)
+    db.add(release)
+    await db.flush()
+
+    await StagingService(db).use_releases(request, [release], selection_source="manual")
+
+    statuses = {
+        ep.episode_number: ep.status for ep in (await db.execute(select(Episode))).scalars()
+    }
+    assert statuses == {1: RequestStatus.PENDING, 2: RequestStatus.STAGED}
+    assert (await db.execute(select(Season))).scalar_one().status != RequestStatus.PENDING
+
+
+def _scope_request() -> Request:
+    return Request(id=9, media_type=MediaType.TV, status=RequestStatus.PENDING)
+
+
+def _scope_release(title: str) -> Release:
+    return Release(id=1, title=title)
+
+
+def _staged(sid: int, title: str) -> StagedTorrent:
+    return StagedTorrent(id=sid, request_id=9, title=title, status="staged")
+
+
+@pytest.mark.parametrize(
+    ("incoming", "active", "expected_conflicts"),
+    [
+        (E02, [E01, S02], []),
+        (S02, [E01, "Show.S03.1080p.WEB-DL"], []),
+        (
+            E01,
+            [S01, "Show.S01-S02.1080p", "Show.S03-S04.1080p", COMPLETE],
+            [S01, "Show.S01-S02.1080p", COMPLETE],
+        ),
+        (
+            "Show.S02-S03.1080p",
+            [S01, "Show.S01-S02.1080p", "Show.S03-S04.1080p", COMPLETE],
+            ["Show.S01-S02.1080p", "Show.S03-S04.1080p", COMPLETE],
+        ),
+    ],
+    ids=[
+        "episode-vs-other-episode-and-season",
+        "season-vs-episode-and-other-season",
+        "episode-covered-by-packs",
+        "multi-season-overlap",
+    ],
+)
+def test_tv_conflict_scope(incoming, active, expected_conflicts):
+    staged = [_staged(i, title) for i, title in enumerate(active, start=1)]
+
+    conflicts = svc._filter_active_staged_torrents_for_release(
+        _scope_request(), _scope_release(incoming), staged
     )
 
-
-def test_tv_conflict_scope_allows_multiple_same_season_episodes_and_seasons():
-    request_record = _tv_request()
-    active = [
-        _staged(1, request_record.id, "Show.S01E01.1080p.WEB-DL"),
-        _staged(2, request_record.id, "Show.S03.1080p.WEB-DL"),
-    ]
-
-    episode_two = _release(1, "Show.S01E02.1080p.WEB-DL")
-    season_two = _release(2, "Show.S02.1080p.WEB-DL")
-
-    assert svc._filter_active_staged_torrents_for_release(request_record, episode_two, active) == []
-    assert svc._filter_active_staged_torrents_for_release(request_record, season_two, active) == []
+    assert [row.title for row in conflicts] == expected_conflicts
 
 
-def test_tv_conflict_scope_episode_replaces_covering_pack_multi_and_complete_series():
-    request_record = _tv_request()
-    season_pack = _staged(1, request_record.id, "Show.S01.1080p.WEB-DL")
-    multi_1_2 = _staged(2, request_record.id, "Show.S01-S02.1080p.WEB-DL")
-    multi_3_4 = _staged(3, request_record.id, "Show.S03-S04.1080p.WEB-DL")
-    complete_series = _staged(4, request_record.id, "Show.Complete.Series.1080p.WEB-DL")
-    active = [season_pack, multi_1_2, multi_3_4, complete_series]
-
-    episode_one = _release(1, "Show.S01E01.1080p.WEB-DL")
-    multi_2_3 = _release(2, "Show.S02-S03.1080p.WEB-DL")
-
-    assert svc._filter_active_staged_torrents_for_release(request_record, episode_one, active) == [
-        season_pack,
-        multi_1_2,
-        complete_series,
-    ]
-    assert svc._filter_active_staged_torrents_for_release(request_record, multi_2_3, active) == [
-        multi_1_2,
-        multi_3_4,
-        complete_series,
-    ]
-
-
-@patch.object(svc, "PendingQueueService")
-@patch.object(svc, "get_settings")
-@pytest.mark.asyncio
-async def test_use_releases_tv_season_pack_s02_does_not_replace_s01(
-    mock_get_settings, mock_pq_cls, mock_db
+async def test_force_download_keeps_new_approved_row_and_removes_old_stage(
+    db, monkeypatch, qbittorrent
 ):
-    """Season-1 pack staged, then Season-2 pack staged → both remain (no superseding)."""
-    settings = MagicMock(staging_mode_enabled=True)
-    mock_get_settings.return_value = settings
-    queue_service = AsyncMock()
-    mock_pq_cls.return_value = queue_service
+    _staging_mode(monkeypatch, True)
+    request = await make_request(db)
+    await make_staged_torrent(db, request, title="Example Movie 2025 720p")
+    release = await make_release(db, request, magnet_url="magnet:?xt=urn:btih:abc")
 
-    request_record = _tv_request()
-    s01_release = _release(201, "Show.S01.1080p.WEB-DL")
-    s02_release = _release(202, "Show.S02.1080p.WEB-DL")
-    stage_s01 = _staged(71, request_record.id, "Show.S01.1080p.WEB-DL")
-    stage_s02 = _staged(72, request_record.id, "Show.S02.1080p.WEB-DL")
+    await StagingService(db).use_releases(
+        request, [release], selection_source="manual", force_download=True
+    )
 
-    mock_db.execute.side_effect = [
-        _active_mock([]),  # first call: nothing yet
-        _active_mock([stage_s01]),  # second call: S01 already staged
+    rows = (await db.execute(select(StagedTorrent))).scalars().all()
+    assert [(row.title, row.status, row.info_hash) for row in rows] == [
+        (release.title, "approved", "a" * 40)
     ]
 
-    with (
-        patch.object(StagingService, "save_release", new_callable=AsyncMock) as mock_save,
-        _patch_tv_methods(),
-    ):
-        mock_save.side_effect = [stage_s01, stage_s02]
-        staging = StagingService(mock_db)
 
-        result1 = await staging.use_releases(
-            request_record, [s01_release], selection_source="manual"
-        )
-        result2 = await staging.use_releases(
-            request_record, [s02_release], selection_source="manual"
-        )
-
-    assert result1["action"] == "manual_staged"
-    assert result2["action"] == "manual_staged"
-    assert result2["status"] == "staged"
-    assert mock_save.await_count == 2
-    # No torrents were superseded — both should remain
-    mock_db.delete.assert_not_called()
-    queue_service.remove_from_queue.assert_awaited()
-
-
-@patch.object(svc, "PendingQueueService")
-@patch.object(svc, "get_settings")
-@pytest.mark.asyncio
-async def test_use_releases_tv_season_pack_replaces_same_season_keeps_other(
-    mock_get_settings, mock_pq_cls, mock_db
+@pytest.mark.parametrize(
+    ("force_download", "picked_status"),
+    [(False, RequestStatus.STAGED), (True, RequestStatus.DOWNLOADING)],
+    ids=["staged", "force-download"],
+)
+async def test_manual_season_pack_does_not_downgrade_completed_episodes(
+    db, session_maker, monkeypatch, qbittorrent, force_download, picked_status
 ):
-    """S01 pack staged then a different S01 pack staged → old S01 replaced but S02 preserved."""
-    settings = MagicMock(staging_mode_enabled=True)
-    mock_get_settings.return_value = settings
-    queue_service = AsyncMock()
-    mock_pq_cls.return_value = queue_service
+    _staging_mode(monkeypatch, True)
+    request = await make_request(db, media_type=MediaType.TV, title="Show")
+    season = await make_season(db, request, 1, episodes=3)
+    first = (await db.execute(select(Episode).where(Episode.episode_number == 1))).scalar_one()
+    first.status = RequestStatus.COMPLETED
+    release = _tv_release(request, 1, S01)
+    db.add(release)
+    await db.commit()
 
-    request_record = _tv_request()
-    s01_first = _release(301, "Show.S01.1080p.WEB-DL")
-    s01_repack = _release(302, "Show.S01.REPACK.1080p.WEB-DL")
-    s02_release = _release(303, "Show.S02.1080p.WEB-DL")
-    stage_s01_first = _staged(81, request_record.id, "Show.S01.1080p.WEB-DL")
-    stage_s02 = _staged(82, request_record.id, "Show.S02.1080p.WEB-DL")
-    stage_s01_repack = _staged(83, request_record.id, "Show.S01.REPACK.1080p.WEB-DL")
+    await StagingService(db).use_releases(
+        request, [release], selection_source="manual", force_download=force_download
+    )
 
-    mock_db.execute.side_effect = [
-        _active_mock([]),  # call 1: stage S01 → nothing active
-        _active_mock([stage_s01_first]),  # call 2: stage S02 → S01 active
-        _active_mock([stage_s01_first, stage_s02]),  # call 3: stage S01.REPACK → both active
-    ]
-
-    with (
-        patch.object(StagingService, "save_release", new_callable=AsyncMock) as mock_save,
-        _patch_tv_methods(),
-    ):
-        mock_save.side_effect = [stage_s01_first, stage_s02, stage_s01_repack]
-        staging = StagingService(mock_db)
-
-        await staging.use_releases(request_record, [s01_first], selection_source="manual")
-        await staging.use_releases(request_record, [s02_release], selection_source="manual")
-        result3 = await staging.use_releases(
-            request_record, [s01_repack], selection_source="manual"
-        )
-
-    assert result3["action"] == "replaced_active_selection"
-    assert result3["status"] == "staged"
-    # stage_s01_first should be deleted (replaced), stage_s02 should be preserved
-    mock_db.delete.assert_awaited_with(stage_s01_first)
-    assert stage_s02.status == "staged"
-    assert mock_save.await_count == 3
-
-
-@patch.object(svc, "PendingQueueService")
-@patch.object(svc, "get_settings")
-@pytest.mark.asyncio
-async def test_use_releases_tv_single_episode_does_not_interfere_with_season_pack(
-    mock_get_settings, mock_pq_cls, mock_db
-):
-    """Single episode and season pack staged together → no interference."""
-    settings = MagicMock(staging_mode_enabled=True)
-    mock_get_settings.return_value = settings
-    queue_service = AsyncMock()
-    mock_pq_cls.return_value = queue_service
-
-    request_record = _tv_request()
-    s02_pack = _release(401, "Show.S02.1080p.WEB-DL")
-    s01e01 = _release(402, "Show.S01E01.1080p.WEB-DL")
-    stage_s02_pack = _staged(91, request_record.id, "Show.S02.1080p.WEB-DL")
-    stage_s01e01 = _staged(92, request_record.id, "Show.S01E01.1080p.WEB-DL")
-
-    mock_db.execute.side_effect = [
-        _active_mock([]),
-        _active_mock([stage_s02_pack]),
-    ]
-
-    with (
-        patch.object(StagingService, "save_release", new_callable=AsyncMock) as mock_save,
-        _patch_tv_methods(),
-    ):
-        mock_save.side_effect = [stage_s02_pack, stage_s01e01]
-        staging = StagingService(mock_db)
-
-        result1 = await staging.use_releases(request_record, [s02_pack], selection_source="manual")
-        result2 = await staging.use_releases(request_record, [s01e01], selection_source="manual")
-
-    assert result1["action"] == "manual_staged"
-    assert result2["action"] == "manual_staged"
-    assert mock_save.await_count == 2
-    mock_db.delete.assert_not_called()
-
-
-@patch.object(svc, "PendingQueueService")
-@patch.object(svc, "get_settings")
-@pytest.mark.asyncio
-async def test_use_releases_tv_complete_series_replaces_all(
-    mock_get_settings, mock_pq_cls, mock_db
-):
-    """Complete series staged → replaces all previously staged TV items."""
-    settings = MagicMock(staging_mode_enabled=True)
-    mock_get_settings.return_value = settings
-    queue_service = AsyncMock()
-    mock_pq_cls.return_value = queue_service
-
-    request_record = _tv_request()
-    s01_pack = _release(501, "Show.S01.1080p.WEB-DL")
-    complete = _release(502, "Show.Complete.Series.1080p.WEB-DL")
-    stage_s01_pack = _staged(101, request_record.id, "Show.S01.1080p.WEB-DL")
-    stage_complete = _staged(102, request_record.id, "Show.Complete.Series.1080p.WEB-DL")
-
-    mock_db.execute.side_effect = [
-        _active_mock([]),
-        _active_mock([stage_s01_pack]),
-    ]
-
-    with (
-        patch.object(StagingService, "save_release", new_callable=AsyncMock) as mock_save,
-        _patch_tv_methods(),
-    ):
-        mock_save.side_effect = [stage_s01_pack, stage_complete]
-        staging = StagingService(mock_db)
-
-        result1 = await staging.use_releases(request_record, [s01_pack], selection_source="manual")
-        result2 = await staging.use_releases(request_record, [complete], selection_source="manual")
-
-    assert result1["action"] == "manual_staged"
-    assert result2["action"] == "replaced_active_selection"
-    assert result2["status"] == "staged"
-    mock_db.delete.assert_awaited_with(stage_s01_pack)
-    assert mock_save.await_count == 2
+    async with session_maker() as fresh:
+        episodes = (await fresh.execute(select(Episode))).scalars().all()
+        persisted_season = await fresh.get(Season, season.id)
+    assert {ep.episode_number: ep.status for ep in episodes} == {
+        1: RequestStatus.COMPLETED,
+        2: picked_status,
+        3: picked_status,
+    }
+    assert persisted_season is not None
+    assert persisted_season.status == picked_status

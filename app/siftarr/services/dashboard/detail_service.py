@@ -18,7 +18,6 @@ from app.siftarr.services.dashboard.dashboard_service import (
     DashboardRequestSummary,
     DashboardTimelineEntry,
     RequestDetailsData,
-    RequestSearchData,
 )
 from app.siftarr.services.dashboard.tv_enrichment_service import TVEnrichmentService
 from app.siftarr.services.decisions.rule_engine import RuleEngine
@@ -196,23 +195,6 @@ class DetailService:
             overseerr=overseerr_details,
             tv_info=tv_info,
             timeline=await self._load_timeline(request_id),
-        )
-
-    async def load_movie_search_results(
-        self, request: Any, *, request_id: int
-    ) -> RequestSearchData:
-        """Load stored releases for a movie request after a search."""
-        releases, _total, _filtered_total = await self._load_serialized_stored_releases(
-            request_id, media_type=request.media_type
-        )
-        return RequestSearchData(
-            request=DashboardRequestSummary(
-                id=request.id,
-                title=request.title,
-                status=request.status.value,
-                media_type=request.media_type.value,
-            ),
-            releases=releases,
         )
 
     async def _load_serialized_stored_releases(
