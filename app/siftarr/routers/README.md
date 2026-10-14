@@ -5,7 +5,7 @@ HTTP boundary for the FastAPI app. Routers should translate requests into servic
 ## Responsibilities
 
 - `dashboard.py` renders the main dashboard page.
-- `dashboard_api.py` returns dashboard JSON for details, release search, timeline, and enrichment flows.
+- `dashboard_api.py` returns dashboard JSON for details, timeline, and enrichment flows; searches run through `search_sse.py`.
 - `dashboard_actions.py` handles dashboard-triggered mutations such as retries, discard, and availability actions.
 - `rules.py` manages rule UI/API interactions.
 - `search_sse.py` provides SSE streaming endpoints for live search progress and TV inspect results.

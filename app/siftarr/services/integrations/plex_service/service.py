@@ -84,9 +84,6 @@ class PlexService:
     def clear_scan_cycle_caches(self) -> None:
         self._cache.clear_scan_cycle_caches()
 
-    def get_cached_item_by_rating_key(self, rating_key: str) -> dict[str, Any] | None:
-        return self._cache.get_cached_item_by_rating_key(rating_key)
-
     async def _get_library_sections_metadata(
         self,
         media_type: str,
@@ -145,31 +142,6 @@ class PlexService:
         ):
             yield item
 
-    async def scan_library_items(
-        self,
-        media_type: str,
-        *,
-        recently_added: bool = False,
-        page_size: int = 200,
-    ):
-        return await self._library_scan.scan_library_items(
-            media_type,
-            recently_added=recently_added,
-            page_size=page_size,
-        )
-
-    async def get_all_show_rating_keys(self) -> list[str]:
-        return await self._library_scan.get_all_show_rating_keys()
-
-    async def _get_tv_library_sections(self) -> list[str]:
-        return await self._library_scan._get_tv_library_sections()
-
-    async def _get_movie_library_sections(self) -> list[str]:
-        return await self._library_scan._get_movie_library_sections()
-
-    async def _get_section_shows(self, section_key: str) -> list[str]:
-        return await self._library_scan._get_section_shows(section_key)
-
     async def _scan_sections_for_guids(
         self,
         guid_values: tuple[str, ...],
@@ -189,14 +161,6 @@ class PlexService:
             external_id=external_id,
             media_type=media_type,
         )
-
-    async def _find_by_guid_in_sections(
-        self,
-        guid_prefix: str,
-        guid_id: int,
-        media_type: str,
-    ) -> dict[str, Any] | None:
-        return await self._lookup._find_by_guid_in_sections(guid_prefix, guid_id, media_type)
 
     async def search_show(self, title: str) -> list[dict[str, Any]]:
         return await self._lookup.search_show(title)
@@ -224,12 +188,6 @@ class PlexService:
 
     async def lookup_show_by_tvdb(self, tvdb_id: int):
         return await self._lookup.lookup_show_by_tvdb(tvdb_id)
-
-    async def get_show_children(self, rating_key: str) -> list[dict[str, Any]]:
-        return await self._episodes.get_show_children(rating_key)
-
-    async def get_season_children(self, rating_key: str) -> list[dict[str, Any]]:
-        return await self._episodes.get_season_children(rating_key)
 
     async def _get_metadata_children_strict(self, rating_key: str) -> list[dict[str, Any]]:
         return await self._episodes._get_metadata_children_strict(rating_key)
@@ -278,7 +236,3 @@ class PlexService:
                     return str(rk), True
 
         return None, True
-
-    async def close(self) -> None:
-        """Close the service (no-op since using shared client)."""
-        pass

@@ -156,31 +156,6 @@ def apply_synced_request_status(request: Request, episodes: Sequence[Episode]) -
     request.status = derive_request_status_from_episodes(episodes)
 
 
-def recompute_tv_request_status(request: Request) -> RequestStatus:
-    """Recompute ``Request.status`` for a TV show from its episode tree.
-
-    Loads all episodes (via ``request.seasons[*].episodes``) and derives
-    the aggregate status.  Call this after any episode mutation so the
-    request-level status stays in sync.
-    """
-    all_episodes: list[Episode] = []
-    for season in request.seasons:
-        all_episodes.extend(season.episodes)
-    return derive_request_status_from_episodes(all_episodes)
-
-
-def recompute_tv_season_statuses(request: Request) -> dict[int, RequestStatus]:
-    """Recompute all ``Season.status`` values from their episodes.
-
-    Returns a ``{season_number: status}`` map so callers can decide
-    whether to persist or just inspect.
-    """
-    result: dict[int, RequestStatus] = {}
-    for season in request.seasons:
-        result[season.season_number] = derive_season_status(list(season.episodes))
-    return result
-
-
 def derive_tv_display_label(episodes: list[Episode]) -> str:
     """Return a short human-readable label for dashboard cards.
 

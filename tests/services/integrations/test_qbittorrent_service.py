@@ -276,56 +276,6 @@ class TestQbittorrentServiceUnit:
                 assert result is None
 
     @pytest.mark.asyncio
-    async def test_get_torrents_by_category(self):
-        """Test getting torrents by category."""
-        with patch("app.siftarr.config.get_settings") as mock_get_settings:
-            mock_settings = MagicMock()
-            mock_settings.qbittorrent_url = "http://localhost:8080"
-            mock_settings.qbittorrent_api_key = "qbt_test_key"
-            mock_get_settings.return_value = mock_settings
-
-            service = QbittorrentService()
-            mock_torrent1 = MagicMock()
-            mock_torrent1.hash = "abc"
-            mock_torrent1.name = "Torrent 1"
-            mock_torrent1.size = 1024
-            mock_torrent1.progress = 1.0
-            mock_torrent1.state = "seeding"
-
-            mock_torrent2 = MagicMock()
-            mock_torrent2.hash = "def"
-            mock_torrent2.name = "Torrent 2"
-            mock_torrent2.size = 2048
-            mock_torrent2.progress = 0.5
-            mock_torrent2.state = "downloading"
-
-            mock_client = MagicMock()
-            service._client = mock_client
-
-            with patch("asyncio.to_thread", AsyncMock(return_value=[mock_torrent1, mock_torrent2])):
-                result = await service.get_torrents_by_category("radarr")
-
-                assert len(result) == 2
-                assert result[0]["hash"] == "abc"
-
-    @pytest.mark.asyncio
-    async def test_get_torrents_by_category_error(self):
-        """Test getting torrents by category with error."""
-        with patch("app.siftarr.config.get_settings") as mock_get_settings:
-            mock_settings = MagicMock()
-            mock_settings.qbittorrent_url = "http://localhost:8080"
-            mock_settings.qbittorrent_api_key = "qbt_test_key"
-            mock_get_settings.return_value = mock_settings
-
-            service = QbittorrentService()
-            mock_client = MagicMock()
-            service._client = mock_client
-
-            with patch("asyncio.to_thread", side_effect=Exception("Error")):
-                result = await service.get_torrents_by_category("radarr")
-                assert result == []
-
-    @pytest.mark.asyncio
     async def test_delete_torrent_success(self):
         """Test successful torrent deletion."""
         with patch("app.siftarr.config.get_settings") as mock_get_settings:

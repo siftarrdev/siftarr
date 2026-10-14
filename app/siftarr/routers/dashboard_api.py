@@ -13,18 +13,15 @@ from app.siftarr.database import get_db
 from app.siftarr.models.request import MediaType
 from app.siftarr.services.dashboard.dashboard_service import (
     serialize_request_details_response,
-    serialize_request_search_response,
-    serialize_tv_search_response,
 )
 from app.siftarr.services.dashboard.detail_service import DetailService
-from app.siftarr.services.dashboard.search_service import SearchService
 from app.siftarr.services.dashboard.tv_details_service import (
     compute_sync_metadata,
     count_season_episode_states,
     load_tv_seasons_with_episodes,
 )
 from app.siftarr.services.integrations.plex_service import PlexService
-from app.siftarr.services.request_service import load_request_or_404, validate_tv_request
+from app.siftarr.services.request_service import load_request_or_404
 from app.siftarr.services.search_history_service import SearchHistoryService
 
 logger = logging.getLogger(__name__)
@@ -96,30 +93,6 @@ async def request_search_history(
     return JSONResponse(payload)
 
 
-@router.post("/{request_id}/search")
-async def search_request_releases(
-    request_id: int,
-    db: AsyncSession = Depends(get_db),
-) -> JSONResponse:
-    """Trigger a search for a movie request and return updated releases as JSON."""
-    request = await load_request_or_404(db, request_id)
-
-    if request.media_type != MediaType.MOVIE:
-        return JSONResponse(
-            {"error": "Search endpoint is only available for movie requests"},
-            status_code=400,
-        )
-
-    service = SearchService(db)
-    await service.process_request_search(request)
-    detail_service = DetailService(db, settings=get_settings())
-    search_data = await detail_service.load_movie_search_results(
-        request,
-        request_id=request_id,
-    )
-    return JSONResponse(serialize_request_search_response(search_data))
-
-
 @router.get("/{request_id}/seasons")
 async def get_request_seasons(
     request_id: int,
@@ -171,58 +144,6 @@ async def get_request_seasons(
         {"seasons": seasons_data, "sync_state": sync_state},
         background=background_tasks,
     )
-
-
-@router.post("/{request_id}/seasons/{season_number}/season-packs/search")
-async def search_season_packs(
-    request_id: int,
-    season_number: int,
-    db: AsyncSession = Depends(get_db),
-) -> JSONResponse:
-    """Compatibility/debug endpoint for inspecting one season-pack bucket."""
-    request = await load_request_or_404(db, request_id)
-    validate_tv_request(request)
-    service = SearchService(db)
-    search_data = await service.search_season_packs(
-        request,
-        season_number=season_number,
-    )
-    return JSONResponse(serialize_tv_search_response(search_data))
-
-
-@router.post("/{request_id}/multi-season-packs/search")
-async def search_multi_season_packs(
-    request_id: int,
-    db: AsyncSession = Depends(get_db),
-) -> JSONResponse:
-    """Compatibility/debug endpoint for inspecting multi-season/series-pack buckets."""
-    request = await load_request_or_404(db, request_id)
-    validate_tv_request(request)
-    service = SearchService(db)
-    search_data = await service.search_multi_season_packs(
-        request,
-        request_id=request_id,
-    )
-    return JSONResponse(serialize_tv_search_response(search_data))
-
-
-@router.post("/{request_id}/seasons/{season_number}/episodes/{episode_number}/search")
-async def search_episode(
-    request_id: int,
-    season_number: int,
-    episode_number: int,
-    db: AsyncSession = Depends(get_db),
-) -> JSONResponse:
-    """Compatibility/debug endpoint for inspecting one episode bucket."""
-    request = await load_request_or_404(db, request_id)
-    validate_tv_request(request)
-    service = SearchService(db)
-    search_data = await service.search_episode(
-        request,
-        season_number=season_number,
-        episode_number=episode_number,
-    )
-    return JSONResponse(serialize_tv_search_response(search_data))
 
 
 @router.post("/{request_id}/refresh-plex")

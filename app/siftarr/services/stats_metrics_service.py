@@ -176,19 +176,6 @@ async def record_staged_release_fact(db: AsyncSession, torrent: StagedTorrent) -
     )
 
 
-async def record_release_fact(db: AsyncSession, release: Release, *, selection_source: str) -> None:
-    """Record approval facts for a direct-send stored release."""
-    await record_selected_release_fact(
-        db,
-        request_id=release.request_id,
-        title=release.title,
-        indexer=release.indexer,
-        resolution=release.resolution,
-        selection_source=selection_source,
-        release_id=release.id,
-    )
-
-
 async def record_rule_outcomes(
     db: AsyncSession,
     *,

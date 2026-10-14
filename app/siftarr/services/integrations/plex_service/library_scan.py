@@ -4,7 +4,7 @@ from typing import Any
 import httpx
 
 from .cache import PlexServiceCache
-from .models import PlexLibraryScanResult, PlexTransientScanError
+from .models import PlexTransientScanError
 
 
 class PlexServiceLibraryScan:
@@ -173,76 +173,3 @@ class PlexServiceLibraryScan:
             page_size=page_size,
         ):
             yield item
-
-    async def scan_library_items(
-        self,
-        media_type: str,
-        *,
-        recently_added: bool = False,
-        page_size: int = 200,
-    ) -> PlexLibraryScanResult:
-        """Scan every relevant Plex section and report authoritative status."""
-        try:
-            sections = await self._service._get_library_sections_metadata(media_type, strict=True)
-        except PlexTransientScanError:
-            return PlexLibraryScanResult(
-                media_type=media_type,
-                items=(),
-                authoritative=False,
-                failed_sections=("__sections__",),
-            )
-
-        scanned_items: list[dict[str, Any]] = []
-        failed_sections: list[str] = []
-
-        for section in sections:
-            section_key = section["key"]
-            try:
-                async for item in self._service.iter_section_items(
-                    section_key,
-                    recently_added=recently_added,
-                    page_size=page_size,
-                ):
-                    scanned_items.append(item)
-            except PlexTransientScanError:
-                failed_sections.append(section_key)
-
-        return PlexLibraryScanResult(
-            media_type=media_type,
-            items=tuple(scanned_items),
-            authoritative=not failed_sections,
-            failed_sections=tuple(failed_sections),
-        )
-
-    async def get_all_show_rating_keys(self) -> list[str]:
-        """Get all show rating keys from the library sections."""
-        if not self._service.base_url or not self._service.token:
-            return []
-
-        rating_keys: list[str] = []
-        async for item in self._service.iter_full_library_items("show"):
-            if item.get("type") == "show" and item.get("rating_key"):
-                rating_keys.append(str(item["rating_key"]))
-
-        return rating_keys
-
-    async def _get_tv_library_sections(self) -> list[str]:
-        """Get the library section keys for TV content."""
-        sections = await self._service._get_library_sections_metadata("show", strict=False)
-        return [str(section["key"]) for section in sections]
-
-    async def _get_movie_library_sections(self) -> list[str]:
-        """Get the library section keys for movie content."""
-        sections = await self._service._get_library_sections_metadata("movie", strict=False)
-        return [str(section["key"]) for section in sections]
-
-    async def _get_section_shows(self, section_key: str) -> list[str]:
-        """Get all show rating keys in a library section."""
-        rating_keys: list[str] = []
-        try:
-            async for item in self._service.iter_section_items(section_key):
-                if item.get("type") == "show" and item.get("rating_key"):
-                    rating_keys.append(str(item["rating_key"]))
-        except PlexTransientScanError:
-            return []
-        return rating_keys

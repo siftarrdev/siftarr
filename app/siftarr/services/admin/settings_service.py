@@ -14,7 +14,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.siftarr.config import (
     PLACEHOLDER_API_KEY,
-    Settings,
     generate_api_key,
     get_settings,
     reload_settings,
@@ -93,7 +92,6 @@ ENV_KEY_MAP: dict[str, str] = {
 
 # Keys that are persisted and used as runtime connection/scheduling settings.
 SETTINGS_KEYS = frozenset(ENV_KEY_MAP)
-SSO_CLAIM_KEYS = frozenset({"plex_claimed_id", "plex_username", "plex_thumb", "plex_token"})
 SECRET_SETTING_KEYS = frozenset(
     {
         "overseerr_api_key",
@@ -216,9 +214,7 @@ class SettingsStore:
         """Return a versioned JSON-serializable backup of restorable non-secrets."""
         values = await self.get_all()
         settings = {
-            key: value
-            for key, value in sorted(values.items())
-            if key in RESTORABLE_SETTING_KEYS and key not in SECRET_SETTING_KEYS
+            key: value for key, value in sorted(values.items()) if key in RESTORABLE_SETTING_KEYS
         }
         return {
             "version": SETTINGS_BACKUP_VERSION,
@@ -440,17 +436,10 @@ async def build_effective_settings(db: AsyncSession | None = None) -> dict[str, 
     }
 
 
-async def build_effective_settings_obj(db: AsyncSession) -> Settings:
-    """Build the effective Settings object."""
-    del db
-    return get_settings()
-
-
 async def build_settings_page_context(
     request,
     db: AsyncSession,
     *,
-    build_plex_job_statuses_func,
     effective_settings_override: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Build the shared context required by the settings page.
@@ -475,7 +464,6 @@ async def build_settings_page_context(
         "app_version": __version__,
         "staging_enabled": staging_enabled,
         "pending_count": pending_count,
-        "plex_jobs": await build_plex_job_statuses_func(db),
         "scheduler_status": await build_scheduler_status(),
         "env": effective_settings,
     }
@@ -484,26 +472,6 @@ async def build_settings_page_context(
 def serialize_datetime(value: datetime | None) -> str | None:
     """Serialize datetimes for compact status rendering."""
     return value.isoformat(sep=" ", timespec="seconds") if value is not None else None
-
-
-def build_compact_metrics_snapshot(metrics_payload: dict[str, Any] | None) -> str | None:
-    """Render a compact operator-facing metrics summary."""
-    if not isinstance(metrics_payload, dict):
-        return None
-
-    parts: list[str] = []
-    if "completed_requests" in metrics_payload:
-        parts.append(f"completed={metrics_payload['completed_requests']}")
-    for source_key, label in [
-        ("scanned_items", "scanned"),
-        ("matched_requests", "matched"),
-        ("skipped_on_error_items", "errors"),
-    ]:
-        value = metrics_payload.get(source_key)
-        if value is not None:
-            parts.append(f"{label}={value}")
-
-    return ", ".join(parts) if parts else None
 
 
 def _coerce_int(value: Any) -> int:
@@ -599,57 +567,6 @@ def build_manual_plex_job_message(job_label: str, result: Any) -> tuple[str, str
         )
 
     return message, "success"
-
-
-async def build_plex_job_statuses(
-    db: AsyncSession,
-    *,
-    recent_scan_job_name: str,
-    poll_job_name: str,
-) -> list[dict[str, Any]]:
-    """Load in-memory scheduler status for Plex scan jobs."""
-    del db
-    from app.siftarr.main import scheduler_service
-
-    job_rows = [
-        (recent_scan_job_name, "Recent Plex Scan", "Recent-additions scan for active requests"),
-        (poll_job_name, "Plex Poll", "Active-request availability poll"),
-    ]
-    job_state = (
-        await scheduler_service.get_plex_job_state_snapshot()
-        if scheduler_service is not None
-        else {}
-    )
-
-    statuses: list[dict[str, Any]] = []
-    for job_name, label, description in job_rows:
-        state = job_state.get(job_name, {})
-        metrics_payload = state.get("metrics_payload")
-        locked = bool(state.get("locked", False))
-        lock_owner = state.get("lock_owner")
-        last_error = state.get("last_error")
-        statuses.append(
-            {
-                "job_name": job_name,
-                "label": label,
-                "description": description,
-                "last_success": serialize_datetime(state.get("last_success")),
-                "last_run": serialize_datetime(state.get("last_run")),
-                "last_started": serialize_datetime(state.get("last_started")),
-                "locked": locked,
-                "lock_owner": lock_owner,
-                "last_error": last_error,
-                "run_summary": build_plex_run_outcome_summary(
-                    metrics_payload,
-                    locked=locked,
-                    lock_owner=lock_owner,
-                    last_error=last_error,
-                ),
-                "metrics_snapshot": build_compact_metrics_snapshot(metrics_payload),
-                "metrics_payload": metrics_payload,
-            }
-        )
-    return statuses
 
 
 async def build_scheduler_status() -> dict[str, Any]:
@@ -1194,7 +1111,7 @@ async def prepare_overseerr_import(
     requested_by = ov_req.get("requestedBy") or {}
     username = (
         requested_by.get("username")
-        or requested_by.get("plexAPI Key")
+        or requested_by.get("plexUsername")
         or requested_by.get("displayName")
     )
     email = requested_by.get("email")
@@ -1315,65 +1232,89 @@ async def import_overseerr_requests(
             return 0
         return min(current, total - 1)
 
-    try:
+    await emit(
+        build_sse_progress(
+            "fetching",
+            current=0,
+            total=1,
+            active=[],
+            message="Fetching requests from Overseerr...",
+        )
+    )
+    overseerr_requests = await overseerr_service.get_all_requests(status=None)
+    upstream_request_ids = set()
+    for ov_req in overseerr_requests:
+        request_id = ov_req.get("id")
+        if request_id is not None:
+            with contextlib.suppress(TypeError, ValueError):
+                upstream_request_ids.add(int(request_id))
+    await cleanup_stale_overseerr_requests(upstream_request_ids)
+
+    if not overseerr_requests:
+        await SettingsStore(db).record_sync_success("overseerr")
+        await db.commit()
+        return 0, 0
+
+    result = await db.execute(select(RequestModel.external_id))
+    existing_external_ids = {row[0] for row in result.fetchall()}
+    existing_request_ids = await linked_overseerr_request_ids(db)
+
+    actionable_requests = []
+    for index, ov_req in enumerate(overseerr_requests, start=1):
+        media = ov_req.get("media") or {}
+        request_status = overseerr_service.normalize_request_status(ov_req.get("status"))
+        media_status = overseerr_service.normalize_media_status(media.get("status"))
+        if request_status in {"pending", "approved"} and media_status != "available":
+            actionable_requests.append(ov_req)
         await emit(
             build_sse_progress(
-                "fetching",
-                current=0,
-                total=1,
+                "filtering",
+                current=progress_current(index, len(overseerr_requests)),
+                total=len(overseerr_requests),
                 active=[],
-                message="Fetching requests from Overseerr...",
+                message="Filtering actionable Overseerr requests...",
             )
         )
-        overseerr_requests = await overseerr_service.get_all_requests(status=None)
-        upstream_request_ids = set()
-        for ov_req in overseerr_requests:
-            request_id = ov_req.get("id")
-            if request_id is not None:
-                with contextlib.suppress(TypeError, ValueError):
-                    upstream_request_ids.add(int(request_id))
-        await cleanup_stale_overseerr_requests(upstream_request_ids)
 
-        if not overseerr_requests:
-            await SettingsStore(db).record_sync_success("overseerr")
-            await db.commit()
-            return 0, 0
+    sync_concurrency = max(1, runtime_settings.overseerr_sync_concurrency)
+    sync_semaphore = asyncio.Semaphore(sync_concurrency)
+    media_details_tasks: dict[tuple[str, int], asyncio.Task[dict | None]] = {}
+    media_details_lock = asyncio.Lock()
+    active_prefetch: list[str] = []
+    prefetch_completed = 0
+    prefetch_lock = asyncio.Lock()
 
-        result = await db.execute(select(RequestModel.external_id))
-        existing_external_ids = {row[0] for row in result.fetchall()}
-        existing_request_ids = await linked_overseerr_request_ids(db)
-
-        actionable_requests = []
-        for index, ov_req in enumerate(overseerr_requests, start=1):
-            media = ov_req.get("media") or {}
-            request_status = overseerr_service.normalize_request_status(ov_req.get("status"))
-            media_status = overseerr_service.normalize_media_status(media.get("status"))
-            if request_status in {"pending", "approved"} and media_status != "available":
-                actionable_requests.append(ov_req)
-            await emit(
-                build_sse_progress(
-                    "filtering",
-                    current=progress_current(index, len(overseerr_requests)),
-                    total=len(overseerr_requests),
-                    active=[],
-                    message="Filtering actionable Overseerr requests...",
-                )
+    async def prepare_with_progress(ov_req: dict[str, Any]) -> PreparedOverseerrImport | None:
+        nonlocal prefetch_completed
+        media = ov_req.get("media") or {}
+        title = media.get("title") or media.get("name") or f"Request #{ov_req.get('id', '?')}"
+        async with prefetch_lock:
+            active_prefetch.append(title)
+            active_snapshot = active_prefetch[:16]
+            completed_snapshot = prefetch_completed
+        await emit(
+            build_sse_progress(
+                "prefetching",
+                current=progress_current(completed_snapshot, len(actionable_requests)),
+                total=len(actionable_requests),
+                title=title,
+                active=active_snapshot,
+                message=f"Fetching metadata for {title}...",
             )
-
-        sync_concurrency = max(1, runtime_settings.overseerr_sync_concurrency)
-        sync_semaphore = asyncio.Semaphore(sync_concurrency)
-        media_details_tasks: dict[tuple[str, int], asyncio.Task[dict | None]] = {}
-        media_details_lock = asyncio.Lock()
-        active_prefetch: list[str] = []
-        prefetch_completed = 0
-        prefetch_lock = asyncio.Lock()
-
-        async def prepare_with_progress(ov_req: dict[str, Any]) -> PreparedOverseerrImport | None:
-            nonlocal prefetch_completed
-            media = ov_req.get("media") or {}
-            title = media.get("title") or media.get("name") or f"Request #{ov_req.get('id', '?')}"
+        )
+        try:
+            return await prepare_overseerr_import_func(
+                ov_req,
+                overseerr_service,
+                sync_semaphore,
+                media_details_tasks,
+                media_details_lock,
+            )
+        finally:
             async with prefetch_lock:
-                active_prefetch.append(title)
+                with contextlib.suppress(ValueError):
+                    active_prefetch.remove(title)
+                prefetch_completed += 1
                 active_snapshot = active_prefetch[:16]
                 completed_snapshot = prefetch_completed
             await emit(
@@ -1383,201 +1324,167 @@ async def import_overseerr_requests(
                     total=len(actionable_requests),
                     title=title,
                     active=active_snapshot,
-                    message=f"Fetching metadata for {title}...",
+                    message=f"Fetched metadata for {title}.",
                 )
             )
-            try:
-                return await prepare_overseerr_import_func(
-                    ov_req,
-                    overseerr_service,
-                    sync_semaphore,
-                    media_details_tasks,
-                    media_details_lock,
+
+    prepared_requests = await asyncio.gather(
+        *(prepare_with_progress(ov_req) for ov_req in actionable_requests),
+        return_exceptions=True,
+    )
+
+    synced_count = 0
+    skipped_count = 0
+    new_tv_requests: list[RequestModel] = []
+
+    for index, prepared_request in enumerate(prepared_requests, start=1):
+        try:
+            if isinstance(prepared_request, BaseException):
+                logger.exception(
+                    "Overseerr request prefetch failed during sync",
+                    exc_info=prepared_request,
                 )
-            finally:
-                async with prefetch_lock:
-                    with contextlib.suppress(ValueError):
-                        active_prefetch.remove(title)
-                    prefetch_completed += 1
-                    active_snapshot = active_prefetch[:16]
-                    completed_snapshot = prefetch_completed
-                await emit(
-                    build_sse_progress(
-                        "prefetching",
-                        current=progress_current(completed_snapshot, len(actionable_requests)),
-                        total=len(actionable_requests),
-                        title=title,
-                        active=active_snapshot,
-                        message=f"Fetched metadata for {title}.",
-                    )
-                )
-
-        prepared_requests = await asyncio.gather(
-            *(prepare_with_progress(ov_req) for ov_req in actionable_requests),
-            return_exceptions=True,
-        )
-
-        synced_count = 0
-        skipped_count = 0
-        new_tv_requests: list[RequestModel] = []
-
-        for index, prepared_request in enumerate(prepared_requests, start=1):
-            try:
-                if isinstance(prepared_request, BaseException):
-                    logger.exception(
-                        "Overseerr request prefetch failed during sync",
-                        exc_info=prepared_request,
-                    )
-                    skipped_count += 1
-                    continue
-                if prepared_request is None:
-                    skipped_count += 1
-                    continue
-
-                prepared = prepared_request
-                await emit(
-                    build_sse_progress(
-                        "importing",
-                        current=progress_current(index - 1, len(prepared_requests)),
-                        total=len(prepared_requests),
-                        title=prepared.title,
-                        active=[prepared.title] if prepared.title else [],
-                        message=f"Importing {prepared.title or 'request'}...",
-                    )
-                )
-                # A Seerr request ID is the canonical import identity. External IDs
-                # are not globally unique: movie TMDB IDs and TVDB IDs share the
-                # same string namespace, and the same title may be requested again
-                # after an earlier request was denied. Treating either collision as
-                # "already imported" silently drops a real Seerr request.
-                if prepared.overseerr_request_id in existing_request_ids or (
-                    prepared.overseerr_request_id is None
-                    and prepared.external_id in existing_external_ids
-                ):
-                    skipped_count += 1
-                    continue
-
-                # Another Seerr request for media we already track (for example a
-                # later season request) links to the existing row.
-                existing_request = (
-                    await find_request_for_media(
-                        db, prepared.media_type, prepared.tmdb_id, prepared.tvdb_id
-                    )
-                    if prepared.overseerr_request_id is not None
-                    else None
-                )
-                if existing_request is not None and prepared.overseerr_request_id is not None:
-                    reactivated = await attach_overseerr_request(
-                        db, existing_request, prepared.overseerr_request_id
-                    )
-                    # Episode sync rewrites episode statuses, so only resync a row
-                    # that was reactivated. An active show already tracks every season.
-                    if reactivated:
-                        await evaluate_imported_request_func(
-                            db,
-                            overseerr_service,
-                            existing_request,
-                            logger=logger,
-                            prefetched_media_details=prepared.media_details,
-                            local_episodes=(),
-                        )
-                        if prepared.media_type == MediaType.TV:
-                            new_tv_requests.append(existing_request)
-                    existing_request_ids.add(prepared.overseerr_request_id)
-                    synced_count += 1
-                    continue
-
-                external_id = prepared.external_id
-                if external_id in existing_external_ids:
-                    external_id = f"{external_id}-{prepared.overseerr_request_id}"
-                    suffix = 2
-                    while external_id in existing_external_ids:
-                        external_id = (
-                            f"{prepared.external_id}-{prepared.overseerr_request_id}-{suffix}"
-                        )
-                        suffix += 1
-
-                new_request = RequestModel(
-                    external_id=external_id,
-                    media_type=prepared.media_type,
-                    tmdb_id=prepared.tmdb_id,
-                    tvdb_id=prepared.tvdb_id,
-                    title=prepared.title,
-                    year=prepared.year,
-                    requester_username=prepared.requester_username,
-                    requester_email=prepared.requester_email,
-                    status=RequestStatus.PENDING,
-                    overseerr_request_id=prepared.overseerr_request_id,
-                    created_at=prepared.created_at,
-                )
-                db.add(new_request)
-                await db.flush()
-                if prepared.overseerr_request_id is not None:
-                    await add_overseerr_link(db, new_request, prepared.overseerr_request_id)
-                await evaluate_imported_request_func(
-                    db,
-                    overseerr_service,
-                    new_request,
-                    logger=logger,
-                    prefetched_media_details=prepared.media_details,
-                    local_episodes=(),
-                )
-                if prepared.media_type == MediaType.TV:
-                    new_tv_requests.append(new_request)
-                existing_external_ids.add(external_id)
-                if prepared.overseerr_request_id is not None:
-                    existing_request_ids.add(prepared.overseerr_request_id)
-                synced_count += 1
-            except Exception:
-                logger.exception("Overseerr request import failed during sync")
                 skipped_count += 1
+                continue
+            if prepared_request is None:
+                skipped_count += 1
+                continue
 
-        await SettingsStore(db).record_sync_success("overseerr")
-        await db.commit()
-
-        if synced_count > 0:
-            from app.siftarr.services.lifecycle.episode_sync_service import EpisodeSyncService
-
-            plex_service = plex_service_cls(settings=runtime_settings)
-            try:
-                episode_sync = EpisodeSyncService(
-                    db, overseerr=overseerr_service, plex=plex_service
+            prepared = prepared_request
+            await emit(
+                build_sse_progress(
+                    "importing",
+                    current=progress_current(index - 1, len(prepared_requests)),
+                    total=len(prepared_requests),
+                    title=prepared.title,
+                    active=[prepared.title] if prepared.title else [],
+                    message=f"Importing {prepared.title or 'request'}...",
                 )
-                for index, req in enumerate(new_tv_requests, start=1):
-                    try:
-                        await emit(
-                            build_sse_progress(
-                                "episode_sync",
-                                current=progress_current(index - 1, len(new_tv_requests)),
-                                total=len(new_tv_requests),
-                                title=req.title,
-                                active=[req.title],
-                                message=f"Syncing TV episodes for {req.title}...",
-                            )
-                        )
-                        await episode_sync.sync_request(req.id)
-                    except Exception:
-                        logger.exception(
-                            "Episode sync failed for request_id=%s during import",
-                            req.id,
-                        )
-                    finally:
-                        await emit(
-                            build_sse_progress(
-                                "episode_sync",
-                                current=progress_current(index, len(new_tv_requests)),
-                                total=len(new_tv_requests),
-                                title=req.title,
-                                active=[],
-                                message=f"Finished TV episode sync for {req.title}.",
-                            )
-                        )
-            finally:
-                pass
+            )
+            # A Seerr request ID is the canonical import identity. External IDs
+            # are not globally unique: movie TMDB IDs and TVDB IDs share the
+            # same string namespace, and the same title may be requested again
+            # after an earlier request was denied. Treating either collision as
+            # "already imported" silently drops a real Seerr request.
+            if prepared.overseerr_request_id in existing_request_ids or (
+                prepared.overseerr_request_id is None
+                and prepared.external_id in existing_external_ids
+            ):
+                skipped_count += 1
+                continue
 
-        return synced_count, skipped_count
-    finally:
-        pass
+            # Another Seerr request for media we already track (for example a
+            # later season request) links to the existing row.
+            existing_request = (
+                await find_request_for_media(
+                    db, prepared.media_type, prepared.tmdb_id, prepared.tvdb_id
+                )
+                if prepared.overseerr_request_id is not None
+                else None
+            )
+            if existing_request is not None and prepared.overseerr_request_id is not None:
+                reactivated = await attach_overseerr_request(
+                    db, existing_request, prepared.overseerr_request_id
+                )
+                # Episode sync rewrites episode statuses, so only resync a row
+                # that was reactivated. An active show already tracks every season.
+                if reactivated:
+                    await evaluate_imported_request_func(
+                        db,
+                        overseerr_service,
+                        existing_request,
+                        logger=logger,
+                        prefetched_media_details=prepared.media_details,
+                        local_episodes=(),
+                    )
+                    if prepared.media_type == MediaType.TV:
+                        new_tv_requests.append(existing_request)
+                existing_request_ids.add(prepared.overseerr_request_id)
+                synced_count += 1
+                continue
+
+            external_id = prepared.external_id
+            if external_id in existing_external_ids:
+                external_id = f"{external_id}-{prepared.overseerr_request_id}"
+                suffix = 2
+                while external_id in existing_external_ids:
+                    external_id = f"{prepared.external_id}-{prepared.overseerr_request_id}-{suffix}"
+                    suffix += 1
+
+            new_request = RequestModel(
+                external_id=external_id,
+                media_type=prepared.media_type,
+                tmdb_id=prepared.tmdb_id,
+                tvdb_id=prepared.tvdb_id,
+                title=prepared.title,
+                year=prepared.year,
+                requester_username=prepared.requester_username,
+                requester_email=prepared.requester_email,
+                status=RequestStatus.PENDING,
+                overseerr_request_id=prepared.overseerr_request_id,
+                created_at=prepared.created_at,
+            )
+            db.add(new_request)
+            await db.flush()
+            if prepared.overseerr_request_id is not None:
+                await add_overseerr_link(db, new_request, prepared.overseerr_request_id)
+            await evaluate_imported_request_func(
+                db,
+                overseerr_service,
+                new_request,
+                logger=logger,
+                prefetched_media_details=prepared.media_details,
+                local_episodes=(),
+            )
+            if prepared.media_type == MediaType.TV:
+                new_tv_requests.append(new_request)
+            existing_external_ids.add(external_id)
+            if prepared.overseerr_request_id is not None:
+                existing_request_ids.add(prepared.overseerr_request_id)
+            synced_count += 1
+        except Exception:
+            logger.exception("Overseerr request import failed during sync")
+            skipped_count += 1
+
+    await SettingsStore(db).record_sync_success("overseerr")
+    await db.commit()
+
+    if synced_count > 0:
+        from app.siftarr.services.lifecycle.episode_sync_service import EpisodeSyncService
+
+        plex_service = plex_service_cls(settings=runtime_settings)
+        episode_sync = EpisodeSyncService(db, overseerr=overseerr_service, plex=plex_service)
+        for index, req in enumerate(new_tv_requests, start=1):
+            try:
+                await emit(
+                    build_sse_progress(
+                        "episode_sync",
+                        current=progress_current(index - 1, len(new_tv_requests)),
+                        total=len(new_tv_requests),
+                        title=req.title,
+                        active=[req.title],
+                        message=f"Syncing TV episodes for {req.title}...",
+                    )
+                )
+                await episode_sync.sync_request(req.id)
+            except Exception:
+                logger.exception(
+                    "Episode sync failed for request_id=%s during import",
+                    req.id,
+                )
+            finally:
+                await emit(
+                    build_sse_progress(
+                        "episode_sync",
+                        current=progress_current(index, len(new_tv_requests)),
+                        total=len(new_tv_requests),
+                        title=req.title,
+                        active=[],
+                        message=f"Finished TV episode sync for {req.title}.",
+                    )
+                )
+
+    return synced_count, skipped_count
 
 
 async def sync_overseerr_generator(

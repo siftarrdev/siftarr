@@ -151,10 +151,6 @@ def test_dashboard_js_uses_shared_search_loading_state():
     assert "function renderMovieSearchLoadingState()" in js
     assert 'role="status" aria-live="polite"' in js
     _assert_window_facade_exports(js, "renderSearchLoadingState", "renderMovieSearchLoadingState")
-    assert "function showSearchProgressToast(" in js
-    assert "showSearchProgressToast," in js
-    assert "search-progress-toast" in js
-    assert "document.createElement('div')" in js
     _assert_window_facade_exports(js, "escapeHtml")
     assert "Search for new checks missing aired episodes" in js
     assert "window.renderMovieSearchLoadingState()" in js

@@ -157,10 +157,6 @@ class ProwlarrService:
             return f"ih:{release.info_hash.lower()}"
         return f"title:{release.indexer.lower()}:{release.title.lower()}:{release.size}"
 
-    async def close(self) -> None:
-        """Close the service (no-op since using shared client)."""
-        pass
-
     def _parse_release_info(self, release: dict) -> ProwlarrRelease:
         """Parse a release from Prowlarr response."""
         # Parse title for resolution, codec, release group
@@ -274,25 +270,6 @@ class ProwlarrService:
             parts.append(f"S{season:02d}")
         if year is not None:
             parts.append(str(year))
-        return " ".join(parts)
-
-    @staticmethod
-    def _build_tv_imdb_season_query(title: str | None, imdbid: str | int, season: int) -> str:
-        """Build an IPTorrents-compatible IMDb + season TV query."""
-        if title:
-            title = ProwlarrService._normalize_search_title(title)
-        imdb = str(imdbid).removeprefix("tt")
-        parts = [title.strip() for title in [title] if title and title.strip()]
-        parts.extend([f"{{imdbid:{imdb}}}", f"{{season:{season}}}"])
-        return " ".join(parts)
-
-    @staticmethod
-    def _build_tv_title_season_token_query(title: str | None, season: int) -> str:
-        """Build an IPTorrents-compatible title + {season:N} TV query."""
-        if title:
-            title = ProwlarrService._normalize_search_title(title)
-        parts = [title.strip() for title in [title] if title and title.strip()]
-        parts.append(f"{{season:{season}}}")
         return " ".join(parts)
 
     async def _search(

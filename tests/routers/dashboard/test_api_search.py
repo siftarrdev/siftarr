@@ -5,7 +5,7 @@ from typing import cast
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-from fastapi import HTTPException
+from fastapi.responses import JSONResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
@@ -14,10 +14,31 @@ from app.siftarr.models.release import Release
 from app.siftarr.models.request import MediaType, RequestStatus
 from app.siftarr.models.request import Request as RequestModel
 from app.siftarr.models.stats_metrics import StatsTimingEvent
-from app.siftarr.routers import dashboard_api
 from app.siftarr.services.dashboard import search_service
+from app.siftarr.services.dashboard.dashboard_service import serialize_tv_search_response
 from app.siftarr.services.dashboard.search_service import SearchService
 from app.siftarr.services.integrations.prowlarr_service import ProwlarrRelease, ProwlarrSearchResult
+from app.siftarr.services.request_service import load_request_or_404
+
+
+async def _search_season_packs(request_id, season_number, db):
+    request = await load_request_or_404(db, request_id)
+    data = await SearchService(db).search_season_packs(request, season_number=season_number)
+    return JSONResponse(serialize_tv_search_response(data))
+
+
+async def _search_multi_season_packs(request_id, db):
+    request = await load_request_or_404(db, request_id)
+    data = await SearchService(db).search_multi_season_packs(request, request_id=request_id)
+    return JSONResponse(serialize_tv_search_response(data))
+
+
+async def _search_episode(request_id, season_number, episode_number, db):
+    request = await load_request_or_404(db, request_id)
+    data = await SearchService(db).search_episode(
+        request, season_number=season_number, episode_number=episode_number
+    )
+    return JSONResponse(serialize_tv_search_response(data))
 
 
 @pytest.fixture(autouse=True)
@@ -156,7 +177,7 @@ async def test_search_multi_season_packs_returns_coverage_metadata(mock_db, monk
         MagicMock(return_value=fake_engine),
     )
 
-    response = await dashboard_api.search_multi_season_packs(request_id=12, db=mock_db)
+    response = await _search_multi_season_packs(request_id=12, db=mock_db)
 
     body = json.loads(cast(bytes, response.body))
     assert body["scope"] == {"type": "multi_season_packs"}
@@ -273,7 +294,7 @@ async def test_search_season_packs_excludes_multi_season_results(mock_db, monkey
         MagicMock(return_value=fake_engine),
     )
 
-    response = await dashboard_api.search_season_packs(request_id=12, season_number=1, db=mock_db)
+    response = await _search_season_packs(request_id=12, season_number=1, db=mock_db)
 
     body = json.loads(cast(bytes, response.body))
     assert body["scope"] == {"type": "season_packs", "season_number": 1}
@@ -302,7 +323,7 @@ async def test_search_season_packs_skips_partly_available_season(mock_db, monkey
     prowlarr_service = AsyncMock()
     monkeypatch.setattr(search_service, "ProwlarrService", lambda settings: prowlarr_service)
 
-    response = await dashboard_api.search_season_packs(request_id=12, season_number=1, db=mock_db)
+    response = await _search_season_packs(request_id=12, season_number=1, db=mock_db)
 
     body = json.loads(cast(bytes, response.body))
     assert body["releases"] == []
@@ -378,7 +399,7 @@ async def test_search_season_packs_orders_by_score_then_size(mock_db, monkeypatc
         MagicMock(return_value=fake_engine),
     )
 
-    response = await dashboard_api.search_season_packs(request_id=12, season_number=1, db=mock_db)
+    response = await _search_season_packs(request_id=12, season_number=1, db=mock_db)
 
     body = json.loads(cast(bytes, response.body))
     assert body["scope"] == {"type": "season_packs", "season_number": 1}
@@ -457,7 +478,7 @@ async def test_search_season_packs_prioritizes_size_limit_passes(mock_db, monkey
         MagicMock(return_value=fake_engine),
     )
 
-    response = await dashboard_api.search_season_packs(request_id=12, season_number=1, db=mock_db)
+    response = await _search_season_packs(request_id=12, season_number=1, db=mock_db)
 
     body = json.loads(cast(bytes, response.body))
     assert body["scope"] == {"type": "season_packs", "season_number": 1}
@@ -533,7 +554,7 @@ async def test_search_episode_excludes_packs_and_multi_season_results(mock_db, m
         MagicMock(return_value=fake_engine),
     )
 
-    response = await dashboard_api.search_episode(
+    response = await _search_episode(
         request_id=12,
         season_number=1,
         episode_number=1,
@@ -586,7 +607,7 @@ async def test_search_episode_falls_back_to_exact_episode_when_sweep_misses_it(
         MagicMock(return_value=fake_engine),
     )
 
-    response = await dashboard_api.search_episode(
+    response = await _search_episode(
         request_id=12,
         season_number=2,
         episode_number=1,
@@ -700,7 +721,7 @@ async def test_search_episode_returns_exact_provider_error(mock_db, monkeypatch)
     )
     monkeypatch.setattr(search_service, "ProwlarrService", lambda settings: prowlarr_service)
 
-    response = await dashboard_api.search_episode(
+    response = await _search_episode(
         request_id=12,
         season_number=1,
         episode_number=1,
@@ -842,7 +863,7 @@ async def test_search_multi_season_packs_orders_by_score_then_size(mock_db, monk
         MagicMock(return_value=fake_engine),
     )
 
-    response = await dashboard_api.search_multi_season_packs(request_id=12, db=mock_db)
+    response = await _search_multi_season_packs(request_id=12, db=mock_db)
 
     body = json.loads(cast(bytes, response.body))
     assert body["scope"] == {"type": "multi_season_packs"}
@@ -920,7 +941,7 @@ async def test_search_episode_orders_by_score_then_size(mock_db, monkeypatch):
         MagicMock(return_value=fake_engine),
     )
 
-    response = await dashboard_api.search_episode(
+    response = await _search_episode(
         request_id=12,
         season_number=1,
         episode_number=1,
@@ -985,7 +1006,7 @@ async def test_search_multi_season_packs_includes_broad_pack_query(mock_db, monk
         MagicMock(return_value=MagicMock(evaluate=MagicMock(return_value=fake_evaluation))),
     )
 
-    response = await dashboard_api.search_multi_season_packs(request_id=12, db=mock_db)
+    response = await _search_multi_season_packs(request_id=12, db=mock_db)
 
     prowlarr_service.search_tv_packs_broad.assert_awaited_once()
     assert prowlarr_service.search_tv_packs_broad.await_args.kwargs["title"] == "Foundation"
@@ -1034,26 +1055,9 @@ async def test_search_multi_season_packs_survives_broad_query_failure(mock_db, m
         MagicMock(return_value=MagicMock(evaluate=MagicMock(return_value=fake_evaluation))),
     )
 
-    response = await dashboard_api.search_multi_season_packs(request_id=12, db=mock_db)
+    response = await _search_multi_season_packs(request_id=12, db=mock_db)
 
     body = json.loads(cast(bytes, response.body))
     assert [release["title"] for release in body["releases"]] == [
         "Foundation.Complete.1080p.BluRay"
     ]
-
-
-@pytest.mark.asyncio
-async def test_search_multi_season_packs_rejects_non_tv_requests(mock_db):
-    """Multi-season endpoint should reject non-TV requests."""
-    request_record = MagicMock()
-    request_record.media_type = MediaType.MOVIE
-
-    request_result = MagicMock()
-    request_result.scalar_one_or_none.return_value = request_record
-    mock_db.execute.return_value = request_result
-
-    with pytest.raises(HTTPException) as exc_info:
-        await dashboard_api.search_multi_season_packs(request_id=44, db=mock_db)
-
-    assert exc_info.value.status_code == 400
-    assert exc_info.value.detail == "Request is not a TV show"

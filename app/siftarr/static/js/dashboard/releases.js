@@ -7,7 +7,7 @@ function renderAnnotation(value, toneClass = 'text-gray-400', dataAttr = '') {
   if (!value) return '';
   return `<span class="${toneClass}" ${dataAttr}>${escapeHtml(value)}</span>`;
 }
-function renderSearchLoadingState(message) {
+export function renderSearchLoadingState(message) {
   return (
     '<div class="dashboard-search-loading" role="status" aria-live="polite">' +
     '<svg class="animate-spin h-4 w-4 shrink-0" aria-hidden="true" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>' +
@@ -17,7 +17,7 @@ function renderSearchLoadingState(message) {
     '</div>'
   );
 }
-function renderMovieSearchLoadingState() {
+export function renderMovieSearchLoadingState() {
   return (
     '<div class="dashboard-details-search-loading" role="status" aria-live="polite">' +
     '<div class="flex items-start gap-3">' +
@@ -89,7 +89,7 @@ function releaseAnnotationTone(release, field) {
   }
   return 'text-gray-400';
 }
-function formatRelativePublishAge(publishDate) {
+export function formatRelativePublishAge(publishDate) {
   if (!publishDate) return '';
   const publishedAt = new Date(publishDate);
   if (Number.isNaN(publishedAt.getTime())) return '';
@@ -184,7 +184,7 @@ function renderIconAction(kind, label, attrs = '', disabled = false) {
 // (active selection) cards carry inline Approve + Discard; conflicting siblings
 // show Replace; passed releases show Stage; rejected releases dim and inline the
 // rejection reason as the meta line, with a Force action.
-function renderReleaseCard(release, requestId, options = {}) {
+export function renderReleaseCard(release, requestId, options = {}) {
   const bucket = !!(options && options.bucket);
   const releaseScope = release.target_scope || {};
   const isScopedEpisodeRelease = releaseScope.type === 'single_episode';
@@ -446,7 +446,7 @@ function isMultiSeasonRelease(release) {
 // Single source of truth for "this episode needs nothing further". The backend
 // enum only has `completed`, but older payloads (and the Plex sync path) can
 // still surface `available`, so both are treated as complete.
-function isEpisodeComplete(episode) {
+export function isEpisodeComplete(episode) {
   const status = episode && episode.status;
   return status === 'available' || status === 'completed';
 }
@@ -857,7 +857,7 @@ function renderScopeChip(requestId, value, label, count, activeScope) {
     '</span></button>'
   );
 }
-function renderSeasonAccordion(data) {
+export function renderSeasonAccordion(data) {
   const tvInfo = data.tv_info;
   const requestId = data.request.id;
   const syncState = tvInfo.sync_state || {};
@@ -1179,7 +1179,7 @@ function renderSeasonAccordion(data) {
     '</div>';
   return '<div class="space-y-4">' + scopeChipBar + allSection + seasonPacksSection + completeSeriesSection + '</div>';
 }
-async function markEpisodeAvailable(requestId, episodeId) {
+export async function markEpisodeAvailable(requestId, episodeId) {
   try {
     var response = await fetch('/requests/' + requestId + '/episodes/' + episodeId + '/mark-available', {
       method: 'POST',
@@ -1190,7 +1190,7 @@ async function markEpisodeAvailable(requestId, episodeId) {
     console.error('Failed to mark episode available:', e);
   }
 }
-async function markSeasonAvailable(requestId, seasonId) {
+export async function markSeasonAvailable(requestId, seasonId) {
   try {
     var response = await fetch('/requests/' + requestId + '/seasons/' + seasonId + '/mark-all-available', {
       method: 'POST',
@@ -1206,7 +1206,7 @@ async function markSeasonAvailable(requestId, seasonId) {
 // "Season packs" scope share the same data attribute. Results are persisted
 // server-side, so on completion the details modal reloads (preserving UI
 // state) to rebuild counts, chips, and groups from the cached payload.
-function searchSeasonPacks(requestId, seasonNumber) {
+export function searchSeasonPacks(requestId, seasonNumber) {
   return new Promise(function (resolve) {
     var containers = document.querySelectorAll('[data-season-pack-results="' + requestId + '-' + seasonNumber + '"]');
     if (!containers.length) return resolve();
@@ -1244,7 +1244,7 @@ function searchSeasonPacks(requestId, seasonNumber) {
 }
 // Stream a multi-season pack search into the "Multi-season packs" group in the
 // "Season packs" scope tab.
-function searchMultiSeasonPacks(requestId) {
+export function searchMultiSeasonPacks(requestId) {
   return new Promise(function (resolve) {
     var containers = document.querySelectorAll('[data-multi-season-pack-results="' + requestId + '"]');
     if (!containers.length) return resolve();
@@ -1279,7 +1279,7 @@ function searchMultiSeasonPacks(requestId) {
 // searches sequentially (each one streams progress and reloads the modal),
 // then the broad multi-season/complete-series query, which no per-season sweep
 // can surface.
-async function searchAllSeasonPacks(requestId, btn = null) {
+export async function searchAllSeasonPacks(requestId, btn = null) {
   var data = window.currentDetailsData;
   var seasons = ((data && data.tv_info && data.tv_info.seasons) || []).filter(isSeasonPackEligible);
   if (!seasons.length) return;
@@ -1302,7 +1302,7 @@ async function searchAllSeasonPacks(requestId, btn = null) {
     }
   }
 }
-async function searchEpisode(requestId, seasonNumber, episodeNumber) {
+export async function searchEpisode(requestId, seasonNumber, episodeNumber) {
   var details = document.getElementById('episode-details-' + requestId + '-' + seasonNumber + '-' + episodeNumber);
   var container = document.getElementById('episode-search-' + requestId + '-' + seasonNumber + '-' + episodeNumber);
   if (!container) return;
@@ -1373,13 +1373,13 @@ async function submitReleaseAction(btn, approveNow = false) {
     window.showToast('Error: ' + err.message);
   }
 }
-async function stageRelease(btn) {
+export async function stageRelease(btn) {
   return submitReleaseAction(btn, false);
 }
-async function approveRelease(btn) {
+export async function approveRelease(btn) {
   return submitReleaseAction(btn, true);
 }
-async function rejectRelease(btn, requestId, releaseId) {
+export async function rejectRelease(btn, requestId, releaseId) {
   btn.disabled = true;
   btn.setAttribute('aria-busy', 'true');
   btn.classList.add('opacity-50');
@@ -1402,7 +1402,7 @@ async function rejectRelease(btn, requestId, releaseId) {
     window.showToast('Error: ' + err.message);
   }
 }
-async function stageIndividualEpisodes(btn, requestId, seasonNumber) {
+export async function stageIndividualEpisodes(btn, requestId, seasonNumber) {
   const originalText = btn.textContent;
   btn.disabled = true;
   btn.textContent = 'Staging…';
@@ -1442,7 +1442,7 @@ async function stageIndividualEpisodes(btn, requestId, seasonNumber) {
 // the staged tab and reload the open details modal so the card re-renders with
 // the new staged state. Disables the clicked button and shows "…" while in
 // flight.
-async function inlineStagedAction(actionUrl, btn = null) {
+export async function inlineStagedAction(actionUrl, btn = null) {
   const originalContent = btn ? btn.innerHTML : '';
   const approvedEpisodeDetailsId = actionUrl.endsWith('/approve')
     ? btn?.closest?.('details[id^="episode-details-"]')?.id || null
@@ -1499,14 +1499,14 @@ async function inlineStagedAction(actionUrl, btn = null) {
     window.showToast('Error: ' + err.message);
   }
 }
-function captureDetailsAccordionState() {
+export function captureDetailsAccordionState() {
   const state = {};
   document.querySelectorAll('#request-details-releases details[id]').forEach(function (details) {
     state[details.id] = !!details.open;
   });
   return state;
 }
-function restoreDetailsAccordionState(state) {
+export function restoreDetailsAccordionState(state) {
   if (!state) return;
   document.querySelectorAll('#request-details-releases details[id]').forEach(function (details) {
     if (Object.prototype.hasOwnProperty.call(state, details.id)) {
@@ -1553,21 +1553,21 @@ function setTvAccordionNodesOpen(nodes, open) {
   });
   updateTvAccordionControls();
 }
-function toggleTvDetailsAll(requestId) {
+export function toggleTvDetailsAll(requestId) {
   var nodes = tvDetailsNodesForRequest(requestId);
   var shouldOpen = nodes.some(function (details) {
     return !details.open;
   });
   setTvAccordionNodesOpen(nodes, shouldOpen);
 }
-function toggleTvSeasonDetails(requestId, seasonNumber) {
+export function toggleTvSeasonDetails(requestId, seasonNumber) {
   var nodes = tvSeasonNodes(requestId, seasonNumber);
   var shouldOpen = nodes.some(function (details) {
     return !details.open;
   });
   setTvAccordionNodesOpen(nodes, shouldOpen);
 }
-function focusTvEpisode(requestId, seasonNumber, episodeNumber) {
+export function focusTvEpisode(requestId, seasonNumber, episodeNumber) {
   if (!requestId || !seasonNumber || !episodeNumber) return;
   const seasonDetails = document.getElementById('season-details-' + requestId + '-' + seasonNumber);
   const targetDetails = document.getElementById(
@@ -1586,7 +1586,7 @@ function focusTvEpisode(requestId, seasonNumber, episodeNumber) {
   }
   updateTvAccordionControls();
 }
-function focusStagedTvScope(requestId, scope) {
+export function focusStagedTvScope(requestId, scope) {
   if (!scope || scope.type !== 'single_episode') return;
   focusTvEpisode(requestId, scope.season_number, scope.episode_number);
 }
@@ -1599,13 +1599,13 @@ function parseSingleEpisodeScopeFromTitle(title) {
     episode_number: Number(match[2]),
   };
 }
-function openStagedRequestDetailsFromElement(element) {
+export function openStagedRequestDetailsFromElement(element) {
   const requestId = Number(element?.dataset?.requestId || 0);
   if (!requestId) return;
   const focusTvScope = parseSingleEpisodeScopeFromTitle(element.dataset.title || element.textContent || '');
   window.openRequestDetails(requestId, null, { focusTvScope });
 }
-function updateTvAccordionControls() {
+export function updateTvAccordionControls() {
   document.querySelectorAll('[data-tv-accordion-toggle]').forEach(function (button) {
     var requestId = button.dataset.requestId;
     var nodes =
@@ -1621,33 +1621,6 @@ function updateTvAccordionControls() {
     button.setAttribute('aria-expanded', allOpen ? 'true' : 'false');
   });
 }
-export {
-  renderReleaseCard,
-  renderSearchLoadingState,
-  renderMovieSearchLoadingState,
-  renderSeasonAccordion,
-  formatRelativePublishAge,
-  isEpisodeComplete,
-  markEpisodeAvailable,
-  markSeasonAvailable,
-  searchSeasonPacks,
-  searchMultiSeasonPacks,
-  searchAllSeasonPacks,
-  searchEpisode,
-  stageRelease,
-  approveRelease,
-  rejectRelease,
-  stageIndividualEpisodes,
-  inlineStagedAction,
-  focusTvEpisode,
-  focusStagedTvScope,
-  openStagedRequestDetailsFromElement,
-  captureDetailsAccordionState,
-  restoreDetailsAccordionState,
-  toggleTvDetailsAll,
-  toggleTvSeasonDetails,
-  updateTvAccordionControls,
-};
 // Temporary compatibility facade for HTML onclick handlers and unconverted modules.
 Object.assign(window, {
   renderReleaseCard,

@@ -58,14 +58,6 @@ class PlexServiceEpisodes:
             logger.exception("PlexService: get_metadata_children(%s) failed", rating_key)
             return []
 
-    async def get_show_children(self, rating_key: str) -> list[dict[str, Any]]:
-        """Get all seasons for a show."""
-        return await self._get_metadata_children(rating_key, strict=False)
-
-    async def get_season_children(self, rating_key: str) -> list[dict[str, Any]]:
-        """Get all episodes for a season."""
-        return await self._get_metadata_children(rating_key, strict=False)
-
     async def _get_metadata_children_strict(self, rating_key: str) -> list[dict[str, Any]]:
         """Get metadata children and raise on transient Plex failures."""
         return await self._get_metadata_children(rating_key, strict=True)

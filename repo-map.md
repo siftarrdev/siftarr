@@ -139,11 +139,11 @@ HTTP route layer.
 - `dashboard.py` — main dashboard page routes; `GET /api/downloads` (unfinished) and `GET /api/torrents/completed` (live completed) both return qBittorrent torrents grouped by owning Siftarr request with per-group totals, lifecycle actions limited to matched Siftarr rows
 - `dashboard_api.py` — dashboard JSON endpoints for details/search/history data, including validated detail-release filter/sort query controls
 - `dashboard_actions.py` — dashboard-triggered actions and mutations, including per-release staging, direct approval, and manual candidate rejection
-- `search_sse.py` — SSE streaming endpoints for live search progress and post-commit `results_updated` notifications; `/requests/{id}/search/stream` supports TV `search_mode=new|full`, while TV scope-specific streams remain compatibility/debug inspect paths
+- `search_sse.py` — SSE streaming endpoints for live search progress and post-commit `results_updated` notifications; `/requests/{id}/search/stream` supports TV `search_mode=new|full`, and TV season-pack, multi-season, and episode scope streams back the targeted dashboard searches
 - `rules.py` — rule management UI/API, including unified rule listing, multi-title testing, modal create/edit actions, export, import preview/apply flows that merge explicit keep selections from existing and imported rules, and the Rules-area staging decision-log page for rule tuning
 - `settings.py` — settings UI (connection test/save/reset, scheduler interval save/reset, staging toggle, Plex rescan, Overseerr sync, cache/reseed actions, SSE progress streams, API key management, Plex SSO status, non-secret settings backup preview/restore, qBit mover enable/paths/retention settings and manual trigger, and Settings-hosted background job status/manual triggers); Overseerr reconciliation keys imports by request ID so repeat requests and cross-provider media-ID collisions remain distinct, uses SettingsStore for DB-backed persistence, and keeps the SSO-managed Plex token out of connection saves/resets/backups
 - `stats.py` — protected Stats page and JSON data endpoint for all-time, preset, and custom date ranges, including chart-ready time-series payloads
-- `staged.py` — staged torrent review/approval endpoints, staged-alternative comparison API, session/API-key staging decision-log API, and download-status endpoint returning move tracking fields (status, path, error) for dashboard visibility
+- `staged.py` — staged torrent review/approval endpoints, staged-alternative comparison API, and session/API-key staging decision-log API
 - `download_health.py` — protected persisted-health listing and explicitly confirmed recovery API; recovery leaves qBittorrent torrents and files untouched
 - `webhooks.py` — inbound webhook handling; validates movie/TV media types and requires a positive TMDB or TVDB identifier before request creation
 
@@ -158,10 +158,10 @@ Business logic and integrations, organized into thematic subpackages:
 - `stats_service.py` — read-side Stats aggregation and date-range validation for cards, splits, rule outcomes, timing charts, and chart-ready time series (downloads, failures, rule rejections, indexer behavior)
 - `stats_metrics_service.py` — write-only instrumentation helpers for immutable stats metric facts/events consumed by the Stats service/API
 - `search_history_service.py` — records/finalizes request search runs, stores compact candidate/rule evidence snapshots, and serves paginated search history plus staged alternative comparisons
-- `staging_decision_log.py` — append/read/normalize the JSONL staging decision log used for rule-tuning diagnostics, including retention and legacy entry compatibility
+- `staging_decision_log.py` — append/read/normalize the JSONL staging decision log used for rule-tuning diagnostics, including retention; entries without `schema_version` are skipped
 
 **`auth/`** — Plex SSO authentication
-- `plex_oauth_service.py` — `PlexOAuthService` wrapping plex.tv API calls (PIN flow, user identity, token validation)
+- `plex_oauth_service.py` — `PlexOAuthService` wrapping plex.tv API calls (token validation and user identity; the PIN flow runs in the browser)
 
 **`admin/`** — Config, scheduling, polling
 - `settings_service.py` — SettingsStore (DB-backed settings persistence, startup API key generation, runtime env loading, sync success timestamps, Plex SSO claim/token status without exposing token, versioned non-secret settings backup/export/preview/restore), SSE progress, scheduled job helpers/status helpers, Plex rescan/Overseerr import orchestration

@@ -690,7 +690,7 @@ class TestProcessRequest:
                 episode.status = statuses[key]
                 episode.air_date = air_dates.get(key, today - timedelta(days=1))
 
-        seasons, episodes = service._get_actionable_targets(request)
+        seasons, episodes = service._get_loaded_episode_targets(request, actionable_only=True)
 
         assert seasons == [3]
         assert episodes == {3: [1]}

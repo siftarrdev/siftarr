@@ -2,7 +2,7 @@
 // Dashboard Modals Module - Modal dialogs and toast notifications
 // ===============================================================
 import { refreshCurrentTabContent } from './core.js';
-function showToast(message) {
+export function showToast(message) {
   const container = document.getElementById('toast-container');
   if (!container) return;
   const toast = document.createElement('div');
@@ -20,92 +20,7 @@ function showToast(message) {
     setTimeout(() => toast.remove(), 300);
   }, 4000);
 }
-function showSearchProgressToast(title, message, items) {
-  const container = document.getElementById('toast-container');
-  if (!container) return { update: () => {}, dismiss: () => {} };
-  const el = document.createElement('div');
-  el.className =
-    'search-progress-toast bg-surface-800 border border-gray-700/70 rounded-2xl shadow-2xl p-4 pointer-events-auto w-full max-w-sm transition-opacity duration-300 opacity-0';
-  el.innerHTML =
-    '<div class="flex items-start justify-between gap-3 mb-3">' +
-    '<div class="min-w-0">' +
-    '<h3 class="text-sm font-semibold text-white">' +
-    window.escapeHtml(title) +
-    '</h3>' +
-    '<p class="text-xs text-gray-500 mt-0.5">Working…</p>' +
-    '</div>' +
-    '</div>' +
-    '<div class="mb-3"><div class="w-full h-2 rounded-full bg-surface-700 overflow-hidden">' +
-    '<div class="search-progress-bar h-2 rounded-full bg-brand-500 transition-all duration-700" style="width: 0%"></div>' +
-    '</div></div>' +
-    '<p class="search-progress-status text-sm text-gray-400">' +
-    window.escapeHtml(message) +
-    '</p>' +
-    '<div class="search-progress-items-wrap hidden mt-3">' +
-    '<div class="text-[10px] uppercase tracking-wide text-gray-500 mb-1">Searching for</div>' +
-    '<ul class="search-progress-items space-y-1 text-gray-300 max-h-28 overflow-y-auto"></ul>' +
-    '</div>';
-  // Populate items list
-  const itemsWrap = el.querySelector('.search-progress-items-wrap');
-  const itemsList = el.querySelector('.search-progress-items');
-  if (itemsList && itemsWrap && items.length) {
-    itemsWrap.classList.remove('hidden');
-    items.slice(0, 5).forEach((item) => {
-      const li = document.createElement('li');
-      li.className = 'rounded-lg bg-surface-850 px-2.5 py-1 text-xs text-gray-300 truncate';
-      li.textContent = item;
-      itemsList.appendChild(li);
-    });
-    if (items.length > 5) {
-      const li = document.createElement('li');
-      li.className = 'px-2.5 py-0.5 text-[11px] text-gray-500';
-      li.textContent = '+' + (items.length - 5) + ' more';
-      itemsList.appendChild(li);
-    }
-  }
-  container.appendChild(el);
-  // Animate bar
-  const bar = el.querySelector('.search-progress-bar');
-  if (bar) {
-    requestAnimationFrame(() => {
-      bar.style.width = '15%';
-    });
-    setTimeout(() => {
-      if (bar) bar.style.width = '90%';
-    }, 150);
-  }
-  // Fade in
-  requestAnimationFrame(() => {
-    el.classList.remove('opacity-0');
-    el.classList.add('opacity-100');
-  });
-  return {
-    update(newMessage, failed = false) {
-      const statusEl = el.querySelector('.search-progress-status');
-      const barEl = el.querySelector('.search-progress-bar');
-      const textEl = el.querySelector('p.text-xs.text-gray-500');
-      if (statusEl) {
-        statusEl.textContent = newMessage;
-        statusEl.classList.remove('text-gray-400', 'text-emerald-400', 'text-red-400');
-        statusEl.classList.add(failed ? 'text-red-400' : 'text-emerald-400');
-      }
-      if (barEl) {
-        barEl.style.width = '100%';
-        barEl.classList.remove('bg-brand-500', 'bg-emerald-500', 'bg-red-500');
-        barEl.classList.add(failed ? 'bg-red-500' : 'bg-emerald-500');
-      }
-      if (textEl) textEl.textContent = failed ? 'Failed' : 'Complete';
-    },
-    dismiss(delayMs = 3000) {
-      setTimeout(() => {
-        el.classList.remove('opacity-100');
-        el.classList.add('opacity-0');
-        setTimeout(() => el.remove(), 300);
-      }, delayMs);
-    },
-  };
-}
-function setSearchActionLoading(trigger, message = 'Searching...') {
+export function setSearchActionLoading(trigger, message = 'Searching...') {
   if (!trigger) return;
   trigger.disabled = true;
   trigger.dataset.originalText = trigger.textContent;
@@ -163,31 +78,7 @@ async function submitSearchRequest(action, body, redirectTo) {
   if (!response.ok) throw new Error('Search request failed (' + response.status + ')');
   return response.url || redirectTo || window.location.href;
 }
-function showBulkSearchStatus(form, searchAll = false) {
-  if (!form) return;
-  const panel = form.querySelector('[data-bulk-search-status="true"]');
-  if (!panel) return;
-  const selectedCount = getDedupedCheckedBulkCheckboxes(
-    form,
-    'input[name="request_ids"]:checked, input[name="torrent_ids"]:checked',
-  ).length;
-  const title = panel.querySelector('[data-bulk-search-status-title="true"]');
-  const message = panel.querySelector('[data-bulk-search-status-message="true"]');
-  if (title) title.textContent = searchAll ? 'Searching all pending requests' : 'Searching selected requests/torrents';
-  if (message) {
-    message.textContent = searchAll
-      ? 'Searching all pending items. You will be redirected when the search starts.'
-      : selectedCount > 0
-        ? 'Searching ' +
-          selectedCount +
-          ' selected item' +
-          (selectedCount === 1 ? '' : 's') +
-          '. You will be redirected when the search starts.'
-        : 'Preparing selected search. You will be redirected when the search starts.';
-  }
-  panel.classList.remove('hidden');
-}
-async function postToAction(action, redirectTo, trigger = null, scope = null) {
+export async function postToAction(action, redirectTo, trigger = null, scope = null) {
   const row = scope || (trigger ? trigger.closest('tr') || trigger.closest('[data-request-id]') : null);
   const title = getRequestTitleFromRow(row);
   if (trigger && trigger.dataset.searchAction === 'true') {
@@ -305,7 +196,7 @@ async function handleBulkDenyAction(event, form) {
   }
   return false;
 }
-function handleBulkRequestActionSubmit(event, form) {
+export function handleBulkRequestActionSubmit(event, form) {
   const submitter = event.submitter;
   if (!submitter) return true;
   // Handle deny actions via fetch
@@ -369,7 +260,7 @@ function handleBulkRequestActionSubmit(event, form) {
 }
 let _denyRequestId = null;
 let _denyRedirectTo = null;
-function openDenyModal(requestId, redirectTo) {
+export function openDenyModal(requestId, redirectTo) {
   _denyRequestId = requestId;
   _denyRedirectTo = redirectTo || '/';
   const modal = document.getElementById('deny-modal');
@@ -377,7 +268,7 @@ function openDenyModal(requestId, redirectTo) {
   if (reason) reason.value = '';
   if (modal) modal.classList.remove('hidden');
 }
-async function submitDenyRequest() {
+export async function submitDenyRequest() {
   if (!_denyRequestId) return;
   const btn = document.getElementById('deny-submit-btn');
   if (btn) btn.disabled = true;
@@ -404,13 +295,13 @@ async function submitDenyRequest() {
     if (btn) btn.disabled = false;
   }
 }
-function closeDenyModal() {
+export function closeDenyModal() {
   const modal = document.getElementById('deny-modal');
   if (modal) modal.classList.add('hidden');
   _denyRequestId = null;
   _denyRedirectTo = null;
 }
-function bindDenyModalHandlers() {
+export function bindDenyModalHandlers() {
   const submitBtn = document.getElementById('deny-submit-btn');
   if (submitBtn && !submitBtn.getAttribute('onclick') && submitBtn.dataset.denyHandlerBound !== 'true') {
     submitBtn.addEventListener('click', (event) => {
@@ -420,7 +311,7 @@ function bindDenyModalHandlers() {
     submitBtn.dataset.denyHandlerBound = 'true';
   }
 }
-function openReplaceModal(torrentId, requestId, torrentTitle, redirectTo) {
+export function openReplaceModal(torrentId, requestId, torrentTitle, redirectTo) {
   const modal = document.getElementById('replace-modal');
   const form = document.getElementById('replace-form');
   const currentTorrentEl = document.getElementById('replace-current-torrent');
@@ -431,13 +322,13 @@ function openReplaceModal(torrentId, requestId, torrentTitle, redirectTo) {
   reason.value = '';
   modal.classList.remove('hidden');
 }
-function openReplaceModalFromElement(element, torrentId, requestId, redirectTo) {
+export function openReplaceModalFromElement(element, torrentId, requestId, redirectTo) {
   openReplaceModal(torrentId, requestId, element.dataset.torrentTitle, redirectTo);
 }
-function closeReplaceModal() {
+export function closeReplaceModal() {
   document.getElementById('replace-modal').classList.add('hidden');
 }
-function bindSelectAll(toggle, checkboxSelector) {
+export function bindSelectAll(toggle, checkboxSelector) {
   if (!toggle) return;
   if (toggle.dataset.selectAllBound === 'true') return;
   toggle.dataset.selectAllBound = 'true';
@@ -453,29 +344,11 @@ if (document.readyState === 'loading') {
 } else {
   bindDenyModalHandlers();
 }
-export {
-  showToast,
-  showSearchProgressToast,
-  postToAction,
-  setSearchActionLoading,
-  showBulkSearchStatus,
-  handleBulkRequestActionSubmit,
-  openDenyModal,
-  submitDenyRequest,
-  closeDenyModal,
-  bindDenyModalHandlers,
-  openReplaceModal,
-  openReplaceModalFromElement,
-  closeReplaceModal,
-  bindSelectAll,
-};
 // Temporary compatibility facade for HTML onclick handlers and unconverted modules.
 Object.assign(window, {
   showToast,
-  showSearchProgressToast,
   postToAction,
   setSearchActionLoading,
-  showBulkSearchStatus,
   handleBulkRequestActionSubmit,
   openDenyModal,
   submitDenyRequest,

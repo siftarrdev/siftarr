@@ -87,16 +87,6 @@ class PlexServiceLookup:
         self._cache._cache_lookup_result(media_type, cache_guids, lookup_result)
         return lookup_result
 
-    async def _find_by_guid_in_sections(
-        self,
-        guid_prefix: str,
-        guid_id: int,
-        media_type: str,
-    ) -> dict[str, Any] | None:
-        """Scan library sections to find an item by its external Guid."""
-        result = await self._scan_sections_for_guids((f"{guid_prefix}{guid_id}",), media_type)
-        return result.item
-
     async def search_show(self, title: str) -> list[dict[str, Any]]:
         """Search Plex library by title, return matching items with rating keys."""
         if not self._service.base_url or not self._service.token:

@@ -58,7 +58,6 @@ def base_context() -> Callable[[], dict[str, Any]]:
             },
             "staging_enabled": True,
             "pending_count": 0,
-            "plex_jobs": [],
         }
 
     return factory

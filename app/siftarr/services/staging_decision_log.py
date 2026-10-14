@@ -92,17 +92,6 @@ def staged_torrent_payload(torrent: StagedTorrent | None) -> dict[str, Any] | No
     }
 
 
-def _candidate_from_mapping(value: object, *, category: str | None = None) -> dict[str, Any] | None:
-    if not isinstance(value, Mapping):
-        return None
-    payload = dict(value)
-    if "size" in payload and "size_bytes" not in payload and isinstance(payload["size"], int):
-        payload["size_bytes"] = payload["size"]
-    if category is not None:
-        payload["category"] = category
-    return payload
-
-
 def _candidate_from_evaluation(
     evaluation: ReleaseEvaluation,
     *,
@@ -328,46 +317,8 @@ def log_evaluations(
     )
 
 
-def _normalize_legacy(entry: Mapping[str, Any]) -> dict[str, Any]:
-    approved = _candidate_from_mapping(entry.get("approved_torrent"), category="selected")
-    rules = _candidate_from_mapping(entry.get("rules_selected_torrent"), category="top")
-    new_torrent = _candidate_from_mapping(entry.get("new_torrent"), category="selected")
-    replaced = _candidate_from_mapping(entry.get("replaced_torrent"), category="replaced")
-    selected = (
-        approved
-        or new_torrent
-        or _candidate_from_mapping(entry.get("selected_release"), category="selected")
-    )
-    event_type = str(entry.get("event_type") or "decision")
-    return {
-        "schema_version": SCHEMA_VERSION,
-        "logged_at": entry.get("logged_at"),
-        "event_type": event_type,
-        "outcome": "replaced" if event_type == "replacement" else "approved",
-        "request": entry.get("request"),
-        "selection": {
-            "source": (selected or {}).get("selection_source"),
-            "selection_source": (selected or {}).get("selection_source"),
-            "reason": entry.get("reason"),
-        },
-        "selected_release": selected,
-        "rules_selected_release": rules,
-        "top_candidates": [c for c in (selected, rules, replaced) if c],
-        "all_candidates": [c for c in (selected, rules, replaced) if c],
-        "failures": [{"reason": entry.get("reason"), "replaced_release": replaced}]
-        if replaced
-        else [],
-        "counts": {},
-        "indexer_stats": {},
-        "search_context": {},
-    }
-
-
 def normalize_entry(entry: Mapping[str, Any]) -> dict[str, Any]:
-    if entry.get("schema_version") == SCHEMA_VERSION:
-        normalized = dict(entry)
-    else:
-        normalized = _normalize_legacy(entry)
+    normalized = dict(entry)
     for key, default in {
         "selection": {},
         "top_candidates": [],
@@ -395,7 +346,7 @@ def read_entries(
                 raw = json.loads(line)
             except json.JSONDecodeError:
                 continue
-            if not isinstance(raw, Mapping):
+            if not isinstance(raw, Mapping) or raw.get("schema_version") != SCHEMA_VERSION:
                 continue
             normalized = normalize_entry(raw)
             if include_expired or _is_retained(normalized, cutoff):
