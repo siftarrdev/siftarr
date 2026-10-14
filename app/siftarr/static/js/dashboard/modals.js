@@ -66,91 +66,70 @@ function collectBulkSearchTitles(form, searchAll = false) {
     .map((node) => getRequestTitleFromRow(searchAll ? node : node.closest('tr') || node.closest('[data-request-id]')))
     .filter(Boolean);
 }
-async function submitSearchRequest(action, body, redirectTo) {
-  const response = await fetch(action, {
-    method: 'POST',
-    body,
-    headers: { Accept: 'text/html' },
-  });
-  if (!response.ok) throw new Error('Search request failed (' + response.status + ')');
-  return response.url || redirectTo || window.location.href;
-}
-export async function postToAction(action, redirectTo, trigger = null, scope = null) {
-  const row = scope || (trigger ? trigger.closest('tr') || trigger.closest('[data-request-id]') : null);
+export async function postToAction(action, trigger, scope = null) {
+  const row = scope || trigger.closest('tr') || trigger.closest('[data-request-id]');
   const title = getRequestTitleFromRow(row);
-  if (trigger && trigger.dataset.searchAction === 'true') {
-    setSearchActionLoading(trigger);
-    disableSearchControls(row);
-    const match = action.match(/\/requests\/(\d+)\/search/);
-    const requestId = match ? parseInt(match[1], 10) : null;
-    if (requestId) {
-      let resetTrigger = function () {
-        trigger.disabled = false;
-        trigger.innerHTML = trigger.dataset.originalText || trigger.textContent;
-        trigger.removeAttribute('aria-busy');
-        if (row) {
-          row
-            .querySelectorAll('[data-search-action="true"], [data-search-submit-control="true"]')
-            .forEach((control) => {
-              control.disabled = false;
-            });
-        }
-      };
-      const isTv = String(row?.dataset.type || '').toLowerCase() === 'tv';
-      if (isTv) {
-        try {
-          const searchChoice = await window.confirmLargeTvSearch(requestId);
-          if (searchChoice === 'none') {
-            resetTrigger();
-            return;
-          }
-          if (searchChoice === 'packs') {
-            window.detailsAutoSearchStarted[requestId] = true;
-            await window.openRequestDetails(requestId, null, { focusTvScope: 'season_packs' });
-            window.isTvScopeSearchRunning = true;
-            try {
-              await window.searchAllSeasonPacks(requestId);
-            } finally {
-              window.isTvScopeSearchRunning = false;
-              resetTrigger();
-            }
-            return;
-          }
-        } catch (error) {
+  setSearchActionLoading(trigger);
+  disableSearchControls(row);
+  const match = action.match(/\/requests\/(\d+)\/search/);
+  const requestId = match ? parseInt(match[1], 10) : null;
+  if (requestId) {
+    let resetTrigger = function () {
+      trigger.disabled = false;
+      trigger.innerHTML = trigger.dataset.originalText || trigger.textContent;
+      trigger.removeAttribute('aria-busy');
+      if (row) {
+        row.querySelectorAll('[data-search-action="true"], [data-search-submit-control="true"]').forEach((control) => {
+          control.disabled = false;
+        });
+      }
+    };
+    const isTv = String(row?.dataset.type || '').toLowerCase() === 'tv';
+    if (isTv) {
+      try {
+        const searchChoice = await window.confirmLargeTvSearch(requestId);
+        if (searchChoice === 'none') {
           resetTrigger();
-          window.showToast('Could not prepare TV search: ' + error.message);
           return;
         }
-      }
-      const onComplete = function (data) {
-        window.updateRequestRow(requestId, data.result);
+        if (searchChoice === 'packs') {
+          window.detailsAutoSearchStarted[requestId] = true;
+          await window.openRequestDetails(requestId, null, { focusTvScope: 'season_packs' });
+          window.isTvScopeSearchRunning = true;
+          try {
+            await window.searchAllSeasonPacks(requestId);
+          } finally {
+            window.isTvScopeSearchRunning = false;
+            resetTrigger();
+          }
+          return;
+        }
+      } catch (error) {
         resetTrigger();
-        refreshCurrentTabContent();
-      };
-      const onError = function () {
-        resetTrigger();
-      };
-      if (isTv) {
-        window.startTvSearchProgress(
-          '/requests/' + requestId + '/search/stream',
-          'Search for new: ' + title,
-          onComplete,
-          onError,
-          '/requests/' + requestId + '/search/cancel',
-        );
-      } else {
-        window.startSearchProgress(requestId, title, onComplete, onError);
+        window.showToast('Could not prepare TV search: ' + error.message);
+        return;
       }
     }
-    return;
+    const onComplete = function (data) {
+      window.updateRequestRow(requestId, data.result);
+      resetTrigger();
+      refreshCurrentTabContent();
+    };
+    const onError = function () {
+      resetTrigger();
+    };
+    if (isTv) {
+      window.startTvSearchProgress(
+        '/requests/' + requestId + '/search/stream',
+        'Search for new: ' + title,
+        onComplete,
+        onError,
+        '/requests/' + requestId + '/search/cancel',
+      );
+    } else {
+      window.startSearchProgress(requestId, title, onComplete, onError);
+    }
   }
-  const body = new FormData();
-  body.append('redirect_to', redirectTo);
-  submitSearchRequest(action, body, redirectTo)
-    .then((url) => {
-      setTimeout(() => window.location.assign(url), 800);
-    })
-    .catch(() => {});
 }
 async function handleBulkDenyAction(event, form) {
   event.preventDefault();
