@@ -93,7 +93,7 @@ class ConnectionTester:
             return missing
 
         endpoint = f"{str(settings.overseerr_url).rstrip('/')}/api/v1/status"
-        headers = {"X-Api-Key": settings.overseerr_api_key}
+        headers = {"X-Api-Key": settings.overseerr_api_key or ""}
 
         return await ConnectionTester._probe_http(
             "Overseerr", endpoint, headers, "Invalid API key", read_version=True
@@ -115,7 +115,7 @@ class ConnectionTester:
             return missing
 
         endpoint = f"{str(settings.prowlarr_url).rstrip('/')}/api/v1/system/status"
-        headers = {"X-Api-Key": settings.prowlarr_api_key}
+        headers = {"X-Api-Key": settings.prowlarr_api_key or ""}
 
         return await ConnectionTester._probe_http(
             "Prowlarr", endpoint, headers, "Invalid API key", read_version=True
@@ -185,7 +185,7 @@ class ConnectionTester:
             return missing
 
         endpoint = f"{str(settings.plex_url).rstrip('/')}/status"
-        headers = {"X-Plex-Token": settings.plex_token, "Accept": "application/json"}
+        headers = {"X-Plex-Token": settings.plex_token or "", "Accept": "application/json"}
 
         return await ConnectionTester._probe_http(
             "Plex", endpoint, headers, "Invalid Plex token", read_version=False

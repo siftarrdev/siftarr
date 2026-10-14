@@ -3,6 +3,7 @@
 import time
 from collections import OrderedDict
 from typing import Any
+from urllib.parse import quote
 
 import httpx
 
@@ -69,8 +70,6 @@ def build_poster_url(poster_path: object) -> str | None:
     tmdb_path = extract_poster_path(poster_path)
     if not tmdb_path:
         return None
-    from urllib.parse import quote
-
     return f"/api/poster?path={quote(tmdb_path, safe='')}"
 
 
@@ -115,54 +114,26 @@ class OverseerrService:
         self.base_url = (self.settings.overseerr_url or "").rstrip("/")
         self.api_key = self.settings.overseerr_api_key
 
-    @classmethod
-    def normalize_media_status(cls, status: Any) -> str:
-        """Normalize Overseerr media status to a string label."""
+    @staticmethod
+    def _normalize(status: Any, mapping: dict[int, str]) -> str:
         if isinstance(status, str):
             return status.lower()
         if isinstance(status, int):
-            return cls.MEDIA_STATUS_MAP.get(status, f"unknown_{status}")
+            return mapping.get(status, f"unknown_{status}")
         return "unknown"
+
+    @classmethod
+    def normalize_media_status(cls, status: Any) -> str:
+        """Normalize Overseerr media status to a string label."""
+        return cls._normalize(status, cls.MEDIA_STATUS_MAP)
 
     @classmethod
     def normalize_request_status(cls, status: Any) -> str:
         """Normalize Overseerr request status to a string label."""
-        if isinstance(status, str):
-            return status.lower()
-        if isinstance(status, int):
-            return cls.REQUEST_STATUS_MAP.get(status, f"unknown_{status}")
-        return "unknown"
+        return cls._normalize(status, cls.REQUEST_STATUS_MAP)
 
     def _get_headers(self) -> dict[str, str]:
-        api_key = self.api_key
-        if api_key is None:
-            api_key = ""
-        return {"X-Api-Key": api_key}
-
-    async def _get_client(self) -> httpx.AsyncClient:
-        return await get_shared_client()
-
-    async def get_requests(
-        self,
-        status: str | None = "approved",
-        limit: int = 100,
-        skip: int = 0,
-    ) -> list[dict[str, Any]]:
-        """
-        Fetch requests from Overseerr.
-
-        Args:
-            status: Filter by request status ('approved', 'pending', etc.)
-            limit: Maximum number of results to return
-            skip: Number of results to skip for pagination
-
-        Returns:
-            List of request dictionaries from Overseerr API, or an empty list on error.
-        """
-        try:
-            return await self._fetch_requests_page(status=status, limit=limit, skip=skip)
-        except OverseerrFetchError:
-            return []
+        return {"X-Api-Key": self.api_key or ""}
 
     async def _fetch_requests_page(
         self,
@@ -175,7 +146,7 @@ class OverseerrService:
             raise OverseerrFetchError("Overseerr is not configured")
 
         endpoint = f"{self.base_url}/api/v1/request"
-        client = await self._get_client()
+        client = await get_shared_client()
         headers = self._get_headers()
         params: dict[str, Any] = {"take": limit, "skip": skip}
         if status and status != "all":
@@ -243,7 +214,7 @@ class OverseerrService:
         """Send an authenticated request. Return None if unconfigured or on network error."""
         if not self._configured:
             return None
-        client = await self._get_client()
+        client = await get_shared_client()
         try:
             return await client.request(
                 method,
