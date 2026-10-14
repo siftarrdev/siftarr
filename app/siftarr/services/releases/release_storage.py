@@ -2,7 +2,7 @@
 
 import logging
 from datetime import datetime
-from typing import Any
+from typing import Any, cast
 
 from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -26,31 +26,12 @@ def get_release_persistence_key(*, title: str, info_hash: str | None) -> str:
     return info_hash or title
 
 
-async def _purge_releases(
-    db: AsyncSession,
-    *,
-    request_id: int | None = None,
-    commit: bool = True,
-) -> dict[str, int]:
-    """Delete stored releases, optionally for one request."""
-    count_stmt = select(func.count()).select_from(Release)
-    release_delete_query = delete(Release)
-    if request_id is not None:
-        count_stmt = count_stmt.where(Release.request_id == request_id)
-        release_delete_query = release_delete_query.where(Release.request_id == request_id)
-
-    count_result = await db.scalar(count_stmt)
-    deleted_release_count = count_result or 0
-    await db.execute(release_delete_query)
-    if commit:
-        await db.commit()
-
-    return {"deleted_releases": deleted_release_count}
-
-
 async def clear_release_search_cache(db: AsyncSession) -> dict[str, int]:
     """Clear persisted release search cache."""
-    result = await _purge_releases(db)
+    count_result = await db.scalar(select(func.count()).select_from(Release))
+    result = {"deleted_releases": count_result or 0}
+    await db.execute(delete(Release))
+    await db.commit()
 
     logger.info(
         "Cleared persisted release search cache: deleted_releases=%s",
@@ -78,7 +59,7 @@ def build_prowlarr_release(release: Release) -> ProwlarrRelease:
         release_group=release.release_group,
         files=release.files,
         uploaded_by=release.uploaded_by,
-        file_paths=tuple(path for path in paths if isinstance(path, str))
+        file_paths=tuple(cast(list[str], paths))
         if isinstance(paths, list) and all(isinstance(p, str) for p in paths)
         else None,
         file_metadata_observed_at=_parse_observation_time(
@@ -150,12 +131,6 @@ def release_columns(
         if isinstance(rejection_reason, str) and rejection_reason
         else None,
         "search_source": source,
-    }
-
-
-def _evidence_columns(release: ProwlarrRelease, evaluation: ReleaseEvaluation) -> dict[str, Any]:
-    coverage = cached_parse_release_coverage(release.title)
-    return {
         "rule_evidence": compact_rule_evidence(evaluation),
         "release_parse_metadata": {
             "season_number": coverage.season_number,
@@ -229,10 +204,7 @@ async def store_search_results(
             continue
         seen_keys.add(dedupe_key)
 
-        columns = {
-            **release_columns(release, evaluation, source=source),
-            **_evidence_columns(release, evaluation),
-        }
+        columns = release_columns(release, evaluation, source=source)
 
         existing = existing_by_key.get(dedupe_key)
         if existing is not None:
@@ -333,10 +305,7 @@ async def persist_manual_release(
     existing_result = await db.execute(select(Release).where(*filters))
     record = existing_result.scalar_one_or_none()
 
-    columns = {
-        **release_columns(release, evaluation, source="manual"),
-        **_evidence_columns(release, evaluation),
-    }
+    columns = release_columns(release, evaluation, source="manual")
     if record is None:
         record = Release(request_id=request.id, **columns)
         db.add(record)

@@ -35,7 +35,6 @@ from app.siftarr.services.lifecycle.request_link_service import get_linked_overs
 from app.siftarr.services.releases.release_disposition_service import ReleaseDispositionService
 from app.siftarr.services.releases.release_parser import (
     cached_parse_release_coverage,
-    parse_season_episode,
     serialize_release_coverage,
 )
 from app.siftarr.services.releases.release_serializers import compact_rule_evidence
@@ -134,7 +133,6 @@ async def _persist_manual_candidate_uncommitted(
             request.id, record, media_type=request.media_type
         )
     prior_rejection_reason = record.rejection_reason
-    parsed = parse_season_episode(candidate.title)
     coverage = cached_parse_release_coverage(candidate.title)
     record.title = candidate.title
     record.size = candidate.size
@@ -150,8 +148,8 @@ async def _persist_manual_candidate_uncommitted(
     record.release_group = candidate.release_group
     record.uploaded_by = candidate.uploaded_by
     record.files = candidate.files
-    record.season_number = parsed.season_number
-    record.episode_number = parsed.episode_number
+    record.season_number = coverage.season_number
+    record.episode_number = coverage.episode_number
     record.season_coverage = serialize_release_coverage(coverage)
     record.score = evaluation.total_score
     record.passed_rules = evaluation.passed

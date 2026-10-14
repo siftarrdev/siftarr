@@ -5,13 +5,11 @@ import pytest
 from app.siftarr.models.request import MediaType
 from app.siftarr.services.releases.release_parser import (
     ParsedReleaseCoverage,
-    ParsedSeasonEpisode,
     is_exact_single_episode_release,
     is_multi_episode_release,
     movie_release_identity_rejection_reason,
     parse_movie_release_identity,
     parse_release_coverage,
-    parse_season_episode,
     tv_release_identity_rejection_reason,
 )
 from app.siftarr.services.releases.release_serializers import serialize_target_scope
@@ -57,9 +55,8 @@ from app.siftarr.services.releases.release_serializers import serialize_target_s
     ],
 )
 def test_parse_season_episode(text, season, episode):
-    assert parse_season_episode(text) == ParsedSeasonEpisode(
-        season_number=season, episode_number=episode
-    )
+    coverage = parse_release_coverage(text)
+    assert (coverage.season_number, coverage.episode_number) == (season, episode)
 
 
 class TestTVReleaseIdentity:
