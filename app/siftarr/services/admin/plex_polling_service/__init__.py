@@ -7,7 +7,6 @@ import contextlib
 import logging
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
-from datetime import UTC, datetime, timedelta
 from typing import Protocol, TypeVar
 
 from sqlalchemy import select
@@ -122,7 +121,6 @@ class PlexPollingService:
         self.plex = plex
         self.lifecycle = LifecycleService(db)
         self._write_lock = asyncio.Lock()
-        self._reconcile_counter: int = 0
 
     async def get_active_requests(self) -> list[Request]:
         result = await self.db.execute(
@@ -132,37 +130,8 @@ class PlexPollingService:
         )
         return list(result.scalars().all())
 
-    async def get_priority_requests(self) -> list[Request]:
-        """Return recently active requests for faster polling cycles.
-
-        Returns requests that are DOWNLOADING or were updated within the last 24 hours,
-        limited to 50 ordered by most recently updated.
-        """
-        cutoff = datetime.now(UTC) - timedelta(hours=24)
-        result = await self.db.execute(
-            select(Request)
-            .where(
-                Request.status.in_(NON_TERMINAL_REQUEST_STATUSES),
-                (Request.status == RequestStatus.DOWNLOADING) | (Request.updated_at >= cutoff),
-            )
-            .order_by(Request.updated_at.desc())
-            .limit(50)
-            .options(selectinload(Request.seasons).selectinload(Season.episodes))
-        )
-        return list(result.scalars().all())
-
-    async def poll(
-        self, on_progress: ProgressCallback | None = None, priority_only: bool = True
-    ) -> int:
-        if priority_only:
-            self._reconcile_counter += 1
-            if self._reconcile_counter >= 20:
-                self._reconcile_counter = 0
-                requests = await self.get_active_requests()
-            else:
-                requests = await self.get_priority_requests()
-        else:
-            requests = await self.get_active_requests()
+    async def poll(self, on_progress: ProgressCallback | None = None) -> int:
+        requests = await self.get_active_requests()
         if not requests:
             return 0
 
@@ -175,33 +144,7 @@ class PlexPollingService:
         return await self._apply_decisions(requests, decisions)
 
     async def check_request(self, request_or_id: Request | int) -> CheckRequestResult:
-        if isinstance(request_or_id, int):
-            request_id = request_or_id
-            req = await self._load_request(request_id)
-        else:
-            request_id = int(request_or_id.id)
-            req = request_or_id
-        if req is None:
-            return CheckRequestResult(request_id=request_id)
-
-        before_status = req.status
-        decision = await self._probe_single_request(req, partial_tv_match=True)
-        if decision is None:
-            return CheckRequestResult(
-                request_id=req.id,
-                status_before=before_status,
-                status_after=req.status,
-            )
-
-        await self._run_serialized_write(self._apply_decision(req, decision))
-        return CheckRequestResult(
-            request_id=req.id,
-            matched=True,
-            available=True,
-            status_before=before_status,
-            status_after=req.status,
-            reason=decision.reason,
-        )
+        return await self.check_completed_download_waiting_for_plex(request_or_id)
 
     async def check_completed_download_waiting_for_plex(
         self,
@@ -334,6 +277,11 @@ class PlexPollingService:
             return configured
         return max(1, get_settings().plex_sync_concurrency)
 
+    @staticmethod
+    async def _emit(on_progress: ProgressCallback | None, payload: dict[str, object]) -> None:
+        if on_progress is not None:
+            await maybe_await(on_progress(payload))
+
     async def _probe_requests(
         self,
         requests: list[Request],
@@ -342,10 +290,6 @@ class PlexPollingService:
         on_progress: ProgressCallback | None,
         partial_tv_match: bool,
     ) -> list[_PollDecision]:
-        async def emit(payload: dict[str, object]) -> None:
-            if on_progress is not None:
-                await maybe_await(on_progress(payload))
-
         active_titles: list[str] = []
         active_lock = asyncio.Lock()
         started = 0
@@ -356,13 +300,8 @@ class PlexPollingService:
             nonlocal started, finished
             title = req.title or f"Request #{req.id}"
 
-            async with active_lock:
-                active_titles.append(title)
-                started += 1
-                active_snapshot = active_titles[:16]
-
-            await emit(
-                {
+            def progress_base() -> dict[str, object]:
+                return {
                     "phase": phase,
                     "current": finished,
                     "total": len(requests),
@@ -374,24 +313,18 @@ class PlexPollingService:
                     "request_id": req.id,
                     "concurrency_limit": concurrency_limit,
                 }
-            )
+
+            async with active_lock:
+                active_titles.append(title)
+                started += 1
+                active_snapshot = active_titles[:16]
+
+            await self._emit(on_progress, progress_base())
 
             async def emit_detail(detail: str, item_progress: float) -> None:
-                await emit(
-                    {
-                        "phase": phase,
-                        "current": finished,
-                        "total": len(requests),
-                        "title": title,
-                        "active": active_snapshot,
-                        "started": started,
-                        "completed": finished,
-                        "media_type": req.media_type.value,
-                        "request_id": req.id,
-                        "concurrency_limit": concurrency_limit,
-                        "detail": detail,
-                        "item_progress": item_progress,
-                    }
+                await self._emit(
+                    on_progress,
+                    {**progress_base(), "detail": detail, "item_progress": item_progress},
                 )
 
             try:
@@ -414,20 +347,7 @@ class PlexPollingService:
                     finished += 1
                     active_snapshot = active_titles[:16]
 
-                await emit(
-                    {
-                        "phase": phase,
-                        "current": finished,
-                        "total": len(requests),
-                        "title": title,
-                        "active": active_snapshot,
-                        "started": started,
-                        "completed": finished,
-                        "media_type": req.media_type.value,
-                        "request_id": req.id,
-                        "concurrency_limit": concurrency_limit,
-                    }
-                )
+                await self._emit(on_progress, progress_base())
 
         results = await gather_limited(requests, concurrency_limit, run)
         return [decision for decision in results if decision is not None]
@@ -514,10 +434,6 @@ class PlexPollingService:
         *,
         on_progress: ProgressCallback | None,
     ) -> tuple[list[_PollDecision], int]:
-        async def emit(payload: dict[str, object]) -> None:
-            if on_progress is not None:
-                await maybe_await(on_progress(payload))
-
         decisions: list[_PollDecision] = []
         skipped_on_error = 0
         matched_requests = [
@@ -525,14 +441,15 @@ class PlexPollingService:
         ]
 
         for index, req in enumerate(matched_requests, start=1):
-            await emit(
+            await self._emit(
+                on_progress,
                 {
                     "phase": "scan_recent",
                     "current": index,
                     "total": len(matched_requests),
                     "title": req.title or f"Request #{req.id}",
                     "active": [],
-                }
+                },
             )
 
             item = self._find_recent_item_for_request(req, recent_items)
@@ -562,17 +479,13 @@ class PlexPollingService:
         *,
         on_progress: ProgressCallback | None,
     ) -> tuple[list[_PollDecision], int]:
-        async def emit(payload: dict[str, object]) -> None:
-            if on_progress is not None:
-                await maybe_await(on_progress(payload))
-
-        decisions: list[_PollDecision] = []
         skipped_on_error = 0
         concurrency_limit = self._get_concurrency_limit()
 
         async def run(req: Request) -> _PollDecision | None:
             nonlocal skipped_on_error
-            await emit(
+            await self._emit(
+                on_progress,
                 {
                     "phase": "scan_recent_targeted",
                     "total": len(requests),
@@ -581,7 +494,7 @@ class PlexPollingService:
                     "media_type": req.media_type.value,
                     "active": [],
                     "concurrency_limit": concurrency_limit,
-                }
+                },
             )
             try:
                 return await self._probe_single_request(req, partial_tv_match=True)
@@ -595,8 +508,7 @@ class PlexPollingService:
                 return None
 
         results = await gather_limited(requests, concurrency_limit, run)
-        decisions.extend(decision for decision in results if decision is not None)
-        return decisions, skipped_on_error
+        return [decision for decision in results if decision is not None], skipped_on_error
 
     async def _probe_request_from_recent_item(
         self,
@@ -814,7 +726,6 @@ class PlexPollingService:
 __all__ = [
     "CheckRequestResult",
     "HasMetrics",
-    "NON_TERMINAL_REQUEST_STATUSES",
     "PlexJobResult",
     "PlexPollingService",
     "PlexPollResult",

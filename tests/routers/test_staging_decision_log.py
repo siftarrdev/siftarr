@@ -13,8 +13,9 @@ from itsdangerous import TimestampSigner
 
 from app.siftarr.config import reload_settings
 from app.siftarr.main import create_app
-from app.siftarr.routers import auth_router, staged
+from app.siftarr.routers import auth_router
 from app.siftarr.routers import settings as settings_router
+from app.siftarr.services import staging_decision_log
 
 
 class MemorySettingsStore:
@@ -43,7 +44,9 @@ def client(monkeypatch, tmp_path) -> Iterator[TestClient]:
     reload_settings()
     monkeypatch.setattr(auth_router, "SettingsStore", MemorySettingsStore)
     monkeypatch.setattr(settings_router, "SettingsStore", MemorySettingsStore)
-    monkeypatch.setattr(staged, "STAGING_DECISION_LOG_PATH", tmp_path / "decision-log.jsonl")
+    monkeypatch.setattr(
+        staging_decision_log, "STAGING_DECISION_LOG_PATH", tmp_path / "decision-log.jsonl"
+    )
     app = create_app()
     app.dependency_overrides[auth_router.get_db] = _fake_db
     app.dependency_overrides[settings_router.get_db] = _fake_db
@@ -55,7 +58,7 @@ def client(monkeypatch, tmp_path) -> Iterator[TestClient]:
 
 
 def _write_log(*entries: dict) -> None:
-    staged.STAGING_DECISION_LOG_PATH.write_text(
+    staging_decision_log.STAGING_DECISION_LOG_PATH.write_text(
         "\n".join(json.dumps(entry) for entry in entries) + "\nnot-json\n",
         encoding="utf-8",
     )

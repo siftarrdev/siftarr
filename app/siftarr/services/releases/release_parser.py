@@ -6,12 +6,6 @@ from dataclasses import dataclass
 
 
 @dataclass
-class ParsedSeasonEpisode:
-    season_number: int | None
-    episode_number: int | None
-
-
-@dataclass
 class ParsedReleaseCoverage:
     season_numbers: tuple[int, ...]
     episode_number: int | None
@@ -358,14 +352,7 @@ def _append_unique(numbers: list[int], values: tuple[int, ...]) -> None:
             numbers.append(value)
 
 
-def _is_complete_series_match(
-    title: str,
-    season_numbers: tuple[int, ...],
-    episode_number: int | None,
-) -> bool:
-    if episode_number is not None:
-        return False
-
+def _is_complete_series_match(title: str, season_numbers: tuple[int, ...]) -> bool:
     if not any(pattern.search(title) for pattern in _COMPLETE_SERIES_PATTERNS):
         return False
 
@@ -436,29 +423,9 @@ def parse_release_coverage(title: str) -> ParsedReleaseCoverage:
     return ParsedReleaseCoverage(
         season_numbers=parsed_season_numbers,
         episode_number=None,
-        is_complete_series=_is_complete_series_match(
-            title,
-            parsed_season_numbers,
-            None,
-        ),
+        is_complete_series=_is_complete_series_match(title, parsed_season_numbers),
     )
 
 
 cached_parse_release_coverage = functools.lru_cache(maxsize=4096)(parse_release_coverage)
 """Cached wrapper to avoid repeated parsing of identical release titles."""
-
-
-def parse_season_episode(title: str) -> ParsedSeasonEpisode:
-    """Parse a release title to extract season and episode numbers.
-
-    Returns:
-        ParsedSeasonEpisode with:
-        - season_number=None, episode_number=None — unknown/unparsed
-        - season_number=N, episode_number=None — season pack for season N
-        - season_number=N, episode_number=M — specific episode SNE M
-    """
-    coverage = cached_parse_release_coverage(title)
-    return ParsedSeasonEpisode(
-        season_number=coverage.season_number,
-        episode_number=coverage.episode_number,
-    )

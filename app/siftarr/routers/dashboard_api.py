@@ -2,7 +2,6 @@
 
 import logging
 from datetime import datetime
-from typing import Any
 
 from fastapi import APIRouter, BackgroundTasks, Depends
 from fastapi.responses import JSONResponse
@@ -15,11 +14,6 @@ from app.siftarr.services.dashboard.dashboard_service import (
     serialize_request_details_response,
 )
 from app.siftarr.services.dashboard.detail_service import DetailService
-from app.siftarr.services.dashboard.tv_details_service import (
-    compute_sync_metadata,
-    count_season_episode_states,
-    load_tv_seasons_with_episodes,
-)
 from app.siftarr.services.integrations.plex_service import PlexService
 from app.siftarr.services.request_service import load_request_or_404
 from app.siftarr.services.search_history_service import SearchHistoryService
@@ -91,59 +85,6 @@ async def request_search_history(
         started_before=_parse_datetime(started_before),
     )
     return JSONResponse(payload)
-
-
-@router.get("/{request_id}/seasons")
-async def get_request_seasons(
-    request_id: int,
-    background_tasks: BackgroundTasks,
-    db: AsyncSession = Depends(get_db),
-) -> JSONResponse:
-    """Get seasons and episodes for a TV request."""
-    request = await load_request_or_404(db, request_id)
-
-    if request.media_type != MediaType.TV:
-        return JSONResponse({"seasons": [], "message": "Request is not a TV show"})
-
-    seasons, episodes = await load_tv_seasons_with_episodes(db, request_id)
-    episodes_by_season: dict[int, list[Any]] = {}
-    for episode in episodes:
-        episodes_by_season.setdefault(episode.season_id, []).append(episode)
-    sync_state = compute_sync_metadata(
-        seasons,
-        episodes_by_season,
-        request_id,
-        background_tasks,
-    )
-
-    seasons_data = []
-    for season in seasons:
-        season_episodes = episodes_by_season.get(season.id, [])
-
-        season_data = {
-            "id": season.id,
-            "season_number": season.season_number,
-            "status": season.status.value,
-            "synced_at": season.synced_at.isoformat() if season.synced_at else None,
-            "pending_count": count_season_episode_states(season_episodes)["pending"],
-            "unreleased_count": count_season_episode_states(season_episodes)["unreleased"],
-            "episodes": [
-                {
-                    "id": ep.id,
-                    "episode_number": ep.episode_number,
-                    "title": ep.title,
-                    "air_date": ep.air_date.isoformat() if ep.air_date else None,
-                    "status": ep.status.value,
-                }
-                for ep in season_episodes
-            ],
-        }
-        seasons_data.append(season_data)
-
-    return JSONResponse(
-        {"seasons": seasons_data, "sync_state": sync_state},
-        background=background_tasks,
-    )
 
 
 @router.post("/{request_id}/refresh-plex")

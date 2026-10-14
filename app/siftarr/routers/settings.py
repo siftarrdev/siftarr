@@ -3,7 +3,7 @@
 import json
 import logging
 import os
-import secrets
+from collections.abc import Awaitable, Callable
 from typing import Any
 
 from fastapi import APIRouter, Depends, File, Form, Query, Request, UploadFile
@@ -17,7 +17,13 @@ from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.siftarr.config import get_settings, reload_settings
+from app.siftarr.config import (
+    generate_api_key,
+    get_settings,
+    normalize_full_sync_frequency,
+    normalize_full_sync_time,
+    reload_settings,
+)
 from app.siftarr.database import get_db
 from app.siftarr.services.admin.settings_service import (
     ENV_KEY_MAP,
@@ -100,7 +106,7 @@ async def _build_settings_page_context(
     return await build_settings_page_context_svc(
         request,
         db,
-        effective_settings_override=effective_settings,
+        effective_settings=effective_settings,
     )
 
 
@@ -134,23 +140,6 @@ def _qbit_move_message(result) -> tuple[str, str]:
         f"Moved {result.moved}, removed {result.removed}, errors {result.errors}.",
         "success" if result.errors == 0 else "error",
     )
-
-
-def _coerce_full_sync_frequency(value: str | None) -> str:
-    normalized = (value or "daily").strip().lower()
-    return normalized if normalized in {"daily", "weekly"} else "daily"
-
-
-def _coerce_time(value: str | None, default: str = "03:00") -> str:
-    try:
-        hour_str, minute_str = (value or default).strip().split(":", maxsplit=1)
-        hour = int(hour_str)
-        minute = int(minute_str)
-    except ValueError:
-        return default
-    if 0 <= hour <= 23 and 0 <= minute <= 59:
-        return f"{hour:02d}:{minute:02d}"
-    return default
 
 
 def _restart_scheduler_if_running() -> None:
@@ -217,13 +206,17 @@ async def save_connections(
     """Save connection settings as runtime environment overrides."""
     del request
     store = SettingsStore(db)
-    await _apply_runtime_setting(store, "overseerr_url", overseerr_url or "")
-    await _apply_runtime_setting(store, "overseerr_api_key", overseerr_api_key or "")
-    await _apply_runtime_setting(store, "prowlarr_url", prowlarr_url or "")
-    await _apply_runtime_setting(store, "prowlarr_api_key", prowlarr_api_key or "")
-    await _apply_runtime_setting(store, "qbittorrent_url", qbittorrent_url or "")
-    await _apply_runtime_setting(store, "qbittorrent_api_key", qbittorrent_api_key or "")
-    await _apply_runtime_setting(store, "plex_url", plex_url or "")
+    connection_values = {
+        "overseerr_url": overseerr_url,
+        "overseerr_api_key": overseerr_api_key,
+        "prowlarr_url": prowlarr_url,
+        "prowlarr_api_key": prowlarr_api_key,
+        "qbittorrent_url": qbittorrent_url,
+        "qbittorrent_api_key": qbittorrent_api_key,
+        "plex_url": plex_url,
+    }
+    for key, value in connection_values.items():
+        await _apply_runtime_setting(store, key, value or "")
     if tz:
         await _apply_runtime_setting(store, "tz", tz)
     await db.commit()
@@ -293,9 +286,11 @@ async def save_scheduler_settings(
     await _apply_runtime_setting(
         store,
         "plex_full_sync_frequency",
-        _coerce_full_sync_frequency(plex_full_sync_frequency),
+        normalize_full_sync_frequency(plex_full_sync_frequency),
     )
-    await _apply_runtime_setting(store, "plex_full_sync_time", _coerce_time(plex_full_sync_time))
+    await _apply_runtime_setting(
+        store, "plex_full_sync_time", normalize_full_sync_time(plex_full_sync_time)
+    )
     await db.commit()
     _restart_scheduler_if_running()
     return RedirectResponse(url="/settings?scheduler_saved=true", status_code=303)
@@ -429,88 +424,72 @@ async def restore_settings_backup(
 # ── Connection testing API routes ─────────────────────────────────────────
 
 
-@router.post("/api/test/overseerr", response_model=ConnectionTestResponse)
-async def test_overseerr_connection(db: AsyncSession = Depends(get_db)) -> ConnectionTestResponse:
-    """Test connection to Overseerr."""
-    result: ConnectionTestResult = await ConnectionTester.test_overseerr(
-        await _get_runtime_settings(db)
-    )
+def _connection_testers() -> dict[str, Callable[[Any], Awaitable[ConnectionTestResult]]]:
+    """Return the service testers in the order "test all" runs them.
+
+    Built per call so the current ``ConnectionTester`` attributes are read.
+    """
+    return {
+        "plex": ConnectionTester.test_plex,
+        "overseerr": ConnectionTester.test_overseerr,
+        "prowlarr": ConnectionTester.test_prowlarr,
+        "qbittorrent": ConnectionTester.test_qbittorrent,
+    }
+
+
+def _to_response(service: str, result: ConnectionTestResult) -> ConnectionTestResponse:
     return ConnectionTestResponse(
-        service="overseerr",
+        service=service,
         success=result.success,
         message=result.message,
         details=result.details,
     )
+
+
+async def _test_connection(service: str, db: AsyncSession) -> ConnectionTestResponse:
+    tester = _connection_testers()[service]
+    return _to_response(service, await tester(await _get_runtime_settings(db)))
+
+
+@router.post("/api/test/overseerr", response_model=ConnectionTestResponse)
+async def test_overseerr_connection(db: AsyncSession = Depends(get_db)) -> ConnectionTestResponse:
+    """Test connection to Overseerr."""
+    return await _test_connection("overseerr", db)
 
 
 @router.post("/api/test/prowlarr", response_model=ConnectionTestResponse)
 async def test_prowlarr_connection(db: AsyncSession = Depends(get_db)) -> ConnectionTestResponse:
     """Test connection to Prowlarr."""
-    result: ConnectionTestResult = await ConnectionTester.test_prowlarr(
-        await _get_runtime_settings(db)
-    )
-    return ConnectionTestResponse(
-        service="prowlarr",
-        success=result.success,
-        message=result.message,
-        details=result.details,
-    )
+    return await _test_connection("prowlarr", db)
 
 
 @router.post("/api/test/qbittorrent", response_model=ConnectionTestResponse)
 async def test_qbittorrent_connection(db: AsyncSession = Depends(get_db)) -> ConnectionTestResponse:
     """Test connection to qBittorrent."""
-    result: ConnectionTestResult = await ConnectionTester.test_qbittorrent(
-        await _get_runtime_settings(db)
-    )
-    return ConnectionTestResponse(
-        service="qbittorrent",
-        success=result.success,
-        message=result.message,
-        details=result.details,
-    )
+    return await _test_connection("qbittorrent", db)
 
 
 @router.post("/api/test/plex", response_model=ConnectionTestResponse)
 async def test_plex_connection(db: AsyncSession = Depends(get_db)) -> ConnectionTestResponse:
     """Test connection to Plex."""
-    result: ConnectionTestResult = await ConnectionTester.test_plex(await _get_runtime_settings(db))
-    return ConnectionTestResponse(
-        service="plex",
-        success=result.success,
-        message=result.message,
-        details=result.details,
-    )
+    return await _test_connection("plex", db)
 
 
 @router.post("/api/test/all", response_model=list[ConnectionTestResponse])
 async def test_all_connections(db: AsyncSession = Depends(get_db)) -> list[ConnectionTestResponse]:
     """Test connections to all services."""
     effective_settings = await _get_runtime_settings(db)
-    results = []
-    for service_name, tester in [
-        ("plex", ConnectionTester.test_plex),
-        ("overseerr", ConnectionTester.test_overseerr),
-        ("prowlarr", ConnectionTester.test_prowlarr),
-        ("qbittorrent", ConnectionTester.test_qbittorrent),
-    ]:
-        result: ConnectionTestResult = await tester(effective_settings)
-        results.append(
-            ConnectionTestResponse(
-                service=service_name,
-                success=result.success,
-                message=result.message,
-                details=result.details,
-            )
-        )
-    return results
+    return [
+        _to_response(service_name, await tester(effective_settings))
+        for service_name, tester in _connection_testers().items()
+    ]
 
 
 # ── API Key management ────────────────────────────────────────────────────
 
 
 @router.get("/api/api-key", response_model=ApiKeyResponse)
-async def get_api_key(db: AsyncSession = Depends(get_db)) -> ApiKeyResponse:
+async def get_api_key() -> ApiKeyResponse:
     """Get the current API key."""
     settings = get_settings()
     return ApiKeyResponse(
@@ -522,17 +501,8 @@ async def get_api_key(db: AsyncSession = Depends(get_db)) -> ApiKeyResponse:
 @router.post("/api/api-key/regenerate", response_model=ApiKeyResponse)
 async def regenerate_api_key(db: AsyncSession = Depends(get_db)) -> ApiKeyResponse:
     """Generate a new API key and persist it."""
-    new_key = secrets.token_urlsafe(32)
-    store = SettingsStore(db)
-    await store.set("api_key", new_key)
-
-    # Push to runtime environment
-    env_name = ENV_KEY_MAP.get("api_key", "SIFTARR_API_KEY")
-    os.environ[env_name] = new_key
-
-    # Reload settings so the app uses the new key
-    reload_settings()
-
+    new_key = generate_api_key()
+    await _apply_runtime_setting(SettingsStore(db), "api_key", new_key)
     await db.commit()
     return ApiKeyResponse(
         api_key=new_key,

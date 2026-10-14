@@ -1,18 +1,33 @@
 """Service for testing connections to external services."""
 
+from dataclasses import dataclass
+
 import httpx
 
 from app.siftarr.config import Settings
 from app.siftarr.services.utils.http_client import get_shared_client
 
 
+@dataclass
 class ConnectionTestResult:
     """Result of a connection test."""
 
-    def __init__(self, success: bool, message: str, details: str | None = None):
-        self.success = success
-        self.message = message
-        self.details = details
+    success: bool
+    message: str
+    details: str | None = None
+
+
+def _missing_config(
+    label: str, url: object, secret: str | None, secret_name: str
+) -> ConnectionTestResult | None:
+    """Return a failure result when the URL or secret is not configured."""
+    if not url:
+        return ConnectionTestResult(success=False, message=f"{label} URL is not configured")
+    if not secret:
+        return ConnectionTestResult(
+            success=False, message=f"{label} {secret_name} is not configured"
+        )
+    return None
 
 
 class ConnectionTester:
@@ -72,20 +87,13 @@ class ConnectionTester:
         Returns:
             ConnectionTestResult with success status and message.
         """
-        if not settings.overseerr_url:
-            return ConnectionTestResult(
-                success=False,
-                message="Overseerr URL is not configured",
-            )
-
-        if not settings.overseerr_api_key:
-            return ConnectionTestResult(
-                success=False,
-                message="Overseerr API key is not configured",
-            )
+        if missing := _missing_config(
+            "Overseerr", settings.overseerr_url, settings.overseerr_api_key, "API key"
+        ):
+            return missing
 
         endpoint = f"{str(settings.overseerr_url).rstrip('/')}/api/v1/status"
-        headers = {"X-Api-Key": settings.overseerr_api_key}
+        headers = {"X-Api-Key": settings.overseerr_api_key or ""}
 
         return await ConnectionTester._probe_http(
             "Overseerr", endpoint, headers, "Invalid API key", read_version=True
@@ -101,20 +109,13 @@ class ConnectionTester:
         Returns:
             ConnectionTestResult with success status and message.
         """
-        if not settings.prowlarr_url:
-            return ConnectionTestResult(
-                success=False,
-                message="Prowlarr URL is not configured",
-            )
-
-        if not settings.prowlarr_api_key:
-            return ConnectionTestResult(
-                success=False,
-                message="Prowlarr API key is not configured",
-            )
+        if missing := _missing_config(
+            "Prowlarr", settings.prowlarr_url, settings.prowlarr_api_key, "API key"
+        ):
+            return missing
 
         endpoint = f"{str(settings.prowlarr_url).rstrip('/')}/api/v1/system/status"
-        headers = {"X-Api-Key": settings.prowlarr_api_key}
+        headers = {"X-Api-Key": settings.prowlarr_api_key or ""}
 
         return await ConnectionTester._probe_http(
             "Prowlarr", endpoint, headers, "Invalid API key", read_version=True
@@ -130,17 +131,10 @@ class ConnectionTester:
         Returns:
             ConnectionTestResult with success status and message.
         """
-        if not settings.qbittorrent_url:
-            return ConnectionTestResult(
-                success=False,
-                message="qBittorrent URL is not configured",
-            )
-
-        if not settings.qbittorrent_api_key:
-            return ConnectionTestResult(
-                success=False,
-                message="qBittorrent API key is not configured",
-            )
+        if missing := _missing_config(
+            "qBittorrent", settings.qbittorrent_url, settings.qbittorrent_api_key, "API key"
+        ):
+            return missing
 
         try:
             import qbittorrentapi
@@ -187,20 +181,11 @@ class ConnectionTester:
         Returns:
             ConnectionTestResult with success status and message.
         """
-        if not settings.plex_url:
-            return ConnectionTestResult(
-                success=False,
-                message="Plex URL is not configured",
-            )
-
-        if not settings.plex_token:
-            return ConnectionTestResult(
-                success=False,
-                message="Plex token is not configured",
-            )
+        if missing := _missing_config("Plex", settings.plex_url, settings.plex_token, "token"):
+            return missing
 
         endpoint = f"{str(settings.plex_url).rstrip('/')}/status"
-        headers = {"X-Plex-Token": settings.plex_token, "Accept": "application/json"}
+        headers = {"X-Plex-Token": settings.plex_token or "", "Accept": "application/json"}
 
         return await ConnectionTester._probe_http(
             "Plex", endpoint, headers, "Invalid Plex token", read_version=False

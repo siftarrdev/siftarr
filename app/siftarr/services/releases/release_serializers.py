@@ -473,19 +473,13 @@ def serialize_active_staged_torrent(
     media_type: MediaType,
 ) -> dict[str, object]:
     """Serialize staged-torrent metadata for dashboard selection state."""
-    coverage = cached_parse_release_coverage(staged_torrent.title)
     release_identity = _load_staged_release_identity(staged_torrent)
     payload = {
         "id": staged_torrent.id,
         "title": staged_torrent.title,
         "status": staged_torrent.status,
         "selection_source": staged_torrent.selection_source,
-        "target_scope": serialize_target_scope(
-            media_type=media_type,
-            title=staged_torrent.title,
-            season_number=coverage.season_number,
-            episode_number=coverage.episode_number,
-        ),
+        "target_scope": serialize_target_scope(media_type=media_type, title=staged_torrent.title),
     }
     info_hash = release_identity.get("info_hash")
     model_magnet = getattr(staged_torrent, "magnet_url", None)

@@ -12,6 +12,7 @@ from app.siftarr.models import Base, Release, Request, StagedTorrent
 from app.siftarr.models.request import MediaType, RequestStatus
 from app.siftarr.models.rule import RuleType
 from app.siftarr.routers import staged
+from app.siftarr.services import staging_decision_log
 from app.siftarr.services.decisions.rule_engine import clear_engine_caches
 from app.siftarr.services.decisions.rule_service import RuleService
 from app.siftarr.services.releases.release_disposition_service import ReleaseDispositionService
@@ -25,7 +26,9 @@ async def approval_db(monkeypatch, tmp_path):
     clear_engine_caches()
     settings = Settings(secret_key="test-only")
     monkeypatch.setattr(staged, "get_settings", lambda: settings)
-    monkeypatch.setattr(staged, "STAGING_DECISION_LOG_PATH", tmp_path / "decisions.jsonl")
+    monkeypatch.setattr(
+        staging_decision_log, "STAGING_DECISION_LOG_PATH", tmp_path / "decisions.jsonl"
+    )
     monkeypatch.setattr(staged, "approve_overseerr_request_best_effort", AsyncMock())
     async with async_sessionmaker(engine, expire_on_commit=False)() as db:
         yield db

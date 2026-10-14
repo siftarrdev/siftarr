@@ -23,7 +23,6 @@ from app.siftarr.services.integrations.qbittorrent_service import (
     QbittorrentService,
 )
 from app.siftarr.services.lifecycle.activity_log_service import ActivityLogService
-from app.siftarr.services.lifecycle.lifecycle_service import LifecycleService
 from app.siftarr.services.lifecycle.overseerr_sync_service import (
     approve_overseerr_request_best_effort,
 )
@@ -34,17 +33,13 @@ from app.siftarr.services.releases.release_serializers import (
 from app.siftarr.services.utils.torrent_identity import (
     extract_torrent_hash,
     normalize_torrent_name,
+    parse_qbit_progress,
 )
 
 logger = logging.getLogger(__name__)
 
 
-def _extract_hash(magnet_url: str | None, torrent_path: str | None = None) -> str | None:
-    """Extract the info-hash from a magnet URI, or compute it from a .torrent file."""
-    return extract_torrent_hash(magnet_url, torrent_path)
-
-
-def _download_completed_torrent_ids(details: str | None) -> set[int]:
+def download_completed_torrent_ids(details: str | None) -> set[int]:
     if not details:
         return set()
     try:
@@ -64,28 +59,6 @@ def _download_completed_torrent_ids(details: str | None) -> set[int]:
     return torrent_ids
 
 
-def _normalize_name(name: str) -> str:
-    """Normalize a torrent name for loose matching.
-
-    Replaces runs of non-alphanumeric characters with a single space and
-    lowercases, so that e.g. ``"Finding.Carter.S01-S02.1080p.WEB-DL"``
-    and ``"Finding Carter S01-S02 1080p WEB-DL"`` compare as equal.
-    """
-    return normalize_torrent_name(name)
-
-
-def _qbit_progress(value: object) -> float | None:
-    if isinstance(value, bool):
-        return None
-    if isinstance(value, int | float | str):
-        try:
-            parsed = float(value)
-        except ValueError:
-            return None
-        return parsed if 0 <= parsed <= 1 else None
-    return None
-
-
 class DownloadCompletionService:
     """Checks finished downloads and reconciles request availability via Plex."""
 
@@ -101,7 +74,6 @@ class DownloadCompletionService:
         self.db = db
         self.qbittorrent = qbittorrent_service
         self.plex_polling = plex_polling_service
-        self.lifecycle = LifecycleService(db)
 
     async def check_downloading_requests(self) -> int:
         """Check all approved torrents and reconcile requests when downloads finish.
@@ -132,7 +104,7 @@ class DownloadCompletionService:
         )
         rows = [
             (torrent, request)
-            for torrent, request in list((await self.db.execute(stmt)).all())
+            for torrent, request in (await self.db.execute(stmt)).all()
             if not is_terminal_request_status(request.status)
         ]
 
@@ -167,33 +139,28 @@ class DownloadCompletionService:
         for torrent, _request in rows:
             # Prefer the stored info_hash (most reliable), then fall back to
             # extracting from magnet URI or computing from the .torrent file.
-            torrent_hash = _extract_hash(torrent.magnet_url, torrent.torrent_path)
+            torrent_hash = extract_torrent_hash(torrent.magnet_url, torrent.torrent_path)
             stored_hash = torrent.info_hash
             if stored_hash and stored_hash.strip().casefold() != "ok.":
                 torrent_hash = stored_hash
             info: dict[str, Any] | None = None
-            progress: float | None = None
 
             if torrent_hash:
                 info = by_hash.get(torrent_hash.lower())
-                if info is not None:
-                    progress = info.get("progress")
             else:
                 # No hash available — fall back to name matching with
                 # normalised separators (spaces vs dots vs dashes).
-                title_norm = _normalize_name(torrent.title)
-                matched = next(
+                title_norm = normalize_torrent_name(torrent.title)
+                info = next(
                     (t for qname, t in by_name.items() if title_norm in qname),
                     None,
                 )
-                if matched is not None:
-                    info = matched
-                    progress = info.get("progress")
+            progress = info.get("progress") if info else None
 
             # A missing torrent is not completion evidence.  It may have been
             # deleted, lost, or hidden by an outage.  Only an observed progress
             # value at 100% can start Plex reconciliation.
-            numeric_progress = _qbit_progress(progress)
+            numeric_progress = parse_qbit_progress(progress)
             qbit_done = numeric_progress is not None and numeric_progress >= 1.0
             qbit_evidence_by_torrent_id[torrent.id] = {
                 "torrent_id": torrent.id,
@@ -246,7 +213,7 @@ class DownloadCompletionService:
             if request_id is None:
                 continue
             completed_torrent_ids_by_request.setdefault(request_id, set()).update(
-                _download_completed_torrent_ids(details)
+                download_completed_torrent_ids(details)
             )
 
         for request_id, (request, torrents, done_torrents) in ready_request_map.items():
@@ -265,7 +232,7 @@ class DownloadCompletionService:
                 reason="qbit_completion_evidence",
             )
 
-            existing_torrent_ids = completed_torrent_ids_by_request.setdefault(request_id, set())
+            existing_torrent_ids = completed_torrent_ids_by_request[request_id]
             newly_done_torrents = [t for t in done_torrents if t.id not in existing_torrent_ids]
             if newly_done_torrents:
                 await activity_log.log(
@@ -292,9 +259,11 @@ class DownloadCompletionService:
                 continue
 
             try:
-                reconcile_result = await self._check_completed_download_waiting_for_plex(
-                    request,
-                    done_torrents,
+                reconcile_result = (
+                    await self.plex_polling.check_completed_download_waiting_for_plex(
+                        request,
+                        episode_keys=self._covered_episode_keys(request, done_torrents),
+                    )
                 )
                 self._plex_error_backoff_until_by_request_id.pop(request_id, None)
 
@@ -314,8 +283,7 @@ class DownloadCompletionService:
                     )
                     await self.db.commit()
 
-                    logger.log(
-                        logging.INFO,
+                    logger.info(
                         "DownloadCompletionService: checked request_id=%s title=%s via Plex (%s)",
                         request_id,
                         request.title,
@@ -336,16 +304,6 @@ class DownloadCompletionService:
 
         logger.info("DownloadCompletionService: completed %d request(s) this cycle", completed)
         return completed
-
-    async def _check_completed_download_waiting_for_plex(
-        self,
-        request: Request,
-        done_torrents: list[StagedTorrent],
-    ):
-        return await self.plex_polling.check_completed_download_waiting_for_plex(
-            request,
-            episode_keys=self._covered_episode_keys(request, done_torrents),
-        )
 
     def _covered_episode_keys(
         self,

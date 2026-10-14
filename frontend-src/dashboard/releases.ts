@@ -629,7 +629,7 @@ function stagedScopeLabel(staged) {
 
 // Synthetic row for a staged pack with no cached release row. Mirrors the
 // recessed dark staged card, minus the score/meta the cache would have carried.
-function renderStagedPackRow(staged, _requestId) {
+function renderStagedPackRow(staged) {
   const actions = staged.id
     ? '<div class="ml-auto flex items-center gap-1.5 shrink-0">' +
       renderIconAction('stage', 'Already staged for review', '', true) +
@@ -671,10 +671,10 @@ function renderStagedPackRow(staged, _requestId) {
   );
 }
 
-function renderStagedPackRows(stagedPacks, requestId) {
+function renderStagedPackRows(stagedPacks) {
   return (stagedPacks || [])
     .map(function (staged) {
-      return renderStagedPackRow(staged, requestId);
+      return renderStagedPackRow(staged);
     })
     .join('');
 }
@@ -717,7 +717,7 @@ function renderSeasonPacksDrawer(requestId, season, seasonPacks, stagedPacks) {
     '-' +
     seasonNumber +
     '">' +
-    renderStagedPackRows(orphanStaged, requestId) +
+    renderStagedPackRows(orphanStaged) +
     // With a staged pack shown, the "nothing cached" prompt would be
     // actively confusing, so it is suppressed.
     (seasonPacks.length || !orphanStaged.length ? renderSeasonPackRows(seasonPacks, requestId, season) : '') +
@@ -757,7 +757,7 @@ function renderSeasonPackGroup(requestId, season, seasonPacks, stagedPacks) {
     '-' +
     seasonNumber +
     '">' +
-    renderStagedPackRows(orphanStaged, requestId) +
+    renderStagedPackRows(orphanStaged) +
     (seasonPacks.length || !orphanStaged.length ? renderSeasonPackRows(seasonPacks, requestId, season) : '') +
     '</div>' +
     '</div>'
@@ -820,7 +820,7 @@ function renderMultiSeasonPackGroup(requestId, multiSeasonReleases, stagedPacks)
     '<div class="p-2.5 space-y-2" data-multi-season-pack-results="' +
     requestId +
     '">' +
-    renderStagedPackRows(orphanStaged, requestId) +
+    renderStagedPackRows(orphanStaged) +
     rows +
     '</div>' +
     '</div>'
@@ -1243,7 +1243,7 @@ export function renderSeasonAccordion(data) {
     (scope === 'complete_series' ? '' : ' hidden') +
     '>' +
     completeSeriesHelperRow +
-    renderStagedPackRows(stagedPacksMissingFromRows(stagedCompleteSeries, completeSeriesReleases), requestId) +
+    renderStagedPackRows(stagedPacksMissingFromRows(stagedCompleteSeries, completeSeriesReleases)) +
     (completeSeriesReleases.length
       ? '<ul class="divide-y divide-gray-700/40 rounded-xl border border-gray-700/60 bg-surface-850">' +
         completeSeriesReleases

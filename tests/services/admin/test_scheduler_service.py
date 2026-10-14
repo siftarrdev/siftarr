@@ -107,7 +107,7 @@ async def test_plex_poll_records_success_timestamp_and_skips_failed_or_locked(
 
     result = await service.trigger_plex_poll_now()
     assert (result.status, result.completed_requests) == ("completed", 3)
-    fake_plex_poll.assert_awaited_once_with(priority_only=False)
+    fake_plex_poll.assert_awaited_once_with()
     first_success = await _last_sync(session_maker, PLEX_LAST_SYNC_SUCCESS_KEY)
     assert first_success is not None
 
@@ -126,7 +126,7 @@ async def test_plex_sign_in_sync_runs_guarded_full_poll(session_maker, fake_plex
 
     assert result.status == "completed"
     assert result.completed_requests == 3
-    fake_plex_poll.assert_awaited_once_with(priority_only=False)
+    fake_plex_poll.assert_awaited_once_with()
 
 
 async def test_overseerr_poll_logs_synced_counts(monkeypatch, session_maker):

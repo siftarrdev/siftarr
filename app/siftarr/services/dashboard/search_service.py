@@ -46,7 +46,6 @@ from app.siftarr.services.releases.release_serializers import (
 from app.siftarr.services.releases.release_storage import (
     build_prowlarr_release,
     get_release_persistence_key,
-    persist_manual_release,
     store_search_results,
 )
 from app.siftarr.services.releases.release_validation_service import (
@@ -54,7 +53,6 @@ from app.siftarr.services.releases.release_validation_service import (
     identity_warning,
 )
 from app.siftarr.services.releases.staging_service import StagingService
-from app.siftarr.services.stats_metrics_service import record_rule_outcomes
 from app.siftarr.services.utils.media_helpers import extract_media_title_and_year
 
 logger = logging.getLogger(__name__)
@@ -100,40 +98,6 @@ class SearchService:
         """Evaluate an ad hoc release using the request media type rules."""
         engine = await self._build_rule_engine(media_type=request.media_type.value)
         return engine.evaluate(release)
-
-    async def select_manual_release(
-        self,
-        request: RequestModel,
-        release: ProwlarrRelease,
-        *,
-        force_download: bool = False,
-        identity_override: bool = False,
-        rejection_override: bool = False,
-    ) -> dict[str, object]:
-        """Persist and use a manual-search release through the normal selection path."""
-        evaluation = await self.evaluate_manual_release(request, release)
-        identity = identity_warning(request, release)
-        if identity and not identity_override:
-            raise RuntimeError(identity.message)
-        stored_release = await persist_manual_release(self.db, request, release, evaluation)
-        await record_rule_outcomes(
-            self.db,
-            request_id=request.id,
-            evaluations=[evaluation],
-            stored_releases_by_key={
-                release.info_hash or release.title: stored_release,
-            },
-        )
-        await self.db.commit()
-        staging_service = StagingService(self.db)
-        return await staging_service.use_releases(
-            request,
-            [stored_release],
-            selection_source="manual",
-            force_download=force_download,
-            identity_override=identity_override,
-            rejection_override=rejection_override,
-        )
 
     async def process_request_search(
         self,
@@ -185,7 +149,6 @@ class SearchService:
             # unresolved episodes are covered in a single search pass.
             result = await decision_service.process_request(
                 request.id,
-                search_episodes=True,
                 progress_callback=progress_callback,
                 search_mode=search_mode,
                 cancellation_check=cancellation_check,

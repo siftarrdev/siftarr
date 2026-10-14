@@ -349,23 +349,3 @@ async def test_request_details_returns_cached_tv_data_and_schedules_refresh(
     assert sync_state["needs_plex_enrichment"] is True
     assert sync_state["refresh_in_progress"] is True
     assert scheduled_refreshes == [(background_tasks, show.id)]
-
-
-async def test_get_request_seasons_returns_sync_state_without_inline_refresh(
-    db, background_tasks, scheduled_refreshes
-):
-    show = await make_request(db, media_type=MediaType.TV, title="Foundation")
-    season = await make_season(db, show, 1, status=S.COMPLETED, episodes=1)
-    season.synced_at = datetime.now(UTC).replace(tzinfo=None)
-    await db.commit()
-
-    response = await dashboard_api.get_request_seasons(
-        request_id=show.id, background_tasks=background_tasks, db=db
-    )
-
-    body = json.loads(cast(bytes, response.body))
-    assert body["seasons"][0]["episodes"][0]["status"] == S.COMPLETED.value
-    assert body["sync_state"] == {**body["sync_state"], "stale": False}
-    assert body["sync_state"]["needs_plex_enrichment"] is False
-    assert body["sync_state"]["refresh_in_progress"] is False
-    assert scheduled_refreshes == []

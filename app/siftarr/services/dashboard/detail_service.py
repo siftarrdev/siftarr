@@ -20,7 +20,6 @@ from app.siftarr.services.dashboard.dashboard_service import (
     RequestDetailsData,
 )
 from app.siftarr.services.dashboard.tv_enrichment_service import TVEnrichmentService
-from app.siftarr.services.decisions.rule_engine import RuleEngine
 from app.siftarr.services.decisions.rule_engine_provider import get_rule_engine
 from app.siftarr.services.lifecycle.activity_log_service import ActivityLogService
 from app.siftarr.services.metadata_service import MetadataService
@@ -275,7 +274,7 @@ class DetailService:
             evaluation = None
             if not getattr(release, "rule_evidence", None):
                 if engine is None:
-                    engine = await self._build_rule_engine(media_type=media_type.value)
+                    engine = await get_rule_engine(self.db, media_type.value)
                 evaluation = engine.evaluate(build_prowlarr_release(release))
             serialized.append(
                 serialize_stored_evaluated_release(
@@ -354,7 +353,3 @@ class DetailService:
             )
             for entry in timeline_entries
         ]
-
-    async def _build_rule_engine(self, *, media_type: str) -> RuleEngine:
-        """Load rules from DB and build a RuleEngine for evaluation (cached)."""
-        return await get_rule_engine(self.db, media_type)

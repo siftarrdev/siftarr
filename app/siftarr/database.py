@@ -1,8 +1,6 @@
 """Database configuration and session management."""
 
-import sqlite3
 from collections.abc import AsyncGenerator
-from contextlib import closing
 from pathlib import Path
 
 from alembic import command
@@ -19,47 +17,12 @@ from sqlalchemy.ext.asyncio import (
 from app.siftarr.config import get_settings
 
 ALEMBIC_INI_PATH = Path(__file__).resolve().parents[2] / "alembic.ini"
-CURRENT_ALEMBIC_REVISION = "head"
-ALEMBIC_VERSION_TABLE = "alembic_version"
 
 
 def _get_sync_sqlite_url(database_url: str) -> str:
     """Convert an async SQLite URL into the sync URL Alembic expects."""
 
     return database_url.replace("+aiosqlite", "")
-
-
-def _get_sqlite_db_path(database_url: str) -> Path:
-    """Resolve the SQLite database path from a SQLAlchemy URL."""
-
-    sync_url = _get_sync_sqlite_url(database_url)
-    prefix = "sqlite:///"
-    if not sync_url.startswith(prefix):
-        raise ValueError(f"unsupported SQLite URL: {database_url}")
-    return Path(sync_url.removeprefix(prefix))
-
-
-def _inspect_sqlite_database(db_path: Path) -> tuple[set[str], str | None]:
-    """Read current table names and Alembic revision from a SQLite file."""
-
-    if not db_path.exists():
-        return set(), None
-
-    with closing(sqlite3.connect(db_path)) as connection:
-        table_rows = connection.execute(
-            "SELECT name FROM sqlite_master WHERE type = 'table'"
-        ).fetchall()
-        table_names = {row[0] for row in table_rows}
-
-        alembic_revision: str | None = None
-        if ALEMBIC_VERSION_TABLE in table_names:
-            revision_row = connection.execute(
-                f"SELECT version_num FROM {ALEMBIC_VERSION_TABLE} LIMIT 1"
-            ).fetchone()
-            if revision_row is not None:
-                alembic_revision = str(revision_row[0])
-
-    return table_names, alembic_revision
 
 
 # Module-level sentinels — initialized lazily by init_engine().
@@ -84,7 +47,6 @@ def init_engine() -> None:
     engine = create_async_engine(
         settings.database_url,
         echo=False,
-        future=True,
     )
 
     # Enable SQLite WAL mode and busy timeout for better concurrency.
@@ -124,8 +86,6 @@ async def get_db() -> AsyncGenerator[AsyncSession]:
         except Exception:
             await session.rollback()
             raise
-        finally:
-            await session.close()
 
 
 def get_alembic_head_revision() -> str:

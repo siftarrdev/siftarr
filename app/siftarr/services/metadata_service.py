@@ -13,6 +13,8 @@ from app.siftarr.services.integrations.overseerr_service import (
     build_poster_url,
 )
 
+_RELEASE_DATE_KEYS = {"movie": "releaseDate", "tv": "firstAirDate"}
+
 
 class MetadataService:
     """Load Overseerr metadata for request details."""
@@ -28,13 +30,10 @@ class MetadataService:
         overseerr_service = OverseerrService(settings=self.settings)
         ov_task = asyncio.create_task(overseerr_service.get_request(request.overseerr_request_id))
         media_details_task = None
-        if request.media_type.value == "movie" and request.tmdb_id:
+        media_type = request.media_type.value
+        if media_type in _RELEASE_DATE_KEYS and request.tmdb_id:
             media_details_task = asyncio.create_task(
-                overseerr_service.get_media_details("movie", request.tmdb_id)
-            )
-        elif request.media_type.value == "tv" and request.tmdb_id:
-            media_details_task = asyncio.create_task(
-                overseerr_service.get_media_details("tv", request.tmdb_id)
+                overseerr_service.get_media_details(media_type, request.tmdb_id)
             )
 
         ov = await ov_task
@@ -49,11 +48,8 @@ class MetadataService:
         overview_value = merged_media.get("overview") or merged_media.get("summary")
 
         release_date: str | None = None
-        if media_details:
-            if request.media_type.value == "movie":
-                release_date = media_details.get("releaseDate")  # type: ignore[union-attr]
-            elif request.media_type.value == "tv":
-                release_date = media_details.get("firstAirDate")  # type: ignore[union-attr]
+        if media_details and media_type in _RELEASE_DATE_KEYS:
+            release_date = media_details.get(_RELEASE_DATE_KEYS[media_type])
 
         return DashboardOverseerrDetails(
             overview=str(overview_value) if overview_value else "",
@@ -61,7 +57,7 @@ class MetadataService:
             status=request_status,
             url=build_overseerr_media_url(
                 self.settings.overseerr_url,
-                request.media_type.value,
+                media_type,
                 request.tmdb_id,
             ),
             release_date=release_date,

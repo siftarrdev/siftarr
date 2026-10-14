@@ -23,8 +23,7 @@ def _is_sqlite_locked_error(exc: OperationalError) -> bool:
 
 async def run_background_episode_refresh(request_id: int) -> None:
     """Refresh TV details in a detached task using a fresh DB session."""
-    if request_id not in DETAILS_SYNC_TASKS:
-        DETAILS_SYNC_TASKS.add(request_id)
+    DETAILS_SYNC_TASKS.add(request_id)
     try:
         if db_mod.async_session_maker is None:
             init_engine()

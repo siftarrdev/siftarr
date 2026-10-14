@@ -24,20 +24,25 @@ class InitialPlexSyncRequired(Exception):
     """Raised when the first admin session must finish the initial Plex sync."""
 
 
-def build_login_redirect_url(request: Request) -> str:
-    """Return the login URL with a safe local next path for this request."""
+def _request_next_path(request: Request) -> str:
     path = request.url.path or "/"
     query = request.url.query
-    next_path = f"{path}?{query}" if query else path
-    return f"/auth/login?next={quote(next_path, safe='')}"
+    return f"{path}?{query}" if query else path
+
+
+def build_login_redirect_url(request: Request) -> str:
+    """Return the login URL with a safe local next path for this request."""
+    return f"/auth/login?next={quote(_request_next_path(request), safe='')}"
+
+
+def build_initial_plex_sync_url(next_path: str) -> str:
+    """Return the initial Plex sync URL that continues to ``next_path``."""
+    return f"/auth/initial-plex-sync?next={quote(next_path, safe='')}"
 
 
 def build_initial_plex_sync_redirect_url(request: Request) -> str:
     """Return the initial Plex sync URL with a safe local next path."""
-    path = request.url.path or "/"
-    query = request.url.query
-    next_path = f"{path}?{query}" if query else path
-    return f"/auth/initial-plex-sync?next={quote(next_path, safe='')}"
+    return build_initial_plex_sync_url(_request_next_path(request))
 
 
 def _allows_initial_plex_sync_gate(request: Request) -> bool:
@@ -118,25 +123,36 @@ def is_browser_request(request: Request) -> bool:
     return "text/html" in accept or accept in {"", "*/*"}
 
 
-async def require_session_or_api_key(request: Request) -> None:
-    """Require a valid browser session or API key regardless of auth toggle."""
+def _authenticated_via_session_or_key(request: Request) -> bool:
+    """Return True for a valid session (browser) or API key (programmatic) caller.
+
+    Raises InitialPlexSyncRequired when the session still has to finish the
+    initial Plex sync.
+    """
     if get_session_user(request) is not None:
         if request.session.get("initial_plex_sync_required") and not _allows_initial_plex_sync_gate(
             request
         ):
             raise InitialPlexSyncRequired()
-        return
+        return True
 
-    settings = get_settings()
-    key = _extract_api_key(request)
-    if _api_key_matches(key, settings.api_key):
-        return
+    return _api_key_matches(_extract_api_key(request), get_settings().api_key)
 
-    raise HTTPException(
+
+def _unauthorized() -> HTTPException:
+    return HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail="Authentication required. Provide a valid session cookie or API key.",
         headers={"WWW-Authenticate": "Bearer"},
     )
+
+
+async def require_session_or_api_key(request: Request) -> None:
+    """Require a valid browser session or API key regardless of auth toggle."""
+    if _authenticated_via_session_or_key(request):
+        return
+
+    raise _unauthorized()
 
 
 async def require_auth(request: Request) -> None:
@@ -146,28 +162,13 @@ async def require_auth(request: Request) -> None:
     then falls back to the API key header (for programmatic/automated access).
     Returns 401 if neither is valid (unless auth is disabled).
     """
-    # Check session first (browser users)
-    if get_session_user(request) is not None:
-        if request.session.get("initial_plex_sync_required") and not _allows_initial_plex_sync_gate(
-            request
-        ):
-            raise InitialPlexSyncRequired()
-        return
-
-    # Fall back to API key (programmatic access)
-    settings = get_settings()
-    key = _extract_api_key(request)
-    if _api_key_matches(key, settings.api_key):
+    if _authenticated_via_session_or_key(request):
         return
 
     if is_browser_request(request):
         raise BrowserAuthRequired()
 
-    if not settings.auth_enabled:
+    if not get_settings().auth_enabled:
         return
 
-    raise HTTPException(
-        status_code=status.HTTP_401_UNAUTHORIZED,
-        detail="Authentication required. Provide a valid session cookie or API key.",
-        headers={"WWW-Authenticate": "Bearer"},
-    )
+    raise _unauthorized()

@@ -224,21 +224,6 @@ class TestDatabaseLifespan:
 class TestDatabaseHelpers:
     """Tests for database utility functions."""
 
-    def test_get_sqlite_db_path_raises_on_unsupported_url(self):
-        """_get_sqlite_db_path should raise for non-SQLite URLs."""
-        from app.siftarr.database import _get_sqlite_db_path
-
-        with pytest.raises(ValueError, match="unsupported SQLite URL"):
-            _get_sqlite_db_path("postgresql://localhost/db")
-
-    def test_inspect_returns_empty_for_nonexistent_db(self):
-        """_inspect_sqlite_database should return empty sets for missing files."""
-        from app.siftarr.database import _inspect_sqlite_database
-
-        tables, revision = _inspect_sqlite_database(Path("/nonexistent/path.db"))
-        assert tables == set()
-        assert revision is None
-
     def test_alembic_history_supports_incremental_revisions(self):
         """Alembic history should include focused incremental migrations."""
 

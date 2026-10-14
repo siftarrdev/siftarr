@@ -250,15 +250,11 @@ class UnreleasedEvaluator:
                 RequestStatus.UNRELEASED,
                 reason="reclassified to unreleased after release-status recheck",
             )
-            if updated is not None:
-                return RequestStatus.UNRELEASED
-            return None
+            return RequestStatus.UNRELEASED if updated is not None else None
 
         if verdict == "released" and current == RequestStatus.UNRELEASED:
             updated = await self.lifecycle.transition(request.id, RequestStatus.PENDING)
-            if updated is not None:
-                return RequestStatus.PENDING
-            return None
+            return RequestStatus.PENDING if updated is not None else None
 
         return None
 
@@ -284,29 +280,17 @@ class UnreleasedEvaluator:
         if verdict == "unreleased":
             # Redirectable for TV: any episode is PENDING, SEARCHING, or COMPLETED
             has_redirectable = any(ep.status in _REDIRECTABLE_STATUSES for ep in all_episodes)
-            if not has_redirectable:
-                # Still sync cached status even when not redirectable
-                request.status = derive_request_status_from_episodes(all_episodes)
-                await self.db.commit()
-                return request.status
-
-            _logger.info(
-                "UnreleasedEvaluator(TV): reclassifying request_id=%s title=%s "
-                "setting PENDING episodes to UNRELEASED",
-                request.id,
-                request.title,
-            )
-            for ep in all_episodes:
-                if ep.status == RequestStatus.PENDING:
-                    ep.status = RequestStatus.UNRELEASED
-            if all_episodes:
-                await self.db.flush()
-            # Derive cached request status from episodes
-            request.status = derive_request_status_from_episodes(all_episodes)
-            await self.db.commit()
-            return request.status
-
-        if verdict == "released":
+            if has_redirectable:
+                _logger.info(
+                    "UnreleasedEvaluator(TV): reclassifying request_id=%s title=%s "
+                    "setting PENDING episodes to UNRELEASED",
+                    request.id,
+                    request.title,
+                )
+                for ep in all_episodes:
+                    if ep.status == RequestStatus.PENDING:
+                        ep.status = RequestStatus.UNRELEASED
+        elif verdict == "released":
             _logger.info(
                 "UnreleasedEvaluator(TV): setting aired UNRELEASED episodes to PENDING "
                 "for request_id=%s title=%s",
@@ -326,14 +310,15 @@ class UnreleasedEvaluator:
                 if id(ep) in placeholder_ids:
                     continue
                 ep.status = RequestStatus.PENDING
-            if all_episodes:
-                await self.db.flush()
-            # Derive cached request status from episodes
-            request.status = derive_request_status_from_episodes(all_episodes)
-            await self.db.commit()
-            return request.status
+        else:
+            return None
 
-        return None
+        if all_episodes:
+            await self.db.flush()
+        # Derive cached request status from episodes, even when nothing changed
+        request.status = derive_request_status_from_episodes(all_episodes)
+        await self.db.commit()
+        return request.status
 
     async def evaluate_and_apply(
         self,
@@ -355,11 +340,9 @@ async def evaluate_imported_request(
     overseerr: OverseerrService,
     request: Request,
     *,
-    logger: logging.Logger | None = None,
     prefetched_media_details: dict | None = None,
     local_episodes: Iterable[EpisodeLike] | None = None,
 ) -> RequestStatus | None:
-    active_logger = logger or _logger
     try:
         await db.refresh(request)
         new_status = await UnreleasedEvaluator(db, overseerr).evaluate_and_apply(
@@ -370,7 +353,5 @@ async def evaluate_imported_request(
         await db.refresh(request)
         return new_status
     except Exception:
-        active_logger.exception(
-            "Unreleased evaluation failed for imported request_id=%s", request.id
-        )
+        _logger.exception("Unreleased evaluation failed for imported request_id=%s", request.id)
         return None

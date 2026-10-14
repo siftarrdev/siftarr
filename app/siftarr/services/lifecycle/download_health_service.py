@@ -43,7 +43,10 @@ from app.siftarr.services.lifecycle.episode_derive import (
 )
 from app.siftarr.services.releases.release_disposition_service import ReleaseDispositionService
 from app.siftarr.services.releases.release_parser import cached_parse_release_coverage
-from app.siftarr.services.utils.torrent_identity import normalize_torrent_name
+from app.siftarr.services.utils.torrent_identity import (
+    normalize_torrent_name,
+    parse_qbit_progress,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -106,18 +109,6 @@ def _qbit_time(value: object) -> datetime | None:
             return datetime.fromtimestamp(float(value), tz=UTC)
         except OverflowError, OSError, ValueError:
             return None
-    return None
-
-
-def _progress(value: object) -> float | None:
-    if isinstance(value, bool):
-        return None
-    if isinstance(value, int | float | str):
-        try:
-            parsed = float(value)
-        except ValueError:
-            return None
-        return parsed if 0 <= parsed <= 1 else None
     return None
 
 
@@ -338,14 +329,13 @@ class DownloadHealthService:
 
     async def _observe_torrent(
         self,
-        staged: StagedTorrent,
         attempt: DownloadHealth,
         torrent: dict[str, Any],
         *,
         now: datetime,
     ) -> dict[str, object]:
         old_status = attempt.status
-        prior_progress = _progress(attempt.last_progress)
+        prior_progress = parse_qbit_progress(attempt.last_progress)
         was_unobserved = attempt.last_observed_at is None
         attempt.last_observed_at = now
         attempt.last_seen_at = now
@@ -355,7 +345,7 @@ class DownloadHealthService:
         torrent_hash = torrent.get("hash")
         if not attempt.info_hash and isinstance(torrent_hash, str) and torrent_hash.strip():
             attempt.info_hash = torrent_hash.strip().lower()
-        progress = _progress(torrent.get("progress"))
+        progress = parse_qbit_progress(torrent.get("progress"))
         state = _state(torrent.get("state"))
         attempt.last_progress = progress
         attempt.last_state = str(torrent.get("state") or "") or None
@@ -501,7 +491,7 @@ class DownloadHealthService:
                 "problems": await self.list_problems(now=observed_at),
             }
 
-        by_hash, by_name = self._torrent_maps(list(torrents or []))
+        by_hash, by_name = self._torrent_maps(torrents)
         serialized: list[dict[str, object]] = []
         for staged, _request, attempt in attempts:
             torrent, ambiguous = self._match_torrent(staged, attempt, by_hash, by_name)
@@ -510,9 +500,7 @@ class DownloadHealthService:
                     await self._observe_missing(attempt, now=observed_at, ambiguous=ambiguous)
                 )
             else:
-                serialized.append(
-                    await self._observe_torrent(staged, attempt, torrent, now=observed_at)
-                )
+                serialized.append(await self._observe_torrent(attempt, torrent, now=observed_at))
         await self.db.flush()
         return {
             "qbit_available": True,
@@ -535,13 +523,11 @@ class DownloadHealthService:
         self,
         attempt: DownloadHealth,
         staged: StagedTorrent,
-        request: Request | None,
+        request: Request,
         *,
         disposition: RecoveryDisposition,
         now: datetime,
     ) -> datetime | None:
-        if request is None:
-            return None
         release = SimpleNamespace(
             info_hash=attempt.info_hash or staged.info_hash,
             title=staged.title,
@@ -604,12 +590,12 @@ class DownloadHealthService:
 
     @classmethod
     def _reset_request_scope(cls, request: Request, title: str) -> dict[str, object]:
+        request.next_retry_at = None
+        request.retry_count = 0
+        request.rejection_reason = None
         if str(getattr(request.media_type, "value", request.media_type)) != "tv":
             if not is_terminal_request_status(request.status):
                 request.status = RequestStatus.PENDING
-            request.next_retry_at = None
-            request.retry_count = 0
-            request.rejection_reason = None
             return {"media_type": "movie", "title": title}
 
         affected: list[str] = []
@@ -629,9 +615,6 @@ class DownloadHealthService:
         request.status = derive_request_status_from_episodes(
             [episode for season in request.seasons for episode in season.episodes]
         )
-        request.next_retry_at = None
-        request.retry_count = 0
-        request.rejection_reason = None
         return {"media_type": "tv", "title": title, "episodes": affected}
 
     async def recover(
@@ -654,25 +637,15 @@ class DownloadHealthService:
         attempt = result.scalar_one_or_none()
         if attempt is None:
             raise DownloadHealthNotFound(f"Download health attempt {attempt_id} was not found")
-        qbittorrent = self.qbittorrent or QbittorrentService(settings=get_settings())
-        observation_service = (
-            self if self.qbittorrent is not None else DownloadHealthService(self.db, qbittorrent)
-        )
-        observation = await observation_service.observe(observed_at, fetch_when_empty=True)
+        observation = await self.observe(observed_at, fetch_when_empty=True)
         if not observation.get("qbit_available", False):
             raise DownloadRecoveryNotEligible(
                 "qBittorrent is unavailable; recovery was not confirmed"
             )
 
-        # Reload after the strict observation.  The saved status is only a
-        # prompt for review, never proof that the torrent is still stalled.
-        result = await self.db.execute(
-            select(DownloadHealth).where(DownloadHealth.id == attempt_id)
-        )
-        attempt = result.scalar_one_or_none()
-        if attempt is None:
-            raise DownloadHealthNotFound(f"Download health attempt {attempt_id} was not found")
-
+        # The strict observation above updates this same session-tracked attempt.
+        # The saved status is only a prompt for review, never proof that the
+        # torrent is still stalled.
         staged_result = await self.db.execute(
             select(StagedTorrent).where(StagedTorrent.id == attempt.staged_torrent_id)
         )
@@ -732,7 +705,7 @@ class DownloadHealthService:
         )
         await self.db.flush()
         review_url = f"/requests/{request.id}/details"
-        if review_url and attempt.coverage_scope:
+        if attempt.coverage_scope:
             review_url += f"?download_health_scope={quote(attempt.coverage_scope, safe='')}"
         return {
             "status": HEALTH_STATUS_RECOVERED,

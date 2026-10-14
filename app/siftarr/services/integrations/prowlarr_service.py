@@ -26,8 +26,6 @@ CancellationCheck = Callable[[], bool]
 # LRU cache keyed by params hash, with TTL.  Only caches non-manual
 # (automatic decision pipeline) searches.
 _search_cache: OrderedDict[str, tuple[float, ProwlarrSearchResult]] = OrderedDict()
-_SEARCH_CACHE_MAX_SIZE = 50
-_SEARCH_CACHE_TTL = 45  # seconds
 _RESOLUTION_PATTERNS = (
     (re.compile(r"2160[pP]|4[kK]", re.IGNORECASE), "2160p"),
     (re.compile(r"1080[pP]", re.IGNORECASE), "1080p"),
@@ -52,17 +50,11 @@ def _search_cache_key(params: dict) -> str:
     return hashlib.md5(raw.encode()).hexdigest()
 
 
-def _cache_settings(settings: Settings | None = None) -> tuple[int, int]:
-    settings = settings or get_settings()
-    return settings.prowlarr_search_cache_ttl_seconds, settings.prowlarr_search_cache_max_entries
-
-
-def _cache_get(key: str, settings: Settings | None = None) -> ProwlarrSearchResult | None:
+def _cache_get(key: str, settings: Settings) -> ProwlarrSearchResult | None:
     if key not in _search_cache:
         return None
     timestamp, result = _search_cache[key]
-    ttl, _max_size = _cache_settings(settings)
-    if time_module.monotonic() - timestamp > ttl:
+    if time_module.monotonic() - timestamp > settings.prowlarr_search_cache_ttl_seconds:
         del _search_cache[key]
         return None
     # Move to end (most-recently used)
@@ -70,9 +62,8 @@ def _cache_get(key: str, settings: Settings | None = None) -> ProwlarrSearchResu
     return result
 
 
-def _cache_set(key: str, result: ProwlarrSearchResult, settings: Settings | None = None) -> None:
-    _ttl, max_size = _cache_settings(settings)
-    while len(_search_cache) >= max_size:
+def _cache_set(key: str, result: ProwlarrSearchResult, settings: Settings) -> None:
+    while len(_search_cache) >= settings.prowlarr_search_cache_max_entries:
         _search_cache.popitem(last=False)  # evict LRU
     _search_cache[key] = (time_module.monotonic(), result)
 
@@ -129,10 +120,7 @@ class ProwlarrService:
         self.api_key = self.settings.prowlarr_api_key
 
     def _get_headers(self) -> dict[str, str]:
-        api_key = self.api_key
-        if api_key is None:
-            api_key = ""
-        return {"X-Api-Key": api_key}
+        return {"X-Api-Key": self.api_key or ""}
 
     @staticmethod
     def _release_page_signature(
@@ -213,11 +201,16 @@ class ProwlarrService:
         return " ".join(normalized.split())
 
     @staticmethod
-    def _build_movie_query(title: str | None, tmdbid: int, year: int | None = None) -> str:
-        """Build a Prowlarr movie query with metadata tokens in the query string."""
+    def _title_parts(title: str | None) -> list[str]:
+        """Return the normalized, stripped title as a query part list (empty if blank)."""
         if title:
             title = ProwlarrService._normalize_search_title(title)
-        parts = [title.strip() for title in [title] if title and title.strip()]
+        return [title.strip()] if title and title.strip() else []
+
+    @staticmethod
+    def _build_movie_query(title: str | None, tmdbid: int, year: int | None = None) -> str:
+        """Build a Prowlarr movie query with metadata tokens in the query string."""
+        parts = ProwlarrService._title_parts(title)
         parts.append(f"{{tmdbid:{tmdbid}}}")
         if year is not None:
             parts.append(f"{{year:{year}}}")
@@ -226,9 +219,7 @@ class ProwlarrService:
     @staticmethod
     def _build_movie_title_query(title: str | None, year: int | None = None) -> str:
         """Build a plain title-based movie query for fallback searches."""
-        if title:
-            title = ProwlarrService._normalize_search_title(title)
-        parts = [title.strip() for title in [title] if title and title.strip()]
+        parts = ProwlarrService._title_parts(title)
         if year is not None:
             parts.append(str(year))
         return " ".join(parts)
@@ -242,9 +233,7 @@ class ProwlarrService:
         year: int | None = None,
     ) -> str:
         """Build a Prowlarr TV query with metadata tokens in the query string."""
-        if title:
-            title = ProwlarrService._normalize_search_title(title)
-        parts = [title.strip() for title in [title] if title and title.strip()]
+        parts = ProwlarrService._title_parts(title)
         parts.append(f"{{tvdbid:{tvdbid}}}")
         if season is not None:
             parts.append(f"{{season:{season}}}")
@@ -262,9 +251,7 @@ class ProwlarrService:
         year: int | None = None,
     ) -> str:
         """Build a plain title-based TV query for fallback searches."""
-        if title:
-            title = ProwlarrService._normalize_search_title(title)
-        parts = [title.strip() for title in [title] if title and title.strip()]
+        parts = ProwlarrService._title_parts(title)
         if season is not None and episode is not None:
             parts.append(f"S{season:02d}E{episode:02d}")
         elif season is not None:
@@ -290,8 +277,10 @@ class ProwlarrService:
         endpoint = f"{self.base_url}/api/v1/search"
         headers = self._get_headers()
 
+        use_cache = cacheable and not self.settings.siftarr_disable_search_cache
+
         # ── Cache check ──────────────────────────────────────────────
-        if cacheable and not self.settings.siftarr_disable_search_cache:
+        if use_cache:
             cache_key = _search_cache_key(params)
             cached = _cache_get(cache_key, self.settings)
             if cached is not None:
@@ -334,7 +323,7 @@ class ProwlarrService:
                 )
 
                 # ── Cache successful responses only ──────────────────
-                if cacheable and not self.settings.siftarr_disable_search_cache:
+                if use_cache:
                     result_to_cache = ProwlarrSearchResult(
                         releases=releases,
                         query_time_ms=int((time_module.time() - start_time) * 1000),

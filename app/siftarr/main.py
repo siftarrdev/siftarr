@@ -97,31 +97,36 @@ async def lifespan(app: FastAPI):
     logger.info("Starting Siftarr v%s", __version__)
 
     settings = get_settings()
-    if not settings.prowlarr_url:
-        logger.warning(
+    missing_config_warnings = (
+        (
+            settings.prowlarr_url,
             "Prowlarr URL not configured. Set PROWLARR_URL environment variable. "
-            "Torrent search functionality will not work."
-        )
-    if not settings.prowlarr_api_key:
-        logger.warning(
+            "Torrent search functionality will not work.",
+        ),
+        (
+            settings.prowlarr_api_key,
             "Prowlarr API key not configured. Set PROWLARR_API_KEY environment variable. "
-            "Torrent search functionality will not work."
-        )
-    if not settings.overseerr_url:
-        logger.warning(
+            "Torrent search functionality will not work.",
+        ),
+        (
+            settings.overseerr_url,
             "Overseerr URL not configured. Set OVERSEERR_URL environment variable. "
-            "Webhook functionality may be limited."
-        )
-    if not settings.overseerr_api_key:
-        logger.warning(
+            "Webhook functionality may be limited.",
+        ),
+        (
+            settings.overseerr_api_key,
             "Overseerr API key not configured. Set OVERSEERR_API_KEY environment variable. "
-            "Webhook functionality may be limited."
-        )
-    if not settings.qbittorrent_url:
-        logger.warning(
+            "Webhook functionality may be limited.",
+        ),
+        (
+            settings.qbittorrent_url,
             "qBittorrent URL not configured. Set QBITTORRENT_URL environment variable. "
-            "Download functionality will not work."
-        )
+            "Download functionality will not work.",
+        ),
+    )
+    for configured_value, message in missing_config_warnings:
+        if not configured_value:
+            logger.warning(message)
 
     if settings.staging_mode_enabled:
         logger.info("Staging mode is ENABLED - torrents will be held for approval")

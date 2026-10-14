@@ -14,6 +14,7 @@ from app.siftarr.services.utils.torrent_identity import (
     parse_magnet_info_hash,
     torrent_file_info_hash,
 )
+from app.siftarr.services.utils.type_utils import normalize_float
 
 logger = logging.getLogger(__name__)
 
@@ -52,6 +53,27 @@ class BulkAddResult:
 
 _BULK_ADD_CHUNK_SIZE = 10
 
+_TORRENT_FIELDS = (
+    "hash",
+    "name",
+    "size",
+    "progress",
+    "state",
+    "category",
+    "ratio",
+    "added_on",
+    "last_activity",
+    "completed_on",
+    "save_path",
+    "download_location",
+    "seeding_time",
+    "eta",
+    "dlspeed",
+    "upspeed",
+    "downloaded",
+    "uploaded",
+)
+
 
 def _qbit_response_value(response: Any, name: str) -> Any:
     if isinstance(response, dict):
@@ -65,17 +87,23 @@ def _qbit_response_value(response: Any, name: str) -> Any:
     return getattr(response, name, None)
 
 
+def _failure_count(response: Any) -> int | None:
+    """Return the response failure count, or None when missing or not an int."""
+    failure_count = _qbit_response_value(response, "failure_count")
+    if failure_count is None:
+        return None
+    try:
+        return int(failure_count)
+    except TypeError, ValueError:
+        return None
+
+
 def _qbit_add_response_accepted(response: Any) -> bool:
     """Return True when qBit/qbittorrentapi accepted an add request."""
     if response == "Ok.":
         return True
-    failure_count = _qbit_response_value(response, "failure_count")
-    if failure_count is None:
-        return False
-    try:
-        if int(failure_count) > 0:
-            return False
-    except TypeError, ValueError:
+    failure_count = _failure_count(response)
+    if failure_count is None or failure_count > 0:
         return False
     return any(
         _qbit_response_value(response, name) is not None
@@ -84,13 +112,8 @@ def _qbit_add_response_accepted(response: Any) -> bool:
 
 
 def _qbit_add_response_failed(response: Any) -> bool:
-    failure_count = _qbit_response_value(response, "failure_count")
-    if failure_count is None:
-        return False
-    try:
-        return int(failure_count) > 0
-    except TypeError, ValueError:
-        return False
+    failure_count = _failure_count(response)
+    return failure_count is not None and failure_count > 0
 
 
 class QbittorrentService:
@@ -113,26 +136,7 @@ class QbittorrentService:
 
     @staticmethod
     def _serialize_torrent(torrent: Any) -> dict[str, Any]:
-        return {
-            "hash": getattr(torrent, "hash", None),
-            "name": getattr(torrent, "name", None),
-            "size": getattr(torrent, "size", None),
-            "progress": getattr(torrent, "progress", None),
-            "state": getattr(torrent, "state", None),
-            "category": getattr(torrent, "category", None),
-            "ratio": getattr(torrent, "ratio", None),
-            "added_on": getattr(torrent, "added_on", None),
-            "last_activity": getattr(torrent, "last_activity", None),
-            "completed_on": getattr(torrent, "completed_on", None),
-            "save_path": getattr(torrent, "save_path", None),
-            "download_location": getattr(torrent, "download_location", None),
-            "seeding_time": getattr(torrent, "seeding_time", None),
-            "eta": getattr(torrent, "eta", None),
-            "dlspeed": getattr(torrent, "dlspeed", None),
-            "upspeed": getattr(torrent, "upspeed", None),
-            "downloaded": getattr(torrent, "downloaded", None),
-            "uploaded": getattr(torrent, "uploaded", None),
-        }
+        return {field: getattr(torrent, field, None) for field in _TORRENT_FIELDS}
 
     async def authenticate(self) -> bool:
         """Authenticate with qBittorrent.
@@ -212,30 +216,24 @@ class QbittorrentService:
         try:
             await self.ensure_category_exists(category.value)
 
+            source: dict[str, Any]
             if magnet_uri:
-                result = await asyncio.to_thread(
-                    self.client.torrents_add,
-                    urls=magnet_uri,
-                    category=category.value,
-                    is_paused=is_paused,
-                    download_path=download_path,
-                    ratio_limit=ratio_limit,
-                    seeding_time_limit=seeding_time_limit,
-                )
+                source = {"urls": magnet_uri}
             elif torrent_path:
                 with open(torrent_path, "rb") as f:
-                    torrent_data = f.read()
-                result = await asyncio.to_thread(
-                    self.client.torrents_add,
-                    torrent_files=[torrent_data],
-                    category=category.value,
-                    is_paused=is_paused,
-                    download_path=download_path,
-                    ratio_limit=ratio_limit,
-                    seeding_time_limit=seeding_time_limit,
-                )
+                    source = {"torrent_files": [f.read()]}
             else:
                 raise ValueError("Either torrent_path or magnet_uri must be provided")
+
+            result = await asyncio.to_thread(
+                self.client.torrents_add,
+                **source,
+                category=category.value,
+                is_paused=is_paused,
+                download_path=download_path,
+                ratio_limit=ratio_limit,
+                seeding_time_limit=seeding_time_limit,
+            )
 
             if _qbit_add_response_accepted(result):
                 # qBit accepts add requests before metadata is always queryable.
@@ -328,20 +326,11 @@ class QbittorrentService:
         ), items in groups.items():
             try:
                 await self.ensure_category_exists(category)
-                result = "Ok."
                 for chunk_start in range(0, len(items), _BULK_ADD_CHUNK_SIZE):
                     chunk = items[chunk_start : chunk_start + _BULK_ADD_CHUNK_SIZE]
+                    source: dict[str, Any]
                     if is_magnet_group:
-                        urls = "\n".join(p.magnet_uri or "" for p, _ in chunk)
-                        chunk_result = await asyncio.to_thread(
-                            self.client.torrents_add,
-                            urls=urls,
-                            category=category,
-                            is_paused=is_paused,
-                            download_path=download_path,
-                            ratio_limit=ratio_limit,
-                            seeding_time_limit=seeding_time_limit,
-                        )
+                        source = {"urls": "\n".join(p.magnet_uri or "" for p, _ in chunk)}
                     else:
                         torrent_files = []
                         for p, _ in chunk:
@@ -349,15 +338,16 @@ class QbittorrentService:
                                 raise ValueError("Missing torrent_path for file bulk add")
                             with open(p.torrent_path, "rb") as file_handle:
                                 torrent_files.append(file_handle.read())
-                        chunk_result = await asyncio.to_thread(
-                            self.client.torrents_add,
-                            torrent_files=torrent_files,
-                            category=category,
-                            is_paused=is_paused,
-                            download_path=download_path,
-                            ratio_limit=ratio_limit,
-                            seeding_time_limit=seeding_time_limit,
-                        )
+                        source = {"torrent_files": torrent_files}
+                    chunk_result = await asyncio.to_thread(
+                        self.client.torrents_add,
+                        **source,
+                        category=category,
+                        is_paused=is_paused,
+                        download_path=download_path,
+                        ratio_limit=ratio_limit,
+                        seeding_time_limit=seeding_time_limit,
+                    )
                     if _qbit_add_response_accepted(chunk_result):
                         for payload, info_hash in chunk:
                             results[payload.key] = BulkAddResult(
@@ -366,7 +356,6 @@ class QbittorrentService:
                                 torrent_hash=info_hash,
                             )
                     else:
-                        result = chunk_result
                         error = str(chunk_result)
                         if _qbit_add_response_failed(chunk_result):
                             error = f"qBittorrent reported add failures: {chunk_result}"
@@ -387,10 +376,6 @@ class QbittorrentService:
                             error=str(exc),
                         ),
                     )
-                continue
-
-            if result != "Ok.":
-                continue
 
         return [
             results.get(
@@ -448,23 +433,9 @@ class QbittorrentService:
         and Siftarr database linkage must not hide an in-progress torrent.
         """
         torrents = await self.get_all_active_torrents_or_raise()
-        unfinished: list[dict] = []
-        for torrent in torrents:
-            progress = torrent.get("progress")
-            if isinstance(progress, int | float | str):
-                try:
-                    is_complete = float(progress) >= 1.0
-                except ValueError:
-                    # Keep entries with malformed progress visible rather than
-                    # accidentally concealing an active qBit download.
-                    is_complete = False
-            else:
-                # Keep entries with unknown progress visible rather than
-                # accidentally concealing an active qBit download.
-                is_complete = False
-            if not is_complete:
-                unfinished.append(torrent)
-        return unfinished
+        # Malformed or unknown progress counts as 0 so the entry stays visible
+        # rather than accidentally concealing an active qBit download.
+        return [t for t in torrents if not (normalize_float(t.get("progress")) >= 1.0)]
 
     async def get_completed_torrents(self) -> list[dict]:
         """Get completed torrents from qBittorrent, returning [] on failure."""

@@ -38,7 +38,8 @@ class TestUnconfigured:
         service = _unconfigured(url, api_key)
 
         assert service.base_url in ("", "http://localhost:5055")
-        assert await service.get_requests() == []
+        with pytest.raises(OverseerrFetchError):
+            await service.get_all_requests()
         assert await service.get_request(1) is None
         assert await service.get_media_details("movie", 123) is None
         assert await service.decline_request(1) is False
@@ -53,33 +54,23 @@ class TestGetRequests:
     @pytest.mark.parametrize(
         ("kwargs", "expected_params"),
         [
-            ({}, {"take": "100", "skip": "0", "filter": "approved"}),
-            ({"status": None, "limit": 50, "skip": 100}, {"take": "50", "skip": "100"}),
+            ({"status": "approved"}, {"take": "100", "skip": "0", "filter": "approved"}),
+            ({"status": None, "page_size": 50}, {"take": "50", "skip": "0"}),
         ],
-        ids=["default_filter", "no_filter"],
+        ids=["filter", "no_filter"],
     )
-    async def test_success_builds_request(
+    async def test_get_all_requests_builds_request(
         self, overseerr_service, http_stub, kwargs, expected_params
     ):
         http_stub.reply(httpx.Response(200, json={"results": [{"id": 1}, {"id": 2}]}))
 
-        result = await overseerr_service.get_requests(**kwargs)
+        result = await overseerr_service.get_all_requests(**kwargs)
 
         assert result == [{"id": 1}, {"id": 2}]
         (request,) = http_stub.requests
         assert request.url.path == "/api/v1/request"
         assert dict(request.url.params) == expected_params
         assert request.headers["X-Api-Key"] == "test"
-
-    @pytest.mark.parametrize(
-        "outcome",
-        [httpx.Response(401), httpx.ConnectError("Network error")],
-        ids=["unauthorized", "network_error"],
-    )
-    async def test_failures_return_empty_list(self, overseerr_service, http_stub, outcome):
-        http_stub.reply(outcome)
-
-        assert await overseerr_service.get_requests() == []
 
     async def test_get_all_requests_paginates(self, overseerr_service, http_stub):
         """get_all_requests aggregates pages until a short page."""

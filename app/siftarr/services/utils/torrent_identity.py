@@ -42,6 +42,19 @@ def normalize_torrent_name(name: str | None) -> str:
     return _NON_ALNUM_RE.sub(" ", name or "").strip().lower()
 
 
+def parse_qbit_progress(value: object) -> float | None:
+    """Return a qBittorrent progress fraction in [0, 1], or None when invalid."""
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int | float | str):
+        try:
+            parsed = float(value)
+        except ValueError:
+            return None
+        return parsed if 0 <= parsed <= 1 else None
+    return None
+
+
 def _bencode_extract_info_value(data: bytes) -> bytes | None:
     if not data or data[0:1] != b"d":
         return None
