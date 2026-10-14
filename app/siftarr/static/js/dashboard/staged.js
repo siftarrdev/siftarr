@@ -1,6 +1,3 @@
-// @ts-nocheck
-// Dashboard Staged Module - Staged tab polling and bulk actions
-// =============================================================
 import {
   bindCheckboxRangeSelection,
   escapeHtml,
@@ -8,19 +5,14 @@ import {
   postWithConfirm,
   promptEachWarning,
 } from '/static/js/dashboard/core.js';
-// Torrent Status tab poll intervals. The active/downloading sub-tab refreshes
-// aggressively; completed torrents barely change, so they poll slowly.
 const ACTIVE_DOWNLOADS_POLL_INTERVAL_MS = 1000;
-const COMPLETED_TORRENTS_POLL_INTERVAL_MS = 10000;
+const COMPLETED_TORRENTS_POLL_INTERVAL_MS = 1e4;
 let stagedTabRefreshInFlight = false;
 let downloadingTabRefreshInFlight = false;
 let _stagedStatusPollInterval = null;
 let _downloadStatusPatchInFlight = false;
 let _stagedStatusPollWanted = false;
-// Which sub-view of the Torrent Status tab is visible: 'downloading' | 'completed'.
 let _torrentStatusView = 'downloading';
-// Shared by both Torrent Status sub-views so changing views or polling does not
-// reset the user's selected ordering.
 let _torrentStatusSort = 'added-desc';
 function _currentPollIntervalMs() {
   return _torrentStatusView === 'completed' ? COMPLETED_TORRENTS_POLL_INTERVAL_MS : ACTIVE_DOWNLOADS_POLL_INTERVAL_MS;
@@ -32,8 +24,6 @@ export function _startStagedStatusPoll() {
   if (document.visibilityState === 'hidden') return;
   _stagedStatusPollInterval = setInterval(_patchStagedDownloadStatus, _currentPollIntervalMs());
 }
-// Sub-view toggle for the Torrent Status tab. Only the visible sub-view is
-// polled, and switching restarts the timer at that sub-view's interval.
 export function showQbitView(view) {
   const downloading = document.getElementById('qbit-download-list');
   const completed = document.getElementById('qbit-completed-list');
@@ -86,7 +76,6 @@ document.addEventListener('visibilitychange', () => {
 async function _patchStagedDownloadStatus() {
   const downloadingContent = document.getElementById('content-downloading');
   if (!downloadingContent || downloadingContent.classList.contains('hidden')) return;
-  // In-flight guard: at a 1s interval a slow qBittorrent must not queue requests.
   if (_downloadStatusPatchInFlight) return;
   const completedView = _torrentStatusView === 'completed';
   const panel = document.getElementById(completedView ? 'qbit-completed-list' : 'qbit-download-list');
@@ -105,7 +94,6 @@ async function _patchStagedDownloadStatus() {
     if (completedView) renderQbitCompleted(groups);
     else renderQbitDownloads(groups);
   } catch (_err) {
-    // silently ignore poll errors
   } finally {
     _downloadStatusPatchInFlight = false;
   }
@@ -156,14 +144,6 @@ export function renderQbitDownloadSummary(groups) {
 function qbitGroupKey(group) {
   return group.request_id === null || group.request_id === undefined ? 'unmanaged' : String(group.request_id);
 }
-// Collapse state is keyed by request_id (via the group key) and captured/restored
-// around every re-render, mirroring the accordion pattern in releases.js. Without
-// it a 1s poll would slam every expanded group shut.
-//
-// The desktop table header row and the mobile <details> card share one group key,
-// so the two representations are OR-ed together: a group counts as expanded when
-// either is open. Overwriting instead of OR-ing collapsed every desktop group on
-// each poll, because the untouched mobile card always reported open === false.
 function captureQbitGroupState(prefix) {
   const state = {};
   const record = (key, open) => {
@@ -200,15 +180,9 @@ function setQbitGroupOpen(prefix, key, open) {
   document
     .querySelectorAll(`tr[data-download-group-child="${key}"][data-group-prefix="${prefix}"]`)
     .forEach((row) => row.classList.toggle('hidden', !open));
-  // Keep the mobile card in sync. Both representations share one group key and
-  // are always in the DOM (visibility is CSS-only), so if they are allowed to
-  // disagree the OR in captureQbitGroupState makes a collapse spring back open
-  // on the next poll.
   const card = document.querySelector(`details[data-download-group="${key}"][data-group-prefix="${prefix}"]`);
   if (card && card.open !== open) card.open = open;
 }
-// Mobile <details> toggles natively, so mirror its state onto the desktop row.
-// setQbitGroupOpen only writes card.open when it differs, so this cannot recurse.
 export function syncQbitGroupFromCard(prefix, key, open) {
   setQbitGroupOpen(prefix, key, !!open);
 }
@@ -217,8 +191,6 @@ export function toggleQbitGroup(prefix, key) {
   if (!header) return;
   setQbitGroupOpen(prefix, key, header.getAttribute('aria-expanded') !== 'true');
 }
-// Lower-confidence matches are labelled so a title-only grouping is never
-// mistaken for a torrent Siftarr actually staged.
 const QBIT_MATCH_LABELS = { staged: 'Staged match', title: 'Title match' };
 function qbitMatchBadge(match) {
   const label = QBIT_MATCH_LABELS[match];
@@ -238,16 +210,14 @@ function qbitGroupTotalsText(totals, showSpeeds) {
 function qbitTorrentSortValue(torrent) {
   if (_torrentStatusSort === 'eta-asc') {
     const rawEta = torrent.eta;
-    if (rawEta === null || rawEta === undefined || rawEta === '') return Infinity;
+    if (rawEta === null || rawEta === undefined || rawEta === '') return 1 / 0;
     const eta = Number(rawEta);
-    // qBittorrent uses negative values and 8,640,000 seconds for an
-    // unavailable/infinite ETA. Both belong after real ETAs.
-    return Number.isFinite(eta) && eta >= 0 && eta < 8640000 ? eta : Infinity;
+    return Number.isFinite(eta) && eta >= 0 && eta < 8640000 ? eta : 1 / 0;
   }
   const rawAddedOn = torrent.added_on;
-  if (rawAddedOn === null || rawAddedOn === undefined || rawAddedOn === '') return Infinity;
+  if (rawAddedOn === null || rawAddedOn === undefined || rawAddedOn === '') return 1 / 0;
   const addedOn = Number(rawAddedOn);
-  if (!Number.isFinite(addedOn)) return Infinity;
+  if (!Number.isFinite(addedOn)) return 1 / 0;
   return _torrentStatusSort === 'added-desc' ? -addedOn : addedOn;
 }
 function sortQbitGroups(groups) {
@@ -265,9 +235,6 @@ function sortQbitGroups(groups) {
     return difference || String(left.title || '').localeCompare(String(right.title || ''));
   });
 }
-// Shared grouped renderer for both sub-views. Groups with a single torrent are
-// rendered as a flat row/card (no needless expand click); everything else gets a
-// collapsible header carrying the aggregate totals.
 function renderQbitGroups(groups, options) {
   const { prefix, colspan, showSpeeds, rowHtml, cardHtml, emptyText, cards, body } = options;
   if (!cards || !body) return;
@@ -349,8 +316,6 @@ function renderQbitDownloads(groups) {
   renderQbitDownloadSummary(groups);
   if (window.reinitColumnResizer) window.reinitColumnResizer();
 }
-// Completed sub-view: speeds are meaningless once a torrent is done, so the
-// columns are size / downloaded / uploaded / ratio instead.
 function renderQbitCompleted(groups) {
   const cards = document.getElementById('completed-torrent-cards');
   const body = document.getElementById('completed-torrents-body');
@@ -524,7 +489,10 @@ export async function bulkStagedAction(action) {
         byCode.get(warning.code).push(`#${warning.torrent_id} ${warning.title}: ${warning.message}`);
       });
       return Array.from(byCode, ([code, messages]) => ({
-        text: `${messages.join('\n')}\n\nApprove these anyway?`,
+        text: `${messages.join(`
+`)}
+
+Approve these anyway?`,
         code,
       }));
     });
@@ -576,7 +544,6 @@ export async function openStagedReview(torrentId) {
     content.innerHTML = `<div class="text-red-400">Failed to load alternatives: ${escapeHtml(err.message || 'Unknown error')}</div>`;
   }
 }
-// Temporary compatibility facade for HTML event handlers and untouched modules.
 Object.assign(window, {
   checkNow,
   postStagedAction,

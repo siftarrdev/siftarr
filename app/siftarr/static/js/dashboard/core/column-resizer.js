@@ -27,14 +27,11 @@ export class ColumnResizer {
     document.addEventListener('mouseup', () => this.endResize());
     document.addEventListener('mouseleave', () => this.endResize());
   }
-  // Refreshed tabs replace their table markup, so handles are re-attachable
-  // without duplicating the document-level drag listeners.
   attachHandles() {
     this.tables = document.querySelectorAll('table.data-resizable');
     this.tables.forEach((table) => {
-      var _a;
       const tableId = table.id;
-      const tableWidths = (_a = this.savedWidths)[tableId] ?? (_a[tableId] = {});
+      const tableWidths = (this.savedWidths[tableId] ??= {});
       table.querySelectorAll('th[data-col-key]').forEach((th) => {
         const colKey = th.dataset.colKey;
         if (!colKey) return;
@@ -65,13 +62,12 @@ export class ColumnResizer {
     this.activeCol.style.width = Math.max(this.minWidth, this.startWidth + dx) + 'px';
   }
   endResize() {
-    var _a;
     if (!this.activeHandle || !this.activeCol) return;
     const tableId = this.activeCol.closest('table')?.id;
     const colKey = this.activeCol.dataset.colKey;
     if (!tableId || !colKey) return;
     const finalWidth = parseInt(this.activeCol.style.width) || this.activeCol.offsetWidth;
-    const tableWidths = (_a = this.savedWidths)[tableId] ?? (_a[tableId] = {});
+    const tableWidths = (this.savedWidths[tableId] ??= {});
     tableWidths[colKey] = finalWidth;
     this.saveWidths();
     this.activeHandle.classList.remove('dragging');

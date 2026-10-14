@@ -1,3 +1,4 @@
+export {};
 function requiredElement(selector) {
   const element = document.querySelector(selector);
   if (!element) throw new Error(`Missing stats element: ${selector}`);
@@ -221,4 +222,3 @@ form.addEventListener('submit', (event) => {
 });
 syncCustomRange();
 loadStats();
-export {};

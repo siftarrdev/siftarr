@@ -1,9 +1,3 @@
-// @ts-nocheck
-// Dashboard Main Entry Point
-// ==========================
-// This file imports all dashboard modules and initializes the application.
-// dashboard.html maps these stable specifiers to versioned URLs. Import maps
-// make the entry and every child share the server-provided static revision.
 import '/static/js/dashboard/core.js';
 import '/static/js/dashboard/releases.js';
 import '/static/js/dashboard/filters.js';
@@ -13,25 +7,17 @@ import '/static/js/dashboard/download_health.js';
 import '/static/js/dashboard/modals.js';
 import '/static/js/dashboard/search_sse.js';
 import { ColumnResizer } from '/static/js/dashboard/core/column-resizer.js';
-// Initialize on DOM ready
 function initDashboard() {
   window.initDownloadHealth?.();
-  // Initialize column resizer
   const columnResizer = new ColumnResizer();
-  // Re-attach resize handles after a tab's markup is replaced wholesale
-  // (refreshStagedTabData / refreshDownloadingTabData swap innerHTML, which
-  // discards the previous handles and their listeners).
   window.reinitColumnResizer = () => columnResizer.attachHandles();
-  // Set initial tab from URL
   const initialTab = new URLSearchParams(window.location.search).get('tab');
   if (initialTab && document.getElementById('content-' + initialTab) && document.getElementById('tab-' + initialTab)) {
     window.showTab(initialTab);
   }
-  // Apply initial filters
   if (window.filterTable) {
     window.filterTable();
   }
-  // Delegate filter events because tab refreshes replace filter inputs.
   const activeSelectAll = document.getElementById('active-select-all');
   const pendingSelectAll = document.getElementById('pending-select-all');
   document.addEventListener('input', (event) => {
@@ -47,7 +33,6 @@ function initDashboard() {
     };
     handlers[event.target?.id]?.();
   });
-  // Bind select all checkboxes
   window.bindSelectAll(activeSelectAll, '.active-request-checkbox');
   window.bindSelectAll(pendingSelectAll, '.pending-request-checkbox');
   window.bindCheckboxRangeSelection('.pending-request-checkbox');
@@ -57,9 +42,6 @@ function initDashboard() {
   if (document.getElementById('unreleased-requests-table')) {
     window.sortTable('unreleased', 'releasedate');
   }
-  // Bind sort handlers to the full sortable header cell. This keeps sorting reliable
-  // when users click header padding, labels, or sort indicators, while leaving the
-  // column resize handle reserved for resizing only.
   document.addEventListener('click', (e) => {
     if (e.target.closest('.resize-handle')) return;
     const th = e.target.closest('th[data-table][data-sort]');
@@ -67,7 +49,6 @@ function initDashboard() {
     const sortKey = th.dataset.sort === 'ovstatus' ? 'ovrank' : th.dataset.sort;
     window.sortTable(th.dataset.table, sortKey);
   });
-  // Keyboard navigation for details modal
   document.addEventListener('keydown', (e) => {
     const modal = document.getElementById('request-details-modal');
     const largeTvSearchModal = document.getElementById('large-tv-search-modal');
@@ -82,8 +63,6 @@ function initDashboard() {
         window.closeTvSearchScopeMenu();
         return;
       }
-      // The Activity overlay is dismissed first so Escape does not close
-      // the whole modal out from under an open panel.
       if (window.isActivityPanelOpen && window.isActivityPanelOpen()) {
         window.closeActivityPanel();
         return;
@@ -97,7 +76,6 @@ function initDashboard() {
       window.navigateDetails(1);
     }
   });
-  // Close TV search dropdown on outside click
   document.addEventListener('click', (e) => {
     const dropdown = document.getElementById('tv-search-scope-menu');
     const wrapper = document.getElementById('request-details-tv-search-btn');

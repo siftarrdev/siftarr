@@ -9,7 +9,7 @@ current dark theme) and use fake content. No application files are changed.
    `S24E01` + `Episode 1`, `Season packs` + `0 cached` all render with zero horizontal space.
    In the live markup these rows use `gap-x-3` on a `flex` container, so the built Tailwind CSS
    very likely does not contain the `gap-x-*` utilities in use (worth checking
-   `npm run build:css` output before styling anything else).
+   `bun run build:css` output before styling anything else).
 2. **Everything is squashed.** 8–12px padding throughout, small type, boxes nested inside boxes.
 
 ## The three options

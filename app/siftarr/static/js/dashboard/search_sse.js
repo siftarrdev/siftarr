@@ -1,7 +1,3 @@
-// @ts-nocheck
-// Search SSE Progress Panel
-// ==========================
-// Reusable SSE-based search progress panel for the dashboard.
 let activeSearchEventSource = null;
 let activeTvSearchCancelUrl = null;
 function getProgressBar() {

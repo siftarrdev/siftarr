@@ -6,6 +6,7 @@ Thanks for helping improve Siftarr. This guide is for developers working on the 
 
 - Python 3.14+
 - [uv](https://docs.astral.sh/uv/) for dependency and virtual environment management
+- [Bun](https://bun.sh/) 1.4.3 for frontend dependencies, builds, and checks (Node.js is not required)
 - Git
 - Docker, if you need to test the container/Compose workflow
 
@@ -15,6 +16,7 @@ Thanks for helping improve Siftarr. This guide is for developers working on the 
 git clone <repository-url>
 cd siftarr
 uv sync --extra dev
+bun install
 mkdir -p data/db
 uv run alembic upgrade head
 uv run uvicorn app.siftarr.main:app --reload
@@ -96,8 +98,8 @@ Prefer focused tests while iterating, then run the full quality gates before ope
 Run all gates in this order before merge:
 
 ```bash
-npm run format:js
-npm run lint:js
+bun run format:js
+bun run lint:js
 uv run ruff format .
 uv run ruff check .
 uv run ty check

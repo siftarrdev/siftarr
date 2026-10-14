@@ -1,6 +1,3 @@
-// @ts-nocheck
-// Dashboard Filters Module - Table filtering and sorting
-// ======================================================
 import { refreshDetailsNavigationContext } from '/static/js/dashboard/core.js';
 import { dashboardState } from '/static/js/dashboard/core/state.js';
 export function toggleMediaFilter(tabName, mediaType) {
@@ -172,8 +169,6 @@ export function sortTable(tableName, sortKey, preserveDirection = false, forcedD
     state.column = sortKey;
     state.direction = forcedDirection;
   } else if (state.column === sortKey) {
-    // preserveDirection is used by restoreTabState to re-sort rows
-    // without flipping the sort direction on every tab refresh.
     if (!preserveDirection) {
       state.direction = state.direction === 'asc' ? 'desc' : 'asc';
     }
@@ -186,7 +181,7 @@ export function sortTable(tableName, sortKey, preserveDirection = false, forcedD
   });
   const indicator = table.querySelector(`th[data-table="${tableName}"][data-sort="${sortKey}"] .sort-indicator`);
   if (indicator) {
-    indicator.textContent = state.direction === 'asc' ? ' \u25B2' : ' \u25BC';
+    indicator.textContent = state.direction === 'asc' ? ' ▲' : ' ▼';
   }
   const rows = Array.from(tbody.querySelectorAll('tr'));
   rows.sort((a, b) => {
@@ -226,13 +221,7 @@ export function sortDashboardCards(tableName, encodedSort) {
   if (!sortKey) return;
   sortTable(tableName, sortKey, true, direction === 'desc' ? 'desc' : 'asc');
 }
-/**
- * Restore tab UI state after an in-place DOM refresh.
- * Re-applies media filter button styling, re-applies the current sort,
- * and updates sort indicators in table headers.
- */
 export function restoreTabState(tabName) {
-  // Restore media filter button styling
   const activeMediaType = dashboardState.mediaFilterState[tabName] || null;
   const tvBtn = document.getElementById('media-filter-' + tabName + '-tv');
   const movieBtn = document.getElementById('media-filter-' + tabName + '-movie');
@@ -246,7 +235,6 @@ export function restoreTabState(tabName) {
     activeBtn.classList.remove('border-gray-700/60', 'text-gray-500');
     activeBtn.classList.add('border-brand-500', 'text-brand-400', 'bg-brand-500/10');
   }
-  // Restore text filter value
   const filterInputIdMap = {
     active: 'filter-input',
     pending: 'pending-filter-input',
@@ -261,10 +249,8 @@ export function restoreTabState(tabName) {
     filterInput.value = filterInput.dataset.priorValue;
     delete filterInput.dataset.priorValue;
   }
-  // Re-apply sorting using saved state
   const sortState = dashboardState.tableSortState[tabName];
   if (sortState && sortState.column) {
-    // Update sort indicator in the header
     const tableIdMap = {
       active: 'active-requests-table',
       pending: 'pending-requests-table',
@@ -283,26 +269,15 @@ export function restoreTabState(tabName) {
         `th[data-table="${tabName}"][data-sort="${sortState.column}"] .sort-indicator`,
       );
       if (indicator) {
-        indicator.textContent = sortState.direction === 'asc' ? ' \u25B2' : ' \u25BC';
+        indicator.textContent = sortState.direction === 'asc' ? ' ▲' : ' ▼';
       }
     }
-    // Re-sort rows without toggling direction (preserveDirection=true)
     sortTable(tabName, sortState.column, true);
   } else {
-    // No saved sort, just re-apply filters
     applyAllFilters(tabName);
   }
 }
-/**
- * Save and restore tab state around an in-place refresh.
- * Call before replacing innerHTML to save state, call after to restore.
- * Usage:
- *   const cleanup = saveTabState('staged');
- *   // ... replace DOM ...
- *   cleanup();
- */
 export function saveTabState(tabName) {
-  // Save text filter value onto the input element so restoreTabState can find it
   const filterInputIdMap = {
     active: 'filter-input',
     pending: 'pending-filter-input',
@@ -316,12 +291,10 @@ export function saveTabState(tabName) {
   if (filterInput && filterInput.value) {
     filterInput.dataset.priorValue = filterInput.value;
   }
-  // Return a cleanup function that restores state
   return function restore() {
     restoreTabState(tabName);
   };
 }
-// Temporary adapter for bootstrap code and HTML event handlers.
 Object.assign(window, {
   toggleMediaFilter,
   filterTable,

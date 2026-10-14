@@ -1,7 +1,7 @@
 # Stage 1: Build browser assets
-FROM node:20-slim AS frontend-builder
+FROM oven/bun:1.4.3-slim AS frontend-builder
 WORKDIR /build
-COPY package.json package-lock.json tsconfig.json tsconfig.build.json ./
+COPY package.json bun.lock bunfig.toml tsconfig.json .prettierrc.json ./
 COPY frontend-src/ ./frontend-src/
 # The whole app tree must be present: Tailwind only emits utilities it finds in
 # scanned sources, and the dashboard builds most of the request-details markup in
@@ -9,10 +9,10 @@ COPY frontend-src/ ./frontend-src/
 # JS-only class (e.g. the `gap-*` on season/episode rows, which then rendered
 # with no spacing at all in the container while looking fine locally).
 COPY app/ ./app/
-RUN --mount=type=cache,target=/root/.npm \
-    npm ci && \
-    npm run build:frontend && \
-    npm run build:css
+RUN --mount=type=cache,target=/root/.bun/install/cache \
+    bun install --frozen-lockfile && \
+    bun run build:frontend && \
+    bun run build:css
 
 # Stage 2: Python application
 FROM python:3.14-slim

@@ -1,9 +1,5 @@
-// @ts-nocheck
-// Dashboard Core Module - Tab navigation, utilities, and global state
-// ====================================================================
 import { dashboardState } from '/static/js/dashboard/core/state.js';
 const checkboxRangeAnchors = new Map();
-// Utility functions
 export function escapeHtml(value) {
   return String(value ?? '')
     .replaceAll('&', '&amp;')
@@ -12,12 +8,6 @@ export function escapeHtml(value) {
     .replaceAll('"', '&quot;')
     .replaceAll("'", '&#39;');
 }
-/**
- * POST form data as JSON-accepting fetch. On a 409 with `detail.warnings`, ask the user
- * to confirm each prompt, append `confirm_<code>=true` for the confirmed codes, and
- * re-POST once. `buildPrompts` maps the server warnings to confirm() prompts.
- * Returns `cancelled: true` (no retry) when the user declines any prompt.
- */
 export async function postWithConfirm(url, formData, buildPrompts) {
   const post = () => fetch(url, { method: 'POST', headers: { Accept: 'application/json' }, body: formData });
   let response = await post();
@@ -33,11 +23,15 @@ export async function postWithConfirm(url, formData, buildPrompts) {
   }
   return { response, cancelled: false };
 }
-/** One confirm() prompt per warning: "<message>\n\n<suffix>". */
 export function promptEachWarning(suffix) {
-  return (warnings) => warnings.map((warning) => ({ text: `${warning.message}\n\n${suffix}`, code: warning.code }));
+  return (warnings) =>
+    warnings.map((warning) => ({
+      text: `${warning.message}
+
+${suffix}`,
+      code: warning.code,
+    }));
 }
-/** Fetch the current page HTML and parse it, or return null when the request fails. */
 export async function fetchPageDoc() {
   const response = await fetch(window.location.pathname, { headers: { Accept: 'text/html' } });
   if (!response.ok) return null;
@@ -88,10 +82,6 @@ export function setPoster(posterUrl, titleText) {
   if (posterUrl) {
     poster.src = posterUrl;
     poster.alt = titleText;
-    // Only toggle visibility + src/alt so the responsive classes authored in
-    // the template (w-14 aspect-[2/3] ... lg:w-full) survive across both the
-    // mobile header-card and the desktop rail. Resetting className would
-    // clobber the responsive breakpoints.
     poster.classList.remove('hidden');
     fallback.classList.add('hidden');
     return;
@@ -145,7 +135,6 @@ export function updateNavigationButtons() {
   const nextBtn = document.getElementById('details-next-btn');
   const position = document.getElementById('details-position');
   if (!prevBtn || !nextBtn || !position) return;
-  // Mobile bottom-bar prev/next set (guarded so desktop-only contexts work).
   const prevBtnMobile = document.getElementById('details-prev-btn-mobile');
   const nextBtnMobile = document.getElementById('details-next-btn-mobile');
   const positionMobile = document.getElementById('details-position-mobile');
@@ -245,11 +234,6 @@ export function bindCheckboxRangeSelection(selector) {
     });
   });
 }
-/**
- * Refresh the currently visible tab's content by fetching fresh HTML from the server.
- * Preserves text filter, media filter, and sort state.
- * Also updates stat cards.
- */
 export async function refreshCurrentTabContent() {
   const activeTabEl = document.querySelector('.tab-content:not(.hidden)');
   if (!activeTabEl) return;
@@ -258,19 +242,16 @@ export async function refreshCurrentTabContent() {
   try {
     const doc = await fetchPageDoc();
     if (!doc) return;
-    // Update tab content
     const newTabContent = doc.getElementById('content-' + tabName);
     if (newTabContent) {
       activeTabEl.innerHTML = newTabContent.innerHTML;
     }
-    // Update stat cards
     const statsContainer = document.querySelector('[data-dashboard-stat-cards]');
     const newStatsContainer = doc.querySelector('[data-dashboard-stat-cards]');
     if (statsContainer && newStatsContainer) {
       statsContainer.innerHTML = newStatsContainer.innerHTML;
     }
     restore();
-    // Re-bind selection handlers if applicable
     if (tabName === 'staged') {
       if (window.bindStagedSelectionHandlers) {
         window.bindStagedSelectionHandlers();
@@ -294,7 +275,6 @@ export async function refreshCurrentTabContent() {
     console.error('Failed to refresh tab content:', err);
   }
 }
-// Temporary adapter for untouched modules and HTML event handlers.
 export function installCoreCompatibility() {
   Object.keys(dashboardState).forEach((key) => {
     Object.defineProperty(window, key, {

@@ -1,4 +1,3 @@
-// Dashboard download-health warnings and explicit replacement review.
 import { escapeHtml } from './core.js';
 const healthProblems = new Map();
 async function openHealthDetails(problem) {
@@ -73,7 +72,7 @@ export function renderDownloadHealth(problems, target = '[data-download-health]'
   list.querySelectorAll('[data-health-review]').forEach((button) => {
     button.addEventListener('click', () => {
       const problem = healthProblems.get(Number(button.dataset.healthReview));
-      if (problem) void openHealthDetails(problem);
+      if (problem) openHealthDetails(problem);
     });
   });
   list.querySelectorAll('[data-health-recover]').forEach((button) => {
@@ -124,10 +123,10 @@ export async function confirmDownloadHealthRecovery(attemptId, button) {
 let refreshTimer;
 export function initDownloadHealth() {
   if (refreshTimer !== undefined) return;
-  void loadDownloadHealth();
+  loadDownloadHealth();
   refreshTimer = window.setInterval(() => {
     if (!document.hidden && !document.getElementById('content-downloading')?.classList.contains('hidden')) {
-      void loadDownloadHealth();
+      loadDownloadHealth();
     }
   }, 60000);
   window.addEventListener(

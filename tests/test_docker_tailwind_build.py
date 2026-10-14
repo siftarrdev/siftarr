@@ -13,7 +13,7 @@ DOCKERFILE = Path(__file__).resolve().parents[1] / "docker" / "Dockerfile"
 
 def _tailwind_stage() -> str:
     content = DOCKERFILE.read_text(encoding="utf-8")
-    start = content.index("FROM node:")
+    start = content.index("AS frontend-builder")
     end = content.index("FROM python:")
     return content[start:end]
 

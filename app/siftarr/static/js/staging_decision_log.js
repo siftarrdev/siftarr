@@ -1,4 +1,3 @@
-'use strict';
 (function () {
   function requiredElement(id) {
     const element = document.getElementById(id);

@@ -1,4 +1,3 @@
-// Shared SSE progress panel for settings sync jobs (Overseerr sync, Plex re-scan).
 function byId(id) {
   const element = document.getElementById(id);
   if (!element) throw new Error(`Missing element #${id}`);
@@ -46,7 +45,6 @@ export function renderActiveItems(listElement, wrapperElement, items) {
   }
   wrapperElement.classList.remove('hidden');
 }
-/** Open an SSE progress stream and render it into the panel described by `ids`. */
 export function startProgressStream(options) {
   const { ids } = options;
   const bar = byId(ids.bar);
