@@ -14,7 +14,7 @@ from app.siftarr.models.request import MediaType, Request, RequestStatus
 from app.siftarr.models.season import Season
 from app.siftarr.services.lifecycle.episode_derive import derive_request_status_from_episodes
 from app.siftarr.services.lifecycle.lifecycle_service import LifecycleService
-from app.siftarr.services.lifecycle.unreleased_service import is_unreleased
+from app.siftarr.services.lifecycle.unreleased_service import UnreleasedEvaluator, is_unreleased
 
 
 class TestLifecycleService:
@@ -279,6 +279,22 @@ def test_is_unreleased_tv_future_season_no_air_date_placeholder():
     )
 
 
+def test_is_unreleased_tv_undated_episode_between_aired_ones_still_needs_release():
+    """An undated episode that sync left PENDING is aired content, not a placeholder."""
+    request = SimpleNamespace(media_type="tv", tmdb_id=456)
+    details = {"firstAirDate": "2025-01-01", "status": "Returning Series"}
+    episodes = [
+        SimpleNamespace(air_date=date(2026, 3, 20), status=RequestStatus.COMPLETED),
+        SimpleNamespace(air_date=None, status=RequestStatus.PENDING),
+        SimpleNamespace(air_date=date(2026, 4, 3), status=RequestStatus.COMPLETED),
+        SimpleNamespace(air_date=date(2026, 5, 1), status=RequestStatus.UNRELEASED),
+    ]
+
+    assert (
+        is_unreleased(request, media_details=details, local_episodes=episodes, today=TODAY) is False
+    )
+
+
 def test_is_unreleased_tv_all_aired_downloaded_with_empty_season():
     """A series with all aired episodes downloaded but an empty future season is unreleased."""
     request = SimpleNamespace(media_type="tv", tmdb_id=456)
@@ -439,4 +455,70 @@ async def test_transition_downloading_scope(
         assert refreshed is not None
         all_episodes = list((await db.execute(select(Episode))).scalars().all())
         assert refreshed.status == derive_request_status_from_episodes(all_episodes)
+    await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_released_verdict_keeps_future_and_placeholder_episodes_unreleased():
+    """A released verdict reopens newly aired episodes only, not future or placeholder ones."""
+    today = date.today()
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+    session_maker = async_sessionmaker(engine, expire_on_commit=False)
+    async with session_maker() as db:
+        request = Request(
+            external_id="verdict-tv",
+            media_type=MediaType.TV,
+            tmdb_id=456,
+            title="Verdict Show",
+            status=RequestStatus.UNRELEASED,
+        )
+        db.add(request)
+        await db.flush()
+        season_one = Season(request_id=request.id, season_number=1)
+        season_two = Season(request_id=request.id, season_number=2)
+        db.add_all([season_one, season_two])
+        await db.flush()
+        db.add_all(
+            [
+                Episode(
+                    season_id=season_one.id,
+                    episode_number=1,
+                    air_date=today - timedelta(days=14),
+                    status=RequestStatus.COMPLETED,
+                ),
+                # Aired since the last episode sync.
+                Episode(
+                    season_id=season_one.id,
+                    episode_number=2,
+                    air_date=today - timedelta(days=1),
+                    status=RequestStatus.UNRELEASED,
+                ),
+                Episode(
+                    season_id=season_one.id,
+                    episode_number=3,
+                    air_date=today + timedelta(days=6),
+                    status=RequestStatus.UNRELEASED,
+                ),
+                Episode(season_id=season_two.id, episode_number=1, status=RequestStatus.UNRELEASED),
+            ]
+        )
+        await db.commit()
+
+        new_status = await UnreleasedEvaluator(db, AsyncMock()).evaluate_and_apply(
+            request,
+            prefetched_media_details={
+                "firstAirDate": "2020-01-01",
+                "status": "Returning Series",
+            },
+        )
+
+        assert new_status == RequestStatus.PENDING
+        assert await _episode_statuses(db, season_one.id) == [
+            RequestStatus.COMPLETED,
+            RequestStatus.PENDING,
+            RequestStatus.UNRELEASED,
+        ]
+        assert await _episode_statuses(db, season_two.id) == [RequestStatus.UNRELEASED]
     await engine.dispose()

@@ -17,6 +17,7 @@ from app.siftarr.services.lifecycle.episode_derive import (
     apply_synced_request_status,
     derive_episode_status,
     derive_season_status,
+    unaired_undated_episodes,
 )
 from app.siftarr.services.utils.async_utils import gather_limited
 
@@ -33,6 +34,19 @@ async def _load_season_episodes(db: AsyncSession, season: Season) -> list[Episod
     return list(episodes_result.scalars().all())
 
 
+def _mark_pending_placeholders_unreleased(
+    episodes_by_season: list[tuple[Season, list[Episode]]],
+) -> None:
+    """Mark undated placeholder episodes that are still PENDING as UNRELEASED."""
+    for episode in unaired_undated_episodes(
+        (season.season_number, episode)
+        for season, episodes in episodes_by_season
+        for episode in episodes
+    ):
+        if episode.status == RequestStatus.PENDING:
+            episode.status = RequestStatus.UNRELEASED
+
+
 async def persist_episode_availability(
     db: AsyncSession,
     request: Request,
@@ -47,13 +61,16 @@ async def persist_episode_availability(
     statuses, and commits the transaction.
     """
     request_episodes: list[Episode] = []
+    episodes_by_season: list[tuple[Season, list[Episode]]] = []
     for season in seasons:
         episodes = sorted(
             await _load_season_episodes(db, season),
             key=lambda episode: episode.episode_number,
         )
         request_episodes.extend(episodes)
+        episodes_by_season.append((season, episodes))
 
+    for season, episodes in episodes_by_season:
         for episode in episodes:
             is_on_plex = availability.get((season.season_number, episode.episode_number), False)
             if is_on_plex:
@@ -65,6 +82,9 @@ async def persist_episode_availability(
             # so that workflow states (DOWNLOADING, STAGED) are not reset to
             # PENDING before Plex has indexed the newly-added media.
 
+    _mark_pending_placeholders_unreleased(episodes_by_season)
+
+    for season, episodes in episodes_by_season:
         await db.flush()
         season.status = derive_season_status(episodes)
 
@@ -245,9 +265,6 @@ class EpisodeSyncService:
 
             season_episodes.append(episode)
 
-        # Derive season status from episode states (cached summary)
-        season.status = derive_season_status(season_episodes)
-
         return season, season_episodes
 
     async def _sync_from_overseerr(self, request: Request) -> list[Season]:
@@ -284,6 +301,7 @@ class EpisodeSyncService:
         )
         synced_seasons: list[Season] = []
         synced_episodes: list[Episode] = []
+        episodes_by_season: list[tuple[Season, list[Episode]]] = []
 
         for season_info in seasons_data:
             episodes_data = self._get_season_episodes_payload(season_info, fetched_season_details)
@@ -295,6 +313,13 @@ class EpisodeSyncService:
             if season is not None:
                 synced_seasons.append(season)
                 synced_episodes.extend(season_episodes)
+                episodes_by_season.append((season, season_episodes))
+
+        _mark_pending_placeholders_unreleased(episodes_by_season)
+
+        # Derive season status from episode states (cached summary)
+        for season, season_episodes in episodes_by_season:
+            season.status = derive_season_status(season_episodes)
 
         # Derive request-level status from episode states (cached summary)
         apply_synced_request_status(request, synced_episodes)
