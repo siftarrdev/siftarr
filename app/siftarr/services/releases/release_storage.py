@@ -2,7 +2,7 @@
 
 import logging
 from datetime import datetime
-from typing import Any
+from typing import Any, cast
 
 from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -59,7 +59,7 @@ def build_prowlarr_release(release: Release) -> ProwlarrRelease:
         release_group=release.release_group,
         files=release.files,
         uploaded_by=release.uploaded_by,
-        file_paths=tuple(paths)
+        file_paths=tuple(cast(list[str], paths))
         if isinstance(paths, list) and all(isinstance(p, str) for p in paths)
         else None,
         file_metadata_observed_at=_parse_observation_time(
