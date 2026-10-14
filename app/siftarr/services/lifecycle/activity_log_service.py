@@ -71,9 +71,3 @@ class ActivityLogService:
         )
         result = await self.db.execute(stmt)
         return list(result.scalars().all())
-
-    async def get_recent(self, limit: int = 50) -> list[ActivityLog]:
-        """Return recent activity logs across all requests, newest first."""
-        stmt = select(ActivityLog).order_by(ActivityLog.created_at.desc()).limit(limit)
-        result = await self.db.execute(stmt)
-        return list(result.scalars().all())

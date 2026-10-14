@@ -37,19 +37,16 @@ async def test_log_allows_system_event_without_request_or_details(db):
 
 
 @pytest.mark.asyncio
-async def test_timeline_filters_by_request_and_recent_spans_all(db):
+async def test_timeline_filters_by_request(db):
     first = await make_request(db, external_id="1")
     second = await make_request(db, external_id="2")
     service = ActivityLogService(db)
     await service.log(EventType.SEARCH_STARTED, request_id=first.id)
     await service.log(EventType.DOWNLOAD_COMPLETED, request_id=second.id)
-    await service.log(EventType.ERROR)
 
     timeline = await service.get_timeline(first.id, limit=10)
-    recent = await service.get_recent(limit=2)
 
     assert [log.event_type for log in timeline] == ["search_started"]
-    assert len(recent) == 2
 
 
 @pytest.mark.asyncio

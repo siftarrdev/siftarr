@@ -133,14 +133,14 @@ async def receive_overseerr_webhook(
     # Fetch title and year from Overseerr media details
     title = ""
     year = None
+    # The OverseerrMedia validator guarantees at least one id.
     media_external_id = payload.media.tmdbid or payload.media.tvdbid
-    if media_external_id:
-        settings = get_settings()
-        overseerr_service = OverseerrService(settings=settings)
-        media_type_for_api = "movie" if media_type == MediaType.MOVIE else "tv"
-        title, year = await extract_media_title_and_year(
-            overseerr_service, media_type_for_api, media_external_id
-        )
+    assert media_external_id is not None
+    settings = get_settings()
+    overseerr_service = OverseerrService(settings=settings)
+    title, year = await extract_media_title_and_year(
+        overseerr_service, media_type.value, media_external_id
+    )
 
     # Parse created_at from Overseerr webhook
     created_at = None

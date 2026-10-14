@@ -44,14 +44,6 @@ class _MoveCandidate:
     request: Request | None = None
 
 
-def _normalize_name(name: str | None) -> str:
-    return normalize_torrent_name(name)
-
-
-def _safe_folder_name(value: str | None, fallback: str) -> str:
-    return safe_folder_name(value, fallback)
-
-
 def _resolved(path: str | Path) -> Path:
     return Path(path).expanduser().resolve(strict=False)
 
@@ -131,7 +123,7 @@ class QbitMoveService:
             if torrent_hash:
                 managed_hashes.add(torrent_hash)
                 used_hashes.add(torrent_hash)
-            destination = self._destination_for(torrent, request=request, strict=True)
+            destination = self._destination_for(torrent, request=request)
             if destination is None:
                 await self._mark_managed_error(staged, "unsafe_destination", torrent)
                 continue
@@ -152,7 +144,7 @@ class QbitMoveService:
             save_path = torrent.get("save_path") or torrent.get("download_location")
             if not save_path or not _is_relative_to(_resolved(str(save_path)), completed_dir):
                 continue
-            destination = self._destination_for(torrent, request=None, strict=True)
+            destination = self._destination_for(torrent, request=None)
             if destination is None:
                 self.logger.warning(
                     "QbitMoveService: unsafe unmanaged destination for %s", torrent.get("name")
@@ -173,14 +165,14 @@ class QbitMoveService:
             if torrent is not None:
                 return torrent
 
-        title_norm = _normalize_name(staged.title)
+        title_norm = normalize_torrent_name(staged.title)
         if not title_norm:
             return None
         for torrent in completed:
             torrent_hash = str(torrent.get("hash") or "").lower()
             if torrent_hash and torrent_hash in used_hashes:
                 continue
-            if title_norm in _normalize_name(str(torrent.get("name") or "")):
+            if title_norm in normalize_torrent_name(str(torrent.get("name") or "")):
                 return torrent
         return None
 
@@ -189,46 +181,27 @@ class QbitMoveService:
         torrent: dict[str, Any],
         *,
         request: Request | None,
-        strict: bool,
     ) -> Path | None:
         movie_root = _resolved(self.settings.qbittorrent_move_movie_root)
         tv_root = _resolved(self.settings.qbittorrent_move_tv_root)
 
         if request is not None and request.media_type == MediaType.TV:
-            destination = tv_root / _safe_folder_name(request.title, "Unknown Show")
-            return (
-                destination
-                if not strict or _is_relative_to(_resolved(destination), tv_root)
-                else None
-            )
+            root, subfolder = tv_root, safe_folder_name(request.title, "Unknown Show")
+        elif request is not None and request.media_type == MediaType.MOVIE:
+            root, subfolder = movie_root, None
+        else:
+            name = str(torrent.get("name") or "")
+            match = TV_PATTERN.search(name)
+            if match:
+                raw_show = re.sub(
+                    r"\s\d{4}$", "", name[: match.start()].replace(".", " ").replace("_", " ")
+                ).strip()
+                root, subfolder = tv_root, safe_folder_name(raw_show.title(), "Unknown Show")
+            else:
+                root, subfolder = movie_root, None
 
-        if request is not None and request.media_type == MediaType.MOVIE:
-            destination = movie_root
-            return (
-                destination
-                if not strict or _is_relative_to(_resolved(destination), movie_root)
-                else None
-            )
-
-        name = str(torrent.get("name") or "")
-        match = TV_PATTERN.search(name)
-        if match:
-            raw_show = re.sub(
-                r"\s\d{4}$", "", name[: match.start()].replace(".", " ").replace("_", " ")
-            ).strip()
-            destination = tv_root / _safe_folder_name(raw_show.title(), "Unknown Show")
-            return (
-                destination
-                if not strict or _is_relative_to(_resolved(destination), tv_root)
-                else None
-            )
-
-        destination = movie_root
-        return (
-            destination
-            if not strict or _is_relative_to(_resolved(destination), movie_root)
-            else None
-        )
+        destination = root / subfolder if subfolder else root
+        return destination if _is_relative_to(_resolved(destination), root) else None
 
     async def _move_candidate(self, candidate: _MoveCandidate) -> bool:
         torrent_hash = candidate.torrent.get("hash")

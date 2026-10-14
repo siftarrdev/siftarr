@@ -24,6 +24,19 @@ from app.siftarr.services.releases.release_parser import cached_parse_release_co
 
 logger = logging.getLogger(__name__)
 
+# TV episode-level transitions: new status -> episode statuses it may replace.
+# None means every episode is replaced.
+_EPISODE_TRANSITION_SOURCES: dict[RequestStatus, frozenset[RequestStatus] | None] = {
+    RequestStatus.DENIED: None,
+    RequestStatus.UNRELEASED: frozenset({RequestStatus.PENDING}),
+    RequestStatus.FAILED: frozenset(
+        {RequestStatus.PENDING, RequestStatus.SEARCHING, RequestStatus.DOWNLOADING}
+    ),
+    RequestStatus.DOWNLOADING: frozenset(
+        {RequestStatus.STAGED, RequestStatus.PENDING, RequestStatus.SEARCHING}
+    ),
+}
+
 
 class LifecycleService:
     """
@@ -127,38 +140,20 @@ class LifecycleService:
                 # No episode tree to derive from yet, so apply the status directly.
                 request.status = new_status
             else:
-                if new_status == RequestStatus.DENIED:
-                    for ep in all_episodes:
-                        ep.status = RequestStatus.DENIED
-                elif new_status == RequestStatus.UNRELEASED:
-                    for ep in all_episodes:
-                        if ep.status == RequestStatus.PENDING:
-                            ep.status = RequestStatus.UNRELEASED
-                elif new_status == RequestStatus.FAILED:
-                    for ep in all_episodes:
-                        if ep.status in (
-                            RequestStatus.PENDING,
-                            RequestStatus.SEARCHING,
-                            RequestStatus.DOWNLOADING,
-                        ):
-                            ep.status = RequestStatus.FAILED
-                elif new_status == RequestStatus.DOWNLOADING:
+                # Statuses without an entry (COMPLETED) change no episodes.
+                if new_status in _EPISODE_TRANSITION_SOURCES:
                     target_episodes = all_episodes
-                    if coverage_title:
+                    if new_status == RequestStatus.DOWNLOADING and coverage_title:
                         season_number_by_id = {
                             season.id: season.season_number for season in request.seasons
                         }
                         target_episodes = self._episodes_covered_by_title(
                             all_episodes, season_number_by_id, coverage_title
                         )
+                    allowed_from = _EPISODE_TRANSITION_SOURCES[new_status]
                     for ep in target_episodes:
-                        if ep.status in (
-                            RequestStatus.STAGED,
-                            RequestStatus.PENDING,
-                            RequestStatus.SEARCHING,
-                        ):
-                            ep.status = RequestStatus.DOWNLOADING
-                # COMPLETED — no episode-level changes needed
+                        if allowed_from is None or ep.status in allowed_from:
+                            ep.status = new_status
                 # Recompute season statuses and derive request status from episodes
                 episodes_by_season: dict[int, list[Episode]] = {}
                 for episode in all_episodes:

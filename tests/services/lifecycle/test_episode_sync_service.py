@@ -12,6 +12,7 @@ from app.siftarr.models.season import Season
 from app.siftarr.services.integrations.plex_service import PlexEpisodeAvailabilityResult
 from app.siftarr.services.lifecycle.episode_sync_service import (
     EpisodeSyncService,
+    persist_episode_availability,
 )
 
 
@@ -442,9 +443,8 @@ class TestEpisodeSyncService:
         ) as mock_load:
             mock_load.return_value = [available_episode, pending_episode, future_episode]
 
-            seasons = await service._apply_plex_availability(request, [season])
+            await service._apply_plex_availability(request, [season])
 
-        assert seasons == [season]
         assert season.status == RequestStatus.PENDING
         assert request.status == RequestStatus.PENDING
         mock_db.commit.assert_awaited_once()
@@ -596,7 +596,7 @@ class TestEpisodeSyncService:
             ),
         ],
     )
-    async def test_reconcile_existing_seasons_from_plex(
+    async def test_persist_episode_availability_from_plex(
         self,
         mock_db,
         mock_overseerr,
@@ -619,7 +619,6 @@ class TestEpisodeSyncService:
                 availability[(number, index)] = on_plex
             episodes_by_season.append(season_eps)
 
-        service = EpisodeSyncService(mock_db, overseerr=mock_overseerr)
         mock_db.flush = AsyncMock()
         mock_db.commit = AsyncMock()
 
@@ -628,7 +627,7 @@ class TestEpisodeSyncService:
             new_callable=AsyncMock,
         ) as mock_load:
             mock_load.side_effect = episodes_by_season
-            await service.reconcile_existing_seasons_from_plex(request, seasons, availability)
+            await persist_episode_availability(mock_db, request, seasons, availability)
 
         assert [ep.status for eps in episodes_by_season for ep in eps] == expected_episodes
         assert [season.status for season in seasons] == expected_seasons

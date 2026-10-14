@@ -112,30 +112,6 @@ class EpisodeSyncService:
             self._overseerr = OverseerrService(settings=get_settings())
         return self._overseerr
 
-    @property
-    def plex(self) -> PlexService | None:
-        return self._plex
-
-    async def _persist_episode_availability(
-        self,
-        request: Request,
-        seasons: list[Season],
-        availability: dict[tuple[int, int], bool],
-    ) -> list[Season]:
-        """Persist season/request aggregates from authoritative Plex availability."""
-        return await persist_episode_availability(self.db, request, seasons, availability)
-
-    async def reconcile_existing_seasons_from_plex(
-        self,
-        request: Request,
-        seasons: list[Season],
-        availability: dict[tuple[int, int], bool],
-    ) -> list[Season]:
-        """Recompute persisted TV availability from an authoritative Plex view."""
-        if not seasons:
-            return seasons
-        return await self._persist_episode_availability(request, seasons, availability)
-
     @staticmethod
     def _get_season_episodes_payload(
         season_info: dict,
@@ -324,19 +300,18 @@ class EpisodeSyncService:
 
         return synced_seasons
 
-    async def _resolve_plex_rating_key(self, request: Request) -> tuple[str | None, bool]:
+    async def _resolve_plex_rating_key(
+        self, request: Request, plex: PlexService
+    ) -> tuple[str | None, bool]:
         """Try to find and persist the Plex rating key for a request.
 
         Delegates to PlexService which handles TMDB → TVDB → title search.
         Saves the result on the request so future syncs skip the lookup.
         """
-        if self._plex is None:
-            return None, True
-
         if request.plex_rating_key:
             return request.plex_rating_key, True
 
-        rating_key, authoritative = await self._plex.resolve_show_rating_key(
+        rating_key, authoritative = await plex.resolve_show_rating_key(
             tmdb_id=request.tmdb_id,
             tvdb_id=request.tvdb_id,
             title=request.title,
@@ -363,14 +338,12 @@ class EpisodeSyncService:
 
         return rating_key, authoritative
 
-    async def _apply_plex_availability(
-        self, request: Request, seasons: list[Season]
-    ) -> list[Season]:
+    async def _apply_plex_availability(self, request: Request, seasons: list[Season]) -> None:
         """Override episode statuses based on authoritative Plex availability."""
         if self._plex is None or not seasons:
-            return seasons
+            return
 
-        rating_key, lookup_authoritative = await self._resolve_plex_rating_key(request)
+        rating_key, lookup_authoritative = await self._resolve_plex_rating_key(request, self._plex)
         if not lookup_authoritative:
             logger.warning(
                 "EpisodeSyncService: degraded Plex sync for request %s (%s); "
@@ -378,7 +351,7 @@ class EpisodeSyncService:
                 request.id,
                 request.title,
             )
-            return seasons
+            return
 
         if not rating_key:
             logger.info(
@@ -386,7 +359,7 @@ class EpisodeSyncService:
                 request.id,
                 request.title,
             )
-            return seasons
+            return
 
         availability_result = await self._plex.get_episode_availability_result(rating_key)
         if not availability_result.authoritative:
@@ -396,17 +369,17 @@ class EpisodeSyncService:
                 request.id,
                 request.title,
             )
-            return seasons
+            return
 
-        await self._persist_episode_availability(request, seasons, availability_result.availability)
+        await persist_episode_availability(
+            self.db, request, seasons, availability_result.availability
+        )
 
         logger.info(
             "EpisodeSyncService: applied Plex availability for request %s (%d episodes on Plex)",
             request.id,
             sum(1 for v in availability_result.availability.values() if v),
         )
-
-        return seasons
 
     async def sync_request(self, request_id: int) -> list[Season]:
         """Sync TV metadata from Overseerr, then apply Plex episode availability."""
@@ -422,22 +395,15 @@ class EpisodeSyncService:
 
         synced_seasons = await self._sync_from_overseerr(request)
 
-        if self._plex is None:
-            logger.info(
-                "EpisodeSyncService: synced %d seasons for request %s",
-                len(synced_seasons),
-                request_id,
-            )
-            return synced_seasons
-
-        try:
-            synced_seasons = await self._apply_plex_availability(request, synced_seasons)
-        except Exception:
-            logger.exception(
-                "EpisodeSyncService: failed to apply Plex availability for request %s",
-                request.id,
-            )
-            await self.db.commit()
+        if self._plex is not None:
+            try:
+                await self._apply_plex_availability(request, synced_seasons)
+            except Exception:
+                logger.exception(
+                    "EpisodeSyncService: failed to apply Plex availability for request %s",
+                    request.id,
+                )
+                await self.db.commit()
 
         logger.info(
             "EpisodeSyncService: synced %d seasons for request %s",
