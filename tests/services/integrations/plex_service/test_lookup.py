@@ -6,53 +6,29 @@ import pytest
 from app.siftarr.services.integrations.plex_service import PlexService
 
 
-def test_direct_metadata_format():
-    container = {
-        "Metadata": [
-            {"type": "season", "ratingKey": "1", "title": "Season 1"},
-            {"type": "season", "ratingKey": "2", "title": "Season 2"},
-        ]
+def resp(container: dict | None = None, status: int = 200) -> MagicMock:
+    response = MagicMock()
+    response.status_code = status
+    response.json.return_value = {"MediaContainer": container if container is not None else {}}
+    return response
+
+
+def movie(rating_key: str, title: str, *, media: bool = True, **extra) -> dict:
+    item = {
+        "type": "movie",
+        "ratingKey": rating_key,
+        "title": title,
+        "year": 2024,
+        "guid": "plex://movie/abc",
+        **extra,
     }
-    result = PlexService._extract_metadata_items(container)
-    assert len(result) == 2
-    assert result[0]["title"] == "Season 1"
+    if media:
+        item["Media"] = [{"id": 1}]
+    return item
 
 
-def test_search_result_format():
-    container = {
-        "SearchResult": [
-            {
-                "score": 0.93,
-                "Metadata": {"type": "show", "ratingKey": "100", "title": "The Rookie"},
-            },
-            {
-                "score": 0.85,
-                "Metadata": {"type": "movie", "ratingKey": "200", "title": "Some Movie"},
-            },
-        ]
-    }
-    result = PlexService._extract_metadata_items(container)
-    assert len(result) == 2
-    assert result[0]["title"] == "The Rookie"
-    assert result[1]["title"] == "Some Movie"
-
-
-def test_empty_container():
-    assert PlexService._extract_metadata_items({}) == []
-    assert PlexService._extract_metadata_items({"Metadata": []}) == []
-    assert PlexService._extract_metadata_items({"SearchResult": []}) == []
-
-
-def test_mixed_none_metadata():
-    container = {
-        "SearchResult": [
-            {"Metadata": {"type": "show", "ratingKey": "1", "title": "A"}},
-            {"Metadata": None},
-        ]
-    }
-    result = PlexService._extract_metadata_items(container)
-    assert len(result) == 1
-    assert result[0]["title"] == "A"
+def show(rating_key: str, title: str, **extra) -> dict:
+    return {"type": "show", "ratingKey": rating_key, "title": title, "year": 2018, **extra}
 
 
 @pytest.fixture
@@ -67,231 +43,133 @@ def mock_client(service, monkeypatch):
     return client
 
 
-def test_match_tmdb_guid(service):
-    item = {"Guid": [{"id": "imdb://tt12345"}, {"id": "tmdb://79744"}, {"id": "tvdb://350665"}]}
-    assert service._match_guid(item, "tmdb://", 79744) is True
-    assert service._match_guid(item, "tvdb://", 350665) is True
-    assert service._match_guid(item, "tmdb://", 99999) is False
+@pytest.fixture
+def unconfigured_service():
+    settings = MagicMock()
+    settings.plex_url = None
+    settings.plex_token = None
+    return PlexService(settings=settings)
 
 
-def test_match_guid_missing(service):
-    assert service._match_guid({"Guid": [{"id": "imdb://tt12345"}]}, "tmdb://", 79744) is False
+# Metadata extraction and GUID matching
 
 
-def test_match_guid_empty(service):
-    assert service._match_guid({"Guid": []}, "tmdb://", 79744) is False
+@pytest.mark.parametrize(
+    ("container", "titles"),
+    [
+        ({"Metadata": [{"title": "Season 1"}, {"title": "Season 2"}]}, ["Season 1", "Season 2"]),
+        (
+            {
+                "SearchResult": [
+                    {"score": 0.93, "Metadata": {"title": "The Rookie"}},
+                    {"score": 0.85, "Metadata": {"title": "Some Movie"}},
+                ]
+            },
+            ["The Rookie", "Some Movie"],
+        ),
+        ({"SearchResult": [{"Metadata": {"title": "A"}}, {"Metadata": None}]}, ["A"]),
+        ({}, []),
+        ({"Metadata": []}, []),
+        ({"SearchResult": []}, []),
+    ],
+    ids=[
+        "direct",
+        "search_result",
+        "skips_null_metadata",
+        "empty",
+        "empty_metadata",
+        "empty_search",
+    ],
+)
+def test_extract_metadata_items(container, titles):
+    assert [i["title"] for i in PlexService._extract_metadata_items(container)] == titles
 
 
-def test_match_guid_no_guid_key(service):
-    assert service._match_guid({}, "tmdb://", 79744) is False
+@pytest.mark.parametrize(
+    ("item", "prefix", "value", "expected"),
+    [
+        (
+            {"Guid": [{"id": "imdb://tt1"}, {"id": "tmdb://79744"}, {"id": "tvdb://350665"}]},
+            "tmdb://",
+            79744,
+            True,
+        ),
+        (
+            {"Guid": [{"id": "imdb://tt1"}, {"id": "tmdb://79744"}, {"id": "tvdb://350665"}]},
+            "tvdb://",
+            350665,
+            True,
+        ),
+        ({"Guid": [{"id": "tmdb://79744"}]}, "tmdb://", 99999, False),
+        ({"Guid": [{"id": "imdb://tt1"}]}, "tmdb://", 79744, False),
+        ({"Guid": []}, "tmdb://", 79744, False),
+        ({}, "tmdb://", 79744, False),
+    ],
+    ids=["tmdb_hit", "tvdb_hit", "wrong_id", "other_provider", "empty_guid", "no_guid_key"],
+)
+def test_match_guid(service, item, prefix, value, expected):
+    assert service._match_guid(item, prefix, value) is expected
 
 
-@pytest.mark.asyncio
-async def test_check_movie_available_true(service, mock_client):
-    mock_response = MagicMock()
-    mock_response.status_code = 200
-    mock_response.json.return_value = {
-        "MediaContainer": {
-            "Metadata": [
-                {
-                    "type": "movie",
-                    "ratingKey": "123",
-                    "title": "Test Movie",
-                    "year": 2024,
-                    "guid": "plex://movie/abc",
-                    "Media": [{"id": 1}],
-                }
-            ]
-        }
-    }
-    mock_client.get.return_value = mock_response
-
-    assert await service.check_movie_available(12345) is True
-
-
-@pytest.mark.asyncio
-async def test_check_movie_available_false_no_media(service, mock_client):
-    mock_response = MagicMock()
-    mock_response.status_code = 200
-    mock_response.json.return_value = {
-        "MediaContainer": {
-            "Metadata": [
-                {
-                    "type": "movie",
-                    "ratingKey": "123",
-                    "title": "Test Movie",
-                    "year": 2024,
-                    "guid": "plex://movie/abc",
-                }
-            ]
-        }
-    }
-    mock_client.get.return_value = mock_response
-
-    assert await service.check_movie_available(12345) is False
-
-
-@pytest.mark.asyncio
-async def test_check_movie_available_false_not_found(service, mock_client):
-    mock_response = MagicMock()
-    mock_response.status_code = 200
-    mock_response.json.return_value = {"MediaContainer": {"Metadata": []}}
-    mock_client.get.return_value = mock_response
-
-    assert await service.check_movie_available(99999) is False
+# Movies
 
 
 @pytest.mark.asyncio
-async def test_check_movie_available_false_http_error(service, mock_client):
-    mock_response = MagicMock()
-    mock_response.status_code = 400
-    mock_client.get.return_value = mock_response
+@pytest.mark.parametrize(
+    ("response", "expected"),
+    [
+        (resp({"Metadata": [movie("123", "Test Movie")]}), True),
+        (resp({"Metadata": [movie("123", "Test Movie", media=False)]}), False),
+        (resp({"Metadata": []}), False),
+        (resp(status=400), False),
+    ],
+    ids=["available", "no_media_files", "not_found", "http_error"],
+)
+async def test_check_movie_available(service, mock_client, response, expected):
+    mock_client.get.return_value = response
 
-    assert await service.check_movie_available(12345) is False
+    assert await service.check_movie_available(12345) is expected
 
 
 @pytest.mark.asyncio
 async def test_get_movie_by_tmdb_returns_metadata(service, mock_client):
-    mock_response = MagicMock()
-    mock_response.status_code = 200
-    mock_response.json.return_value = {
-        "MediaContainer": {
-            "Metadata": [
-                {
-                    "type": "movie",
-                    "ratingKey": "456",
-                    "title": "A Movie",
-                    "year": 2023,
-                    "guid": "plex://movie/xyz",
-                    "Media": [{"id": 2}],
-                }
-            ]
-        }
-    }
-    mock_client.get.return_value = mock_response
+    mock_client.get.return_value = resp({"Metadata": [movie("456", "A Movie")]})
 
     result = await service.get_movie_by_tmdb(555)
+
     assert result is not None
     assert result["rating_key"] == "456"
     assert result["title"] == "A Movie"
 
 
 @pytest.mark.asyncio
-async def test_get_movie_by_tmdb_modern_guid_format(service, mock_client):
-    modern_response = MagicMock()
-    modern_response.status_code = 200
-    modern_response.json.return_value = {
-        "MediaContainer": {
-            "Metadata": [
-                {
-                    "type": "movie",
-                    "ratingKey": "789",
-                    "title": "Modern Movie",
-                    "year": 2024,
-                    "guid": "plex://movie/abc",
-                    "Media": [{"id": 3}],
-                }
-            ]
-        }
-    }
-    mock_client.get.return_value = modern_response
+async def test_get_movie_by_tmdb_falls_back_to_section_scan(service, mock_client):
+    sections = resp({"Directory": [{"key": "1", "type": "movie"}]})
+    scan = resp({"Metadata": [movie("999", "Scanned Movie", Guid=[{"id": "tmdb://555"}])]})
+    mock_client.get.side_effect = [resp(status=400), resp(status=400), sections, scan]
 
     result = await service.get_movie_by_tmdb(555)
-    assert result is not None
-    assert result["rating_key"] == "789"
-    assert result["title"] == "Modern Movie"
 
-
-@pytest.mark.asyncio
-async def test_get_movie_by_tmdb_fallback_to_section_scan(service, mock_client, monkeypatch):
-    error_response = MagicMock()
-    error_response.status_code = 400
-    section_response = MagicMock()
-    section_response.status_code = 200
-    section_response.json.return_value = {
-        "MediaContainer": {
-            "Metadata": [
-                {
-                    "type": "movie",
-                    "ratingKey": "999",
-                    "title": "Scanned Movie",
-                    "year": 2024,
-                    "guid": "plex://movie/xyz",
-                    "Guid": [{"id": "tmdb://555"}],
-                    "Media": [{"id": 5}],
-                }
-            ]
-        }
-    }
-
-    original_client = AsyncMock()
-
-    async def get_client():
-        return original_client
-
-    monkeypatch.setattr(service, "_get_client", get_client)
-
-    sections_response = MagicMock()
-    sections_response.status_code = 200
-    sections_response.json.return_value = {
-        "MediaContainer": {"Directory": [{"key": "1", "type": "movie"}]}
-    }
-
-    original_client.get.return_value = error_response
-    original_client.get.side_effect = [
-        error_response,
-        error_response,
-        sections_response,
-        section_response,
-    ]
-
-    result = await service.get_movie_by_tmdb(555)
     assert result is not None
     assert result["rating_key"] == "999"
-    assert result["title"] == "Scanned Movie"
+
+
+# Shows
 
 
 @pytest.mark.asyncio
-async def test_get_movie_by_tmdb_no_config():
-    settings = MagicMock()
-    settings.plex_url = None
-    settings.plex_token = None
-    svc = PlexService(settings=settings)
-    assert await svc.get_movie_by_tmdb(123) is None
-
-
-@pytest.mark.asyncio
-async def test_check_movie_available_no_config():
-    settings = MagicMock()
-    settings.plex_url = None
-    settings.plex_token = None
-    svc = PlexService(settings=settings)
-    assert await svc.check_movie_available(123) is False
-
-
-@pytest.mark.asyncio
-async def test_get_show_by_tmdb_search_result_format(service, mock_client):
-    mock_response = MagicMock()
-    mock_response.status_code = 200
-    mock_response.json.return_value = {
-        "MediaContainer": {
+@pytest.mark.parametrize("lookup", ["get_show_by_tmdb", "get_show_by_tvdb"])
+async def test_get_show_search_result_format(service, mock_client, lookup):
+    mock_client.get.return_value = resp(
+        {
             "SearchResult": [
-                {
-                    "score": 0.93,
-                    "Metadata": {
-                        "type": "show",
-                        "ratingKey": "25620",
-                        "title": "The Rookie",
-                        "year": 2018,
-                        "guid": "plex://show/5d9c08ffe264b7001fc4d397",
-                    },
-                }
+                {"score": 0.93, "Metadata": show("25620", "The Rookie", guid="plex://show/abc")}
             ]
         }
-    }
-    mock_client.get.return_value = mock_response
+    )
 
-    result = await service.get_show_by_tmdb(79744)
+    result = await getattr(service, lookup)(79744)
+
     assert result is not None
     assert result["rating_key"] == "25620"
     assert result["title"] == "The Rookie"
@@ -299,192 +177,96 @@ async def test_get_show_by_tmdb_search_result_format(service, mock_client):
 
 @pytest.mark.asyncio
 async def test_get_show_by_tmdb_legacy_guid_fallback(service, mock_client):
-    modern_response = MagicMock()
-    modern_response.status_code = 200
-    modern_response.json.return_value = {"MediaContainer": {}}
-    legacy_response = MagicMock()
-    legacy_response.status_code = 200
-    legacy_response.json.return_value = {
-        "MediaContainer": {
-            "Metadata": [
-                {
-                    "type": "show",
-                    "ratingKey": "100",
-                    "title": "Legacy Show",
-                    "year": 2020,
-                    "guid": "com.plexapp.agents.themoviedb://12345?lang=en",
-                }
-            ]
-        }
-    }
-    mock_client.get.side_effect = [modern_response, legacy_response]
+    legacy = show("100", "Legacy Show", guid="com.plexapp.agents.themoviedb://12345?lang=en")
+    mock_client.get.side_effect = [resp(), resp({"Metadata": [legacy]})]
 
     result = await service.get_show_by_tmdb(12345)
+
     assert result is not None
     assert result["rating_key"] == "100"
-    assert result["title"] == "Legacy Show"
 
 
 @pytest.mark.asyncio
-async def test_get_show_by_tvdb_search_result_format(service, mock_client):
-    mock_response = MagicMock()
-    mock_response.status_code = 200
-    mock_response.json.return_value = {
-        "MediaContainer": {
-            "SearchResult": [
-                {
-                    "score": 0.90,
-                    "Metadata": {
-                        "type": "show",
-                        "ratingKey": "300",
-                        "title": "A TV Show",
-                        "year": 2019,
-                        "guid": "plex://show/abc",
-                    },
-                }
-            ]
-        }
-    }
-    mock_client.get.return_value = mock_response
-
-    result = await service.get_show_by_tvdb(12345)
-    assert result is not None
-    assert result["rating_key"] == "300"
-
-
-@pytest.mark.asyncio
-async def test_get_show_by_tmdb_section_scan_fallback(service, monkeypatch):
-    client = AsyncMock()
-    error_response = MagicMock()
-    error_response.status_code = 400
-    section_response = MagicMock()
-    section_response.status_code = 200
-    section_response.json.return_value = {
-        "MediaContainer": {
+async def test_get_show_by_tmdb_falls_back_to_section_scan(service, mock_client):
+    sections = resp({"Directory": [{"key": "2", "type": "show"}]})
+    scan = resp(
+        {
             "Metadata": [
-                {
-                    "type": "show",
-                    "ratingKey": "25620",
-                    "title": "The Rookie",
-                    "year": 2018,
-                    "guid": "plex://show/5d9c08ffe264b7001fc4d397",
-                    "Guid": [
-                        {"id": "imdb://tt7587890"},
-                        {"id": "tmdb://79744"},
-                        {"id": "tvdb://350665"},
-                    ],
-                }
+                show(
+                    "25620",
+                    "The Rookie",
+                    Guid=[{"id": "imdb://tt7587890"}, {"id": "tmdb://79744"}],
+                )
             ]
         }
-    }
-    client.get.return_value = error_response
-    monkeypatch.setattr(service, "_get_client", AsyncMock(return_value=client))
-
-    sections_response = MagicMock()
-    sections_response.status_code = 200
-    sections_response.json.return_value = {
-        "MediaContainer": {"Directory": [{"key": "2", "type": "show"}]}
-    }
-
-    client.get.side_effect = [error_response, error_response, sections_response, section_response]
+    )
+    mock_client.get.side_effect = [resp(status=400), resp(status=400), sections, scan]
 
     result = await service.get_show_by_tmdb(79744)
+
     assert result is not None
     assert result["rating_key"] == "25620"
-    assert result["title"] == "The Rookie"
 
 
 @pytest.mark.asyncio
-async def test_search_show_search_result_format(service, mock_client):
-    mock_response = MagicMock()
-    mock_response.status_code = 200
-    mock_response.json.return_value = {
-        "MediaContainer": {
+async def test_search_show_keeps_only_shows(service, mock_client):
+    mock_client.get.return_value = resp(
+        {
             "SearchResult": [
-                {
-                    "score": 0.93,
-                    "Metadata": {
-                        "type": "show",
-                        "ratingKey": "25620",
-                        "title": "The Rookie",
-                        "year": 2018,
-                        "guid": "plex://show/5d9c08ffe264b7001fc4d397",
-                    },
-                },
-                {
-                    "score": 0.85,
-                    "Metadata": {
-                        "type": "show",
-                        "ratingKey": "25736",
-                        "title": "The Rookie: Feds",
-                        "year": 2022,
-                        "guid": "plex://show/627fcfb77eb52ccdcc843c0c",
-                    },
-                },
+                {"score": 0.93, "Metadata": show("25620", "The Rookie")},
+                {"score": 0.85, "Metadata": show("25736", "The Rookie: Feds")},
                 {
                     "score": 0.31,
-                    "Metadata": {
-                        "type": "episode",
-                        "ratingKey": "25622",
-                        "title": "Pilot",
-                        "year": 2018,
-                    },
+                    "Metadata": {"type": "episode", "ratingKey": "1", "title": "Pilot"},
                 },
             ]
         }
-    }
-    mock_client.get.return_value = mock_response
+    )
 
     result = await service.search_show("The Rookie")
-    assert len(result) == 2
-    assert result[0]["title"] == "The Rookie"
+
+    assert [r["title"] for r in result] == ["The Rookie", "The Rookie: Feds"]
     assert result[0]["rating_key"] == "25620"
-    assert result[1]["title"] == "The Rookie: Feds"
+
+
+# Unconfigured service
 
 
 @pytest.mark.asyncio
-async def test_get_show_by_tmdb_no_config():
-    settings = MagicMock()
-    settings.plex_url = None
-    settings.plex_token = None
-    svc = PlexService(settings=settings)
-    assert await svc.get_show_by_tmdb(79744) is None
+@pytest.mark.parametrize(
+    ("method", "arg", "expected"),
+    [
+        ("get_movie_by_tmdb", 123, None),
+        ("check_movie_available", 123, False),
+        ("get_show_by_tmdb", 79744, None),
+        ("get_show_by_tvdb", 350665, None),
+    ],
+)
+async def test_unconfigured_plex_returns_empty(unconfigured_service, method, arg, expected):
+    assert await getattr(unconfigured_service, method)(arg) is expected
+
+
+# Authoritative miss vs inconclusive
 
 
 @pytest.mark.asyncio
-async def test_get_show_by_tvdb_no_config():
-    settings = MagicMock()
-    settings.plex_url = None
-    settings.plex_token = None
-    svc = PlexService(settings=settings)
-    assert await svc.get_show_by_tvdb(350665) is None
-
-
-@pytest.mark.asyncio
-async def test_lookup_show_by_tvdb_reports_inconclusive_on_section_failure(service, mock_client):
-    sections_response = MagicMock()
-    sections_response.status_code = 200
-    sections_response.json.return_value = {
-        "MediaContainer": {
-            "Directory": [{"key": "2", "type": "show"}, {"key": "3", "type": "show"}]
-        }
-    }
-    empty_search = MagicMock()
-    empty_search.status_code = 200
-    empty_search.json.return_value = {"MediaContainer": {}}
-    good_scan = MagicMock()
-    good_scan.status_code = 200
-    good_scan.json.return_value = {"MediaContainer": {"size": 0, "totalSize": 0, "Metadata": []}}
-
-    mock_client.get.side_effect = [
-        empty_search,
-        empty_search,
-        sections_response,
-        good_scan,
-        httpx.RequestError("boom"),
-    ]
+@pytest.mark.parametrize(
+    ("second_scan", "authoritative", "failed_sections"),
+    [
+        (resp({"size": 0, "totalSize": 0, "Metadata": []}), True, ()),
+        (httpx.RequestError("boom"), False, ("3",)),
+    ],
+    ids=["missing_is_authoritative", "section_failure_is_inconclusive"],
+)
+async def test_lookup_show_by_tvdb_miss_vs_inconclusive(
+    service, mock_client, second_scan, authoritative, failed_sections
+):
+    sections = resp({"Directory": [{"key": "2", "type": "show"}, {"key": "3", "type": "show"}]})
+    good_scan = resp({"size": 0, "totalSize": 0, "Metadata": []})
+    mock_client.get.side_effect = [resp(), resp(), sections, good_scan, second_scan]
 
     result = await service.lookup_show_by_tvdb(777)
+
     assert result.item is None
-    assert result.authoritative is False
-    assert result.failed_sections == ("3",)
+    assert result.authoritative is authoritative
+    assert result.failed_sections == failed_sections

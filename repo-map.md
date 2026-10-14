@@ -260,7 +260,7 @@ Tests mirror the service subpackage organization under `tests/services/`:
 - `tests/routers/dashboard/` — dashboard page/API/action coverage, including details controls and SSE search streams
 - `tests/routers/settings/` — settings page, connections, maintenance, and jobs coverage
 - `tests/routers/stats/` — Stats page/API coverage, including protection, range validation, and JSON payload shape
-- `tests/services/auth/` — PlexOAuthService unit tests and auth_service (require_auth, get_session_user) tests
+- `tests/services/auth/` — PlexOAuthService token validation and auth_service (require_auth, get_session_user) tests
 - `tests/services/admin/` — settings, scheduler, and Plex polling service tests
 - `tests/services/decisions/` — rule engine, rule service (including import/export-backed default seeding), TV/movie decision service tests
 - `tests/services/integrations/` — Prowlarr, qBittorrent, Overseerr, Plex service tests
@@ -269,8 +269,12 @@ Tests mirror the service subpackage organization under `tests/services/`:
 - `tests/services/test_search_history_service.py` — search history persistence, summary, and candidate snapshot tests
 - `tests/services/releases/` — release parser, serializers, staging, and release selection tests
 - `tests/services/utils/` — type utils tests
-- Top-level `tests/test_*.py` — integration tests (season sweep, torrent helpers, API, router-level, config)
-- `frontend-tests/unit/dashboard-regressions.test.js` — stat refresh, safe replace-title handling, and stale search-history response guards; rendered-title escaping also has coverage in `tests/routers/dashboard/test_template.py`
+- `tests/routers/test_staged.py`, `test_rules.py`, `test_staging_decision_log.py`, `test_staged_check_now.py` — staged, rules, and decision-log router coverage
+- `tests/integration/` — end-to-end TV season sweep and multi-season pack search flows on a real SQLite DB
+- `tests/conftest.py` — shared `session_maker`/`db` in-memory SQLite fixtures; `tests/factories.py` — persisted model factories
+- `tests/services/integrations/conftest.py` — shared Overseerr/qBittorrent/Prowlarr service fixtures and an `httpx.MockTransport` stub
+- Top-level `tests/test_*.py` — cross-cutting checks (config, database/migrations, auth app flow, approval validation, version)
+- `frontend-tests/unit/dashboard-regressions.test.js` — stat refresh, safe replace-title handling, and stale search-history response guards; replace-button title escaping also has coverage in `tests/routers/dashboard/test_template.py`
 
 ## CI/CD Workflows
 

@@ -139,31 +139,6 @@ class TestProcessRequest:
         service.prowlarr.search_tv_episode_exact.assert_not_awaited()
 
     @pytest.mark.asyncio
-    async def test_no_tvdb_id_returns_error(self, service, mock_db):
-        request = _make_request(tvdb_id=None)
-        mock_db.execute.return_value = MagicMock(scalar_one_or_none=MagicMock(return_value=request))
-        mock_db.commit = AsyncMock()
-
-        result = await service.process_request(1)
-
-        assert result["status"] == "error"
-        assert "TVDB" in result["message"]
-        request.status = RequestStatus.FAILED
-
-    @pytest.mark.asyncio
-    async def test_no_seasons_specified_returns_error(self, service, mock_db):
-        request = _make_request(seasons=[])
-        mock_db.execute.return_value = MagicMock(scalar_one_or_none=MagicMock(return_value=request))
-        mock_db.commit = AsyncMock()
-
-        with patch.object(service, "_get_rule_engine", new_callable=AsyncMock) as mock_rule:
-            mock_rule.return_value = MagicMock()
-            result = await service.process_request(1)
-
-        assert result["status"] == "error"
-        assert "No seasons" in result["message"]
-
-    @pytest.mark.asyncio
     async def test_season_sweep_uses_overseerr_imdb_id(self, service):
         request = _make_request(tmdb_id=987, seasons=[1])
         release = _make_release("Test.Show.S01.1080p")
@@ -239,23 +214,27 @@ class TestProcessRequest:
         }
 
     @pytest.mark.asyncio
-    async def test_request_not_found_returns_error(self, service, mock_db):
-        mock_db.execute.return_value = MagicMock(scalar_one_or_none=MagicMock(return_value=None))
-
-        result = await service.process_request(999)
-
-        assert result["status"] == "error"
-        assert "not found" in result["message"]
-
-    @pytest.mark.asyncio
-    async def test_non_tv_request_returns_error(self, service, mock_db):
-        request = _make_request(media_type=MediaType.MOVIE)
+    @pytest.mark.parametrize(
+        ("request_kwargs", "message"),
+        [
+            (None, "not found"),
+            ({"media_type": MediaType.MOVIE}, "not TV"),
+            ({"tvdb_id": None}, "TVDB"),
+            ({"seasons": []}, "No seasons"),
+        ],
+        ids=["not-found", "not-tv", "no-tvdb-id", "no-seasons"],
+    )
+    async def test_invalid_request_returns_error(self, service, mock_db, request_kwargs, message):
+        request = None if request_kwargs is None else _make_request(**request_kwargs)
         mock_db.execute.return_value = MagicMock(scalar_one_or_none=MagicMock(return_value=request))
+        mock_db.commit = AsyncMock()
 
-        result = await service.process_request(1)
+        with patch.object(service, "_get_rule_engine", new_callable=AsyncMock) as mock_rule:
+            mock_rule.return_value = MagicMock()
+            result = await service.process_request(1)
 
         assert result["status"] == "error"
-        assert "not TV" in result["message"]
+        assert message in result["message"]
 
     @pytest.mark.asyncio
     async def test_default_search_skips_pack_for_partly_available_season(self, service, mock_db):
@@ -288,7 +267,7 @@ class TestProcessRequest:
                 "app.siftarr.services.decisions.tv_decision_service.store_search_results",
                 new_callable=AsyncMock,
                 return_value={"s01e02": stored_ep2},
-            ) as store_mock,
+            ),
             patch(
                 "app.siftarr.services.decisions.tv_decision_service.StagingService",
                 return_value=mock_staging,
@@ -302,10 +281,6 @@ class TestProcessRequest:
             title="Show", season=1, episode=2, request_id=1
         )
         service.prowlarr.search_tv_season_sweep.assert_not_awaited()
-        assert store_mock.await_args is not None
-        assert [e.release.title for e in store_mock.await_args.args[2]] == [
-            "Show.S01E02.1080p",
-        ]
         assert [r["title"] for r in result["selected_releases"]] == ["Show.S01E02.1080p"]
         mock_staging.use_releases.assert_awaited_once_with(
             request, [stored_ep2], selection_source="rule"

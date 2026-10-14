@@ -5,10 +5,8 @@ from typing import Any, cast
 
 import pytest
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from app.siftarr.config import PLACEHOLDER_API_KEY, get_settings, reload_settings
-from app.siftarr.models import Base
 from app.siftarr.models.app_setting import AppSetting
 from app.siftarr.services.admin.settings_service import (
     PLEX_LAST_SYNC_SUCCESS_KEY,
@@ -22,17 +20,6 @@ from app.siftarr.services.admin.settings_service import (
     serialize_sync_timestamp,
 )
 from app.siftarr.services.auth_service import require_auth
-
-
-@pytest.fixture
-async def session_maker():
-    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-    try:
-        yield async_sessionmaker(engine, expire_on_commit=False)
-    finally:
-        await engine.dispose()
 
 
 @pytest.fixture(autouse=True)
@@ -80,51 +67,64 @@ def _clean_api_key_env(monkeypatch):
     reload_settings()
 
 
-@pytest.mark.asyncio
-async def test_scheduler_settings_load_into_environ_and_effective_dict(session_maker):
+@pytest.mark.parametrize(
+    ("stored", "env_name", "expected"),
+    [
+        pytest.param(
+            {
+                "overseerr_poll_interval_minutes": "15",
+                "qbittorrent_completion_poll_interval_seconds": "45",
+                "plex_fast_sync_interval_minutes": "7",
+                "plex_full_sync_frequency": "weekly",
+                "plex_full_sync_time": "04:30",
+            },
+            "OVERSEERR_POLL_INTERVAL_MINUTES",
+            {
+                "overseerr_poll_interval_minutes": 15,
+                "qbittorrent_completion_poll_interval_seconds": 45,
+                "plex_fast_sync_interval_minutes": 7,
+                "plex_full_sync_frequency": "weekly",
+                "plex_full_sync_time": "04:30",
+            },
+            id="scheduler",
+        ),
+        pytest.param(
+            {
+                "qbittorrent_move_enabled": "true",
+                "qbittorrent_move_completed_dir": "/downloads/complete",
+                "qbittorrent_move_movie_root": "/media/Movies",
+                "qbittorrent_move_tv_root": "/media/TV",
+                "qbittorrent_move_unmanaged_fallback_enabled": "true",
+                "qbittorrent_move_retention_weeks": "8",
+            },
+            "QBITTORRENT_MOVE_ENABLED",
+            {
+                "qbittorrent_move_enabled": True,
+                "qbittorrent_move_completed_dir": "/downloads/complete",
+                "qbittorrent_move_movie_root": "/media/Movies",
+                "qbittorrent_move_tv_root": "/media/TV",
+                "qbittorrent_move_unmanaged_fallback_enabled": True,
+                "qbittorrent_move_retention_weeks": 8,
+            },
+            id="qbittorrent_move",
+        ),
+    ],
+)
+async def test_stored_settings_load_into_environ_runtime_and_effective_dict(
+    session_maker, stored, env_name, expected
+):
     async with session_maker() as session, session.begin():
         store = SettingsStore(session)
-        await store.set("overseerr_poll_interval_minutes", "15")
-        await store.set("qbittorrent_completion_poll_interval_seconds", "45")
-        await store.set("plex_fast_sync_interval_minutes", "7")
-        await store.set("plex_full_sync_frequency", "weekly")
-        await store.set("plex_full_sync_time", "04:30")
+        for key, value in stored.items():
+            await store.set(key, value)
         await store.load_into_environ()
         effective = await store.get_effective_dict()
 
-    assert os.environ["OVERSEERR_POLL_INTERVAL_MINUTES"] == "15"
-    assert get_settings().overseerr_poll_interval_minutes == 15
-    assert get_settings().qbittorrent_completion_poll_interval_seconds == 45
-    assert get_settings().plex_fast_sync_interval_minutes == 7
-    assert get_settings().plex_full_sync_frequency == "weekly"
-    assert get_settings().plex_full_sync_time == "04:30"
-    assert effective["overseerr_poll_interval_minutes"] == 15
-    assert effective["qbittorrent_completion_poll_interval_seconds"] == 45
-
-
-@pytest.mark.asyncio
-async def test_qbittorrent_move_settings_load_into_environ_and_effective_dict(session_maker):
-    async with session_maker() as session, session.begin():
-        store = SettingsStore(session)
-        await store.set("qbittorrent_move_enabled", "true")
-        await store.set("qbittorrent_move_completed_dir", "/downloads/complete")
-        await store.set("qbittorrent_move_movie_root", "/media/Movies")
-        await store.set("qbittorrent_move_tv_root", "/media/TV")
-        await store.set("qbittorrent_move_unmanaged_fallback_enabled", "true")
-        await store.set("qbittorrent_move_retention_weeks", "8")
-        await store.load_into_environ()
-        effective = await store.get_effective_dict()
-
-    assert os.environ["QBITTORRENT_MOVE_ENABLED"] == "true"
-    assert get_settings().qbittorrent_move_enabled is True
-    assert get_settings().qbittorrent_move_completed_dir == "/downloads/complete"
-    assert get_settings().qbittorrent_move_retention_weeks == 8
-    assert effective["qbittorrent_move_enabled"] is True
-    assert effective["qbittorrent_move_completed_dir"] == "/downloads/complete"
-    assert effective["qbittorrent_move_movie_root"] == "/media/Movies"
-    assert effective["qbittorrent_move_tv_root"] == "/media/TV"
-    assert effective["qbittorrent_move_unmanaged_fallback_enabled"] is True
-    assert effective["qbittorrent_move_retention_weeks"] == 8
+    assert env_name in os.environ
+    runtime = get_settings()
+    for key, value in expected.items():
+        assert getattr(runtime, key) == value
+        assert effective[key] == value
 
 
 @pytest.mark.asyncio
@@ -179,36 +179,25 @@ async def test_ensure_runtime_api_key_preserves_explicit_env_override(
     assert get_settings().api_key == "explicit-key"
 
 
-@pytest.mark.asyncio
-async def test_load_into_environ_preserves_process_env_when_db_value_missing(
-    monkeypatch,
-    session_maker,
-):
-    monkeypatch.setenv("OVERSEERR_URL", "https://compose-overseerr")
-    reload_settings()
-
-    async with session_maker() as session, session.begin():
-        await SettingsStore(session).load_into_environ()
-
-    assert os.environ["OVERSEERR_URL"] == "https://compose-overseerr"
-    assert get_settings().overseerr_url == "https://compose-overseerr"
-
-
-@pytest.mark.asyncio
-async def test_load_into_environ_db_values_override_process_env(
-    monkeypatch,
-    session_maker,
-):
+@pytest.mark.parametrize(
+    ("saved", "expected"),
+    [
+        pytest.param(None, "https://compose-overseerr", id="env_kept_when_db_missing"),
+        pytest.param("https://saved-overseerr", "https://saved-overseerr", id="db_overrides_env"),
+    ],
+)
+async def test_load_into_environ_precedence(monkeypatch, session_maker, saved, expected):
     monkeypatch.setenv("OVERSEERR_URL", "https://compose-overseerr")
     reload_settings()
 
     async with session_maker() as session, session.begin():
         store = SettingsStore(session)
-        await store.set("overseerr_url", "https://saved-overseerr")
+        if saved:
+            await store.set("overseerr_url", saved)
         await store.load_into_environ()
 
-    assert os.environ["OVERSEERR_URL"] == "https://saved-overseerr"
-    assert get_settings().overseerr_url == "https://saved-overseerr"
+    assert os.environ["OVERSEERR_URL"] == expected
+    assert get_settings().overseerr_url == expected
 
 
 @pytest.mark.asyncio

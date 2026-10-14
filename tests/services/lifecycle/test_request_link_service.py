@@ -5,9 +5,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from sqlalchemy import select, update
-from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
-from app.siftarr.models._base import Base
 from app.siftarr.models.episode import Episode
 from app.siftarr.models.request import MediaType, RequestStatus
 from app.siftarr.models.request import Request as RequestModel
@@ -18,16 +16,12 @@ from app.siftarr.services.lifecycle.overseerr_sync_service import (
     approve_overseerr_request_best_effort,
 )
 from app.siftarr.services.lifecycle.request_link_service import add_overseerr_link
+from tests.factories import make_episode, make_season
 
 
 @pytest.fixture
-async def session():
-    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-    async with async_sessionmaker(engine, expire_on_commit=False)() as db:
-        yield db
-    await engine.dispose()
+def session(db):
+    return db
 
 
 def _seerr_request(request_id: int, tmdb_id: int, media_type: str = "tv") -> dict[str, Any]:
@@ -134,10 +128,7 @@ async def _links(db) -> dict[int, int]:
 async def test_second_season_request_links_to_existing_show(session):
     show = await _add_request(session, tmdb_id=136315, overseerr_request_id=32)
 
-    season = Season(request_id=show.id, season_number=5, status=RequestStatus.DOWNLOADING)
-    session.add(season)
-    await session.flush()
-    session.add(Episode(season_id=season.id, episode_number=1, status=RequestStatus.DOWNLOADING))
+    await make_season(session, show, 5, status=RequestStatus.DOWNLOADING, episodes=1)
     await session.commit()
 
     await _run_import(session, [_seerr_request(32, 136315), _seerr_request(264, 136315)])
@@ -168,15 +159,8 @@ async def test_new_request_reactivates_denied_show(session):
         status=RequestStatus.DENIED,
         rejection_reason="Removed from Overseerr",
     )
-    season = Season(request_id=show.id, season_number=1, status=RequestStatus.DENIED)
-    session.add(season)
-    await session.flush()
-    session.add_all(
-        [
-            Episode(season_id=season.id, episode_number=1, status=RequestStatus.DENIED),
-            Episode(season_id=season.id, episode_number=2, status=RequestStatus.COMPLETED),
-        ]
-    )
+    season = await make_season(session, show, 1, status=RequestStatus.DENIED, episodes=1)
+    await make_episode(session, season, 2, status=RequestStatus.COMPLETED)
     await session.commit()
 
     await _run_import(session, [_seerr_request(400, 66134)])

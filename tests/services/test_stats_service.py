@@ -1,11 +1,9 @@
 from datetime import datetime
 
 import pytest
-from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from app.siftarr.models import (
     ActivityLog,
-    Base,
     Release,
     Request,
     Rule,
@@ -31,17 +29,6 @@ def _clear_stats_cache():
     clear_stats_cache()
     yield
     clear_stats_cache()
-
-
-@pytest.fixture
-async def session_maker():
-    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-    try:
-        yield async_sessionmaker(engine, expire_on_commit=False)
-    finally:
-        await engine.dispose()
 
 
 def test_range_validation_all_and_custom():

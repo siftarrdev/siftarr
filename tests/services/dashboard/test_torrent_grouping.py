@@ -142,36 +142,32 @@ async def test_completed_endpoint_groups_terminal_request_torrents(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_completed_endpoint_reports_qbit_unavailable(monkeypatch):
-    _patch_settings(
-        monkeypatch,
-        SimpleNamespace(
-            get_completed_torrents_or_raise=AsyncMock(side_effect=RuntimeError("boom"))
+@pytest.mark.parametrize(
+    ("endpoint", "qbit", "url"),
+    [
+        pytest.param(
+            "qbit_completed_torrents_api",
+            SimpleNamespace(
+                get_completed_torrents_or_raise=AsyncMock(side_effect=RuntimeError("boom"))
+            ),
+            "http://qb",
+            id="completed-qbit-error",
         ),
-    )
+        pytest.param(
+            "qbit_downloads_api",
+            SimpleNamespace(get_unfinished_torrents_or_raise=AsyncMock(side_effect=RuntimeError())),
+            "http://qb",
+            id="downloads-qbit-error",
+        ),
+        pytest.param(
+            "qbit_completed_torrents_api", SimpleNamespace(), None, id="completed-not-configured"
+        ),
+    ],
+)
+async def test_endpoints_report_qbit_unavailable(monkeypatch, endpoint, qbit, url):
+    _patch_settings(monkeypatch, qbit, url=url)
 
-    payload = await dashboard.qbit_completed_torrents_api(db=MagicMock())
-
-    assert payload == {"groups": [], "qbit_unavailable": True}
-
-
-@pytest.mark.asyncio
-async def test_completed_endpoint_without_qbit_configured(monkeypatch):
-    _patch_settings(monkeypatch, SimpleNamespace(), url=None)
-
-    payload = await dashboard.qbit_completed_torrents_api(db=MagicMock())
-
-    assert payload == {"groups": [], "qbit_unavailable": True}
-
-
-@pytest.mark.asyncio
-async def test_downloads_endpoint_reports_qbit_unavailable(monkeypatch):
-    _patch_settings(
-        monkeypatch,
-        SimpleNamespace(get_unfinished_torrents_or_raise=AsyncMock(side_effect=RuntimeError())),
-    )
-
-    payload = await dashboard.qbit_downloads_api(db=MagicMock())
+    payload = await getattr(dashboard, endpoint)(db=MagicMock())
 
     assert payload == {"groups": [], "qbit_unavailable": True}
 
@@ -255,30 +251,21 @@ def test_hash_and_name_matches_win_over_lower_confidence_tiers():
     assert matched[2]["managed_torrent"] is other_staged
 
 
-def test_group_match_tier_reports_weakest_tier_present():
+@pytest.mark.parametrize(
+    ("tiers", "expected"),
+    [
+        pytest.param(["hash", "title", "name"], "title", id="weakest-known-tier"),
+        # Unknown tiers once mapped to index -1 and won max() as the strongest match.
+        pytest.param(["hash", "speculative"], "speculative", id="unknown-tier-is-weakest"),
+    ],
+)
+def test_group_match_tier_reports_weakest_tier_present(tiers, expected):
     """A group is only as trustworthy as its least-confident member."""
     matched = [
-        {"hash": "a", "name": "A", "match_type": "hash", "matched_request_id": 1},
-        {"hash": "b", "name": "B", "match_type": "title", "matched_request_id": 1},
-        {"hash": "c", "name": "C", "match_type": "name", "matched_request_id": 1},
+        {"hash": str(i), "name": str(i), "match_type": tier, "matched_request_id": 1}
+        for i, tier in enumerate(tiers)
     ]
 
     groups = group_matched_torrents(matched, {1: ("Show", MediaType.TV)})
 
-    assert groups[0]["match"] == "title"
-
-
-def test_unknown_match_tier_ranks_as_weakest_not_strongest():
-    """An unrecognized tier must degrade confidence, never overstate it.
-
-    Guards the regression where unknown tiers mapped to index -1 and so won
-    the ``max()`` as though they were the strongest possible match.
-    """
-    matched = [
-        {"hash": "a", "name": "A", "match_type": "hash", "matched_request_id": 1},
-        {"hash": "b", "name": "B", "match_type": "speculative", "matched_request_id": 1},
-    ]
-
-    groups = group_matched_torrents(matched, {1: ("Show", MediaType.TV)})
-
-    assert groups[0]["match"] == "speculative"
+    assert groups[0]["match"] == expected

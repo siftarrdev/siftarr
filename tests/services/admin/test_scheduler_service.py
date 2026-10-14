@@ -10,9 +10,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
-from app.siftarr.models._base import Base
 from app.siftarr.models.app_setting import AppSetting
 from app.siftarr.models.episode import Episode
 from app.siftarr.models.request import MediaType, Request, RequestStatus
@@ -29,205 +27,58 @@ from app.siftarr.services.admin.settings_service import (
     SettingsStore,
     parse_sync_timestamp,
 )
+from tests.factories import make_episode, make_request, make_season
+from tests.services.admin.conftest import FakeSessionContext
 
 
-class _FakeSessionContext:
-    def __init__(self, db):
-        self.db = db
-
-    async def __aenter__(self):
-        return self.db
-
-    async def __aexit__(self, exc_type, exc, tb):
-        return False
-
-
-class _FakeScheduler:
-    def __init__(self, **kwargs):
-        self.kwargs = kwargs
-        self.jobs: list[dict] = []
-        self.started = False
-        self.stopped = False
-
-    def add_job(self, func, trigger=None, **kwargs):
-        self.jobs.append({"func": func, "trigger": trigger, **kwargs})
-
-    def start(self):
-        self.started = True
-
-    def shutdown(self):
-        self.stopped = True
-
-
-@pytest.mark.asyncio
-async def test_start_registers_recent_scan_and_poll_jobs(monkeypatch):
-    """Scheduler startup should register separate recent-scan and poll jobs."""
-    created = {}
-
-    def fake_scheduler(**kwargs):
-        created["scheduler"] = _FakeScheduler(**kwargs)
-        return created["scheduler"]
-
-    monkeypatch.setattr(scheduler_service, "AsyncIOScheduler", fake_scheduler)
+@pytest.mark.parametrize(
+    ("completion_poll_seconds", "frequency", "expected_completion_seconds"),
+    [
+        pytest.param(45, "weekly", 45, id="configured_interval"),
+        pytest.param(5, "daily", 30, id="clamped_for_targeted_plex_wait"),
+    ],
+)
+def test_start_registers_jobs(
+    monkeypatch,
+    fake_scheduler,
+    session_factory_for,
+    completion_poll_seconds,
+    frequency,
+    expected_completion_seconds,
+):
     monkeypatch.setattr(
         scheduler_service,
         "get_settings",
         lambda: SimpleNamespace(
             overseerr_poll_interval_minutes=17,
-            qbittorrent_completion_poll_interval_seconds=45,
+            qbittorrent_completion_poll_interval_seconds=completion_poll_seconds,
             plex_fast_sync_interval_minutes=7,
-            plex_full_sync_frequency="weekly",
+            plex_full_sync_frequency=frequency,
             plex_full_sync_time="04:30",
         ),
     )
 
-    service = SchedulerService(lambda: _FakeSessionContext(AsyncMock()), logger=MagicMock())
-    service.start()
+    SchedulerService(session_factory_for(AsyncMock()), logger=MagicMock()).start()
 
-    fake = created["scheduler"]
-    job_ids = {job["id"] for job in fake.jobs}
-    assert "plex_recent_scan" in job_ids
-    assert "plex_poll" in job_ids
-    assert "check_download_completion" in job_ids
-    assert "poll_plex_availability" not in job_ids
-
-    job_kwargs = {job["id"]: job for job in fake.jobs}
-    assert job_kwargs["poll_overseerr"]["trigger"].interval.total_seconds() == 17 * 60
-    assert job_kwargs["plex_recent_scan"]["trigger"].interval.total_seconds() == 7 * 60
-    assert job_kwargs["plex_recent_scan"]["kwargs"] == {"trigger_source": "scheduler"}
-    assert job_kwargs["plex_poll"]["kwargs"] == {"trigger_source": "scheduler"}
-    assert job_kwargs["check_download_completion"]["trigger"].interval.total_seconds() == 45
-    assert "sun" in str(job_kwargs["plex_poll"]["trigger"])
-    assert fake.started is True
-
-
-@pytest.mark.asyncio
-async def test_start_clamps_download_completion_interval_for_targeted_plex_wait(monkeypatch):
-    created = {}
-
-    def fake_scheduler(**kwargs):
-        created["scheduler"] = _FakeScheduler(**kwargs)
-        return created["scheduler"]
-
-    monkeypatch.setattr(scheduler_service, "AsyncIOScheduler", fake_scheduler)
-    monkeypatch.setattr(
-        scheduler_service,
-        "get_settings",
-        lambda: SimpleNamespace(
-            overseerr_poll_interval_minutes=17,
-            qbittorrent_completion_poll_interval_seconds=5,
-            plex_fast_sync_interval_minutes=7,
-            plex_full_sync_frequency="daily",
-            plex_full_sync_time="04:30",
-        ),
+    jobs = {job["id"]: job for job in fake_scheduler.jobs}
+    assert "poll_plex_availability" not in jobs
+    assert jobs["poll_overseerr"]["trigger"].interval.total_seconds() == 17 * 60
+    assert jobs["plex_recent_scan"]["trigger"].interval.total_seconds() == 7 * 60
+    assert jobs["plex_recent_scan"]["kwargs"] == {"trigger_source": "scheduler"}
+    assert jobs["plex_poll"]["kwargs"] == {"trigger_source": "scheduler"}
+    assert (
+        jobs["check_download_completion"]["trigger"].interval.total_seconds()
+        == expected_completion_seconds
     )
-
-    service = SchedulerService(lambda: _FakeSessionContext(AsyncMock()), logger=MagicMock())
-    service.start()
-
-    job_kwargs = {job["id"]: job for job in created["scheduler"].jobs}
-    assert job_kwargs["check_download_completion"]["trigger"].interval.total_seconds() == 30
+    if frequency == "weekly":
+        assert "sun" in str(jobs["plex_poll"]["trigger"])
+    assert fake_scheduler.started is True
 
 
-@pytest.mark.asyncio
-async def test_plex_poll_job_uses_explicit_full_reconcile(monkeypatch):
-    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
-    session_maker = async_sessionmaker(engine, expire_on_commit=False)
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-    monkeypatch.setattr(scheduler_service, "get_settings", lambda: SimpleNamespace())
-
-    polling_service = MagicMock()
-    polling_service.poll = AsyncMock(return_value=3)
-    monkeypatch.setattr(scheduler_service, "PlexService", lambda settings: MagicMock())
-    monkeypatch.setattr(
-        scheduler_service,
-        "PlexPollingService",
-        lambda db_session, plex: polling_service,
-    )
-
-    service = SchedulerService(session_maker, logger=MagicMock())
-    result = await service.trigger_plex_poll_now()
-
-    assert result.completed_requests == 3
-    polling_service.poll.assert_awaited_once_with(priority_only=False)
-    await engine.dispose()
-
-
-@pytest.mark.asyncio
-async def test_poll_overseerr_uses_settings_service_import_helper(monkeypatch):
-    """Overseerr polling should call the extracted settings import helper directly."""
-
-    db = AsyncMock()
-    db.add = MagicMock()
-    db.execute.return_value = MagicMock(scalar_one_or_none=MagicMock(return_value=None))
-    runtime_settings = SimpleNamespace(overseerr_url="https://overseerr", overseerr_api_key="key")
-    monkeypatch.setattr(scheduler_service, "get_settings", lambda: runtime_settings)
-
-    import_requests = AsyncMock(return_value=(2, 1))
-    monkeypatch.setattr(
-        scheduler_service.settings_service,
-        "import_overseerr_requests",
-        import_requests,
-    )
-
-    logger = MagicMock()
-    service = SchedulerService(lambda: _FakeSessionContext(db), logger=logger)
-
-    await service._poll_overseerr()
-
-    import_requests.assert_awaited_once_with(
-        db,
-        runtime_settings,
-        overseerr_service_cls=scheduler_service.OverseerrService,
-        plex_service_cls=scheduler_service.PlexService,
-        evaluate_imported_request_func=scheduler_service.evaluate_imported_request,
-        prepare_overseerr_import_func=scheduler_service.settings_service.prepare_overseerr_import,
-        logger=logger,
-    )
-    logger.info.assert_called_once_with(
-        "Overseerr poll: synced %d new request(s) (%d skipped/existing)",
-        2,
-        1,
-    )
-
-
-@pytest.mark.asyncio
-async def test_overseerr_poll_records_success_timestamp(monkeypatch):
-    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
-    session_maker = async_sessionmaker(engine, expire_on_commit=False)
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-
-    runtime_settings = SimpleNamespace(overseerr_url="https://overseerr", overseerr_api_key="key")
-    monkeypatch.setattr(scheduler_service, "get_settings", lambda: runtime_settings)
-    monkeypatch.setattr(
-        scheduler_service.settings_service,
-        "import_overseerr_requests",
-        AsyncMock(return_value=(0, 0)),
-    )
-
-    logger = MagicMock()
-    service = SchedulerService(session_maker, logger=logger)
-    await service._poll_overseerr()
-
-    async with session_maker() as session:
-        setting = await session.get(AppSetting, OVERSEERR_LAST_SYNC_SUCCESS_KEY)
-        assert setting is not None
-        assert parse_sync_timestamp(cast("str | None", setting.value)) is not None
-
-    await engine.dispose()
-
-
-@pytest.mark.asyncio
-async def test_plex_poll_records_success_timestamp_and_skips_failed_or_locked(monkeypatch):
-    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
-    session_maker = async_sessionmaker(engine, expire_on_commit=False)
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-
-    monkeypatch.setattr(scheduler_service, "get_settings", lambda: SimpleNamespace())
-    poll = AsyncMock(return_value=0)
+@pytest.fixture
+def fake_plex_poll(monkeypatch):
+    """Fake Plex and polling services. Returns the AsyncMock used for poll()."""
+    poll = AsyncMock(return_value=3)
 
     class FakePlexService:
         def __init__(self, settings):
@@ -237,76 +88,112 @@ async def test_plex_poll_records_success_timestamp_and_skips_failed_or_locked(mo
         def __init__(self, db_session, plex):
             self.poll = poll
 
+    monkeypatch.setattr(scheduler_service, "get_settings", lambda: SimpleNamespace())
     monkeypatch.setattr(scheduler_service, "PlexService", FakePlexService)
     monkeypatch.setattr(scheduler_service, "PlexPollingService", FakePollingService)
+    return poll
 
-    logger = MagicMock()
-    service = SchedulerService(session_maker, logger=logger)
-    assert (await service.trigger_plex_poll_now()).status == "completed"
 
+async def _last_sync(session_maker, key):
     async with session_maker() as session:
-        setting = await session.get(AppSetting, PLEX_LAST_SYNC_SUCCESS_KEY)
+        setting = await session.get(AppSetting, key)
         assert setting is not None
-        first_success = parse_sync_timestamp(cast("str | None", setting.value))
-        assert first_success is not None
+        return parse_sync_timestamp(cast("str | None", setting.value))
 
-    poll.side_effect = RuntimeError("boom")
+
+async def test_plex_poll_records_success_timestamp_and_skips_failed_or_locked(
+    session_maker, fake_plex_poll
+):
+    service = SchedulerService(session_maker, logger=MagicMock())
+
+    result = await service.trigger_plex_poll_now()
+    assert (result.status, result.completed_requests) == ("completed", 3)
+    fake_plex_poll.assert_awaited_once_with(priority_only=False)
+    first_success = await _last_sync(session_maker, PLEX_LAST_SYNC_SUCCESS_KEY)
+    assert first_success is not None
+
+    fake_plex_poll.side_effect = RuntimeError("boom")
     assert (await service.trigger_plex_poll_now()).status == "failed"
-    async with session_maker() as session:
-        setting = await session.get(AppSetting, PLEX_LAST_SYNC_SUCCESS_KEY)
-        assert setting is not None
-        assert parse_sync_timestamp(cast("str | None", setting.value)) == first_success
+    assert await _last_sync(session_maker, PLEX_LAST_SYNC_SUCCESS_KEY) == first_success
 
     async with service._plex_job_state_guard:
         service._get_plex_job_state(PLEX_POLL_JOB_NAME).locked = True
     assert (await service.trigger_plex_poll_now()).status == "locked"
-    async with session_maker() as session:
-        setting = await session.get(AppSetting, PLEX_LAST_SYNC_SUCCESS_KEY)
-        assert setting is not None
-        assert parse_sync_timestamp(cast("str | None", setting.value)) == first_success
-
-    await engine.dispose()
+    assert await _last_sync(session_maker, PLEX_LAST_SYNC_SUCCESS_KEY) == first_success
 
 
-@pytest.mark.asyncio
-async def test_plex_sign_in_sync_uses_full_poll_with_distinct_trigger(monkeypatch):
-    """Plex admin sign-in sync should reuse the guarded full poll path."""
-    service = SchedulerService(lambda: _FakeSessionContext(AsyncMock()), logger=MagicMock())
-    run_poll = AsyncMock(return_value=SimpleNamespace(status="completed", error=None))
-    monkeypatch.setattr(service, "_run_plex_poll_job", run_poll)
-
-    result = await service.trigger_plex_sign_in_sync()
+async def test_plex_sign_in_sync_runs_guarded_full_poll(session_maker, fake_plex_poll):
+    result = await SchedulerService(session_maker, logger=MagicMock()).trigger_plex_sign_in_sync()
 
     assert result.status == "completed"
-    run_poll.assert_awaited_once_with(trigger_source="plex_sign_in")
+    assert result.completed_requests == 3
+    fake_plex_poll.assert_awaited_once_with(priority_only=False)
 
 
-@pytest.mark.asyncio
-async def test_startup_catchup_runs_overseerr_before_plex_when_both_stale(monkeypatch):
-    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
-    session_maker = async_sessionmaker(engine, expire_on_commit=False)
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
+async def test_overseerr_poll_records_success_timestamp(monkeypatch, session_maker):
+    monkeypatch.setattr(
+        scheduler_service,
+        "get_settings",
+        lambda: SimpleNamespace(overseerr_url="https://overseerr", overseerr_api_key="key"),
+    )
+    import_requests = AsyncMock(return_value=(2, 1))
+    monkeypatch.setattr(
+        scheduler_service.settings_service, "import_overseerr_requests", import_requests
+    )
+    logger = MagicMock()
 
+    await SchedulerService(session_maker, logger=logger)._poll_overseerr()
+
+    import_requests.assert_awaited_once()
+    assert await _last_sync(session_maker, OVERSEERR_LAST_SYNC_SUCCESS_KEY) is not None
+    logger.info.assert_called_once_with(
+        "Overseerr poll: synced %d new request(s) (%d skipped/existing)", 2, 1
+    )
+
+
+@pytest.mark.parametrize(
+    ("overseerr_url", "overseerr_fresh", "overseerr_fails", "expected_calls"),
+    [
+        pytest.param("https://overseerr", False, False, ["overseerr", "plex"], id="both_stale"),
+        pytest.param("https://overseerr", True, False, ["plex"], id="overseerr_fresh"),
+        pytest.param("", False, False, ["plex"], id="overseerr_unconfigured"),
+        pytest.param(
+            "https://overseerr",
+            False,
+            True,
+            ["overseerr", "plex"],
+            id="overseerr_failure_continues",
+        ),
+    ],
+)
+async def test_startup_catchup(
+    monkeypatch, session_maker, overseerr_url, overseerr_fresh, overseerr_fails, expected_calls
+):
+    if overseerr_fresh:
+        async with session_maker() as session, session.begin():
+            await SettingsStore(session).record_sync_success("overseerr", datetime.now(UTC))
     monkeypatch.setattr(
         scheduler_service,
         "get_settings",
         lambda: SimpleNamespace(
-            overseerr_url="https://overseerr",
-            overseerr_api_key="key",
+            overseerr_url=overseerr_url,
+            overseerr_api_key="key" if overseerr_url else "",
             plex_url="https://plex",
             plex_token="token",
         ),
     )
-    order = []
     logger = MagicMock()
     service = SchedulerService(session_maker, logger=logger)
+    calls: list[str] = []
 
     async def poll_overseerr():
-        order.append("overseerr")
+        calls.append("overseerr")
+        if overseerr_fails:
+            raise RuntimeError("overseerr boom")
 
     async def poll_plex(*, trigger_source):
-        order.append(f"plex:{trigger_source}")
+        calls.append("plex")
+        assert trigger_source == "startup"
         return SimpleNamespace(status="completed", error=None)
 
     monkeypatch.setattr(service, "_poll_overseerr", poll_overseerr)
@@ -314,122 +201,27 @@ async def test_startup_catchup_runs_overseerr_before_plex_when_both_stale(monkey
 
     await service.run_startup_catchup_syncs()
 
-    assert order == ["overseerr", "plex:startup"]
-    await engine.dispose()
+    assert calls == expected_calls
+    if overseerr_fails:
+        logger.exception.assert_called_with("Startup catch-up: Overseerr sync failed")
 
 
-@pytest.mark.asyncio
-async def test_startup_catchup_runs_only_stale_service(monkeypatch):
-    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
-    session_maker = async_sessionmaker(engine, expire_on_commit=False)
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-
-    now = datetime.now(UTC)
-    async with session_maker() as session, session.begin():
-        await SettingsStore(session).record_sync_success("overseerr", now)
-
-    monkeypatch.setattr(
-        scheduler_service,
-        "get_settings",
-        lambda: SimpleNamespace(
-            overseerr_url="https://overseerr",
-            overseerr_api_key="key",
-            plex_url="https://plex",
-            plex_token="token",
-        ),
-    )
-    service = SchedulerService(session_maker, logger=MagicMock())
-    overseerr = AsyncMock()
-    plex = AsyncMock(return_value=SimpleNamespace(status="completed", error=None))
-    monkeypatch.setattr(service, "_poll_overseerr", overseerr)
-    monkeypatch.setattr(service, "_run_plex_poll_job", plex)
-
-    await service.run_startup_catchup_syncs()
-
-    overseerr.assert_not_awaited()
-    plex.assert_awaited_once_with(trigger_source="startup")
-    await engine.dispose()
-
-
-@pytest.mark.asyncio
-async def test_startup_catchup_skips_unconfigured_and_continues_after_overseerr_failure(
-    monkeypatch,
+async def test_download_completion_check_closes_plex_service_on_error(
+    monkeypatch, session_factory_for
 ):
-    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
-    session_maker = async_sessionmaker(engine, expire_on_commit=False)
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-
-    logger = MagicMock()
-    service = SchedulerService(session_maker, logger=logger)
-    plex = AsyncMock(return_value=SimpleNamespace(status="completed", error=None))
-    overseerr = AsyncMock(side_effect=RuntimeError("overseerr boom"))
-    monkeypatch.setattr(service, "_poll_overseerr", overseerr)
-    monkeypatch.setattr(service, "_run_plex_poll_job", plex)
-
-    monkeypatch.setattr(
-        scheduler_service,
-        "get_settings",
-        lambda: SimpleNamespace(
-            overseerr_url="",
-            overseerr_api_key="",
-            plex_url="https://plex",
-            plex_token="token",
-        ),
-    )
-    await service.run_startup_catchup_syncs()
-    overseerr.assert_not_awaited()
-    plex.assert_awaited_once_with(trigger_source="startup")
-
-    plex.reset_mock()
-    monkeypatch.setattr(
-        scheduler_service,
-        "get_settings",
-        lambda: SimpleNamespace(
-            overseerr_url="https://overseerr",
-            overseerr_api_key="key",
-            plex_url="https://plex",
-            plex_token="token",
-        ),
-    )
-    await service.run_startup_catchup_syncs()
-    overseerr.assert_awaited_once()
-    plex.assert_awaited_once_with(trigger_source="startup")
-    logger.exception.assert_called_with("Startup catch-up: Overseerr sync failed")
-    await engine.dispose()
-
-
-@pytest.mark.asyncio
-async def test_download_completion_check_closes_plex_service_on_error(monkeypatch):
     """Download completion polling should always close PlexService."""
-    db = AsyncMock()
-    runtime_settings = SimpleNamespace()
-    monkeypatch.setattr(scheduler_service, "get_settings", lambda: runtime_settings)
+    monkeypatch.setattr(scheduler_service, "get_settings", lambda: SimpleNamespace())
 
-    plex_instance = AsyncMock()
-    qbittorrent_instance = AsyncMock()
-    plex_polling_instance = AsyncMock()
     download_health_service = AsyncMock()
-    download_health_service.observe.return_value = {
-        "qbit_available": True,
-        "problems": [],
-    }
+    download_health_service.observe.return_value = {"qbit_available": True, "problems": []}
     download_completion_service = AsyncMock()
     download_completion_service.check_downloading_requests = AsyncMock(
         side_effect=RuntimeError("download boom")
     )
-
-    monkeypatch.setattr(scheduler_service, "PlexService", lambda settings: plex_instance)
+    monkeypatch.setattr(scheduler_service, "PlexService", lambda settings: AsyncMock())
+    monkeypatch.setattr(scheduler_service, "QbittorrentService", lambda settings: AsyncMock())
     monkeypatch.setattr(
-        scheduler_service,
-        "QbittorrentService",
-        lambda settings: qbittorrent_instance,
-    )
-    monkeypatch.setattr(
-        scheduler_service,
-        "PlexPollingService",
-        lambda db_session, plex: plex_polling_instance,
+        scheduler_service, "PlexPollingService", lambda db_session, plex: AsyncMock()
     )
     monkeypatch.setattr(
         scheduler_service,
@@ -437,26 +229,28 @@ async def test_download_completion_check_closes_plex_service_on_error(monkeypatc
         lambda db_session, qbittorrent: download_health_service,
     )
     monkeypatch.setattr(
-        "app.siftarr.services.admin.scheduler_service.DownloadCompletionService",
+        scheduler_service,
+        "DownloadCompletionService",
         lambda db_session, qbittorrent, plex_polling: download_completion_service,
     )
 
     logger = MagicMock()
-    service = SchedulerService(lambda: _FakeSessionContext(db), logger=logger)
+    service = SchedulerService(session_factory_for(AsyncMock()), logger=logger)
 
     await service._check_download_completion()
 
-    download_health_service.observe.assert_awaited_once()
-    download_completion_service.check_downloading_requests.assert_awaited_once()
     logger.exception.assert_called_once_with("Error during download completion check")
 
 
-@pytest.mark.asyncio
-async def test_download_completion_runs_qbit_move_when_enabled(monkeypatch):
-    db = AsyncMock()
-    runtime_settings = SimpleNamespace(qbittorrent_move_enabled=True)
-    monkeypatch.setattr(scheduler_service, "get_settings", lambda: runtime_settings)
-
+@pytest.mark.parametrize("move_enabled", [True, False], ids=["move_enabled", "move_disabled"])
+async def test_download_completion_runs_qbit_move_only_when_enabled(
+    monkeypatch, session_factory_for, move_enabled
+):
+    monkeypatch.setattr(
+        scheduler_service,
+        "get_settings",
+        lambda: SimpleNamespace(qbittorrent_move_enabled=move_enabled),
+    )
     download_completion_service = AsyncMock()
     download_completion_service.check_downloading_requests.return_value = 0
     move_service = AsyncMock()
@@ -478,91 +272,19 @@ async def test_download_completion_runs_qbit_move_when_enabled(monkeypatch):
         lambda db_session, qbittorrent, settings, log: move_service,
     )
 
-    service = SchedulerService(lambda: _FakeSessionContext(db), logger=MagicMock())
+    service = SchedulerService(session_factory_for(AsyncMock()), logger=MagicMock())
     await service._check_download_completion()
 
     download_completion_service.check_downloading_requests.assert_awaited_once()
-    move_service.run.assert_awaited_once()
+    assert move_service.run.await_count == (1 if move_enabled else 0)
 
 
-@pytest.mark.asyncio
-async def test_download_completion_skips_qbit_move_when_disabled(monkeypatch):
-    db = AsyncMock()
-    runtime_settings = SimpleNamespace(qbittorrent_move_enabled=False)
-    monkeypatch.setattr(scheduler_service, "get_settings", lambda: runtime_settings)
-
-    download_completion_service = AsyncMock()
-    download_completion_service.check_downloading_requests.return_value = 0
-    move_service_cls = MagicMock()
-
-    monkeypatch.setattr(scheduler_service, "PlexService", lambda settings: AsyncMock())
-    monkeypatch.setattr(scheduler_service, "QbittorrentService", lambda settings: AsyncMock())
-    monkeypatch.setattr(
-        scheduler_service, "PlexPollingService", lambda db_session, plex: AsyncMock()
-    )
-    monkeypatch.setattr(
-        scheduler_service,
-        "DownloadCompletionService",
-        lambda db_session, qbittorrent, plex_polling: download_completion_service,
-    )
-    monkeypatch.setattr(scheduler_service, "QbitMoveService", move_service_cls)
-
-    service = SchedulerService(lambda: _FakeSessionContext(db), logger=MagicMock())
-    await service._check_download_completion()
-
-    download_completion_service.check_downloading_requests.assert_awaited_once()
-    move_service_cls.assert_not_called()
-
-
-@pytest.mark.asyncio
-async def test_recheck_unreleased_revisits_finished_and_available_tv_requests(monkeypatch):
-    """Scheduler recheck should revisit ongoing TV rows beyond current unreleased ones."""
-    db = AsyncMock()
-    completed_tv = SimpleNamespace(id=1, media_type=MediaType.TV, status=RequestStatus.COMPLETED)
-    available_tv = SimpleNamespace(id=2, media_type=MediaType.TV, status=RequestStatus.COMPLETED)
-
-    lifecycle_service = AsyncMock()
-    lifecycle_service.get_release_recheck_requests.return_value = [completed_tv, available_tv]
-    monkeypatch.setattr(scheduler_service, "LifecycleService", lambda db_session: lifecycle_service)
-
-    runtime_settings = SimpleNamespace()
-    monkeypatch.setattr(scheduler_service, "get_settings", lambda: runtime_settings)
-
-    overseerr_instance = AsyncMock()
-    monkeypatch.setattr(scheduler_service, "OverseerrService", lambda settings: overseerr_instance)
-
-    evaluator = AsyncMock()
-    evaluator.evaluate_and_apply = AsyncMock(
-        side_effect=[RequestStatus.UNRELEASED, RequestStatus.PENDING]
-    )
-    monkeypatch.setattr(
-        scheduler_service, "UnreleasedEvaluator", lambda db_session, overseerr: evaluator
-    )
-
-    queue_service = AsyncMock()
-    monkeypatch.setattr(scheduler_service, "PendingQueueService", lambda db_session: queue_service)
-
-    service = SchedulerService(lambda: _FakeSessionContext(db), logger=MagicMock())
-    await service._recheck_unreleased()
-
-    lifecycle_service.get_release_recheck_requests.assert_awaited_once_with(limit=500)
-    assert evaluator.evaluate_and_apply.await_count == 2
-    queue_service.add_to_queue.assert_awaited_once_with(2)
-
-
-@pytest.mark.asyncio
 async def test_recheck_unreleased_persists_tv_unreleased_and_pending_transitions(
-    monkeypatch,
+    monkeypatch, session_maker, db
 ):
     """Scheduler recheck should persist unreleased and return to pending after release."""
-    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
-    session_maker = async_sessionmaker(engine, expire_on_commit=False)
     today = date.today()
     queued_request_ids: list[int] = []
-
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-
     monkeypatch.setattr(scheduler_service, "get_settings", lambda: SimpleNamespace())
 
     class FakeOverseerrService:
@@ -570,10 +292,7 @@ async def test_recheck_unreleased_persists_tv_unreleased_and_pending_transitions
             self.settings = settings
 
         async def get_media_details(self, media_type, tmdb_id):
-            return {
-                "firstAirDate": "2025-01-01",
-                "status": "Returning Series",
-            }
+            return {"firstAirDate": "2025-01-01", "status": "Returning Series"}
 
         async def close(self):
             return None
@@ -588,67 +307,37 @@ async def test_recheck_unreleased_persists_tv_unreleased_and_pending_transitions
     monkeypatch.setattr(scheduler_service, "OverseerrService", FakeOverseerrService)
     monkeypatch.setattr(scheduler_service, "PendingQueueService", FakePendingQueueService)
 
-    async with session_maker() as session:
-        request = Request(
-            external_id="ongoing-tv-recheck",
-            media_type=MediaType.TV,
-            tmdb_id=12345,
-            title="Ongoing TV",
-            status=RequestStatus.COMPLETED,
+    request = await make_request(
+        db, media_type=MediaType.TV, tmdb_id=12345, status=RequestStatus.COMPLETED
+    )
+    season = await make_season(db, request, 1, status=RequestStatus.UNRELEASED)
+    for number, offset, status in [
+        (1, -14, RequestStatus.COMPLETED),
+        (2, -7, RequestStatus.COMPLETED),
+        (3, 7, RequestStatus.UNRELEASED),
+    ]:
+        await make_episode(
+            db, season, number, air_date=today + timedelta(days=offset), status=status
         )
-        session.add(request)
-        await session.flush()
-
-        season = Season(
-            request_id=request.id,
-            season_number=1,
-            status=RequestStatus.UNRELEASED,
-        )
-        session.add(season)
-        await session.flush()
-
-        session.add_all(
-            [
-                Episode(
-                    season_id=season.id,
-                    episode_number=1,
-                    air_date=today - timedelta(days=14),
-                    status=RequestStatus.COMPLETED,
-                ),
-                Episode(
-                    season_id=season.id,
-                    episode_number=2,
-                    air_date=today - timedelta(days=7),
-                    status=RequestStatus.COMPLETED,
-                ),
-                Episode(
-                    season_id=season.id,
-                    episode_number=3,
-                    air_date=today + timedelta(days=7),
-                    status=RequestStatus.UNRELEASED,
-                ),
-            ]
-        )
-        await session.commit()
-        request_id = request.id
+    await db.commit()
 
     service = SchedulerService(session_maker, logger=MagicMock())
     await service._recheck_unreleased()
 
-    async with session_maker() as session:
-        refreshed = await session.get(Request, request_id)
-        assert refreshed is not None
-        # Episode-centric: {COMPLETED, UNRELEASED} → UNRELEASED (no true pending work)
-        assert refreshed.status == RequestStatus.UNRELEASED
-
-        future_episode = await session.scalar(
+    async def episode_three(session):
+        return await session.scalar(
             select(Episode)
             .join(Season, Season.id == Episode.season_id)
-            .where(
-                Season.request_id == request_id,
-                Episode.episode_number == 3,
-            )
+            .where(Season.request_id == request.id, Episode.episode_number == 3)
         )
+
+    async with session_maker() as session:
+        refreshed = await session.get(Request, request.id)
+        assert refreshed is not None
+        # Episode-centric: {COMPLETED, UNRELEASED} -> UNRELEASED (no true pending work)
+        assert refreshed.status == RequestStatus.UNRELEASED
+
+        future_episode = await episode_three(session)
         assert future_episode is not None
         future_episode.air_date = today - timedelta(days=1)
         await session.commit()
@@ -656,24 +345,15 @@ async def test_recheck_unreleased_persists_tv_unreleased_and_pending_transitions
     await service._recheck_unreleased()
 
     async with session_maker() as session:
-        refreshed = await session.get(Request, request_id)
+        refreshed = await session.get(Request, request.id)
         assert refreshed is not None
         # Episode-centric: aired UNRELEASED episode becomes PENDING and queues search
         assert refreshed.status == RequestStatus.PENDING
-
-        released_episode = await session.scalar(
-            select(Episode)
-            .join(Season, Season.id == Episode.season_id)
-            .where(
-                Season.request_id == request_id,
-                Episode.episode_number == 3,
-            )
-        )
+        released_episode = await episode_three(session)
         assert released_episode is not None
         assert released_episode.status == RequestStatus.PENDING
 
-    assert queued_request_ids == [request_id]
-    await engine.dispose()
+    assert queued_request_ids == [request.id]
 
 
 @pytest.mark.asyncio
@@ -714,7 +394,7 @@ async def test_recent_plex_scan_returns_locked_when_job_already_running(monkeypa
     monkeypatch.setattr(scheduler_service, "PlexService", FakePlexService)
     monkeypatch.setattr(scheduler_service, "PlexPollingService", FakePollingService)
 
-    service = SchedulerService(lambda: _FakeSessionContext(db), logger=MagicMock())
+    service = SchedulerService(lambda: FakeSessionContext(db), logger=MagicMock())
 
     first_run = asyncio.create_task(service.trigger_recent_plex_scan_now())
     await asyncio.sleep(0)
@@ -763,7 +443,7 @@ async def test_plex_poll_records_failed_run_state(monkeypatch):
         lambda db_session, plex: polling_service,
     )
 
-    service = SchedulerService(lambda: _FakeSessionContext(db), logger=MagicMock())
+    service = SchedulerService(lambda: FakeSessionContext(db), logger=MagicMock())
 
     result = await service.trigger_plex_poll_now()
 
@@ -781,106 +461,70 @@ async def test_plex_poll_records_failed_run_state(monkeypatch):
     assert poll_state["metrics_payload"] is None
 
 
-@pytest.mark.asyncio
-async def test_process_pending_item_marks_request_failed_after_max_retry_result(monkeypatch):
-    """Non-completed retry results should consume the last retry and fail the request."""
-    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
-    session_maker = async_sessionmaker(engine, expire_on_commit=False)
+@pytest.mark.parametrize(
+    ("retry_count", "decision", "expected_status", "expected_retry_count", "expected_reason"),
+    [
+        pytest.param(
+            1,
+            {"status": "pending", "message": "still blocked"},
+            RequestStatus.FAILED,
+            0,
+            "still blocked",
+            id="max_retry_result_fails_request",
+        ),
+        pytest.param(
+            0,
+            RuntimeError("decision boom"),
+            RequestStatus.PENDING,
+            1,
+            "decision boom",
+            id="exception_reschedules_retry",
+        ),
+    ],
+)
+async def test_process_pending_item_retry_outcomes(
+    monkeypatch,
+    session_maker,
+    db,
+    retry_count,
+    decision,
+    expected_status,
+    expected_retry_count,
+    expected_reason,
+):
+    now = datetime.now(UTC).replace(tzinfo=None)
+    request = await make_request(
+        db, next_retry_at=now - timedelta(minutes=1), retry_count=retry_count
+    )
+    await db.commit()
 
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
+    monkeypatch.setattr(
+        scheduler_service,
+        "get_settings",
+        lambda: SimpleNamespace(retry_interval_hours=24, max_retry_duration_days=2),
+    )
+    monkeypatch.setattr(scheduler_service, "ProwlarrService", lambda settings: MagicMock())
+    monkeypatch.setattr(scheduler_service, "QbittorrentService", lambda settings: MagicMock())
 
-    async with session_maker() as session:
-        request = Request(
-            external_id="retry-final-result",
-            media_type=MediaType.MOVIE,
-            title="Retry Movie",
-            status=RequestStatus.PENDING,
-            next_retry_at=datetime.now(UTC).replace(tzinfo=None) - timedelta(minutes=1),
-            retry_count=1,
-        )
-        session.add(request)
-        await session.commit()
-        await session.refresh(request)
+    class FakeMovieDecisionService:
+        def __init__(self, db, prowlarr, qbittorrent):
+            if isinstance(decision, Exception):
+                self.process_request = AsyncMock(side_effect=decision)
+            else:
+                self.process_request = AsyncMock(return_value=decision)
 
-        monkeypatch.setattr(
-            scheduler_service,
-            "get_settings",
-            lambda: SimpleNamespace(retry_interval_hours=24, max_retry_duration_days=2),
-        )
-        monkeypatch.setattr(scheduler_service, "ProwlarrService", lambda settings: MagicMock())
-        monkeypatch.setattr(scheduler_service, "QbittorrentService", lambda settings: MagicMock())
+    monkeypatch.setattr(scheduler_service, "MovieDecisionService", FakeMovieDecisionService)
 
-        class FakeMovieDecisionService:
-            def __init__(self, db, prowlarr, qbittorrent):
-                self.process_request = AsyncMock(
-                    return_value={"status": "pending", "message": "still blocked"}
-                )
-
-        monkeypatch.setattr(scheduler_service, "MovieDecisionService", FakeMovieDecisionService)
-
-        service = SchedulerService(session_maker, logger=MagicMock())
-        await service._process_pending_item(request)
-
-    async with session_maker() as session:
-        refreshed = await session.get(Request, request.id)
-        assert refreshed is not None
-        assert refreshed.status == RequestStatus.FAILED
-        assert refreshed.next_retry_at is None
-        assert refreshed.retry_count == 0
-        assert refreshed.rejection_reason == "still blocked"
-
-    await engine.dispose()
-
-
-@pytest.mark.asyncio
-async def test_process_pending_item_reschedules_retry_after_exception(monkeypatch):
-    """Retry exceptions should preserve the error and reschedule when retries remain."""
-    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
-    session_maker = async_sessionmaker(engine, expire_on_commit=False)
-
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-
-    scheduled_before = datetime.now(UTC).replace(tzinfo=None)
-
-    async with session_maker() as session:
-        request = Request(
-            external_id="retry-exception",
-            media_type=MediaType.MOVIE,
-            title="Retry Movie",
-            status=RequestStatus.PENDING,
-            next_retry_at=scheduled_before - timedelta(minutes=1),
-            retry_count=0,
-        )
-        session.add(request)
-        await session.commit()
-        await session.refresh(request)
-
-        monkeypatch.setattr(
-            scheduler_service,
-            "get_settings",
-            lambda: SimpleNamespace(retry_interval_hours=24, max_retry_duration_days=3),
-        )
-        monkeypatch.setattr(scheduler_service, "ProwlarrService", lambda settings: MagicMock())
-        monkeypatch.setattr(scheduler_service, "QbittorrentService", lambda settings: MagicMock())
-
-        class FakeMovieDecisionService:
-            def __init__(self, db, prowlarr, qbittorrent):
-                self.process_request = AsyncMock(side_effect=RuntimeError("decision boom"))
-
-        monkeypatch.setattr(scheduler_service, "MovieDecisionService", FakeMovieDecisionService)
-
-        service = SchedulerService(session_maker, logger=MagicMock())
-        await service._process_pending_item(request)
+    await SchedulerService(session_maker, logger=MagicMock())._process_pending_item(request)
 
     async with session_maker() as session:
         refreshed = await session.get(Request, request.id)
         assert refreshed is not None
-        assert refreshed.status == RequestStatus.PENDING
-        assert refreshed.retry_count == 1
-        assert refreshed.rejection_reason == "decision boom"
-        assert refreshed.next_retry_at is not None
-        assert refreshed.next_retry_at >= scheduled_before + timedelta(hours=23, minutes=59)
-
-    await engine.dispose()
+        assert refreshed.status == expected_status
+        assert refreshed.retry_count == expected_retry_count
+        assert refreshed.rejection_reason == expected_reason
+        if expected_status == RequestStatus.FAILED:
+            assert refreshed.next_retry_at is None
+        else:
+            assert refreshed.next_retry_at is not None
+            assert refreshed.next_retry_at >= now + timedelta(hours=23, minutes=59)

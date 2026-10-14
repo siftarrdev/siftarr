@@ -25,157 +25,56 @@ class TestRuleService:
         """Create a RuleService instance."""
         return RuleService(mock_db)
 
-    @pytest.mark.asyncio
-    async def test_get_all_rules(self, mock_db, service):
-        """Test getting all rules."""
-        mock_rules = [
-            MagicMock(spec=Rule, id=1, name="Rule 1"),
-            MagicMock(spec=Rule, id=2, name="Rule 2"),
-        ]
-        mock_result = MagicMock()
-        mock_result.scalars.return_value.all.return_value = mock_rules
-        mock_db.execute.return_value = mock_result
-
-        result = await service.get_all_rules()
-
-        assert len(result) == 2
-        mock_db.execute.assert_called_once()
+    @pytest.fixture
+    def real_service(self, db):
+        return RuleService(db)
 
     @pytest.mark.asyncio
-    async def test_get_rules_by_type(self, mock_db, service):
-        """Test getting rules filtered by type."""
-        mock_rules = [
-            MagicMock(spec=Rule, id=1, rule_type=RuleType.EXCLUSION),
-        ]
-        mock_result = MagicMock()
-        mock_result.scalars.return_value.all.return_value = mock_rules
-        mock_db.execute.return_value = mock_result
-
-        result = await service.get_rules_by_type(RuleType.EXCLUSION)
-
-        assert len(result) == 1
-        assert result[0].rule_type == RuleType.EXCLUSION
-
-    @pytest.mark.asyncio
-    async def test_get_rule_by_id(self, mock_db, service):
-        """Test getting a rule by ID."""
-        mock_rule = MagicMock(spec=Rule, id=1)
-        mock_result = MagicMock()
-        mock_result.scalar_one_or_none.return_value = mock_rule
-        mock_db.execute.return_value = mock_result
-
-        result = await service.get_rule_by_id(1)
-
-        assert result == mock_rule
-
-    @pytest.mark.asyncio
-    async def test_get_rule_by_id_not_found(self, mock_db, service):
-        """Test getting a non-existent rule."""
-        mock_result = MagicMock()
-        mock_result.scalar_one_or_none.return_value = None
-        mock_db.execute.return_value = mock_result
-
-        result = await service.get_rule_by_id(999)
-
-        assert result is None
-
-    @pytest.mark.asyncio
-    async def test_create_rule(self, mock_db, service):
-        """Test creating a new rule."""
-        mock_db.add = MagicMock()
-        mock_db.commit = AsyncMock()
-        mock_db.refresh = AsyncMock()
-
-        await service.create_rule(
-            name="Test Rule",
-            rule_type=RuleType.EXCLUSION,
-            pattern="CAM|TS",
-            score=0,
-            min_size_gb=None,
-            max_size_gb=None,
-            tv_target=None,
-            priority=1,
-            is_enabled=True,
-            description="Test description",
+    async def test_create_and_query_rules(self, real_service):
+        """Created rules are persisted, ordered by priority, and filterable by type."""
+        low = await real_service.create_rule(
+            name="Low", rule_type=RuleType.SCORER, pattern="x265", score=5, priority=2
+        )
+        first = await real_service.create_rule(
+            name="First", rule_type=RuleType.EXCLUSION, pattern="CAM|TS", priority=1
+        )
+        disabled = await real_service.create_rule(
+            name="Off", rule_type=RuleType.EXCLUSION, pattern="SCR", priority=3, is_enabled=False
         )
 
-        mock_db.add.assert_called_once()
-        mock_db.commit.assert_called_once()
-        mock_db.refresh.assert_called_once()
+        assert [r.name for r in await real_service.get_all_rules()] == ["First", "Low", "Off"]
+        assert [r.id for r in await real_service.get_rules_by_type(RuleType.EXCLUSION)] == [
+            first.id
+        ]
+        assert [r.id for r in await real_service.get_all_rules_by_type(RuleType.EXCLUSION)] == [
+            first.id,
+            disabled.id,
+        ]
+        assert (await real_service.get_rule_by_id(low.id)) is not None
+        assert await real_service.get_rule_by_id(999) is None
 
     @pytest.mark.asyncio
-    async def test_update_rule(self, mock_db, service):
-        """Test updating an existing rule."""
-        mock_rule = MagicMock(spec=Rule)
-        mock_rule.name = "Old Name"
-        mock_result = MagicMock()
-        mock_result.scalar_one_or_none.return_value = mock_rule
-        mock_db.execute.return_value = mock_result
-
-        await service.update_rule(
-            rule_id=1,
-            name="New Name",
-            pattern="NEWPATTERN",
+    async def test_update_toggle_and_delete_rule(self, real_service):
+        rule = await real_service.create_rule(
+            name="Old", rule_type=RuleType.SCORER, pattern="x265", score=10
         )
 
-        assert mock_rule.name == "New Name"
-        assert mock_rule.pattern == "NEWPATTERN"
-        mock_db.commit.assert_called_once()
+        updated = await real_service.update_rule(rule.id, score=50)
+        assert updated is not None
+        assert (updated.name, updated.pattern, updated.score) == ("Old", "x265", 50)
+
+        toggled = await real_service.toggle_rule(rule.id)
+        assert toggled is not None
+        assert toggled.is_enabled is False
+
+        assert await real_service.delete_rule(rule.id) is True
+        assert await real_service.get_rule_by_id(rule.id) is None
 
     @pytest.mark.asyncio
-    async def test_update_rule_not_found(self, mock_db, service):
-        """Test updating a non-existent rule."""
-        mock_result = MagicMock()
-        mock_result.scalar_one_or_none.return_value = None
-        mock_db.execute.return_value = mock_result
-
-        result = await service.update_rule(rule_id=999, name="New Name")
-
-        assert result is None
-
-    @pytest.mark.asyncio
-    async def test_update_rule_partial(self, mock_db, service):
-        """Test partial update of a rule (only some fields)."""
-        mock_rule = MagicMock(spec=Rule)
-        mock_rule.name = "Original"
-        mock_rule.pattern = "OriginalPattern"
-        mock_rule.score = 10
-
-        mock_result = MagicMock()
-        mock_result.scalar_one_or_none.return_value = mock_rule
-        mock_db.execute.return_value = mock_result
-
-        await service.update_rule(rule_id=1, score=50)
-
-        assert mock_rule.name == "Original"
-        assert mock_rule.pattern == "OriginalPattern"
-        assert mock_rule.score == 50
-
-    @pytest.mark.asyncio
-    async def test_delete_rule(self, mock_db, service):
-        """Test deleting a rule."""
-        mock_rule = MagicMock(spec=Rule, id=1)
-        mock_result = MagicMock()
-        mock_result.scalar_one_or_none.return_value = mock_rule
-        mock_db.execute.return_value = mock_result
-
-        result = await service.delete_rule(1)
-
-        assert result is True
-        mock_db.delete.assert_called_once_with(mock_rule)
-        mock_db.commit.assert_called_once()
-
-    @pytest.mark.asyncio
-    async def test_delete_rule_not_found(self, mock_db, service):
-        """Test deleting a non-existent rule."""
-        mock_result = MagicMock()
-        mock_result.scalar_one_or_none.return_value = None
-        mock_db.execute.return_value = mock_result
-
-        result = await service.delete_rule(999)
-
-        assert result is False
-        mock_db.delete.assert_not_called()
+    async def test_missing_rule_operations_return_empty_results(self, real_service):
+        assert await real_service.update_rule(rule_id=999, name="New") is None
+        assert await real_service.toggle_rule(999) is None
+        assert await real_service.delete_rule(999) is False
 
     @pytest.mark.asyncio
     async def test_seed_default_rules(self, mock_db, service):
@@ -321,34 +220,6 @@ class TestRuleService:
             mock_db.add.assert_not_called()
 
     @pytest.mark.asyncio
-    async def test_toggle_rule(self, mock_db, service):
-        """Test toggling a rule's enabled status."""
-        mock_rule = MagicMock(spec=Rule)
-        mock_rule.is_enabled = True
-        mock_rule.id = 1
-
-        mock_result = MagicMock()
-        mock_result.scalar_one_or_none.return_value = mock_rule
-        mock_db.execute.return_value = mock_result
-
-        await service.toggle_rule(1)
-
-        assert mock_rule.is_enabled is False
-        mock_db.commit.assert_called_once()
-        mock_db.refresh.assert_called_once()
-
-    @pytest.mark.asyncio
-    async def test_toggle_rule_not_found(self, mock_db, service):
-        """Test toggling a non-existent rule."""
-        mock_result = MagicMock()
-        mock_result.scalar_one_or_none.return_value = None
-        mock_db.execute.return_value = mock_result
-
-        result = await service.toggle_rule(999)
-
-        assert result is None
-
-    @pytest.mark.asyncio
     async def test_export_rules_json_includes_versioned_tv_targeting(self, service):
         """Export should include the versioned schema and TV targeting fields."""
         exported_rule = MagicMock(spec=Rule)
@@ -370,32 +241,6 @@ class TestRuleService:
         data = json.loads(payload)
         assert data["version"] == 1
         assert data["rules"][0]["tv_target"] == "season_pack"
-
-    def test_preview_import_rules_rejects_missing_tv_target_for_tv_size_rule(self, service):
-        """Preview validation should reject TV size rules without explicit targeting."""
-        payload = json.dumps(
-            {
-                "version": 1,
-                "rules": [
-                    {
-                        "name": "TV Size",
-                        "rule_type": "size_limit",
-                        "media_scope": "tv",
-                        "tv_target": None,
-                        "pattern": "size_limit",
-                        "score": 0,
-                        "min_size_gb": 1.0,
-                        "max_size_gb": 2.0,
-                        "priority": 1,
-                        "is_enabled": True,
-                        "description": None,
-                    }
-                ],
-            }
-        )
-
-        with pytest.raises(ValueError, match="must set tv_target"):
-            service.preview_import_rules(payload)
 
     def test_preview_import_rules_returns_summary(self, service):
         """Preview should return the parsed replacement summary."""
@@ -577,135 +422,56 @@ class TestRuleService:
         with pytest.raises(ValueError, match="Invalid rule selection index"):
             service.build_selected_import_preview(preview, [], ["imported:9"])
 
-    def test_preview_import_rules_rejects_stringified_numeric_fields(self, service):
-        """Numeric fields must be real JSON numbers, not strings."""
-        payload = json.dumps(
-            {
-                "version": 1,
-                "rules": [
-                    {
-                        "name": "TV Episodes",
-                        "rule_type": "size_limit",
-                        "media_scope": "tv",
-                        "tv_target": "episode",
-                        "pattern": "size_limit",
-                        "score": "0",
-                        "min_size_gb": 0.1,
-                        "max_size_gb": 1.5,
-                        "priority": 7,
-                        "is_enabled": True,
-                        "description": None,
-                    }
-                ],
-            }
-        )
+    @pytest.mark.parametrize(
+        ("version", "overrides", "message"),
+        [
+            (1, {"tv_target": None}, "must set tv_target"),
+            (1, {"score": "0"}, "field 'score' must be an integer"),
+            (1, {"is_enabled": "true"}, "field 'is_enabled' must be a boolean"),
+            (
+                1,
+                {
+                    "rule_type": "exclusion",
+                    "media_scope": "both",
+                    "tv_target": None,
+                    "pattern": "[invalid",
+                    "min_size_gb": None,
+                    "max_size_gb": None,
+                },
+                "not a valid regex",
+            ),
+            (1, {"extra_field": "nope"}, "unsupported field"),
+            (True, {}, "Unsupported rule import version"),
+        ],
+        ids=[
+            "tv-size-without-target",
+            "stringified-number",
+            "non-boolean-flag",
+            "invalid-regex",
+            "unknown-field",
+            "boolean-version",
+        ],
+    )
+    def test_preview_import_rules_rejects_invalid_payload(
+        self, service, version, overrides, message
+    ):
+        rule = {
+            "name": "TV Episodes",
+            "rule_type": "size_limit",
+            "media_scope": "tv",
+            "tv_target": "episode",
+            "pattern": "size_limit",
+            "score": 0,
+            "min_size_gb": 0.1,
+            "max_size_gb": 1.5,
+            "priority": 7,
+            "is_enabled": True,
+            "description": None,
+            **overrides,
+        }
+        payload = json.dumps({"version": version, "rules": [rule]})
 
-        with pytest.raises(ValueError, match="field 'score' must be an integer"):
-            service.preview_import_rules(payload)
-
-    def test_preview_import_rules_rejects_non_boolean_enabled_flag(self, service):
-        """Boolean fields must be true booleans."""
-        payload = json.dumps(
-            {
-                "version": 1,
-                "rules": [
-                    {
-                        "name": "TV Episodes",
-                        "rule_type": "size_limit",
-                        "media_scope": "tv",
-                        "tv_target": "episode",
-                        "pattern": "size_limit",
-                        "score": 0,
-                        "min_size_gb": 0.1,
-                        "max_size_gb": 1.5,
-                        "priority": 7,
-                        "is_enabled": "true",
-                        "description": None,
-                    }
-                ],
-            }
-        )
-
-        with pytest.raises(ValueError, match="field 'is_enabled' must be a boolean"):
-            service.preview_import_rules(payload)
-
-    def test_preview_import_rules_rejects_invalid_regex_for_non_size_rule(self, service):
-        """Preview should fail invalid regexes before apply time."""
-        payload = json.dumps(
-            {
-                "version": 1,
-                "rules": [
-                    {
-                        "name": "Bad Regex",
-                        "rule_type": "exclusion",
-                        "media_scope": "both",
-                        "tv_target": None,
-                        "pattern": "[invalid",
-                        "score": 0,
-                        "min_size_gb": None,
-                        "max_size_gb": None,
-                        "priority": 1,
-                        "is_enabled": True,
-                        "description": None,
-                    }
-                ],
-            }
-        )
-
-        with pytest.raises(ValueError, match="not a valid regex"):
-            service.preview_import_rules(payload)
-
-    def test_preview_import_rules_rejects_unknown_fields(self, service):
-        """Preview should reject unsupported fields to keep the contract strict."""
-        payload = json.dumps(
-            {
-                "version": 1,
-                "rules": [
-                    {
-                        "name": "TV Episodes",
-                        "rule_type": "size_limit",
-                        "media_scope": "tv",
-                        "tv_target": "episode",
-                        "pattern": "size_limit",
-                        "score": 0,
-                        "min_size_gb": 0.1,
-                        "max_size_gb": 1.5,
-                        "priority": 7,
-                        "is_enabled": True,
-                        "description": None,
-                        "extra_field": "nope",
-                    }
-                ],
-            }
-        )
-
-        with pytest.raises(ValueError, match="unsupported field"):
-            service.preview_import_rules(payload)
-
-    def test_preview_import_rules_rejects_boolean_version_value(self, service):
-        """Top-level import version must be integer 1, not boolean true."""
-        payload = json.dumps(
-            {
-                "version": True,
-                "rules": [
-                    {
-                        "name": "TV Episodes",
-                        "rule_type": "size_limit",
-                        "media_scope": "tv",
-                        "tv_target": "episode",
-                        "pattern": "size_limit",
-                        "score": 0,
-                        "min_size_gb": 0.1,
-                        "max_size_gb": 1.5,
-                        "priority": 7,
-                        "is_enabled": True,
-                        "description": None,
-                    }
-                ],
-            }
-        )
-
-        with pytest.raises(ValueError, match="Unsupported rule import version"):
+        with pytest.raises(ValueError, match=message):
             service.preview_import_rules(payload)
 
     @pytest.mark.asyncio
