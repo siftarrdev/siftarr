@@ -2,6 +2,7 @@
 
 import json
 import logging
+from collections.abc import Awaitable, Callable
 from datetime import UTC, date, datetime, timedelta
 
 import httpx
@@ -71,6 +72,15 @@ def _download_completed_torrent_ids(details: str | None) -> set[int]:
     return torrent_ids
 
 
+def _future_date(raw: object, today: date) -> date | None:
+    """Parse the leading ISO date of ``raw``; return it only if after ``today``."""
+    try:
+        parsed = date.fromisoformat(str(raw)[:10])
+    except ValueError:
+        return None
+    return parsed if parsed > today else None
+
+
 def _is_actionable_workflow_torrent(
     torrent: StagedTorrent,
     request_statuses: dict[int, RequestStatus],
@@ -85,22 +95,37 @@ def _is_actionable_workflow_torrent(
     return not is_terminal_request_status(request_statuses.get(torrent.request_id))
 
 
-@router.get("/api/downloads")
-async def qbit_downloads_api(db: AsyncSession = Depends(get_db)):
-    """Return unfinished qBit torrents grouped by owning Siftarr request."""
+async def _grouped_qbit_torrents_payload(
+    db: AsyncSession,
+    fetch: Callable[[QbittorrentService], Awaitable[list]],
+    failure_message: str,
+    *,
+    exclude_terminal_requests: bool,
+):
     settings = get_settings()
     if not settings.qbittorrent_url:
         return {"groups": [], "qbit_unavailable": True}
 
     try:
-        qbit_torrents = await QbittorrentService(
-            settings=settings
-        ).get_unfinished_torrents_or_raise()
+        qbit_torrents = await fetch(QbittorrentService(settings=settings))
     except Exception:
-        logger.warning("Unable to refresh unfinished qBittorrent torrents")
+        logger.warning(failure_message)
         return {"groups": [], "qbit_unavailable": True}
 
-    return await build_grouped_torrent_payload(db, qbit_torrents, exclude_terminal_requests=True)
+    return await build_grouped_torrent_payload(
+        db, qbit_torrents, exclude_terminal_requests=exclude_terminal_requests
+    )
+
+
+@router.get("/api/downloads")
+async def qbit_downloads_api(db: AsyncSession = Depends(get_db)):
+    """Return unfinished qBit torrents grouped by owning Siftarr request."""
+    return await _grouped_qbit_torrents_payload(
+        db,
+        lambda qbit: qbit.get_unfinished_torrents_or_raise(),
+        "Unable to refresh unfinished qBittorrent torrents",
+        exclude_terminal_requests=True,
+    )
 
 
 @router.get("/api/torrents/completed")
@@ -109,21 +134,14 @@ async def qbit_completed_torrents_api(db: AsyncSession = Depends(get_db)):
 
     This is a live view of qBittorrent only; no completion history is stored.
     """
-    settings = get_settings()
-    if not settings.qbittorrent_url:
-        return {"groups": [], "qbit_unavailable": True}
-
-    try:
-        qbit_torrents = await QbittorrentService(
-            settings=settings
-        ).get_completed_torrents_or_raise()
-    except Exception:
-        logger.warning("Unable to refresh completed qBittorrent torrents")
-        return {"groups": [], "qbit_unavailable": True}
-
     # Completed torrents usually belong to requests that already reached a
     # terminal status, so terminal requests must stay matchable here.
-    return await build_grouped_torrent_payload(db, qbit_torrents, exclude_terminal_requests=False)
+    return await _grouped_qbit_torrents_payload(
+        db,
+        lambda qbit: qbit.get_completed_torrents_or_raise(),
+        "Unable to refresh completed qBittorrent torrents",
+        exclude_terminal_requests=False,
+    )
 
 
 @router.get("/")
@@ -167,8 +185,7 @@ async def dashboard(
             request_id = row[0]
             status = row[1]
             raw_staged_request_statuses[request_id] = status
-            if len(row) >= 5:
-                staged_request_identity[request_id] = (row[2], row[3], row[4])
+            staged_request_identity[request_id] = (row[2], row[3], row[4])
         staged_request_statuses = {
             request_id: status.value for request_id, status in raw_staged_request_statuses.items()
         }
@@ -189,16 +206,14 @@ async def dashboard(
     downloading_torrents = [
         t
         for t in active_workflow_torrents
-        if t.status == STAGED_STATUS_APPROVED
-        and t.request_id is not None
-        and not is_terminal_request_status(raw_staged_request_statuses.get(t.request_id))
+        if t.status == STAGED_STATUS_APPROVED and t.request_id is not None
     ]
-    downloading_request_statuses = {
-        request_id: status
-        for request_id, status in staged_request_statuses.items()
-        if any(t.request_id == request_id for t in downloading_torrents)
-    }
     downloading_request_ids = {t.request_id for t in downloading_torrents if t.request_id}
+    downloading_request_statuses = {
+        request_id: staged_request_statuses[request_id]
+        for request_id in downloading_request_ids
+        if request_id in staged_request_statuses
+    }
     replace_staged_torrent_ids = {
         t.id
         for t in staged_torrents
@@ -355,12 +370,9 @@ async def dashboard(
                 candidates: list[date] = []
                 release_date_str = details.get("releaseDate")
                 if release_date_str:
-                    try:
-                        parsed = date.fromisoformat(str(release_date_str)[:10])
-                        if parsed > today:
-                            candidates.append(parsed)
-                    except ValueError:
-                        pass
+                    parsed = _future_date(release_date_str, today)
+                    if parsed:
+                        candidates.append(parsed)
                 releases_block = details.get("releases") or {}
                 for result in releases_block.get("results") or []:
                     for rd in result.get("release_dates") or []:
@@ -369,11 +381,8 @@ async def dashboard(
                         raw = rd.get("release_date")
                         if not raw:
                             continue
-                        try:
-                            parsed = date.fromisoformat(str(raw)[:10])
-                        except ValueError:
-                            continue
-                        if parsed > today:
+                        parsed = _future_date(raw, today)
+                        if parsed:
                             candidates.append(parsed)
                 if not candidates:
                     return req_obj.id, None
@@ -446,7 +455,6 @@ async def dashboard(
             qbit_unavailable = True
     else:
         qbit_unavailable = True
-    managed_downloading_torrents = downloading_torrents
     if qbit_unavailable:
         # Keep the last-known managed queue useful when qBit is down.  It is
         # explicitly labelled unavailable in the UI and is not counted as a
@@ -462,12 +470,10 @@ async def dashboard(
                 "dlspeed": None,
                 "managed_torrent": torrent,
             }
-            for torrent in managed_downloading_torrents
+            for torrent in downloading_torrents
         ]
     else:
-        qbit_downloading_torrents = match_qbit_torrents(
-            qbit_downloads, managed_downloading_torrents
-        )
+        qbit_downloading_torrents = match_qbit_torrents(qbit_downloads, downloading_torrents)
 
     # Attach display_label to every request passed to the template.
     # For TV, derive from episode data when available (safety net against
