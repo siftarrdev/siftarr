@@ -109,7 +109,7 @@ async def test_episode_selection_uses_current_scores_and_skips_rejected_alternat
     monkeypatch.setattr(dashboard_actions, "StagingService", lambda _db: staging)
 
     await dashboard_actions.stage_individual_episode_releases(
-        7, 1, MagicMock(headers={"accept": "application/json"}), db=mock_db
+        7, 1, MagicMock(headers={"accept": "application/json"}), redirect_to=None, db=mock_db
     )
 
     staging.stage_individual_episode_releases.assert_awaited_once_with(request, 1, [current_top])
@@ -532,6 +532,7 @@ async def test_stage_individual_episode_releases_uses_top_per_episode(mock_db, m
         request_id=21,
         season_number=1,
         http_request=MagicMock(headers={"accept": "application/json"}),
+        redirect_to=None,
         db=mock_db,
     )
 
@@ -560,6 +561,7 @@ async def test_stage_individual_episode_releases_errors_for_missing_episode(mock
         request_id=21,
         season_number=1,
         http_request=MagicMock(headers={"accept": "application/json"}),
+        redirect_to=None,
         db=mock_db,
     )
 

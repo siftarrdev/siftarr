@@ -228,16 +228,51 @@ class OverseerrService:
 
         raise OverseerrFetchError(f"Overseerr request list exceeded {max_pages} pages")
 
-    async def request_exists(self, request_id: int) -> bool | None:
-        """Return True/False if Overseerr confirms the request, or None if unknown."""
-        if not self.base_url or not self.api_key:
-            return None
+    @property
+    def _configured(self) -> bool:
+        return bool(self.base_url and self.api_key)
 
-        endpoint = f"{self.base_url}/api/v1/request/{request_id}"
+    async def _send(
+        self,
+        method: str,
+        path: str,
+        *,
+        timeout: float | httpx.Timeout | None | Any = httpx.USE_CLIENT_DEFAULT,
+        **kwargs: Any,
+    ) -> httpx.Response | None:
+        """Send an authenticated request. Return None if unconfigured or on network error."""
+        if not self._configured:
+            return None
         client = await self._get_client()
         try:
-            response = await client.get(endpoint, headers=self._get_headers())
+            return await client.request(
+                method,
+                f"{self.base_url}/api/v1/{path}",
+                headers=self._get_headers(),
+                timeout=timeout,
+                **kwargs,
+            )
         except httpx.RequestError:
+            return None
+
+    async def _get_json(self, path: str, *, timeout: float | None = None) -> Any | None:
+        """GET a path and return the decoded body on HTTP 200, else None."""
+        kwargs: dict[str, Any] = {} if timeout is None else {"timeout": timeout}
+        response = await self._send("GET", path, **kwargs)
+        if response is None or response.status_code != 200:
+            return None
+        return response.json()
+
+    async def _post_ok(self, path: str, json: dict[str, Any] | None = None) -> bool:
+        """POST to a path and return True on HTTP 200, else False."""
+        kwargs: dict[str, Any] = {} if json is None else {"json": json}
+        response = await self._send("POST", path, **kwargs)
+        return response is not None and response.status_code == 200
+
+    async def request_exists(self, request_id: int) -> bool | None:
+        """Return True/False if Overseerr confirms the request, or None if unknown."""
+        response = await self._send("GET", f"request/{request_id}")
+        if response is None:
             return None
         if response.status_code == 200:
             return True
@@ -254,20 +289,7 @@ class OverseerrService:
         Returns:
             A dict containing request details if successful, None otherwise.
         """
-        if not self.base_url or not self.api_key:
-            return None
-
-        endpoint = f"{self.base_url}/api/v1/request/{request_id}"
-        client = await self._get_client()
-        headers = self._get_headers()
-
-        try:
-            response = await client.get(endpoint, headers=headers)
-            if response.status_code == 200:
-                return response.json()
-            return None
-        except httpx.RequestError:
-            return None
+        return await self._get_json(f"request/{request_id}")
 
     async def get_media_details(self, media_type: str, external_id: int) -> dict | None:
         """Fetch media details from Overseerr.
@@ -279,7 +301,7 @@ class OverseerrService:
         Returns:
             A dict containing media details if successful, None otherwise.
         """
-        if not self.base_url or not self.api_key:
+        if not self._configured:
             return None
 
         cache_key = (media_type, external_id)
@@ -296,22 +318,14 @@ class OverseerrService:
             _MEDIA_DETAILS_CACHE.move_to_end(cache_key)
             return cached[1]
 
-        endpoint = f"{self.base_url}/api/v1/{media_type}/{external_id}"
-        client = await self._get_client()
-        headers = self._get_headers()
-
-        try:
-            response = await client.get(endpoint, headers=headers, timeout=30.0)
-            if response.status_code == 200:
-                data = response.json()
-                _MEDIA_DETAILS_CACHE[cache_key] = (time.monotonic(), data)
-                _MEDIA_DETAILS_CACHE.move_to_end(cache_key)
-                while len(_MEDIA_DETAILS_CACHE) > _MEDIA_DETAILS_CACHE_MAX_SIZE:
-                    _MEDIA_DETAILS_CACHE.popitem(last=False)
-                return data
+        data = await self._get_json(f"{media_type}/{external_id}", timeout=30.0)
+        if data is None:
             return None
-        except httpx.RequestError:
-            return None
+        _MEDIA_DETAILS_CACHE[cache_key] = (time.monotonic(), data)
+        _MEDIA_DETAILS_CACHE.move_to_end(cache_key)
+        while len(_MEDIA_DETAILS_CACHE) > _MEDIA_DETAILS_CACHE_MAX_SIZE:
+            _MEDIA_DETAILS_CACHE.popitem(last=False)
+        return data
 
     async def get_season_details(self, tv_id: int, season_number: int) -> dict | None:
         """Fetch season details (including episodes) from Overseerr.
@@ -323,48 +337,14 @@ class OverseerrService:
         Returns:
             A dict containing season details with episodes if successful, None otherwise.
         """
-        if not self.base_url or not self.api_key:
-            return None
-
-        endpoint = f"{self.base_url}/api/v1/tv/{tv_id}/season/{season_number}"
-        client = await self._get_client()
-        headers = self._get_headers()
-
-        try:
-            response = await client.get(endpoint, headers=headers, timeout=30.0)
-            if response.status_code == 200:
-                return response.json()
-            return None
-        except httpx.RequestError:
-            return None
+        return await self._get_json(f"tv/{tv_id}/season/{season_number}", timeout=30.0)
 
     async def decline_request(self, request_id: int, reason: str | None = None) -> bool:
         """Decline a request in Overseerr via API."""
-        if not self.base_url or not self.api_key:
-            return False
-
-        endpoint = f"{self.base_url}/api/v1/request/{request_id}/decline"
-        client = await self._get_client()
-        headers = self._get_headers()
-
-        try:
-            body = {"reason": reason} if reason else {}
-            response = await client.post(endpoint, headers=headers, json=body)
-            return response.status_code == 200
-        except httpx.RequestError:
-            return False
+        return await self._post_ok(
+            f"request/{request_id}/decline", {"reason": reason} if reason else {}
+        )
 
     async def approve_request(self, request_id: int) -> bool:
         """Approve a request in Overseerr via API."""
-        if not self.base_url or not self.api_key:
-            return False
-
-        endpoint = f"{self.base_url}/api/v1/request/{request_id}/approve"
-        client = await self._get_client()
-        headers = self._get_headers()
-
-        try:
-            response = await client.post(endpoint, headers=headers)
-            return response.status_code == 200
-        except httpx.RequestError:
-            return False
+        return await self._post_ok(f"request/{request_id}/approve")

@@ -18,6 +18,7 @@ from app.siftarr.models.release import Release
 from app.siftarr.models.request import MediaType, RequestStatus
 from app.siftarr.models.request import Request as RequestModel
 from app.siftarr.models.season import Season
+from app.siftarr.routers._responses import finalize_action_response, safe_local_redirect_url
 from app.siftarr.services.dashboard.search_service import SearchService
 from app.siftarr.services.decisions.rule_engine import ReleaseEvaluation
 from app.siftarr.services.decisions.rule_engine_provider import get_rule_engine
@@ -101,11 +102,6 @@ def _selection_success_message(result: dict[str, object]) -> str:
     if action == "manual_staged":
         return "Request manually staged successfully"
     return str(result.get("message") or "Torrent sent successfully")
-
-
-def _json_action_response(message: str, redirect_to: str) -> JSONResponse:
-    """Return the standard JSON shape used by dashboard fetch actions."""
-    return JSONResponse({"status": "ok", "message": message, "redirect_to": redirect_to})
 
 
 async def _persist_manual_candidate_uncommitted(
@@ -303,21 +299,26 @@ async def bulk_request_action(
     db: AsyncSession = Depends(get_db),
 ) -> RedirectResponse | JSONResponse:
     """Apply a bulk action to selected requests."""
-    wants_json = "application/json" in http_request.headers.get("accept", "")
     redirect_url = bulk_redirect_url(redirect_to)
     if action == "search_all_pending":
         requests = await _load_all_pending_search_requests(db)
         search_service = SearchService(db)
         for request in requests:
             await search_service.process_request_search(request)
-        if wants_json:
-            return _json_action_response("Search started", redirect_url)
-        return RedirectResponse(url=redirect_url, status_code=303)
+        return finalize_action_response(
+            http_request,
+            "Search started",
+            redirect_url=redirect_url,
+            payload={"redirect_to": redirect_url},
+        )
 
     if not request_ids:
-        if wants_json:
-            return _json_action_response("No items selected", redirect_url)
-        return RedirectResponse(url=redirect_url, status_code=303)
+        return finalize_action_response(
+            http_request,
+            "No items selected",
+            redirect_url=redirect_url,
+            payload={"redirect_to": redirect_url},
+        )
 
     result = await db.execute(
         select(RequestModel)
@@ -335,9 +336,12 @@ async def bulk_request_action(
             await _deny_request_record(request, db, reason="Bulk denied")
             count += 1
 
-    if wants_json:
-        return _json_action_response(f"Denied {count} request(s)", redirect_url)
-    return RedirectResponse(url=redirect_url, status_code=303)
+    return finalize_action_response(
+        http_request,
+        f"Denied {count} request(s)",
+        redirect_url=redirect_url,
+        payload={"redirect_to": redirect_url},
+    )
 
 
 @router.post("/{request_id}/releases/{release_id}/use", response_model=None)
@@ -389,20 +393,14 @@ async def use_request_release(
             identity_override=confirm_identity is True,
             rejection_override=confirm_rejected is True,
         )
-    if "application/json" in http_request.headers.get("accept", ""):
-        return JSONResponse(
-            {
-                "status": "ok",
-                "message": _selection_success_message(result),
-            }
-        )
-    return RedirectResponse(
-        url=selection_redirect_url(
+    return finalize_action_response(
+        http_request,
+        _selection_success_message(result),
+        redirect_url=selection_redirect_url(
             redirect_to,
             request,
             prefer_staged_view=result.get("status") == "staged",
         ),
-        status_code=303,
     )
 
 
@@ -513,11 +511,10 @@ async def stage_individual_episode_releases(
         selected,
     )
     message = _selection_success_message(result)
-    if "application/json" in http_request.headers.get("accept", ""):
-        return JSONResponse({"status": "ok", "message": message})
-    return RedirectResponse(
-        url=selection_redirect_url(redirect_to, request, prefer_staged_view=True),
-        status_code=303,
+    return finalize_action_response(
+        http_request,
+        message,
+        redirect_url=selection_redirect_url(redirect_to, request, prefer_staged_view=True),
     )
 
 
@@ -645,20 +642,14 @@ async def use_manual_release(
         identity_override=confirm_identity is True,
         rejection_override=confirm_rejected is True,
     )
-    if "application/json" in http_request.headers.get("accept", ""):
-        return JSONResponse(
-            {
-                "status": "ok",
-                "message": _selection_success_message(result),
-            }
-        )
-    return RedirectResponse(
-        url=selection_redirect_url(
+    return finalize_action_response(
+        http_request,
+        _selection_success_message(result),
+        redirect_url=selection_redirect_url(
             redirect_to,
             request,
             prefer_staged_view=result.get("status") == "staged",
         ),
-        status_code=303,
     )
 
 
@@ -674,10 +665,13 @@ async def deny_request(
     request = await load_request_or_404(db, request_id)
 
     await _deny_request_record(request, db, reason=reason)
-    redirect_url = redirect_to or "/"
-    if "application/json" in http_request.headers.get("accept", ""):
-        return _json_action_response("Request denied", redirect_url)
-    return RedirectResponse(url=redirect_url, status_code=303)
+    redirect_url = safe_local_redirect_url(redirect_to, "/")
+    return finalize_action_response(
+        http_request,
+        "Request denied",
+        redirect_url=redirect_url,
+        payload={"redirect_to": redirect_url},
+    )
 
 
 @router.post("/{request_id}/episodes/{episode_id}/mark-available")

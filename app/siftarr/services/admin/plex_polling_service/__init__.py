@@ -30,7 +30,7 @@ from app.siftarr.services.lifecycle.lifecycle_service import LifecycleService
 from app.siftarr.services.lifecycle.overseerr_sync_service import (
     approve_overseerr_request_best_effort,
 )
-from app.siftarr.services.utils.async_utils import gather_limited
+from app.siftarr.services.utils.async_utils import gather_limited, maybe_await
 
 logger = logging.getLogger(__name__)
 
@@ -343,11 +343,8 @@ class PlexPollingService:
         partial_tv_match: bool,
     ) -> list[_PollDecision]:
         async def emit(payload: dict[str, object]) -> None:
-            if on_progress is None:
-                return
-            result = on_progress(payload)
-            if asyncio.iscoroutine(result):
-                await result
+            if on_progress is not None:
+                await maybe_await(on_progress(payload))
 
         active_titles: list[str] = []
         active_lock = asyncio.Lock()
@@ -518,11 +515,8 @@ class PlexPollingService:
         on_progress: ProgressCallback | None,
     ) -> tuple[list[_PollDecision], int]:
         async def emit(payload: dict[str, object]) -> None:
-            if on_progress is None:
-                return
-            result = on_progress(payload)
-            if asyncio.iscoroutine(result):
-                await result
+            if on_progress is not None:
+                await maybe_await(on_progress(payload))
 
         decisions: list[_PollDecision] = []
         skipped_on_error = 0
@@ -569,11 +563,8 @@ class PlexPollingService:
         on_progress: ProgressCallback | None,
     ) -> tuple[list[_PollDecision], int]:
         async def emit(payload: dict[str, object]) -> None:
-            if on_progress is None:
-                return
-            result = on_progress(payload)
-            if asyncio.iscoroutine(result):
-                await result
+            if on_progress is not None:
+                await maybe_await(on_progress(payload))
 
         decisions: list[_PollDecision] = []
         skipped_on_error = 0

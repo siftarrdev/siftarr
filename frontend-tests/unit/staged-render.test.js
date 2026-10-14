@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from 'vitest';
-import { renderQbitDownloadSummary } from '/static/js/dashboard/staged.js';
+import { renderQbitDownloadSummary } from '../../frontend-src/dashboard/staged.ts';
 
 describe('qBittorrent download summary', () => {
   beforeEach(() => {

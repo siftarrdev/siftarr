@@ -20,7 +20,7 @@ from app.siftarr.services.dashboard.tv_details_service import (
     load_tv_seasons_with_episodes,
 )
 from app.siftarr.services.releases.release_serializers import (
-    apply_release_size_per_season_metadata,
+    apply_known_season_metadata,
     scope_to_episode_set,
 )
 from app.siftarr.services.releases.release_storage import get_release_persistence_key
@@ -194,15 +194,7 @@ class TVEnrichmentService:
         for release in releases:
             if "covered_seasons" not in release and not release.get("is_complete_series"):
                 continue
-            release["known_total_seasons"] = known_total_seasons
-            covered_seasons = coerce_int_list(release.get("covered_seasons"))
-            release["covers_all_known_seasons"] = bool(
-                known_total_seasons
-                and (
-                    release.get("is_complete_series") or len(covered_seasons) >= known_total_seasons
-                )
-            )
-            apply_release_size_per_season_metadata(release)
+            apply_known_season_metadata(release, known_total_seasons)
 
     @staticmethod
     def _dedupe_releases(releases: list[dict[str, object]]) -> list[dict[str, object]]:

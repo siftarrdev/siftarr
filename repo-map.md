@@ -61,7 +61,7 @@ Primary flow:
 - `uv.lock` — locked dependency graph for `uv`
 - `package.json` — Tailwind and incremental TypeScript builds plus frontend format, lint, typecheck, and test scripts
 - `tsconfig.json` / `tsconfig.build.json` — strict no-emit TypeScript checking and the browser-output build mapping
-- `eslint.config.mjs` / `.prettierrc.json` — JavaScript linting and formatting policy for browser code under `app/siftarr/static/js/`
+- `frontend-src/eslint.config.mjs` / `frontend-tests/eslint.config.mjs` / `.prettierrc.json` — TypeScript and test linting plus formatting policy; generated `app/siftarr/static/js/` output is not linted directly
 - `node_modules/` — JavaScript dependencies (gitignored)
 
 ## Documentation map
@@ -134,6 +134,8 @@ Database entities and enums.
 ### `app/siftarr/routers/`
 
 HTTP route layer.
+
+- `_responses.py` — shared JSON-or-303-redirect helpers for form actions (`wants_json`, `finalize_action_response`); redirect targets go through `request_service.safe_local_redirect_url`
 
 - `auth_router.py` — Plex SSO auth endpoints (login page, first-login admin claim, initial Plex sync gate page/completion, same-admin token refresh, guarded full Plex sync kick-off after later successful admin sign-in, non-admin denial UX, logout, session info); included without global auth dependency
 - `dashboard.py` — main dashboard page routes; `GET /api/downloads` (unfinished) and `GET /api/torrents/completed` (live completed) both return qBittorrent torrents grouped by owning Siftarr request with per-group totals, lifecycle actions limited to matched Siftarr rows
@@ -216,7 +218,8 @@ Business logic and integrations, organized into thematic subpackages:
 
 **`utils/`** — Shared utility modules
 - `http_client.py` — shared HTTP client lifecycle
-- `async_utils.py` — `gather_limited` and async helpers
+- `async_utils.py` — `gather_limited` and `maybe_await` for optional async callbacks
+- `sse.py` — `sse_response()` with the standard no-cache, no-buffering SSE headers
 - `type_utils.py` — type conversion utilities
 - `media_helpers.py` — media title/year extraction
 - `torrent_identity.py` / `safe_names.py` — shared torrent hash/name parsing and safe filename/folder helpers
@@ -247,6 +250,7 @@ Static assets.
 - `js/dashboard.js` and `js/dashboard/` — generated browser assets for the dashboard entrypoint and its migrated TypeScript modules (details modal, releases, filters, staged actions, modals, search SSE, core utilities/state, and column resizing); canonical sources live under `frontend-src/dashboard/`
 - `js/staging_decision_log.js` — generated client-side fetching, URL-backed filters, pagination, and raw JSON expansion for the Rules decision-log page; source is `frontend-src/staging_decision_log.ts`
 - `frontend-src/dashboard/download_health.ts` — dashboard health warnings and explicit non-destructive recovery confirmation
+- `js/progress_stream.js` — generated Settings Overseerr sync / Plex rescan SSE progress bar handling; source is `frontend-src/progress_stream.ts`
 - `js/stats.js` — generated Stats API fetch/range handling and lightweight bar/time-series chart rendering; source is `frontend-src/stats.ts`
 - favicon assets
 

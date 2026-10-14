@@ -8,7 +8,6 @@ import re
 from dataclasses import asdict
 from datetime import UTC, datetime
 from typing import Any, cast
-from urllib.parse import urlsplit
 
 from fastapi import APIRouter, BackgroundTasks, Depends, Form, HTTPException, Query
 from fastapi import Request as FastAPIRequest
@@ -27,6 +26,11 @@ from app.siftarr.models.request import (
     is_terminal_request_status,
 )
 from app.siftarr.models.staged_torrent import StagedTorrent
+from app.siftarr.routers._responses import (
+    finalize_action_response,
+    safe_local_redirect_url,
+    wants_json,
+)
 from app.siftarr.services import staging_decision_log
 from app.siftarr.services.admin.plex_polling_service import CheckRequestResult, PlexPollingService
 from app.siftarr.services.auth_service import require_session_or_api_key
@@ -280,19 +284,6 @@ async def get_staged_alternatives(
     return JSONResponse(payload)
 
 
-def _safe_local_redirect_url(redirect_to: str | None, default: str) -> str:
-    """Return redirect_to only when it is a same-origin absolute path."""
-    if not redirect_to or "\\" in redirect_to or not redirect_to.startswith("/"):
-        return default
-    if redirect_to.startswith("//"):
-        return default
-
-    parsed = urlsplit(redirect_to)
-    if parsed.scheme or parsed.netloc:
-        return default
-    return redirect_to
-
-
 def _build_torrent_payload(torrent: StagedTorrent | None) -> dict[str, Any] | None:
     """Convert a staged torrent into a compact serializable payload."""
     if torrent is None:
@@ -389,10 +380,6 @@ def _engine_fingerprint(engine: object) -> str:
     return hashlib.sha256(encoded.encode()).hexdigest()
 
 
-def _wants_json(http_request: FastAPIRequest) -> bool:
-    return "application/json" in http_request.headers.get("accept", "")
-
-
 async def _approval_warnings(
     db: AsyncSession, torrent: StagedTorrent, request: Request | None
 ) -> list[dict[str, str]]:
@@ -480,18 +467,6 @@ async def _approval_warnings(
     if disposition:
         warnings.append(ReleaseWarning("rejected", disposition.reason or "Release was rejected"))
     return [{"code": warning.code, "message": warning.message} for warning in warnings]
-
-
-async def _finalize_action_response(
-    http_request: FastAPIRequest,
-    message: str,
-    *,
-    redirect_url: str = "/?tab=staged",
-    payload: dict[str, Any] | None = None,
-):
-    if _wants_json(http_request):
-        return JSONResponse({"status": "ok", "message": message, **(payload or {})})
-    return RedirectResponse(url=redirect_url, status_code=303)
 
 
 async def _approve_torrent(
@@ -914,7 +889,7 @@ async def approve_staged_torrent(
     if success:
         _delete_staging_files(cleanup_paths)
 
-    return await _finalize_action_response(
+    return finalize_action_response(
         http_request,
         "Torrent approved successfully",
         redirect_url="/?tab=staged",
@@ -943,7 +918,7 @@ async def discard_staged_torrent(
     await _discard_torrent(torrent, db)
     await db.commit()
 
-    return await _finalize_action_response(
+    return finalize_action_response(
         http_request,
         "Torrent discarded successfully",
         redirect_url="/?tab=staged",
@@ -974,10 +949,10 @@ async def delete_downloading_torrent(
         )
 
     await db.commit()
-    return await _finalize_action_response(
+    return finalize_action_response(
         http_request,
         "Download deleted; request returned to pending.",
-        redirect_url=_safe_local_redirect_url(redirect_to, "/?tab=downloading"),
+        redirect_url=safe_local_redirect_url(redirect_to, "/?tab=downloading"),
         payload={
             "torrent_id": torrent.id,
             "torrent_status": "discarded",
@@ -1000,7 +975,7 @@ async def bulk_staged_action(
 ) -> RedirectResponse | JSONResponse:
     """Apply an approve/discard action to multiple staged torrents."""
     if not torrent_ids:
-        return await _finalize_action_response(
+        return finalize_action_response(
             http_request,
             "No staged torrents were selected.",
             redirect_url="/?tab=staged",
@@ -1127,7 +1102,7 @@ async def bulk_staged_action(
         message = f"{message} Failed {len(failed)}: " + ", ".join(
             f"#{item['id']} {item['title']}" for item in failed
         )
-    if _wants_json(http_request):
+    if wants_json(http_request):
         return JSONResponse(
             {
                 "status": "partial" if failed else "ok",
@@ -1137,7 +1112,7 @@ async def bulk_staged_action(
                 "refresh": ["staged", "downloading"] if action == "approve" else ["staged"],
             }
         )
-    return await _finalize_action_response(
+    return finalize_action_response(
         http_request,
         message,
         redirect_url="/?tab=staged",
@@ -1255,7 +1230,7 @@ async def replace_staged_torrent(
     await db.commit()
     _delete_staging_files(cleanup_paths)
 
-    redirect_url = _safe_local_redirect_url(redirect_to, "/?tab=staged")
+    redirect_url = safe_local_redirect_url(redirect_to, "/?tab=staged")
     return RedirectResponse(url=redirect_url, status_code=303)
 
 

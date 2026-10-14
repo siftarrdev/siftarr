@@ -6,7 +6,6 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.siftarr import database
@@ -20,6 +19,7 @@ from app.siftarr.services.dashboard.dashboard_service import (
 )
 from app.siftarr.services.dashboard.search_service import SearchService
 from app.siftarr.services.request_service import load_request_or_404, validate_tv_request
+from app.siftarr.services.utils.sse import sse_response
 
 logger = logging.getLogger(__name__)
 
@@ -57,33 +57,12 @@ async def _stream_session(fallback_db: AsyncSession) -> AsyncIterator[AsyncSessi
 
 async def _run_request_search_detached(
     request_id: int,
-    fallback_db: AsyncSession | None = None,
+    fallback_db: AsyncSession,
     progress_callback=None,
     search_mode: str = "new",
     cancellation_check=None,
 ) -> dict:
-    if database.async_session_maker is None and fallback_db is not None:
-        request = await load_request_or_404(fallback_db, request_id)
-        service = SearchService(fallback_db)
-        if request.media_type == MediaType.TV:
-            result = await service.process_request_search(
-                request,
-                progress_callback=progress_callback,
-                search_mode=search_mode,
-                cancellation_check=cancellation_check,
-            )
-        else:
-            result = await service.process_request_search(
-                request, progress_callback=progress_callback
-            )
-        return {
-            "request_id": request_id,
-            "title": request.title,
-            "media_type": request.media_type.value,
-            **result,
-        }
-
-    async with await _new_detached_session() as db:
+    async with _stream_session(fallback_db) as db:
         request = await load_request_or_404(db, request_id)
         service = SearchService(db)
         if request.media_type == MediaType.TV:
@@ -97,7 +76,6 @@ async def _run_request_search_detached(
             result = await service.process_request_search(
                 request, progress_callback=progress_callback
             )
-        await db.commit()
         return {
             "request_id": request_id,
             "title": request.title,
@@ -366,7 +344,7 @@ async def _bulk_search_generator(
 
 
 async def _tv_season_pack_generator(request_id: int, season_number: int, db: AsyncSession):
-    """Compatibility/debug stream for inspecting cached/refreshed season-pack rows."""
+    """Stream a targeted season-pack search."""
     try:
         progress_queue: asyncio.Queue[dict] = asyncio.Queue()
 
@@ -409,7 +387,7 @@ async def _tv_season_pack_generator(request_id: int, season_number: int, db: Asy
 
 
 async def _tv_multi_season_generator(request_id: int, db: AsyncSession):
-    """Compatibility/debug stream for inspecting cached/refreshed multi-season rows."""
+    """Stream a targeted multi-season pack search."""
     try:
         progress_queue: asyncio.Queue[dict] = asyncio.Queue()
 
@@ -451,7 +429,7 @@ async def _tv_multi_season_generator(request_id: int, db: AsyncSession):
 async def _tv_episode_generator(
     request_id: int, season_number: int, episode_number: int, db: AsyncSession
 ):
-    """Compatibility/debug stream for inspecting cached/refreshed episode rows."""
+    """Stream a targeted single-episode search."""
     try:
         progress_queue: asyncio.Queue[dict] = asyncio.Queue()
 
@@ -503,14 +481,8 @@ async def stream_bulk_search(
     search_all_pending: bool = Query(default=False),
     db: AsyncSession = Depends(get_db),
 ):
-    return StreamingResponse(
+    return sse_response(
         _bulk_search_generator(request_ids, db, search_all_pending=search_all_pending),
-        media_type="text/event-stream",
-        headers={
-            "Cache-Control": "no-cache",
-            "Connection": "keep-alive",
-            "X-Accel-Buffering": "no",
-        },
     )
 
 
@@ -523,14 +495,8 @@ async def stream_search_request(
     """Primary dashboard search stream; TV uses Search for new by default."""
     if search_mode not in {"new", "full"}:
         raise HTTPException(status_code=422, detail="search_mode must be 'new' or 'full'")
-    return StreamingResponse(
+    return sse_response(
         _search_request_generator(request_id, db, search_mode=search_mode),
-        media_type="text/event-stream",
-        headers={
-            "Cache-Control": "no-cache",
-            "Connection": "keep-alive",
-            "X-Accel-Buffering": "no",
-        },
     )
 
 
@@ -550,15 +516,9 @@ async def stream_tv_season_pack_search(
     season_number: int,
     db: AsyncSession = Depends(get_db),
 ):
-    """Compatibility/debug SSE endpoint; normal TV UX uses /{id}/search/stream."""
-    return StreamingResponse(
+    """Stream a targeted TV search; whole-request searches use /{id}/search/stream."""
+    return sse_response(
         _tv_season_pack_generator(request_id, season_number, db),
-        media_type="text/event-stream",
-        headers={
-            "Cache-Control": "no-cache",
-            "Connection": "keep-alive",
-            "X-Accel-Buffering": "no",
-        },
     )
 
 
@@ -567,15 +527,9 @@ async def stream_tv_multi_season_search(
     request_id: int,
     db: AsyncSession = Depends(get_db),
 ):
-    """Compatibility/debug SSE endpoint; normal TV UX uses /{id}/search/stream."""
-    return StreamingResponse(
+    """Stream a targeted TV search; whole-request searches use /{id}/search/stream."""
+    return sse_response(
         _tv_multi_season_generator(request_id, db),
-        media_type="text/event-stream",
-        headers={
-            "Cache-Control": "no-cache",
-            "Connection": "keep-alive",
-            "X-Accel-Buffering": "no",
-        },
     )
 
 
@@ -586,13 +540,7 @@ async def stream_tv_episode_search(
     episode_number: int,
     db: AsyncSession = Depends(get_db),
 ):
-    """Compatibility/debug SSE endpoint; normal TV UX uses /{id}/search/stream."""
-    return StreamingResponse(
+    """Stream a targeted TV search; whole-request searches use /{id}/search/stream."""
+    return sse_response(
         _tv_episode_generator(request_id, season_number, episode_number, db),
-        media_type="text/event-stream",
-        headers={
-            "Cache-Control": "no-cache",
-            "Connection": "keep-alive",
-            "X-Accel-Buffering": "no",
-        },
     )

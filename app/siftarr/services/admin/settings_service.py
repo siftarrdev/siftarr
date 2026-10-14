@@ -3,7 +3,9 @@
 import asyncio
 import contextlib
 import json
+import logging
 import os
+from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any
@@ -12,6 +14,7 @@ from sqlalchemy import delete as sa_delete
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.siftarr import database as db_mod
 from app.siftarr.config import (
     PLACEHOLDER_API_KEY,
     generate_api_key,
@@ -22,6 +25,9 @@ from app.siftarr.models.app_setting import AppSetting
 from app.siftarr.models.request import MediaType, RequestStatus
 from app.siftarr.models.request import Request as RequestModel
 from app.siftarr.models.request_overseerr_link import RequestOverseerrLink
+from app.siftarr.services.admin.plex_polling_service import PlexPollingService
+from app.siftarr.services.integrations.overseerr_service import OverseerrService
+from app.siftarr.services.integrations.plex_service import PlexService
 from app.siftarr.services.lifecycle.lifecycle_service import LifecycleService
 from app.siftarr.services.lifecycle.pending_queue_service import PendingQueueService
 from app.siftarr.services.lifecycle.request_link_service import (
@@ -31,7 +37,11 @@ from app.siftarr.services.lifecycle.request_link_service import (
     get_linked_overseerr_request_ids,
     linked_overseerr_request_ids,
 )
+from app.siftarr.services.lifecycle.unreleased_service import evaluate_imported_request
+from app.siftarr.services.utils.async_utils import maybe_await
 from app.siftarr.version import __version__
+
+logger = logging.getLogger(__name__)
 
 OVERSEERR_LAST_SYNC_SUCCESS_KEY = "overseerr_last_sync_success_at"
 PLEX_LAST_SYNC_SUCCESS_KEY = "plex_last_sync_success_at"
@@ -174,31 +184,7 @@ class SettingsStore:
         get a complete payload.  Secret values (API keys, tokens, passwords)
         are masked via :func:`mask_secret`.
         """
-        env_settings = get_settings()
-        base: dict[str, Any] = {
-            "overseerr_url": str(env_settings.overseerr_url or ""),
-            "overseerr_api_key": mask_secret(env_settings.overseerr_api_key) or "",
-            "prowlarr_url": str(env_settings.prowlarr_url or ""),
-            "prowlarr_api_key": mask_secret(env_settings.prowlarr_api_key) or "",
-            "qbittorrent_url": str(env_settings.qbittorrent_url or ""),
-            "qbittorrent_api_key": mask_secret(env_settings.qbittorrent_api_key) or "",
-            "qbittorrent_move_enabled": env_settings.qbittorrent_move_enabled,
-            "qbittorrent_move_completed_dir": env_settings.qbittorrent_move_completed_dir,
-            "qbittorrent_move_movie_root": env_settings.qbittorrent_move_movie_root,
-            "qbittorrent_move_tv_root": env_settings.qbittorrent_move_tv_root,
-            "qbittorrent_move_unmanaged_fallback_enabled": env_settings.qbittorrent_move_unmanaged_fallback_enabled,
-            "qbittorrent_move_retention_weeks": env_settings.qbittorrent_move_retention_weeks,
-            "plex_url": str(env_settings.plex_url or ""),
-            "plex_token": mask_secret(env_settings.plex_token) or "",
-            "api_key": mask_secret(env_settings.api_key) or "",
-            "tz": env_settings.tz,
-            "staging_mode_enabled": env_settings.staging_mode_enabled,
-            "overseerr_poll_interval_minutes": env_settings.overseerr_poll_interval_minutes,
-            "qbittorrent_completion_poll_interval_seconds": env_settings.qbittorrent_completion_poll_interval_seconds,
-            "plex_fast_sync_interval_minutes": env_settings.plex_fast_sync_interval_minutes,
-            "plex_full_sync_frequency": env_settings.plex_full_sync_frequency,
-            "plex_full_sync_time": env_settings.plex_full_sync_time,
-        }
+        base = _masked_settings_payload(get_settings())
         db_overrides = await self.get_all()
         for key, value in db_overrides.items():
             if key in base and value:
@@ -334,6 +320,12 @@ class SettingsStore:
         return is_sync_timestamp_stale(await self.get_last_sync_success_at(service), now=now)
 
 
+def _new_session() -> AsyncSession:
+    """Open a session from the app session maker, looked up at call time."""
+    assert db_mod.async_session_maker is not None
+    return db_mod.async_session_maker()
+
+
 def _sync_success_key(service: str) -> str:
     if service == "overseerr":
         return OVERSEERR_LAST_SYNC_SUCCESS_KEY
@@ -405,35 +397,39 @@ def _coerce_setting_type(current: Any, raw: str) -> Any:
     return raw
 
 
+def _masked_settings_payload(settings: Any) -> dict[str, Any]:
+    """Build the flat effective settings dict from *settings* with secrets masked."""
+    return {
+        "overseerr_url": str(settings.overseerr_url or ""),
+        "overseerr_api_key": mask_secret(settings.overseerr_api_key) or "",
+        "prowlarr_url": str(settings.prowlarr_url or ""),
+        "prowlarr_api_key": mask_secret(settings.prowlarr_api_key) or "",
+        "qbittorrent_url": str(settings.qbittorrent_url or ""),
+        "qbittorrent_api_key": mask_secret(settings.qbittorrent_api_key) or "",
+        "qbittorrent_move_enabled": settings.qbittorrent_move_enabled,
+        "qbittorrent_move_completed_dir": settings.qbittorrent_move_completed_dir,
+        "qbittorrent_move_movie_root": settings.qbittorrent_move_movie_root,
+        "qbittorrent_move_tv_root": settings.qbittorrent_move_tv_root,
+        "qbittorrent_move_unmanaged_fallback_enabled": settings.qbittorrent_move_unmanaged_fallback_enabled,
+        "qbittorrent_move_retention_weeks": settings.qbittorrent_move_retention_weeks,
+        "plex_url": str(settings.plex_url or ""),
+        "plex_token": mask_secret(settings.plex_token) or "",
+        "plex_token_present": bool(settings.plex_token),
+        "api_key": mask_secret(settings.api_key) or "",
+        "tz": settings.tz,
+        "staging_mode_enabled": settings.staging_mode_enabled,
+        "overseerr_poll_interval_minutes": settings.overseerr_poll_interval_minutes,
+        "qbittorrent_completion_poll_interval_seconds": settings.qbittorrent_completion_poll_interval_seconds,
+        "plex_fast_sync_interval_minutes": settings.plex_fast_sync_interval_minutes,
+        "plex_full_sync_frequency": settings.plex_full_sync_frequency,
+        "plex_full_sync_time": settings.plex_full_sync_time,
+    }
+
+
 async def build_effective_settings(db: AsyncSession | None = None) -> dict[str, Any]:
     """Build the effective flattened settings payload (secrets masked)."""
     del db
-    effective = get_settings()
-    return {
-        "overseerr_url": str(effective.overseerr_url or ""),
-        "overseerr_api_key": mask_secret(effective.overseerr_api_key) or "",
-        "prowlarr_url": str(effective.prowlarr_url or ""),
-        "prowlarr_api_key": mask_secret(effective.prowlarr_api_key) or "",
-        "qbittorrent_url": str(effective.qbittorrent_url or ""),
-        "qbittorrent_api_key": mask_secret(effective.qbittorrent_api_key) or "",
-        "qbittorrent_move_enabled": effective.qbittorrent_move_enabled,
-        "qbittorrent_move_completed_dir": effective.qbittorrent_move_completed_dir,
-        "qbittorrent_move_movie_root": effective.qbittorrent_move_movie_root,
-        "qbittorrent_move_tv_root": effective.qbittorrent_move_tv_root,
-        "qbittorrent_move_unmanaged_fallback_enabled": effective.qbittorrent_move_unmanaged_fallback_enabled,
-        "qbittorrent_move_retention_weeks": effective.qbittorrent_move_retention_weeks,
-        "plex_url": str(effective.plex_url or ""),
-        "plex_token": mask_secret(effective.plex_token) or "",
-        "plex_token_present": bool(effective.plex_token),
-        "api_key": mask_secret(effective.api_key) or "",
-        "tz": effective.tz,
-        "staging_mode_enabled": effective.staging_mode_enabled,
-        "overseerr_poll_interval_minutes": effective.overseerr_poll_interval_minutes,
-        "qbittorrent_completion_poll_interval_seconds": effective.qbittorrent_completion_poll_interval_seconds,
-        "plex_fast_sync_interval_minutes": effective.plex_fast_sync_interval_minutes,
-        "plex_full_sync_frequency": effective.plex_full_sync_frequency,
-        "plex_full_sync_time": effective.plex_full_sync_time,
-    }
+    return _masked_settings_payload(get_settings())
 
 
 async def build_settings_page_context(
@@ -572,14 +568,18 @@ def build_manual_plex_job_message(job_label: str, result: Any) -> tuple[str, str
 async def build_scheduler_status() -> dict[str, Any]:
     """Build scheduler health and scheduled job rows for Settings."""
     from app.siftarr.main import scheduler_service
+    from app.siftarr.services.admin.scheduler_service import (
+        PLEX_POLL_JOB_NAME,
+        PLEX_RECENT_SCAN_JOB_NAME,
+    )
 
     if scheduler_service is None:
         return {"available": False, "running": False, "jobs": [], "active_jobs": []}
     snapshot = await scheduler_service.get_status_snapshot()
     plex_state = snapshot.get("plex_state", {}) if isinstance(snapshot, dict) else {}
     plex_labels = {
-        "plex_recent_scan": "Recent Plex Scan",
-        "plex_poll": "Plex Poll",
+        PLEX_RECENT_SCAN_JOB_NAME: "Recent Plex Scan",
+        PLEX_POLL_JOB_NAME: "Plex Poll",
     }
     job_rows = []
     for job in snapshot.get("jobs", []):
@@ -601,8 +601,8 @@ async def build_scheduler_status() -> dict[str, Any]:
                 ),
                 "lock_owner": state.get("lock_owner"),
                 "manual_action": {
-                    "plex_recent_scan": "/settings/run-recent-plex-scan",
-                    "plex_poll": "/settings/run-plex-poll",
+                    PLEX_RECENT_SCAN_JOB_NAME: "/settings/run-recent-plex-scan",
+                    PLEX_POLL_JOB_NAME: "/settings/run-plex-poll",
                     "check_download_completion": "/settings/run-qbit-move",
                     "retry_pending": "/settings/retry-pending",
                 }.get(job.get("id")),
@@ -668,7 +668,6 @@ async def run_bounded_with_progress(
     *,
     on_event,
     phase: str,
-    build_sse_progress_func,
 ) -> list[Any]:
     """Run async work with bounded concurrency and progress callbacks."""
     total = len(items)
@@ -679,13 +678,11 @@ async def run_bounded_with_progress(
     finished = 0
 
     async def emit(payload: dict[str, Any]) -> None:
-        result = on_event(payload)
-        if asyncio.iscoroutine(result):
-            await result
+        await maybe_await(on_event(payload))
 
     if total == 0:
         await emit(
-            build_sse_progress_func(
+            build_sse_progress(
                 phase,
                 current=0,
                 total=1,
@@ -707,7 +704,7 @@ async def run_bounded_with_progress(
                 active_snapshot = active_titles[:16]
 
             await emit(
-                build_sse_progress_func(
+                build_sse_progress(
                     phase,
                     current=finished,
                     total=total,
@@ -728,7 +725,7 @@ async def run_bounded_with_progress(
                     active_snapshot = active_titles[:16]
 
                 await emit(
-                    build_sse_progress_func(
+                    build_sse_progress(
                         phase,
                         current=finished,
                         total=total,
@@ -746,15 +743,11 @@ async def rescan_plex_tv_request(
     request_id: int,
     plex,
     runtime_settings,
-    *,
-    session_maker,
-    logger,
 ) -> bool:
     """Resync one TV request on an isolated DB session."""
-    from app.siftarr.services.integrations.overseerr_service import OverseerrService
     from app.siftarr.services.lifecycle.episode_sync_service import EpisodeSyncService
 
-    async with session_maker() as worker_db:
+    async with _new_session() as worker_db:
         overseerr = OverseerrService(settings=runtime_settings)
         episode_sync = EpisodeSyncService(worker_db, overseerr=overseerr, plex=plex)
         try:
@@ -777,20 +770,16 @@ async def rescan_plex_requests(
     *,
     on_event=None,
     shallow: bool = False,
-    plex_polling_service_cls,
-    build_sse_progress_func,
-    run_bounded_with_progress_func,
-    rescan_plex_tv_request_func,
 ) -> tuple[int, int, int]:
     """Run the manual Plex rescan path."""
     mode = "partial" if shallow else "full"
-    polling_service = plex_polling_service_cls(db, plex)
+    polling_service = PlexPollingService(db, plex)
 
     if shallow:
         # ── Partial sync: scan recently added Plex items only ──
         if on_event is not None:
             await on_event(
-                build_sse_progress_func(
+                build_sse_progress(
                     "connecting",
                     mode=mode,
                     message="Scanning recently added Plex items for matching requests...",
@@ -801,7 +790,7 @@ async def rescan_plex_requests(
             if on_event is None:
                 return
             await on_event(
-                build_sse_progress_func(
+                build_sse_progress(
                     "processing",
                     current=payload.get("current", 0),
                     total=payload.get("total"),
@@ -839,7 +828,7 @@ async def rescan_plex_requests(
     if on_event is not None:
         await on_event(
             add_overall_progress(
-                build_sse_progress_func(
+                build_sse_progress(
                     "fetching",
                     current=0,
                     total=max(1, len(active_requests)),
@@ -868,14 +857,14 @@ async def rescan_plex_requests(
         )
 
     async def resync_worker(request: RequestModel) -> bool:
-        return await rescan_plex_tv_request_func(
+        return await rescan_plex_tv_request(
             request.id,
             plex,
             runtime_settings,
         )
 
     if tv_requests:
-        resync_results = await run_bounded_with_progress_func(
+        resync_results = await run_bounded_with_progress(
             tv_requests,
             sync_concurrency,
             resync_worker,
@@ -891,7 +880,7 @@ async def rescan_plex_requests(
     if on_event is not None:
         await on_event(
             add_overall_progress(
-                build_sse_progress_func(
+                build_sse_progress(
                     "polling",
                     current=0,
                     total=max(1, len(active_requests)),
@@ -927,7 +916,7 @@ async def rescan_plex_requests(
             message = "Checking movie availability in Plex..."
         await on_event(
             add_overall_progress(
-                build_sse_progress_func(
+                build_sse_progress(
                     str(phase),
                     current=poll_current,
                     total=poll_total,
@@ -950,14 +939,39 @@ async def rescan_plex_requests(
     return tv_resynced, tv_failed, completed
 
 
+async def _drain_task_events(
+    task: asyncio.Task[Any],
+    queue: asyncio.Queue[dict[str, Any] | None],
+) -> AsyncIterator[str]:
+    """Yield queued progress payloads as SSE events until *task* finishes.
+
+    Task exceptions are not raised here; the caller awaits *task* afterwards.
+    """
+    get_task = asyncio.create_task(queue.get())
+    while True:
+        done, _pending = await asyncio.wait({task, get_task}, return_when=asyncio.FIRST_COMPLETED)
+        if get_task in done:
+            payload = get_task.result()
+            if payload is not None:
+                yield serialize_sse(payload)
+            get_task = asyncio.create_task(queue.get())
+            continue
+
+        if task in done:
+            if not get_task.done():
+                get_task.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await get_task
+            while not queue.empty():
+                payload = queue.get_nowait()
+                if payload is not None:
+                    yield serialize_sse(payload)
+            return
+
+
 async def rescan_plex_generator(
     *,
     shallow: bool = False,
-    async_session_maker,
-    plex_service_cls,
-    rescan_plex_requests_func,
-    build_sse_progress_func,
-    logger,
     on_full_sync_complete=None,
 ):
     """Yield SSE events for Plex re-scan progress."""
@@ -969,7 +983,7 @@ async def rescan_plex_generator(
         if not shallow:
             if _FULL_PLEX_SYNC_LOCK.locked():
                 yield serialize_sse(
-                    build_sse_progress_func(
+                    build_sse_progress(
                         "locked",
                         mode=mode,
                         active=[],
@@ -980,16 +994,16 @@ async def rescan_plex_generator(
             await _FULL_PLEX_SYNC_LOCK.acquire()
             lock_acquired = True
 
-        async with async_session_maker() as db:
+        async with _new_session() as db:
             runtime_settings = get_settings()
-            plex = plex_service_cls(settings=runtime_settings)
+            plex = PlexService(settings=runtime_settings)
             queue: asyncio.Queue[dict[str, Any] | None] = asyncio.Queue()
 
             async def emit(payload: dict[str, Any]) -> None:
                 await queue.put(payload)
 
             task = asyncio.create_task(
-                rescan_plex_requests_func(
+                rescan_plex_requests(
                     db,
                     runtime_settings,
                     plex,
@@ -997,29 +1011,8 @@ async def rescan_plex_generator(
                     shallow=shallow,
                 )
             )
-            get_task = asyncio.create_task(queue.get())
-
-            while True:
-                done, _pending = await asyncio.wait(
-                    {task, get_task}, return_when=asyncio.FIRST_COMPLETED
-                )
-                if get_task in done:
-                    payload = get_task.result()
-                    if payload is not None:
-                        yield serialize_sse(payload)
-                    get_task = asyncio.create_task(queue.get())
-                    continue
-
-                if task in done:
-                    if not get_task.done():
-                        get_task.cancel()
-                        with contextlib.suppress(asyncio.CancelledError):
-                            await get_task
-                    while not queue.empty():
-                        payload = queue.get_nowait()
-                        if payload is not None:
-                            yield serialize_sse(payload)
-                    break
+            async for event in _drain_task_events(task, queue):
+                yield event
 
             scanned, errors, completed = await task
             if shallow:
@@ -1039,7 +1032,7 @@ async def rescan_plex_generator(
             if not shallow and on_full_sync_complete is not None:
                 on_full_sync_complete()
             yield serialize_sse(
-                build_sse_progress_func(
+                build_sse_progress(
                     "complete",
                     mode=mode,
                     resynced=scanned,
@@ -1166,14 +1159,9 @@ async def import_overseerr_requests(
     runtime_settings,
     *,
     on_event=None,
-    overseerr_service_cls,
-    plex_service_cls,
-    evaluate_imported_request_func,
-    prepare_overseerr_import_func,
-    logger,
 ) -> tuple[int, int]:
     """Fetch, filter, and import new Overseerr requests into the local DB."""
-    overseerr_service = overseerr_service_cls(settings=runtime_settings)
+    overseerr_service = OverseerrService(settings=runtime_settings)
 
     async def cleanup_stale_overseerr_requests(upstream_request_ids: set[int]) -> int:
         """Drop Seerr links that are gone upstream; deny requests that lose every link."""
@@ -1221,11 +1209,8 @@ async def import_overseerr_requests(
         return denied_count
 
     async def emit(payload: dict[str, Any]) -> None:
-        if on_event is None:
-            return
-        result = on_event(payload)
-        if asyncio.iscoroutine(result):
-            await result
+        if on_event is not None:
+            await maybe_await(on_event(payload))
 
     def progress_current(current: int, total: int) -> int:
         if total <= 0:
@@ -1303,7 +1288,7 @@ async def import_overseerr_requests(
             )
         )
         try:
-            return await prepare_overseerr_import_func(
+            return await prepare_overseerr_import(
                 ov_req,
                 overseerr_service,
                 sync_semaphore,
@@ -1389,11 +1374,10 @@ async def import_overseerr_requests(
                 # Episode sync rewrites episode statuses, so only resync a row
                 # that was reactivated. An active show already tracks every season.
                 if reactivated:
-                    await evaluate_imported_request_func(
+                    await evaluate_imported_request(
                         db,
                         overseerr_service,
                         existing_request,
-                        logger=logger,
                         prefetched_media_details=prepared.media_details,
                         local_episodes=(),
                     )
@@ -1428,11 +1412,10 @@ async def import_overseerr_requests(
             await db.flush()
             if prepared.overseerr_request_id is not None:
                 await add_overseerr_link(db, new_request, prepared.overseerr_request_id)
-            await evaluate_imported_request_func(
+            await evaluate_imported_request(
                 db,
                 overseerr_service,
                 new_request,
-                logger=logger,
                 prefetched_media_details=prepared.media_details,
                 local_episodes=(),
             )
@@ -1452,7 +1435,7 @@ async def import_overseerr_requests(
     if synced_count > 0:
         from app.siftarr.services.lifecycle.episode_sync_service import EpisodeSyncService
 
-        plex_service = plex_service_cls(settings=runtime_settings)
+        plex_service = PlexService(settings=runtime_settings)
         episode_sync = EpisodeSyncService(db, overseerr=overseerr_service, plex=plex_service)
         for index, req in enumerate(new_tv_requests, start=1):
             try:
@@ -1487,27 +1470,14 @@ async def import_overseerr_requests(
     return synced_count, skipped_count
 
 
-async def sync_overseerr_generator(
-    *,
-    async_session_maker,
-    build_effective_settings_func,
-    import_overseerr_requests_func,
-    build_sse_progress_func,
-    logger,
-    overseerr_service_cls=None,
-    plex_service_cls=None,
-    evaluate_imported_request_func=None,
-    prepare_overseerr_import_func=None,
-):
+async def sync_overseerr_generator() -> AsyncIterator[str]:
     """Yield SSE events for Overseerr sync progress."""
     try:
         yield serialize_sse({"phase": "connecting"})
 
-        async with async_session_maker() as db:
-            effective_settings = await build_effective_settings_func(db)
-            if not effective_settings.get("overseerr_url") or not effective_settings.get(
-                "overseerr_api_key"
-            ):
+        async with _new_session() as db:
+            runtime_settings = get_settings()
+            if not runtime_settings.overseerr_url or not runtime_settings.overseerr_api_key:
                 yield serialize_sse(
                     {
                         "phase": "error",
@@ -1516,51 +1486,16 @@ async def sync_overseerr_generator(
                 )
                 return
 
-            runtime_settings = get_settings()
             queue: asyncio.Queue[dict[str, Any] | None] = asyncio.Queue()
 
             async def emit(payload: dict[str, Any]) -> None:
                 await queue.put(payload)
 
-            # Collect kwargs that the import function may require
-            import_kwargs: dict[str, Any] = {"on_event": emit}
-            if overseerr_service_cls is not None:
-                import_kwargs["overseerr_service_cls"] = overseerr_service_cls
-            if plex_service_cls is not None:
-                import_kwargs["plex_service_cls"] = plex_service_cls
-            if evaluate_imported_request_func is not None:
-                import_kwargs["evaluate_imported_request_func"] = evaluate_imported_request_func
-            if prepare_overseerr_import_func is not None:
-                import_kwargs["prepare_overseerr_import_func"] = prepare_overseerr_import_func
-            if logger is not None:
-                import_kwargs["logger"] = logger
-
             task = asyncio.create_task(
-                import_overseerr_requests_func(db, runtime_settings, **import_kwargs)
+                import_overseerr_requests(db, runtime_settings, on_event=emit)
             )
-            get_task = asyncio.create_task(queue.get())
-
-            while True:
-                done, _pending = await asyncio.wait(
-                    {task, get_task}, return_when=asyncio.FIRST_COMPLETED
-                )
-                if get_task in done:
-                    payload = get_task.result()
-                    if payload is not None:
-                        yield serialize_sse(payload)
-                    get_task = asyncio.create_task(queue.get())
-                    continue
-
-                if task in done:
-                    if not get_task.done():
-                        get_task.cancel()
-                        with contextlib.suppress(asyncio.CancelledError):
-                            await get_task
-                    while not queue.empty():
-                        payload = queue.get_nowait()
-                        if payload is not None:
-                            yield serialize_sse(payload)
-                    break
+            async for event in _drain_task_events(task, queue):
+                yield event
 
             synced_count, skipped_count = await task
             if synced_count > 0:
@@ -1574,7 +1509,7 @@ async def sync_overseerr_generator(
                 )
 
             yield serialize_sse(
-                build_sse_progress_func(
+                build_sse_progress(
                     "complete",
                     active=[],
                     synced=synced_count,
@@ -1584,6 +1519,4 @@ async def sync_overseerr_generator(
             )
     except Exception as exc:
         logger.exception("Overseerr SSE sync failed")
-        yield serialize_sse(
-            build_sse_progress_func("error", active=[], message=f"Sync error: {exc}")
-        )
+        yield serialize_sse(build_sse_progress("error", active=[], message=f"Sync error: {exc}"))

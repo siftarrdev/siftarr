@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it } from 'vitest';
-import { dashboardState } from '/static/js/dashboard/core/state.js';
-import { filterTable } from '/static/js/dashboard/filters.js';
+import { dashboardState } from '../../frontend-src/dashboard/core/state.ts';
+import { filterTable } from '../../frontend-src/dashboard/filters.ts';
 
 describe('dashboard request filtering', () => {
   beforeEach(() => {

@@ -41,34 +41,11 @@ def release_failed_size_limit(release: dict[str, object]) -> bool:
     return isinstance(rejection_reason, str) and rejection_reason.startswith("Size ")
 
 
-def _match_effect(match: object) -> str | None:
-    effect = getattr(match, "effect", None)
-    if isinstance(effect, str):
-        return effect
+def _match_field(match: object, name: str) -> object:
+    """Read a rule-match field from an object or from a stored mapping."""
     if isinstance(match, Mapping):
-        match_mapping = cast(Mapping[object, object], match)
-        value = match_mapping.get("effect")
-        return value if isinstance(value, str) else None
-    return None
-
-
-def _match_rule_type(match: object) -> str | None:
-    rule_type = getattr(match, "rule_type", None)
-    if isinstance(rule_type, str):
-        return rule_type
-    if isinstance(match, Mapping):
-        match_mapping = cast(Mapping[object, object], match)
-        value = match_mapping.get("rule_type")
-        return value if isinstance(value, str) else None
-    return None
-
-
-def _match_matched(match: object) -> bool | None:
-    value = getattr(match, "matched", None)
-    if isinstance(match, Mapping):
-        match_mapping = cast(Mapping[object, object], match)
-        value = match_mapping.get("matched")
-    return value if isinstance(value, bool) else None
+        return cast(Mapping[object, object], match).get(name)
+    return getattr(match, name, None)
 
 
 def _derive_size_passed_from_matches(matches: object) -> bool | None:
@@ -76,12 +53,40 @@ def _derive_size_passed_from_matches(matches: object) -> bool | None:
         return None
     saw_size_rule = False
     for match in matches:
-        if _match_rule_type(match) != "size_limit" and _match_effect(match) != "size_limit":
+        if (
+            _match_field(match, "rule_type") != "size_limit"
+            and _match_field(match, "effect") != "size_limit"
+        ):
             continue
         saw_size_rule = True
-        if _match_matched(match) is False:
+        if _match_field(match, "matched") is False:
             return False
     return True if saw_size_rule else None
+
+
+def covers_all_known_seasons(
+    known_total_seasons: int | None,
+    *,
+    is_complete_series: object,
+    covered_season_count: int,
+) -> bool:
+    """Return True when a release covers every known season of a show."""
+    return bool(
+        known_total_seasons and (is_complete_series or covered_season_count >= known_total_seasons)
+    )
+
+
+def apply_known_season_metadata(
+    release: dict[str, object], known_total_seasons: int
+) -> dict[str, object]:
+    """Attach known-season totals, coverage flag, and per-season size metadata."""
+    release["known_total_seasons"] = known_total_seasons
+    release["covers_all_known_seasons"] = covers_all_known_seasons(
+        known_total_seasons,
+        is_complete_series=release.get("is_complete_series"),
+        covered_season_count=len(coerce_int_list(release.get("covered_seasons"))),
+    )
+    return apply_release_size_per_season_metadata(release)
 
 
 def apply_release_size_per_season_metadata(
@@ -206,6 +211,25 @@ def serialize_evaluated_release(
     known_total_seasons: int | None = None,
 ) -> dict[str, object]:
     """Serialize a release plus rule evaluation for dashboard responses."""
+    return _serialize_release_payload(
+        release,
+        evaluation,
+        coverage=coverage,
+        known_total_seasons=known_total_seasons,
+        matches=[serialize_rule_match(match) for match in getattr(evaluation, "matches", [])],
+        rule_evidence=compact_rule_evidence(evaluation),
+    )
+
+
+def _serialize_release_payload(
+    release: ProwlarrRelease | Any,
+    evaluation: ReleaseEvaluation | Any,
+    *,
+    coverage: ParsedReleaseCoverage | None,
+    known_total_seasons: int | None,
+    matches: list[Any],
+    rule_evidence: dict[str, object],
+) -> dict[str, object]:
     status = "passed" if evaluation.passed else "rejected"
     payload: dict[str, object] = {
         "title": release.title,
@@ -230,8 +254,8 @@ def serialize_evaluated_release(
         "publish_date": release.publish_date.isoformat() if release.publish_date else None,
         "stored_release_id": None,
         "size_passed": _derive_size_passed(evaluation),
-        "matches": [serialize_rule_match(match) for match in getattr(evaluation, "matches", [])],
-        "rule_evidence": compact_rule_evidence(evaluation),
+        "matches": matches,
+        "rule_evidence": rule_evidence,
         "files": getattr(release, "files", None),
     }
 
@@ -246,9 +270,10 @@ def serialize_evaluated_release(
         payload["covered_season_count"] = len(covered_seasons)
         payload["known_total_seasons"] = known_total_seasons
         payload["is_complete_series"] = coverage.is_complete_series
-        payload["covers_all_known_seasons"] = bool(
-            known_total_seasons
-            and (coverage.is_complete_series or len(covered_seasons) >= known_total_seasons)
+        payload["covers_all_known_seasons"] = covers_all_known_seasons(
+            known_total_seasons,
+            is_complete_series=coverage.is_complete_series,
+            covered_season_count=len(covered_seasons),
         )
 
     return apply_release_size_per_season_metadata(payload)
@@ -278,24 +303,26 @@ def serialize_stored_evaluated_release(
             rejection_reason = normalize_optional_text(rule_evidence.get("rejection_reason"))
             matches = rule_evidence.get("matches", [])
 
-        evaluation = _StoredEvaluation()
+        payload = _serialize_release_payload(
+            release,
+            _StoredEvaluation(),
+            coverage=coverage,
+            known_total_seasons=None,
+            matches=rule_evidence.get("matches", []),
+            rule_evidence=rule_evidence,
+        )
     elif evaluation is None:
         raise ValueError("evaluation is required when stored rule evidence is unavailable")
+    else:
+        payload = serialize_evaluated_release(release, evaluation, coverage=coverage)
+        payload["rejection_reason"] = getattr(evaluation, "rejection_reason", None)
 
-    payload = serialize_evaluated_release(release, evaluation, coverage=coverage)
     payload.update(
         {
             "score": release.score,
             "passed": release.passed_rules,
-            "rejection_reason": normalize_optional_text(rule_evidence.get("rejection_reason"))
-            if rule_evidence
-            else getattr(evaluation, "rejection_reason", None),
             "season_number": release.season_number,
             "episode_number": release.episode_number,
-            "matches": rule_evidence.get("matches", [])
-            if rule_evidence
-            else [serialize_rule_match(match) for match in getattr(evaluation, "matches", [])],
-            "rule_evidence": rule_evidence or compact_rule_evidence(evaluation),
             "target_scope": serialize_target_scope(
                 media_type=media_type,
                 title=release.title,
@@ -495,16 +522,6 @@ def release_matches_active_stage(
     active_magnet = active_stage.get("magnet_url")
     if release_magnet and active_magnet:
         return release_magnet == active_magnet and scopes_match
-
-    if (
-        release_scope is not None
-        and active_scope is not None
-        and release_scope.get("type") == active_scope.get("type") == "single_episode"
-    ):
-        scope_matches = release_scope.get("season_number") == active_scope.get(
-            "season_number"
-        ) and release_scope.get("episode_number") == active_scope.get("episode_number")
-        return scope_matches and release.get("title") == active_stage.get("title")
 
     return scopes_match and release.get("title") == active_stage.get("title")
 

@@ -32,15 +32,13 @@ from app.siftarr.services.integrations.qbittorrent_service import QbittorrentSer
 from app.siftarr.services.lifecycle.activity_log_service import ActivityLogService
 from app.siftarr.services.lifecycle.lifecycle_service import LifecycleService
 from app.siftarr.services.lifecycle.pending_queue_service import PendingQueueService
-from app.siftarr.services.metadata_service import extract_imdb_id
 from app.siftarr.services.releases.release_parser import (
     cached_parse_release_coverage,
     is_exact_single_episode_release,
-    serialize_release_coverage,
     tv_release_identity_rejection_reason,
 )
 from app.siftarr.services.releases.release_serializers import (
-    apply_release_size_per_season_metadata,
+    apply_known_season_metadata,
     finalize_releases,
     season_pack_release_sort_key,
     serialize_stored_evaluated_release,
@@ -49,6 +47,7 @@ from app.siftarr.services.releases.release_storage import (
     build_prowlarr_release,
     get_release_persistence_key,
     persist_manual_release,
+    release_columns,
     store_search_results,
 )
 from app.siftarr.services.releases.release_validation_service import (
@@ -128,19 +127,11 @@ class SearchService:
         )
         await self.db.commit()
         staging_service = StagingService(self.db)
-        if force_download:
-            return await staging_service.use_releases(
-                request,
-                [stored_release],
-                selection_source="manual",
-                force_download=True,
-                identity_override=identity_override,
-                rejection_override=rejection_override,
-            )
         return await staging_service.use_releases(
             request,
             [stored_release],
             selection_source="manual",
+            force_download=force_download,
             identity_override=identity_override,
             rejection_override=rejection_override,
         )
@@ -457,32 +448,9 @@ class SearchService:
     def _transient_release_from_evaluation(
         self, request_id: int, evaluation: ReleaseEvaluation
     ) -> Release:
-        release = evaluation.release
-        coverage = cached_parse_release_coverage(release.title)
-        rejection_reason = evaluation.rejection_reason
         return Release(
             request_id=request_id,
-            title=release.title,
-            size=release.size,
-            seeders=release.seeders,
-            leechers=release.leechers,
-            download_url=release.download_url,
-            magnet_url=release.magnet_url,
-            info_hash=release.info_hash,
-            indexer=release.indexer,
-            publish_date=release.publish_date,
-            resolution=release.resolution,
-            codec=release.codec,
-            release_group=release.release_group,
-            files=release.files,
-            uploaded_by=release.uploaded_by,
-            season_number=coverage.season_number,
-            episode_number=coverage.episode_number,
-            season_coverage=serialize_release_coverage(coverage),
-            score=evaluation.total_score,
-            passed_rules=evaluation.passed,
-            rejection_reason=rejection_reason if isinstance(rejection_reason, str) else None,
-            search_source="adhoc",
+            **release_columns(evaluation.release, evaluation, source="adhoc"),
         )
 
     def _filter_serialize_stored_tv_releases(
@@ -496,24 +464,14 @@ class SearchService:
         for release in releases:
             if not self._stored_release_matches_display_scope(release, scope):
                 continue
-            evaluation = self._evaluation_from_stored_release(release)
+            evaluation = (
+                None if release.rule_evidence else self._evaluation_from_stored_release(release)
+            )
             payload = serialize_stored_evaluated_release(
                 release, evaluation, media_type=MediaType.TV
             )
             if known_total_seasons is not None:
-                payload["known_total_seasons"] = known_total_seasons
-                covered_seasons = payload.get("covered_seasons")
-                payload["covers_all_known_seasons"] = bool(
-                    known_total_seasons
-                    and (
-                        payload.get("is_complete_series")
-                        or (
-                            isinstance(covered_seasons, list)
-                            and len(covered_seasons) >= known_total_seasons
-                        )
-                    )
-                )
-                apply_release_size_per_season_metadata(payload)
+                apply_known_season_metadata(payload, known_total_seasons)
             payloads.append(payload)
         return payloads
 
@@ -638,9 +596,8 @@ class SearchService:
         """Run an explicit-refresh paginated season sweep for ad hoc TV searches."""
         from app.siftarr.services.request_service import ensure_tvdb_id
 
-        tvdb_id = ensure_tvdb_id(request)
+        ensure_tvdb_id(request)
         runtime_settings = get_settings()
-        imdb_id = await self._load_imdb_id(request)
         prowlarr = ProwlarrService(settings=runtime_settings)
         logger.info(
             "TV season sweep requested: request_id=%s title=%s season=%s source=prowlarr",
@@ -651,8 +608,6 @@ class SearchService:
         result = await prowlarr.search_tv_season_sweep(
             title=request.title,
             season=season_number,
-            imdbid=imdb_id,
-            tvdbid=tvdb_id,
             cacheable=False,
             request_id=getattr(request, "id", None),
         )
@@ -686,23 +641,6 @@ class SearchService:
         if not isinstance(releases, list):
             return None
         return self._filter_tv_identity(request, result)
-
-    async def _load_imdb_id(self, request: Any) -> str | None:
-        tmdb_id = getattr(request, "tmdb_id", None)
-        if not tmdb_id:
-            return None
-        try:
-            details = await OverseerrService(settings=get_settings()).get_media_details(
-                "tv", tmdb_id
-            )
-        except Exception:
-            logger.warning(
-                "IMDb metadata lookup failed for request_id=%s",
-                getattr(request, "id", None),
-                exc_info=True,
-            )
-            return None
-        return extract_imdb_id(details if isinstance(details, dict) else None)
 
     async def _requested_season_numbers(self, request: Any) -> list[int]:
         seasons_load_failed = False
