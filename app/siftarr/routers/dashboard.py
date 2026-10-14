@@ -33,7 +33,10 @@ from app.siftarr.services.dashboard.torrent_grouping import (
     build_grouped_torrent_payload,
     match_qbit_torrents,
 )
-from app.siftarr.services.dashboard.tv_details_service import load_tv_seasons_with_episodes_bulk
+from app.siftarr.services.dashboard.tv_details_service import (
+    load_tv_seasons_with_episodes_bulk,
+    summarize_tv_completion,
+)
 from app.siftarr.services.integrations.overseerr_service import OverseerrService
 from app.siftarr.services.integrations.qbittorrent_service import QbittorrentService
 from app.siftarr.services.lifecycle.episode_derive import derive_tv_display_label
@@ -322,6 +325,22 @@ async def dashboard(
             continue
         if req.media_type == MediaType.TV and _tv_has_pending_episodes(req.id):
             pending_requests.append(req)
+
+    # SEARCHING TV requests are not in episodes_map yet; load them so every
+    # pending TV row can show its completion progress.
+    missing_tv_ids = {
+        req.id
+        for req in pending_requests
+        if req.media_type == MediaType.TV and req.id not in episodes_map
+    }
+    if missing_tv_ids:
+        episodes_map.update(await load_tv_seasons_with_episodes_bulk(db, missing_tv_ids))
+    for req in pending_requests:
+        seasons, episodes = episodes_map.get(req.id, ([], []))
+        req.tv_progress = (
+            summarize_tv_completion(seasons, episodes) if req.media_type == MediaType.TV else None
+        )
+
     overseerr_service = OverseerrService(settings=effective_settings)
 
     async def _earliest_future_release(req_obj: RequestModel) -> tuple[int, str | None]:

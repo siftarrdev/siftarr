@@ -606,6 +606,53 @@ async def test_dashboard_separates_mixed_pending_from_true_unreleased(mock_db, m
 
 
 @pytest.mark.asyncio
+async def test_pending_tab_shows_tv_completion_progress(mock_db, monkeypatch):
+    """Pending TV rows show completed seasons and the one unfinished season."""
+    tv_request = MagicMock()
+    tv_request.id = 9
+    tv_request.status = RequestStatus.SEARCHING
+    tv_request.overseerr_request_id = 13
+    tv_request.title = "Severance"
+    tv_request.media_type = MediaType.TV
+    tv_request.created_at = datetime(2026, 4, 1, 12, 0, tzinfo=UTC)
+    tv_request.requester_username = "lucas"
+    tv_request.year = 2022
+
+    lifecycle_service = AsyncMock()
+    lifecycle_service.get_active_requests.return_value = [tv_request]
+    lifecycle_service.get_requests_by_status.return_value = []
+    lifecycle_service.get_unreleased_requests.return_value = []
+    monkeypatch.setattr(dashboard, "LifecycleService", lambda db: lifecycle_service)
+    monkeypatch.setattr(
+        dashboard,
+        "get_settings",
+        lambda: MagicMock(
+            overseerr_url="http://overseerr.test",
+            staging_mode_enabled=False,
+            qbittorrent_url=None,
+        ),
+    )
+    empty = MagicMock(scalars=MagicMock(return_value=MagicMock(all=MagicMock(return_value=[]))))
+    mock_db.execute.return_value = empty
+
+    seasons = [MagicMock(id=1, season_number=1), MagicMock(id=2, season_number=2)]
+    episodes = [
+        MagicMock(season_id=1, status=RequestStatus.COMPLETED),
+        MagicMock(season_id=2, status=RequestStatus.COMPLETED),
+        MagicMock(season_id=2, status=RequestStatus.PENDING),
+    ]
+    load_bulk = AsyncMock(return_value={tv_request.id: (seasons, episodes)})
+    monkeypatch.setattr(dashboard, "load_tv_seasons_with_episodes_bulk", load_bulk)
+
+    response = await dashboard.dashboard(MagicMock(), db=mock_db)
+
+    load_bulk.assert_awaited_once_with(mock_db, {tv_request.id})
+    rendered = response.body.decode()
+    assert "1/2 seasons" in rendered
+    assert "S02: 1/2 episodes" in rendered
+
+
+@pytest.mark.asyncio
 async def test_dashboard_classifies_completed_with_future_unreleased_tv_as_unreleased_only(
     mock_db, monkeypatch
 ):

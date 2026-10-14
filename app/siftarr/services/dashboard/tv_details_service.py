@@ -45,6 +45,52 @@ def count_season_episode_states(episodes: list[Any]) -> dict[str, int]:
     return counts
 
 
+def summarize_tv_completion(seasons: list[Any], episodes: list[Any]) -> dict[str, Any] | None:
+    """Summarize aired TV completion for dashboard progress columns.
+
+    Unreleased episodes are left out, and seasons with no aired episodes are
+    skipped. When exactly one season is incomplete, include its episode counts.
+    """
+    aired_by_season: dict[int, list[Any]] = {}
+    for episode in episodes:
+        if getattr(episode.status, "value", episode.status) != RequestStatus.UNRELEASED.value:
+            aired_by_season.setdefault(episode.season_id, []).append(episode)
+
+    aired_seasons = [season for season in seasons if aired_by_season.get(season.id)]
+    if not aired_seasons:
+        return None
+
+    incomplete: list[tuple[Any, int, int]] = []
+    available_episodes = 0
+    total_episodes = 0
+    for season in aired_seasons:
+        season_episodes = aired_by_season[season.id]
+        available = sum(
+            1
+            for episode in season_episodes
+            if getattr(episode.status, "value", episode.status) == RequestStatus.COMPLETED.value
+        )
+        available_episodes += available
+        total_episodes += len(season_episodes)
+        if available < len(season_episodes):
+            incomplete.append((season, available, len(season_episodes)))
+
+    summary: dict[str, Any] = {
+        "seasons_complete": len(aired_seasons) - len(incomplete),
+        "seasons_total": len(aired_seasons),
+        "ratio": available_episodes / total_episodes,
+        "incomplete_season": None,
+    }
+    if len(incomplete) == 1:
+        season, available, total = incomplete[0]
+        summary["incomplete_season"] = {
+            "season_number": season.season_number,
+            "episodes_complete": available,
+            "episodes_total": total,
+        }
+    return summary
+
+
 def count_request_episode_states(seasons_data: list[dict[str, object]]) -> dict[str, int]:
     """Aggregate TV episode counts across all serialized seasons."""
     counts = {
