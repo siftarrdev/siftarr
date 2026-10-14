@@ -429,6 +429,50 @@ class TestEpisodeSyncService:
         ]
 
     @pytest.mark.asyncio
+    async def test_sync_from_overseerr_marks_undated_placeholders_unreleased(
+        self, service, mock_db, mock_overseerr
+    ):
+        """Undated episodes after the last aired episode are placeholders, not search targets."""
+        request = _make_request(id=1, tmdb_id=71527)
+
+        req_result = MagicMock()
+        req_result.scalar_one_or_none.return_value = request
+        missing = MagicMock()
+        missing.scalar_one_or_none.return_value = None
+        mock_db.execute.side_effect = [req_result] + [missing] * 7
+        mock_db.flush = AsyncMock()
+        mock_db.commit = AsyncMock()
+
+        mock_overseerr.get_media_details.return_value = {
+            "seasons": [
+                {
+                    "seasonNumber": 1,
+                    "episodes": [
+                        {"episodeNumber": 1, "airDate": "2024-01-01"},
+                        {"episodeNumber": 2, "airDate": None},
+                        {"episodeNumber": 3, "airDate": "2024-01-15"},
+                        {"episodeNumber": 4, "airDate": None},
+                    ],
+                },
+                {"seasonNumber": 2, "episodes": [{"episodeNumber": 1, "airDate": None}]},
+            ],
+        }
+        added_rows = []
+        mock_db.add = MagicMock(side_effect=added_rows.append)
+
+        await service.sync_request(1)
+
+        added_episodes = [row for row in added_rows if isinstance(row, Episode)]
+        assert [episode.status for episode in added_episodes] == [
+            RequestStatus.PENDING,
+            RequestStatus.PENDING,  # undated, but S01E03 aired after it
+            RequestStatus.PENDING,
+            RequestStatus.UNRELEASED,  # trailing placeholder in the airing season
+            RequestStatus.UNRELEASED,  # future-season placeholder
+        ]
+        assert request.status == RequestStatus.PENDING
+
+    @pytest.mark.asyncio
     async def test_sync_from_overseerr_ignores_completed_status_for_episode_state(
         self, service, mock_db, mock_overseerr
     ):

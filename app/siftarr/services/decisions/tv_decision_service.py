@@ -133,13 +133,15 @@ class TVDecisionService:
         status = getattr(episode, "status", RequestStatus.PENDING)
         if status in ACTIONABLE_EXCLUDED_STATUSES:
             return False
-        air_date = getattr(episode, "air_date", None)
-        return not isinstance(air_date, date) or air_date <= date.today()
+        return TVDecisionService._episode_is_aired(episode)
 
     @staticmethod
     def _episode_is_aired(episode: Episode) -> bool:
         air_date = getattr(episode, "air_date", None)
-        return not isinstance(air_date, date) or air_date <= date.today()
+        if isinstance(air_date, date):
+            return air_date <= date.today()
+        # Episode sync marks undated placeholders for unaired episodes UNRELEASED.
+        return getattr(episode, "status", RequestStatus.PENDING) != RequestStatus.UNRELEASED
 
     def _get_actionable_targets(self, request: Request) -> tuple[list[int], dict[int, list[int]]]:
         seasons: list[int] = []

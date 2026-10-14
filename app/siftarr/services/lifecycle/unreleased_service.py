@@ -17,7 +17,10 @@ from app.siftarr.models.episode import Episode
 from app.siftarr.models.request import MediaType, Request, RequestStatus
 from app.siftarr.models.season import Season
 from app.siftarr.services.integrations.overseerr_service import OverseerrService
-from app.siftarr.services.lifecycle.episode_derive import derive_request_status_from_episodes
+from app.siftarr.services.lifecycle.episode_derive import (
+    derive_request_status_from_episodes,
+    unaired_undated_episodes,
+)
 from app.siftarr.services.lifecycle.lifecycle_service import LifecycleService
 
 _logger = logging.getLogger(__name__)
@@ -124,7 +127,14 @@ def _is_unreleased_tv_request(
         return True
 
     if any_aired_locally:
-        aired = [e for e in episodes if e.air_date is not None and e.air_date <= today]
+        # Episode sync marks undated placeholders UNRELEASED; other undated
+        # episodes sit between aired ones and still need a release.
+        aired = [
+            e
+            for e in episodes
+            if (e.air_date is not None and e.air_date <= today)
+            or (e.air_date is None and e.status != RequestStatus.UNRELEASED)
+        ]
         all_aired_downloaded = all(e.status in _AVAILABLE_EPISODE_STATUSES for e in aired)
         has_future_or_unknown = has_future_signal or any(
             e.air_date is not None and e.air_date > today for e in episodes
@@ -264,11 +274,12 @@ class UnreleasedEvaluator:
         """
         # Load all episodes for this request
         result = await self.db.execute(
-            select(Episode)
+            select(Episode, Season.season_number)
             .join(Season, Season.id == Episode.season_id)
             .where(Season.request_id == request.id)
         )
-        all_episodes = list(result.scalars().all())
+        numbered_episodes = [(season_number, ep) for ep, season_number in result.all()]
+        all_episodes = [ep for _, ep in numbered_episodes]
 
         if verdict == "unreleased":
             # Redirectable for TV: any episode is PENDING, SEARCHING, or COMPLETED
@@ -297,14 +308,24 @@ class UnreleasedEvaluator:
 
         if verdict == "released":
             _logger.info(
-                "UnreleasedEvaluator(TV): setting UNRELEASED episodes to PENDING "
+                "UnreleasedEvaluator(TV): setting aired UNRELEASED episodes to PENDING "
                 "for request_id=%s title=%s",
                 request.id,
                 request.title,
             )
+            # Future and placeholder episodes stay UNRELEASED until they air.
+            today = date.today()
+            placeholder_ids = {
+                id(ep) for ep in unaired_undated_episodes(numbered_episodes, today=today)
+            }
             for ep in all_episodes:
-                if ep.status == RequestStatus.UNRELEASED:
-                    ep.status = RequestStatus.PENDING
+                if ep.status != RequestStatus.UNRELEASED:
+                    continue
+                if ep.air_date is not None and ep.air_date > today:
+                    continue
+                if id(ep) in placeholder_ids:
+                    continue
+                ep.status = RequestStatus.PENDING
             if all_episodes:
                 await self.db.flush()
             # Derive cached request status from episodes

@@ -9,7 +9,7 @@ Pure functions in this module have no database access.
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Iterable, Sequence
 from datetime import UTC, date, datetime
 from typing import TYPE_CHECKING
 
@@ -26,6 +26,35 @@ def derive_episode_status(*, is_on_plex: bool, air_date: date | None) -> Request
     if isinstance(air_date, date) and air_date > datetime.now(UTC).date():
         return RequestStatus.UNRELEASED
     return RequestStatus.PENDING
+
+
+def unaired_undated_episodes(
+    numbered_episodes: Iterable[tuple[int, Episode]], *, today: date | None = None
+) -> list[Episode]:
+    """Return undated episodes that no later episode has aired after.
+
+    TMDB lists announced episodes as placeholders with no air date. An undated
+    episode counts as aired only when a later episode (higher number in the same
+    season, or any episode in a later season) has a past air date or is on Plex.
+    """
+    today = today or datetime.now(UTC).date()
+    numbered = list(numbered_episodes)
+    latest_aired = max(
+        (
+            (season_number, ep.episode_number)
+            for season_number, ep in numbered
+            if (isinstance(ep.air_date, date) and ep.air_date <= today)
+            or ep.status == RequestStatus.COMPLETED
+        ),
+        default=None,
+    )
+    return [
+        ep
+        for season_number, ep in numbered
+        if not isinstance(ep.air_date, date)
+        and ep.status != RequestStatus.COMPLETED
+        and (latest_aired is None or (season_number, ep.episode_number) > latest_aired)
+    ]
 
 
 def episodes_are_unreleased(episodes: Sequence[Episode]) -> bool:

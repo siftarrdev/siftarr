@@ -111,6 +111,15 @@ class TestProcessRequest:
         assert not service.is_season_pack_eligible([aired, future])
         assert service.is_season_pack_eligible([aired])
 
+    def test_undated_episodes_follow_sync_placeholder_status(self, service):
+        placeholder = MagicMock(status=RequestStatus.UNRELEASED, air_date=None)
+        undated_aired = MagicMock(status=RequestStatus.PENDING, air_date=None)
+
+        assert not service._episode_is_actionable(placeholder)
+        assert not service.is_season_pack_eligible([placeholder])
+        assert service._episode_is_actionable(undated_aired)
+        assert service.is_season_pack_eligible([undated_aired])
+
     @pytest.mark.asyncio
     async def test_cancelled_search_does_not_start_waiting_episode_queries(self, service):
         request = _make_request(seasons=[1], episodes={1: [1, 2, 3, 4]})
