@@ -57,6 +57,13 @@ function formatMs(value: number | null | undefined) {
   return `${Math.round(value)}ms`;
 }
 
+function showMessage(container: HTMLElement, text: string) {
+  const message = document.createElement('p');
+  message.className = 'text-sm text-gray-500';
+  message.textContent = text;
+  container.appendChild(message);
+}
+
 function renderBars(
   container: HTMLElement,
   rows: StatRow[] | undefined,
@@ -65,17 +72,11 @@ function renderBars(
 ) {
   container.innerHTML = '';
   if (availability === 'unavailable') {
-    const message = document.createElement('p');
-    message.className = 'text-sm text-gray-500';
-    message.textContent = 'Unavailable for historical data.';
-    container.appendChild(message);
+    showMessage(container, 'Unavailable for historical data.');
     return;
   }
   if (!rows || rows.length === 0) {
-    const message = document.createElement('p');
-    message.className = 'text-sm text-gray-500';
-    message.textContent = 'No data for this range.';
-    container.appendChild(message);
+    showMessage(container, 'No data for this range.');
     return;
   }
   const max = Math.max(...rows.map((row) => row[valueKey] || 0), 1);
@@ -115,19 +116,13 @@ function allPoints(rows: ChartRow[] | undefined): Point[] {
 function renderPointSeries(container: HTMLElement, rows: ChartRow[] | undefined, availability: string = 'stats') {
   container.innerHTML = '';
   if (availability === 'unavailable') {
-    const message = document.createElement('p');
-    message.className = 'text-sm text-gray-500';
-    message.textContent = 'Unavailable for this range.';
-    container.appendChild(message);
+    showMessage(container, 'Unavailable for this range.');
     return;
   }
   const points = allPoints(rows);
   const hasValues = points.some((point) => (point.value || 0) > 0);
   if (!rows || rows.length === 0 || !hasValues) {
-    const message = document.createElement('p');
-    message.className = 'text-sm text-gray-500';
-    message.textContent = 'No data for this range.';
-    container.appendChild(message);
+    showMessage(container, 'No data for this range.');
     return;
   }
   const first = rows[0];

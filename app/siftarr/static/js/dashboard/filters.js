@@ -1,5 +1,81 @@
 import { refreshDetailsNavigationContext } from '/static/js/dashboard/core.js';
 import { dashboardState } from '/static/js/dashboard/core/state.js';
+const TABS = {
+  active: {
+    input: 'filter-input',
+    table: 'active-requests-table',
+    body: 'active-requests-body',
+    fields: ['title', 'type', 'statusLow', 'requestedby'],
+  },
+  pending: {
+    input: 'pending-filter-input',
+    table: 'pending-requests-table',
+    body: 'pending-requests-body',
+    cards: '#pending-request-cards [data-request-id]',
+    cardContainer: 'pending-request-cards',
+    fields: ['title', 'type', 'requestedby', 'status'],
+  },
+  unreleased: {
+    input: 'unreleased-filter-input',
+    table: 'unreleased-requests-table',
+    body: 'unreleased-requests-body',
+    cards: '#unreleased-request-cards [data-request-id]',
+    cardContainer: 'unreleased-request-cards',
+    fields: ['title', 'type', 'requestedby', 'releasedate'],
+    lowercase: true,
+  },
+  staged: {
+    input: 'staged-filter-input',
+    table: 'staged-torrents-table',
+    body: 'staged-torrents-body',
+    cards: '#staged-torrent-cards [data-torrent-id]',
+    cardContainer: 'staged-torrent-cards',
+    fields: ['title', 'indexer', 'requeststate'],
+    media: false,
+  },
+  downloading: {
+    input: 'downloading-filter-input',
+    table: 'downloading-torrents-table',
+    body: 'downloading-torrents-body',
+    cards: '#downloading-torrent-cards [data-torrent-id]',
+    cardContainer: 'downloading-torrent-cards',
+    fields: ['title', 'indexer', 'state', 'requeststate'],
+    media: false,
+  },
+  finished: {
+    input: 'finished-filter-input',
+    table: 'finished-requests-table',
+    body: 'finished-requests-body',
+    cards: '#finished-request-cards [data-request-id]',
+    cardContainer: 'finished-request-cards',
+    fields: ['title', 'type', 'requestedby'],
+  },
+  rejected: {
+    input: 'rejected-filter-input',
+    table: 'rejected-requests-table',
+    body: 'rejected-requests-body',
+    cards: '#rejected-request-cards [data-request-id]',
+    cardContainer: 'rejected-request-cards',
+    fields: ['title', 'type', 'requestedby', 'reason'],
+  },
+};
+const MEDIA_BUTTON_ACTIVE = ['border-brand-500', 'text-brand-400', 'bg-brand-500/10'];
+const MEDIA_BUTTON_IDLE = ['border-gray-700/60', 'text-gray-500'];
+function paintMediaButtons(tabName) {
+  const mediaType = dashboardState.mediaFilterState[tabName] || null;
+  const tvBtn = document.getElementById('media-filter-' + tabName + '-tv');
+  const movieBtn = document.getElementById('media-filter-' + tabName + '-movie');
+  [tvBtn, movieBtn].forEach((btn) => {
+    if (!btn) return;
+    btn.classList.remove(...MEDIA_BUTTON_ACTIVE);
+    btn.classList.add(...MEDIA_BUTTON_IDLE);
+  });
+  const activeBtn = mediaType === 'tv' ? tvBtn : mediaType === 'movie' ? movieBtn : null;
+  if (activeBtn) {
+    activeBtn.classList.remove(...MEDIA_BUTTON_IDLE);
+    activeBtn.classList.add(...MEDIA_BUTTON_ACTIVE);
+  }
+}
 export function toggleMediaFilter(tabName, mediaType) {
   if (!dashboardState.mediaFilterState[tabName]) dashboardState.mediaFilterState[tabName] = null;
   if (dashboardState.mediaFilterState[tabName] === mediaType) {
@@ -7,126 +83,34 @@ export function toggleMediaFilter(tabName, mediaType) {
   } else {
     dashboardState.mediaFilterState[tabName] = mediaType;
   }
-  const tvBtn = document.getElementById('media-filter-' + tabName + '-tv');
-  const movieBtn = document.getElementById('media-filter-' + tabName + '-movie');
-  [tvBtn, movieBtn].forEach((btn) => {
-    if (!btn) return;
-    btn.classList.remove('border-brand-500', 'text-brand-400', 'bg-brand-500/10');
-    btn.classList.add('border-gray-700/60', 'text-gray-500');
-  });
-  const activeBtn =
-    dashboardState.mediaFilterState[tabName] === 'tv'
-      ? tvBtn
-      : dashboardState.mediaFilterState[tabName] === 'movie'
-        ? movieBtn
-        : null;
-  if (activeBtn) {
-    activeBtn.classList.remove('border-gray-700/60', 'text-gray-500');
-    activeBtn.classList.add('border-brand-500', 'text-brand-400', 'bg-brand-500/10');
-  }
+  paintMediaButtons(tabName);
   applyAllFilters(tabName);
 }
 function applyAllFilters(tabName) {
-  const filterMap = {
-    active: filterTable,
-    pending: filterPendingTable,
-    unreleased: filterUnreleasedTable,
-    staged: filterStagedTable,
-    downloading: filterDownloadingTable,
-    finished: filterFinishedTable,
-    rejected: filterRejectedTable,
-  };
-  if (filterMap[tabName]) filterMap[tabName]();
+  if (TABS[tabName]) filterTab(tabName);
+}
+export function filterTab(tabName) {
+  const config = TABS[tabName];
+  const filterEl = document.getElementById(config.input);
+  if (!filterEl) return;
+  const filter = filterEl.value.toLowerCase();
+  const mediaType = config.media === false ? null : dashboardState.mediaFilterState[tabName] || null;
+  const selector = config.cards ? `#${config.body} tr, ${config.cards}` : `#${config.body} tr`;
+  document.querySelectorAll(selector).forEach((row) => {
+    let textContent = config.fields.map((field) => `${row.dataset[field]}`).join(' ');
+    if (config.lowercase) textContent = textContent.toLowerCase();
+    const textMatch = !filter || textContent.includes(filter);
+    const mediaMatch = !mediaType || row.dataset.type === mediaType;
+    row.style.display = textMatch && mediaMatch ? '' : 'none';
+  });
+  refreshDetailsNavigationContext();
 }
 export function filterTable() {
-  const filterEl = document.getElementById('filter-input');
-  if (!filterEl) return;
-  const filter = filterEl.value.toLowerCase();
-  const mediaType = dashboardState.mediaFilterState.active || null;
-  document.querySelectorAll('#active-requests-body tr').forEach((row) => {
-    const textContent = `${row.dataset.title} ${row.dataset.type} ${row.dataset.statusLow} ${row.dataset.requestedby}`;
-    const textMatch = !filter || textContent.includes(filter);
-    const mediaMatch = !mediaType || row.dataset.type === mediaType;
-    row.style.display = textMatch && mediaMatch ? '' : 'none';
-  });
-  refreshDetailsNavigationContext();
+  filterTab('active');
 }
-export function filterPendingTable() {
-  const filterEl = document.getElementById('pending-filter-input');
-  if (!filterEl) return;
-  const filter = filterEl.value.toLowerCase();
-  const mediaType = dashboardState.mediaFilterState.pending || null;
-  document.querySelectorAll('#pending-requests-body tr, #pending-request-cards [data-request-id]').forEach((row) => {
-    const textContent = `${row.dataset.title} ${row.dataset.type} ${row.dataset.requestedby} ${row.dataset.status}`;
-    const textMatch = !filter || textContent.includes(filter);
-    const mediaMatch = !mediaType || row.dataset.type === mediaType;
-    row.style.display = textMatch && mediaMatch ? '' : 'none';
-  });
-  refreshDetailsNavigationContext();
-}
-export function filterStagedTable() {
-  const filterEl = document.getElementById('staged-filter-input');
-  if (!filterEl) return;
-  const filter = filterEl.value.toLowerCase();
-  document.querySelectorAll('#staged-torrents-body tr, #staged-torrent-cards [data-torrent-id]').forEach((row) => {
-    const textContent = `${row.dataset.title} ${row.dataset.indexer} ${row.dataset.requeststate}`;
-    row.style.display = textContent.includes(filter) ? '' : 'none';
-  });
-  refreshDetailsNavigationContext();
-}
-export function filterDownloadingTable() {
-  const filterEl = document.getElementById('downloading-filter-input');
-  if (!filterEl) return;
-  const filter = filterEl.value.toLowerCase();
-  document
-    .querySelectorAll('#downloading-torrents-body tr, #downloading-torrent-cards [data-torrent-id]')
-    .forEach((row) => {
-      const textContent = `${row.dataset.title} ${row.dataset.indexer} ${row.dataset.state} ${row.dataset.requeststate}`;
-      row.style.display = textContent.includes(filter) ? '' : 'none';
-    });
-  refreshDetailsNavigationContext();
-}
-export function filterFinishedTable() {
-  const filterEl = document.getElementById('finished-filter-input');
-  if (!filterEl) return;
-  const filter = filterEl.value.toLowerCase();
-  const mediaType = dashboardState.mediaFilterState.finished || null;
-  document.querySelectorAll('#finished-requests-body tr, #finished-request-cards [data-request-id]').forEach((row) => {
-    const textContent = `${row.dataset.title} ${row.dataset.type} ${row.dataset.requestedby}`;
-    const textMatch = !filter || textContent.includes(filter);
-    const mediaMatch = !mediaType || row.dataset.type === mediaType;
-    row.style.display = textMatch && mediaMatch ? '' : 'none';
-  });
-  refreshDetailsNavigationContext();
-}
-export function filterRejectedTable() {
-  const filterEl = document.getElementById('rejected-filter-input');
-  if (!filterEl) return;
-  const filter = filterEl.value.toLowerCase();
-  const mediaType = dashboardState.mediaFilterState.rejected || null;
-  document.querySelectorAll('#rejected-requests-body tr, #rejected-request-cards [data-request-id]').forEach((row) => {
-    const textContent = `${row.dataset.title} ${row.dataset.type} ${row.dataset.requestedby} ${row.dataset.reason}`;
-    const textMatch = !filter || textContent.includes(filter);
-    const mediaMatch = !mediaType || row.dataset.type === mediaType;
-    row.style.display = textMatch && mediaMatch ? '' : 'none';
-  });
-  refreshDetailsNavigationContext();
-}
-export function filterUnreleasedTable() {
-  const filterEl = document.getElementById('unreleased-filter-input');
-  if (!filterEl) return;
-  const filter = filterEl.value.toLowerCase();
-  const mediaType = dashboardState.mediaFilterState.unreleased || null;
-  document
-    .querySelectorAll('#unreleased-requests-body tr, #unreleased-request-cards [data-request-id]')
-    .forEach((row) => {
-      const textContent =
-        `${row.dataset.title} ${row.dataset.type} ${row.dataset.requestedby} ${row.dataset.releasedate}`.toLowerCase();
-      const textMatch = !filter || textContent.includes(filter);
-      const mediaMatch = !mediaType || row.dataset.type === mediaType;
-      row.style.display = textMatch && mediaMatch ? '' : 'none';
-    });
-  refreshDetailsNavigationContext();
+export function filterTabByInput(inputId) {
+  const tabName = Object.keys(TABS).find((name) => TABS[name].input === inputId);
+  if (tabName) filterTab(tabName);
 }
 export function filterReleaseCards() {
   const filterEl = document.getElementById('release-filter-input');
@@ -142,28 +126,10 @@ export function filterReleaseCards() {
     '</ul>';
 }
 export function sortTable(tableName, sortKey, preserveDirection = false, forcedDirection = null) {
-  const tableIdMap = {
-    active: 'active-requests-table',
-    pending: 'pending-requests-table',
-    unreleased: 'unreleased-requests-table',
-    staged: 'staged-torrents-table',
-    downloading: 'downloading-torrents-table',
-    finished: 'finished-requests-table',
-    rejected: 'rejected-requests-table',
-  };
-  const bodyIdMap = {
-    active: 'active-requests-body',
-    pending: 'pending-requests-body',
-    unreleased: 'unreleased-requests-body',
-    staged: 'staged-torrents-body',
-    downloading: 'downloading-torrents-body',
-    finished: 'finished-requests-body',
-    rejected: 'rejected-requests-body',
-  };
   const numericKeys = new Set(['ovrank', 'retrycount', 'year', 'size', 'score', 'progress', 'eta']);
   const state = dashboardState.tableSortState[tableName];
-  const tbody = document.getElementById(bodyIdMap[tableName]);
-  const table = document.getElementById(tableIdMap[tableName]);
+  const tbody = document.getElementById(TABS[tableName]?.body);
+  const table = document.getElementById(TABS[tableName]?.table);
   if (!tbody || !table || !state) return;
   if (forcedDirection) {
     state.column = sortKey;
@@ -197,15 +163,7 @@ export function sortTable(tableName, sortKey, preserveDirection = false, forcedD
     return 0;
   });
   rows.forEach((row) => tbody.appendChild(row));
-  const cardContainerIdMap = {
-    pending: 'pending-request-cards',
-    unreleased: 'unreleased-request-cards',
-    staged: 'staged-torrent-cards',
-    downloading: 'downloading-torrent-cards',
-    finished: 'finished-request-cards',
-    rejected: 'rejected-request-cards',
-  };
-  const cardContainer = document.getElementById(cardContainerIdMap[tableName]);
+  const cardContainer = document.getElementById(TABS[tableName]?.cardContainer);
   if (cardContainer) {
     rows.forEach((row) => {
       const card = row.dataset.torrentId
@@ -222,45 +180,15 @@ export function sortDashboardCards(tableName, encodedSort) {
   sortTable(tableName, sortKey, true, direction === 'desc' ? 'desc' : 'asc');
 }
 export function restoreTabState(tabName) {
-  const activeMediaType = dashboardState.mediaFilterState[tabName] || null;
-  const tvBtn = document.getElementById('media-filter-' + tabName + '-tv');
-  const movieBtn = document.getElementById('media-filter-' + tabName + '-movie');
-  [tvBtn, movieBtn].forEach((btn) => {
-    if (!btn) return;
-    btn.classList.remove('border-brand-500', 'text-brand-400', 'bg-brand-500/10');
-    btn.classList.add('border-gray-700/60', 'text-gray-500');
-  });
-  const activeBtn = activeMediaType === 'tv' ? tvBtn : activeMediaType === 'movie' ? movieBtn : null;
-  if (activeBtn) {
-    activeBtn.classList.remove('border-gray-700/60', 'text-gray-500');
-    activeBtn.classList.add('border-brand-500', 'text-brand-400', 'bg-brand-500/10');
-  }
-  const filterInputIdMap = {
-    active: 'filter-input',
-    pending: 'pending-filter-input',
-    unreleased: 'unreleased-filter-input',
-    staged: 'staged-filter-input',
-    downloading: 'downloading-filter-input',
-    finished: 'finished-filter-input',
-    rejected: 'rejected-filter-input',
-  };
-  const filterInput = document.getElementById(filterInputIdMap[tabName]);
+  paintMediaButtons(tabName);
+  const filterInput = document.getElementById(TABS[tabName]?.input);
   if (filterInput && filterInput.dataset.priorValue !== undefined) {
     filterInput.value = filterInput.dataset.priorValue;
     delete filterInput.dataset.priorValue;
   }
   const sortState = dashboardState.tableSortState[tabName];
   if (sortState && sortState.column) {
-    const tableIdMap = {
-      active: 'active-requests-table',
-      pending: 'pending-requests-table',
-      unreleased: 'unreleased-requests-table',
-      staged: 'staged-torrents-table',
-      downloading: 'downloading-torrents-table',
-      finished: 'finished-requests-table',
-      rejected: 'rejected-requests-table',
-    };
-    const table = document.getElementById(tableIdMap[tabName]);
+    const table = document.getElementById(TABS[tabName]?.table);
     if (table) {
       table.querySelectorAll('.sort-indicator').forEach((el) => {
         el.textContent = '';
@@ -278,16 +206,7 @@ export function restoreTabState(tabName) {
   }
 }
 export function saveTabState(tabName) {
-  const filterInputIdMap = {
-    active: 'filter-input',
-    pending: 'pending-filter-input',
-    unreleased: 'unreleased-filter-input',
-    staged: 'staged-filter-input',
-    downloading: 'downloading-filter-input',
-    finished: 'finished-filter-input',
-    rejected: 'rejected-filter-input',
-  };
-  const filterInput = document.getElementById(filterInputIdMap[tabName]);
+  const filterInput = document.getElementById(TABS[tabName]?.input);
   if (filterInput && filterInput.value) {
     filterInput.dataset.priorValue = filterInput.value;
   }
@@ -298,12 +217,7 @@ export function saveTabState(tabName) {
 Object.assign(window, {
   toggleMediaFilter,
   filterTable,
-  filterPendingTable,
-  filterStagedTable,
-  filterDownloadingTable,
-  filterFinishedTable,
-  filterRejectedTable,
-  filterUnreleasedTable,
+  filterTabByInput,
   filterReleaseCards,
   sortTable,
   sortDashboardCards,

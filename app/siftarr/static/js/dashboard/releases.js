@@ -529,7 +529,7 @@ function stagedScopeLabel(staged) {
   if (scope.type === 'season_pack') return 'Season pack' + (seasons.length ? ' · S' + seasons.join(', S') : '');
   return 'Staged selection';
 }
-function renderStagedPackRow(staged, _requestId) {
+function renderStagedPackRow(staged) {
   const actions = staged.id
     ? '<div class="ml-auto flex items-center gap-1.5 shrink-0">' +
       renderIconAction('stage', 'Already staged for review', '', true) +
@@ -570,10 +570,10 @@ function renderStagedPackRow(staged, _requestId) {
     '</div>'
   );
 }
-function renderStagedPackRows(stagedPacks, requestId) {
+function renderStagedPackRows(stagedPacks) {
   return (stagedPacks || [])
     .map(function (staged) {
-      return renderStagedPackRow(staged, requestId);
+      return renderStagedPackRow(staged);
     })
     .join('');
 }
@@ -610,7 +610,7 @@ function renderSeasonPacksDrawer(requestId, season, seasonPacks, stagedPacks) {
     '-' +
     seasonNumber +
     '">' +
-    renderStagedPackRows(orphanStaged, requestId) +
+    renderStagedPackRows(orphanStaged) +
     (seasonPacks.length || !orphanStaged.length ? renderSeasonPackRows(seasonPacks, requestId, season) : '') +
     '</div>' +
     '</details>'
@@ -644,7 +644,7 @@ function renderSeasonPackGroup(requestId, season, seasonPacks, stagedPacks) {
     '-' +
     seasonNumber +
     '">' +
-    renderStagedPackRows(orphanStaged, requestId) +
+    renderStagedPackRows(orphanStaged) +
     (seasonPacks.length || !orphanStaged.length ? renderSeasonPackRows(seasonPacks, requestId, season) : '') +
     '</div>' +
     '</div>'
@@ -699,7 +699,7 @@ function renderMultiSeasonPackGroup(requestId, multiSeasonReleases, stagedPacks)
     '<div class="p-2.5 space-y-2" data-multi-season-pack-results="' +
     requestId +
     '">' +
-    renderStagedPackRows(orphanStaged, requestId) +
+    renderStagedPackRows(orphanStaged) +
     rows +
     '</div>' +
     '</div>'
@@ -1061,7 +1061,7 @@ export function renderSeasonAccordion(data) {
     (scope === 'complete_series' ? '' : ' hidden') +
     '>' +
     completeSeriesHelperRow +
-    renderStagedPackRows(stagedPacksMissingFromRows(stagedCompleteSeries, completeSeriesReleases), requestId) +
+    renderStagedPackRows(stagedPacksMissingFromRows(stagedCompleteSeries, completeSeriesReleases)) +
     (completeSeriesReleases.length
       ? '<ul class="divide-y divide-gray-700/40 rounded-xl border border-gray-700/60 bg-surface-850">' +
         completeSeriesReleases
