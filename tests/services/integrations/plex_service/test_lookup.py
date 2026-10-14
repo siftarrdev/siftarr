@@ -4,6 +4,7 @@ import httpx
 import pytest
 
 from app.siftarr.services.integrations.plex_service import PlexService
+from app.siftarr.services.integrations.plex_service.cache import PlexServiceCache
 
 
 def resp(container: dict | None = None, status: int = 200) -> MagicMock:
@@ -82,7 +83,7 @@ def unconfigured_service():
     ],
 )
 def test_extract_metadata_items(container, titles):
-    assert [i["title"] for i in PlexService._extract_metadata_items(container)] == titles
+    assert [i["title"] for i in PlexServiceCache._extract_metadata_items(container)] == titles
 
 
 @pytest.mark.parametrize(
@@ -108,7 +109,7 @@ def test_extract_metadata_items(container, titles):
     ids=["tmdb_hit", "tvdb_hit", "wrong_id", "other_provider", "empty_guid", "no_guid_key"],
 )
 def test_match_guid(service, item, prefix, value, expected):
-    assert service._match_guid(item, prefix, value) is expected
+    assert service._cache._match_guid(item, prefix, value) is expected
 
 
 # Movies
