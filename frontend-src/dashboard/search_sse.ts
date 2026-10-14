@@ -99,6 +99,61 @@ async function _finishSearchEventSource(es, cb, data) {
   await _invokeCallback(cb, data);
 }
 
+// Opens the SSE stream and owns the parts every search mode shares: JSON parsing,
+// the finished flag, complete/error finalization, and the connection-lost handler.
+// `handleMessage(data, finish)` holds the per-mode message handling. It calls
+// `finish('complete' | 'error', data, afterBar)` on a terminal event.
+function openSearchStream(url, onComplete, onError, handleMessage) {
+  let finished = false;
+
+  const es = new EventSource(url);
+  activeSearchEventSource = es;
+
+  const finish = (phase, data, afterBar) => {
+    finished = true;
+    const bar = getProgressBar();
+    const status = getProgressStatus();
+    if (bar) {
+      bar.style.width = '100%';
+      setPhaseStyles(bar, phase);
+    }
+    if (afterBar) afterBar();
+    if (phase === 'error' && status && data.message) {
+      status.textContent = data.message;
+    }
+    _finishSearchEventSource(es, phase === 'complete' ? onComplete : onError, data);
+    if (phase === 'complete') setTimeout(() => closeSearchProgress(), 3000);
+  };
+
+  es.onmessage = (event) => {
+    let data;
+    try {
+      data = JSON.parse(event.data);
+    } catch {
+      return;
+    }
+    handleMessage(data, finish);
+  };
+
+  es.onerror = () => {
+    if (finished) {
+      es.close();
+      activeSearchEventSource = null;
+      return;
+    }
+    const bar = getProgressBar();
+    const status = getProgressStatus();
+    if (bar) {
+      bar.style.width = '100%';
+      setPhaseStyles(bar, 'error');
+    }
+    if (status) status.textContent = 'Connection lost';
+    es.close();
+    activeSearchEventSource = null;
+    _invokeCallback(onError, { phase: 'error', message: 'Connection lost' });
+  };
+}
+
 export function startSearchProgress(requestId, title, onComplete, onError) {
   closeSearchProgress();
   resetProgressPanel();
@@ -109,20 +164,8 @@ export function startSearchProgress(requestId, title, onComplete, onError) {
   const titleEl = getProgressTitle();
   if (titleEl && title) titleEl.textContent = title;
 
-  let finished = false;
-
   const url = '/requests/' + requestId + '/search/stream';
-  const es = new EventSource(url);
-  activeSearchEventSource = es;
-
-  es.onmessage = (event) => {
-    let data;
-    try {
-      data = JSON.parse(event.data);
-    } catch {
-      return;
-    }
-
+  openSearchStream(url, onComplete, onError, (data, finish) => {
     const bar = getProgressBar();
     const status = getProgressStatus();
     const titleEl = getProgressTitle();
@@ -164,46 +207,12 @@ export function startSearchProgress(requestId, title, onComplete, onError) {
           }
           break;
         case 'complete':
-          finished = true;
-          if (bar) {
-            bar.style.width = '100%';
-            setPhaseStyles(bar, 'complete');
-          }
-          _finishSearchEventSource(es, onComplete, data);
-          setTimeout(() => closeSearchProgress(), 3000);
-          break;
         case 'error':
-          finished = true;
-          if (bar) {
-            bar.style.width = '100%';
-            setPhaseStyles(bar, 'error');
-          }
-          if (status && data.message) {
-            status.textContent = data.message;
-          }
-          _finishSearchEventSource(es, onError, data);
+          finish(data.phase, data);
           break;
       }
     }
-  };
-
-  es.onerror = () => {
-    if (finished) {
-      es.close();
-      activeSearchEventSource = null;
-      return;
-    }
-    const bar = getProgressBar();
-    const status = getProgressStatus();
-    if (bar) {
-      bar.style.width = '100%';
-      setPhaseStyles(bar, 'error');
-    }
-    if (status) status.textContent = 'Connection lost';
-    es.close();
-    activeSearchEventSource = null;
-    _invokeCallback(onError, { phase: 'error', message: 'Connection lost' });
-  };
+  });
 }
 
 export function startBulkSearchProgress(requestIds, titles, onComplete, onError, options) {
@@ -235,8 +244,6 @@ export function startBulkSearchProgress(requestIds, titles, onComplete, onError,
     }
   }
 
-  let finished = false;
-
   const params = requestIds.map(function (id) {
     return 'request_ids=' + encodeURIComponent(id);
   });
@@ -245,17 +252,7 @@ export function startBulkSearchProgress(requestIds, titles, onComplete, onError,
   }
   const query = params.join('&');
   const url = '/requests/bulk/search/stream' + (query ? '?' + query : '');
-  const es = new EventSource(url);
-  activeSearchEventSource = es;
-
-  es.onmessage = (event) => {
-    let data;
-    try {
-      data = JSON.parse(event.data);
-    } catch {
-      return;
-    }
-
+  openSearchStream(url, onComplete, onError, (data, finish) => {
     const bar = getProgressBar();
     const status = getProgressStatus();
     const subtitle = getProgressSubtitle();
@@ -289,48 +286,17 @@ export function startBulkSearchProgress(requestIds, titles, onComplete, onError,
     }
 
     if (data.phase === 'complete') {
-      finished = true;
-      if (bar) {
-        bar.style.width = '100%';
-        setPhaseStyles(bar, 'complete');
-      }
-      const count = data.results ? data.results.length : 0;
-      if (status) status.textContent = 'Finished — ' + count + ' request(s) processed';
-      if (subtitle) subtitle.textContent = 'Done';
-      _finishSearchEventSource(es, onComplete, data);
-      setTimeout(() => closeSearchProgress(), 3000);
+      finish('complete', data, () => {
+        const count = data.results ? data.results.length : 0;
+        if (status) status.textContent = 'Finished — ' + count + ' request(s) processed';
+        if (subtitle) subtitle.textContent = 'Done';
+      });
     }
 
     if (data.phase === 'error') {
-      finished = true;
-      if (bar) {
-        bar.style.width = '100%';
-        setPhaseStyles(bar, 'error');
-      }
-      if (status && data.message) {
-        status.textContent = data.message;
-      }
-      _finishSearchEventSource(es, onError, data);
+      finish('error', data);
     }
-  };
-
-  es.onerror = () => {
-    if (finished) {
-      es.close();
-      activeSearchEventSource = null;
-      return;
-    }
-    const bar = getProgressBar();
-    const status = getProgressStatus();
-    if (bar) {
-      bar.style.width = '100%';
-      setPhaseStyles(bar, 'error');
-    }
-    if (status) status.textContent = 'Connection lost';
-    es.close();
-    activeSearchEventSource = null;
-    _invokeCallback(onError, { phase: 'error', message: 'Connection lost' });
-  };
+  });
 }
 
 export async function cancelActiveTvSearch() {
@@ -367,19 +333,7 @@ export function startTvSearchProgress(streamUrl, title, onComplete, onError, can
   const cancelButton = document.getElementById('search-progress-cancel');
   if (cancelButton && cancelUrl) cancelButton.classList.remove('hidden');
 
-  let finished = false;
-
-  const es = new EventSource(streamUrl);
-  activeSearchEventSource = es;
-
-  es.onmessage = (event) => {
-    let data;
-    try {
-      data = JSON.parse(event.data);
-    } catch {
-      return;
-    }
-
+  openSearchStream(streamUrl, onComplete, onError, (data, finish) => {
     const bar = getProgressBar();
     const status = getProgressStatus();
 
@@ -398,43 +352,12 @@ export function startTvSearchProgress(streamUrl, title, onComplete, onError, can
           }
           break;
         case 'complete':
-          finished = true;
-          if (bar) {
-            bar.style.width = '100%';
-            setPhaseStyles(bar, 'complete');
-          }
-          _finishSearchEventSource(es, onComplete, data);
-          setTimeout(() => closeSearchProgress(), 3000);
-          break;
         case 'error':
-          finished = true;
-          if (bar) {
-            bar.style.width = '100%';
-            setPhaseStyles(bar, 'error');
-          }
-          _finishSearchEventSource(es, onError, data);
+          finish(data.phase, data);
           break;
       }
     }
-  };
-
-  es.onerror = () => {
-    if (finished) {
-      es.close();
-      activeSearchEventSource = null;
-      return;
-    }
-    const bar = getProgressBar();
-    const status = getProgressStatus();
-    if (bar) {
-      bar.style.width = '100%';
-      setPhaseStyles(bar, 'error');
-    }
-    if (status) status.textContent = 'Connection lost';
-    es.close();
-    activeSearchEventSource = null;
-    _invokeCallback(onError, { phase: 'error', message: 'Connection lost' });
-  };
+  });
 }
 
 export function updateRequestRow(requestId, result) {
