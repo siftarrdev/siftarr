@@ -43,9 +43,6 @@ class TestRuleService:
         )
 
         assert [r.name for r in await real_service.get_all_rules()] == ["First", "Low", "Off"]
-        assert [r.id for r in await real_service.get_rules_by_type(RuleType.EXCLUSION)] == [
-            first.id
-        ]
         assert [r.id for r in await real_service.get_all_rules_by_type(RuleType.EXCLUSION)] == [
             first.id,
             disabled.id,

@@ -186,7 +186,7 @@ Business logic and integrations, organized into thematic subpackages:
 - `release_fallback.py` — conditional exact-episode size fallback after identity/disposition filtering, without overriding other eligibility failures
 - `rule_engine_provider.py` — shared cached rule-engine loading from database rules
 - `rule_service.py` — CRUD/order logic for rules, export/import validation, existing-vs-imported diff preview and selected merge/replace application, and empty-database default-rule seeding from configured `rules.json`
-- `decision_pipeline.py` — shared decision pipeline helpers (activity logging, pending queue, best-release selection)
+- `decision_pipeline.py` — shared decision pipeline helpers (release ranking, best-release selection, rejection reasons)
 - `tv_decision_service.py` — TV-specific decision logic (Search-for-new season-pack-first selection with exact episode fallback, Full-search broad pack evaluation, actionable staged selection) and incremental committed result-cache snapshots for SSE details refreshes
 - `movie_decision_service.py` — movie-specific decision logic
 
