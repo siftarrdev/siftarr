@@ -120,12 +120,10 @@ export function getVisibleRequests() {
   if (!activeTabContent) return [];
   const isDisplayed = (element) => {
     if (element.style.display === 'none') return false;
-    if (window.getComputedStyle) {
-      let current = element;
-      while (current && current !== activeTabContent.parentElement) {
-        if (window.getComputedStyle(current).display === 'none') return false;
-        current = current.parentElement;
-      }
+    let current = element;
+    while (current && current !== activeTabContent.parentElement) {
+      if (window.getComputedStyle(current).display === 'none') return false;
+      current = current.parentElement;
     }
     return true;
   };
@@ -181,7 +179,7 @@ export function updateNavigationButtons() {
     return;
   }
 
-  const currentIndex = window.currentDetailsIndex >= 0 ? window.currentDetailsIndex : -1;
+  const currentIndex = window.currentDetailsIndex;
   const positionText = currentIndex >= 0 ? `${currentIndex + 1} of ${total}` : `- of ${total}`;
   position.textContent = positionText;
   if (positionMobile) positionMobile.textContent = positionText;
@@ -231,7 +229,6 @@ export function closeRequestDetails() {
 function isRangeSelectableCheckboxVisible(checkbox) {
   const item = checkbox.closest('tr, [data-request-id], [data-torrent-id]');
   if (!item || item.style.display === 'none') return !item;
-  if (!window.getComputedStyle) return true;
   let current = item;
   while (current && current !== document.body.parentElement) {
     if (window.getComputedStyle(current).display === 'none') return false;

@@ -599,7 +599,6 @@ export async function searchTvRequest(mode = 'new', _options = {}) {
   }
   if (otherBtn) otherBtn.disabled = true;
   const modeLabel = fullSearch ? 'Full search' : 'Search for new';
-  const fallbackLabel = fullSearch ? 'Full search' : 'Search for new';
   const detailsTitle = document.getElementById('request-details-title')?.textContent?.trim() || modeLabel;
   const streamUrl =
     '/requests/' + requestId + '/search/stream?search_mode=' + encodeURIComponent(fullSearch ? 'full' : 'new');
@@ -614,14 +613,14 @@ export async function searchTvRequest(mode = 'new', _options = {}) {
       }
       if (btn) {
         btn.disabled = false;
-        btn.innerHTML = originalText || fallbackLabel;
+        btn.innerHTML = originalText || modeLabel;
       }
       if (otherBtn) otherBtn.disabled = false;
     },
     function () {
       if (btn) {
         btn.disabled = false;
-        btn.innerHTML = originalText || fallbackLabel;
+        btn.innerHTML = originalText || modeLabel;
       }
       if (otherBtn) otherBtn.disabled = false;
     },
