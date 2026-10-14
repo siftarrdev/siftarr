@@ -116,6 +116,17 @@ def derive_request_status_from_episodes(episodes: Sequence[Episode]) -> RequestS
     return derive_season_status(episodes)
 
 
+def apply_synced_request_status(request: Request, episodes: Sequence[Episode]) -> None:
+    """Set a TV request's status from synced episodes, keeping DENIED requests denied.
+
+    Episode syncs add new episodes as PENDING. Without this guard, a sync would
+    move a denied request back into the pending queue.
+    """
+    if request.status == RequestStatus.DENIED:
+        return
+    request.status = derive_request_status_from_episodes(episodes)
+
+
 def recompute_tv_request_status(request: Request) -> RequestStatus:
     """Recompute ``Request.status`` for a TV show from its episode tree.
 

@@ -58,7 +58,15 @@ async def _noop_prepare_overseerr_import(*_args, **_kwargs):
     return None
 
 
-async def _run_import_with_requests(session, overseerr_requests: list[dict[str, Any]]):
+async def _run_import_with_requests(
+    session,
+    overseerr_requests: list[dict[str, Any]],
+    *,
+    deleted_upstream_ids: frozenset[int] = frozenset(),
+    prepare_overseerr_import_func=_noop_prepare_overseerr_import,
+):
+    """Run an import. IDs in ``deleted_upstream_ids`` return 404 upstream; others are unknown."""
+
     class FakeOverseerrService:
         def __init__(self, settings=None):
             self.settings = settings
@@ -66,6 +74,9 @@ async def _run_import_with_requests(session, overseerr_requests: list[dict[str, 
         async def get_all_requests(self, status=None):
             assert status is None
             return overseerr_requests
+
+        async def request_exists(self, request_id):
+            return False if request_id in deleted_upstream_ids else None
 
         def normalize_request_status(self, status):
             return str(status).lower()
@@ -79,7 +90,7 @@ async def _run_import_with_requests(session, overseerr_requests: list[dict[str, 
         overseerr_service_cls=FakeOverseerrService,
         plex_service_cls=_NoopPlexService,
         evaluate_imported_request_func=_noop_evaluate_imported_request,
-        prepare_overseerr_import_func=_noop_prepare_overseerr_import,
+        prepare_overseerr_import_func=prepare_overseerr_import_func,
         logger=MagicMock(),
     )
 
@@ -125,12 +136,13 @@ async def test_overseerr_import_marks_missing_upstream_linked_requests_denied():
         await _run_import_with_requests(
             session,
             [{"id": 20, "status": "approved", "media": {"tmdbId": 20, "mediaType": "movie"}}],
+            deleted_upstream_ids=frozenset({10}),
         )
 
         rows = (await session.execute(select(RequestModel))).scalars().all()
         by_external_id = {row.external_id: row for row in rows}
         assert by_external_id["10"].status == RequestStatus.DENIED
-        assert by_external_id["10"].overseerr_request_id is None
+        assert by_external_id["10"].overseerr_request_id == 10
         assert by_external_id["10"].next_retry_at is None
         assert by_external_id["10"].retry_count == 0
         assert by_external_id["20"].status == RequestStatus.PENDING
@@ -170,12 +182,13 @@ async def test_overseerr_import_empty_upstream_response_cleans_linked_only():
         session.add_all([linked, local_only])
         await session.commit()
 
-        assert await _run_import_with_requests(session, []) == (0, 0)
+        assert await _run_import_with_requests(
+            session, [], deleted_upstream_ids=frozenset({11})
+        ) == (0, 0)
 
         rows = (await session.execute(select(RequestModel))).scalars().all()
         by_external_id = {row.external_id: row for row in rows}
         assert by_external_id["11"].status == RequestStatus.DENIED
-        assert by_external_id["11"].overseerr_request_id is None
         assert by_external_id["11"].next_retry_at is None
         assert by_external_id["12"].status == RequestStatus.PENDING
         assert by_external_id["12"].next_retry_at is not None
@@ -250,16 +263,92 @@ async def test_overseerr_import_stale_cleanup_is_idempotent_on_repeated_syncs():
         session.add(stale)
         await session.commit()
 
-        assert await _run_import_with_requests(session, []) == (0, 0)
-        assert await _run_import_with_requests(session, []) == (0, 0)
+        deleted = frozenset({13})
+        assert await _run_import_with_requests(session, [], deleted_upstream_ids=deleted) == (0, 0)
+        assert await _run_import_with_requests(session, [], deleted_upstream_ids=deleted) == (0, 0)
 
         row = (await session.execute(select(RequestModel))).scalar_one()
         assert row.status == RequestStatus.DENIED
-        assert row.overseerr_request_id is None
         assert row.next_retry_at is None
         assert row.retry_count == 0
         activity = (await session.execute(select(ActivityLog))).scalars().all()
         assert len(activity) == 1
+
+    await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_overseerr_import_keeps_requests_missing_from_list_but_unconfirmed():
+    """A request absent from a short list fetch stays active unless Overseerr returns 404."""
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+    session_maker = async_sessionmaker(engine, expire_on_commit=False)
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+
+    async with session_maker() as session:
+        session.add(
+            RequestModel(
+                external_id="14",
+                media_type=MediaType.TV,
+                title="Unconfirmed",
+                status=RequestStatus.PENDING,
+                overseerr_request_id=14,
+            )
+        )
+        await session.commit()
+
+        await _run_import_with_requests(session, [])
+
+        row = (await session.execute(select(RequestModel))).scalar_one()
+        assert row.status == RequestStatus.PENDING
+        activity = (await session.execute(select(ActivityLog))).scalars().all()
+        assert activity == []
+
+    await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_overseerr_import_does_not_reimport_request_after_stale_cleanup():
+    """A request denied by stale cleanup must not come back as a duplicate row."""
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+    session_maker = async_sessionmaker(engine, expire_on_commit=False)
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+
+    async def prepare(ov_req, *_args, **_kwargs):
+        return settings_service.PreparedOverseerrImport(
+            external_id="66134",
+            media_type=MediaType.TV,
+            tmdb_id=None,
+            tvdb_id=66134,
+            title="Show",
+            year=None,
+            requester_username=None,
+            requester_email=None,
+            overseerr_request_id=ov_req["id"],
+            media_details=None,
+        )
+
+    async with session_maker() as session:
+        session.add(
+            RequestModel(
+                external_id="66134",
+                media_type=MediaType.TV,
+                title="Show",
+                status=RequestStatus.PENDING,
+                overseerr_request_id=102,
+            )
+        )
+        await session.commit()
+
+        await _run_import_with_requests(session, [], deleted_upstream_ids=frozenset({102}))
+        upstream = [{"id": 102, "status": "approved", "media": {"status": "pending"}}]
+        assert await _run_import_with_requests(
+            session, upstream, prepare_overseerr_import_func=prepare
+        ) == (0, 1)
+
+        rows = (await session.execute(select(RequestModel))).scalars().all()
+        assert len(rows) == 1
 
     await engine.dispose()
 

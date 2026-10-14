@@ -1258,10 +1258,17 @@ async def import_overseerr_requests(
                 RequestModel.status.in_(STALE_OVERSEERR_CLEANUP_STATUSES),
             )
         )
-        stale_request_ids = [
-            row[0]
+        candidates = [
+            (row[0], row[1])
             for row in result.fetchall()
             if row[1] is not None and row[1] not in upstream_request_ids
+        ]
+        # The list fetch can miss requests, so only deny a request after Overseerr
+        # confirms it is gone. Timeouts and other errors leave the request alone.
+        stale_request_ids = [
+            request_id
+            for request_id, overseerr_request_id in candidates
+            if await overseerr_service.request_exists(overseerr_request_id) is False
         ]
         if not stale_request_ids:
             return 0
@@ -1270,14 +1277,14 @@ async def import_overseerr_requests(
         lifecycle_service = LifecycleService(db)
         for request_id in stale_request_ids:
             await queue_service.remove_from_queue(request_id, commit=False)
-            cleaned_request = await lifecycle_service.transition(
+            # Keep overseerr_request_id so a later sync recognizes the request
+            # and does not import it again as a new row.
+            await lifecycle_service.transition(
                 request_id,
                 RequestStatus.DENIED,
                 reason="Removed from Overseerr",
                 commit=False,
             )
-            if cleaned_request is not None:
-                cleaned_request.overseerr_request_id = None
         logger.info(
             "Cleaned up %d stale Overseerr-linked request(s)",
             len(stale_request_ids),

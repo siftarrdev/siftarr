@@ -89,6 +89,10 @@ class OverseerrApiError(RuntimeError):
     """Raised when an Overseerr mutation fails."""
 
 
+class OverseerrFetchError(RuntimeError):
+    """Raised when Overseerr data could not be fetched completely."""
+
+
 class OverseerrService:
     """Service for fetching media details from Overseerr."""
 
@@ -160,10 +164,22 @@ class OverseerrService:
             skip: Number of results to skip for pagination
 
         Returns:
-            List of request dictionaries from Overseerr API.
+            List of request dictionaries from Overseerr API, or an empty list on error.
         """
-        if not self.base_url or not self.api_key:
+        try:
+            return await self._fetch_requests_page(status=status, limit=limit, skip=skip)
+        except OverseerrFetchError:
             return []
+
+    async def _fetch_requests_page(
+        self,
+        status: str | None,
+        limit: int,
+        skip: int,
+    ) -> list[dict[str, Any]]:
+        """Fetch one page of requests, raising OverseerrFetchError on any failure."""
+        if not self.base_url or not self.api_key:
+            raise OverseerrFetchError("Overseerr is not configured")
 
         endpoint = f"{self.base_url}/api/v1/request"
         client = await self._get_client()
@@ -178,44 +194,63 @@ class OverseerrService:
                 headers=headers,
                 params=params,
             )
-            if response.status_code == 200:
-                data = response.json()
-                # Overseerr returns { "results": [...] } or just [...] depending on version
-                if isinstance(data, dict) and "results" in data:
-                    return data["results"]
-                if isinstance(data, dict) and "data" in data:
-                    return data["data"]
-                return data if isinstance(data, list) else []
-            elif response.status_code == 401:
-                # Unauthorized - API key might be invalid
-                return []
-            return []
-        except httpx.RequestError:
-            return []
+        except httpx.RequestError as exc:
+            raise OverseerrFetchError(f"Overseerr request list failed: {exc}") from exc
+        if response.status_code != 200:
+            raise OverseerrFetchError(
+                f"Overseerr request list returned HTTP {response.status_code}"
+            )
+        data = response.json()
+        # Overseerr returns { "results": [...] } or just [...] depending on version
+        if isinstance(data, dict) and "results" in data:
+            return data["results"]
+        if isinstance(data, dict) and "data" in data:
+            return data["data"]
+        if isinstance(data, list):
+            return data
+        raise OverseerrFetchError("Overseerr request list had an unexpected shape")
 
     async def get_all_requests(
         self,
         status: str | None = None,
         page_size: int = 100,
-        max_pages: int = 20,
+        max_pages: int = 50,
     ) -> list[dict[str, Any]]:
-        """Fetch all requests across paginated Overseerr responses."""
+        """Fetch all requests across paginated Overseerr responses.
+
+        Raises OverseerrFetchError if any page fails or the page limit is reached,
+        so callers never mistake a partial list for the complete upstream state.
+        """
         all_requests: list[dict[str, Any]] = []
 
         for page in range(max_pages):
-            batch = await self.get_requests(
+            batch = await self._fetch_requests_page(
                 status=status,
                 limit=page_size,
                 skip=page * page_size,
             )
-            if not batch:
-                break
-
             all_requests.extend(batch)
             if len(batch) < page_size:
-                break
+                return all_requests
 
-        return all_requests
+        raise OverseerrFetchError(f"Overseerr request list exceeded {max_pages} pages")
+
+    async def request_exists(self, request_id: int) -> bool | None:
+        """Return True/False if Overseerr confirms the request, or None if unknown."""
+        if not self.base_url or not self.api_key:
+            return None
+
+        endpoint = f"{self.base_url}/api/v1/request/{request_id}"
+        client = await self._get_client()
+        try:
+            response = await client.get(endpoint, headers=self._get_headers())
+        except httpx.RequestError:
+            return None
+        if response.status_code == 200:
+            return True
+        if response.status_code == 404:
+            return False
+        return None
 
     async def get_request(self, request_id: int) -> dict[str, Any] | None:
         """Get full request details from Overseerr.

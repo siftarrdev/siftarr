@@ -114,6 +114,28 @@ class TestEpisodeSyncService:
         mock_db.commit.assert_awaited_once()
 
     @pytest.mark.asyncio
+    async def test_sync_keeps_denied_request_out_of_pending(self, service, mock_db, mock_overseerr):
+        """New PENDING episodes from a resync must not move a denied request back to pending."""
+        request = _make_request(id=1, tvdb_id=12345)
+        request.status = RequestStatus.DENIED
+
+        req_result = MagicMock()
+        req_result.scalar_one_or_none.return_value = request
+        missing = MagicMock()
+        missing.scalar_one_or_none.return_value = None
+
+        mock_db.execute.side_effect = [req_result, missing, missing, missing]
+        mock_db.flush = AsyncMock()
+        mock_db.commit = AsyncMock()
+
+        mock_overseerr.get_media_details.return_value = TV_DETAILS_NO_EPISODES
+        mock_overseerr.get_season_details.return_value = SEASON_1_DETAILS
+
+        await service.sync_request(1)
+
+        assert request.status == RequestStatus.DENIED
+
+    @pytest.mark.asyncio
     async def test_sync_is_idempotent(self, service, mock_db, mock_overseerr):
         request = _make_request(id=1, tvdb_id=12345)
         existing_season = _make_season(request_id=1, season_number=1, synced_at=datetime.now(UTC))
