@@ -127,7 +127,7 @@ class LifecycleService:
         if request.media_type == MediaType.TV:
             # For TV, apply transition at the episode level and derive request.status
             all_episodes = await self._load_all_episodes(request)
-            if not all_episodes:
+            if not all_episodes and new_status in (RequestStatus.DOWNLOADING, RequestStatus.DENIED):
                 # No episode tree to derive from yet, so apply the status directly.
                 request.status = new_status
             else:

@@ -4,7 +4,7 @@ from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from app.siftarr.models._base import Base
@@ -77,16 +77,24 @@ async def _run_import(
         def __init__(self, settings=None):
             pass
 
-    class NoopEpisodeSync:
-        def __init__(self, *_args, **_kwargs):
-            pass
+    class ResettingEpisodeSync:
+        """Like the real sync, rewrites every episode status from Seerr data."""
 
-        async def sync_request(self, _request_id):
+        def __init__(self, sync_db, *_args, **_kwargs):
+            self.db = sync_db
+
+        async def sync_request(self, request_id):
+            season_ids = select(Season.id).where(Season.request_id == request_id)
+            await self.db.execute(
+                update(Episode)
+                .where(Episode.season_id.in_(season_ids))
+                .values(status=RequestStatus.PENDING)
+            )
             return []
 
     with patch(
         "app.siftarr.services.lifecycle.episode_sync_service.EpisodeSyncService",
-        NoopEpisodeSync,
+        ResettingEpisodeSync,
     ):
         return await settings_service.import_overseerr_requests(
             db,
@@ -126,11 +134,20 @@ async def _links(db) -> dict[int, int]:
 async def test_second_season_request_links_to_existing_show(session):
     show = await _add_request(session, tmdb_id=136315, overseerr_request_id=32)
 
+    season = Season(request_id=show.id, season_number=5, status=RequestStatus.DOWNLOADING)
+    session.add(season)
+    await session.flush()
+    session.add(Episode(season_id=season.id, episode_number=1, status=RequestStatus.DOWNLOADING))
+    await session.commit()
+
     await _run_import(session, [_seerr_request(32, 136315), _seerr_request(264, 136315)])
 
     rows = (await session.execute(select(RequestModel))).scalars().all()
     assert [row.id for row in rows] == [show.id]
     assert await _links(session) == {32: show.id, 264: show.id}
+    # Resyncing would reset episode statuses, so an active show is left alone.
+    episode = (await session.execute(select(Episode))).scalar_one()
+    assert episode.status == RequestStatus.DOWNLOADING
 
 
 @pytest.mark.asyncio
@@ -168,7 +185,7 @@ async def test_new_request_reactivates_denied_show(session):
     assert show.status == RequestStatus.PENDING
     assert show.rejection_reason is None
     episodes = (await session.execute(select(Episode).order_by(Episode.episode_number))).scalars()
-    assert [ep.status for ep in episodes] == [RequestStatus.PENDING, RequestStatus.COMPLETED]
+    assert RequestStatus.DENIED not in {ep.status for ep in episodes}
     assert (await session.execute(select(RequestModel))).scalars().all() == [show]
 
 

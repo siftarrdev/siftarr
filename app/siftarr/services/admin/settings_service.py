@@ -1470,6 +1470,8 @@ async def import_overseerr_requests(
                     reactivated = await attach_overseerr_request(
                         db, existing_request, prepared.overseerr_request_id
                     )
+                    # Episode sync rewrites episode statuses, so only resync a row
+                    # that was reactivated. An active show already tracks every season.
                     if reactivated:
                         await evaluate_imported_request_func(
                             db,
@@ -1479,8 +1481,8 @@ async def import_overseerr_requests(
                             prefetched_media_details=prepared.media_details,
                             local_episodes=(),
                         )
-                    if prepared.media_type == MediaType.TV:
-                        new_tv_requests.append(existing_request)
+                        if prepared.media_type == MediaType.TV:
+                            new_tv_requests.append(existing_request)
                     existing_request_ids.add(prepared.overseerr_request_id)
                     synced_count += 1
                     continue
