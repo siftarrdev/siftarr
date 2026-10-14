@@ -48,7 +48,6 @@ from app.siftarr.services.releases.release_serializers import (
 from app.siftarr.services.releases.release_storage import build_prowlarr_release
 from app.siftarr.services.releases.release_validation_service import identity_warning
 from app.siftarr.services.stats_metrics_service import record_staged_release_fact
-from app.siftarr.services.utils.http_client import get_shared_client
 from app.siftarr.services.utils.safe_names import safe_staging_filename
 from app.siftarr.services.utils.torrent_identity import extract_torrent_hash
 from app.siftarr.services.utils.torrent_metainfo import inspect_torrent_metainfo
@@ -256,7 +255,6 @@ class StagingService:
         selection_source: str = "rule",
         *,
         commit: bool = True,
-        download_torrent_file: bool = False,
         source_release: Release | None = None,
         identity_override: bool = False,
         rejection_override: bool = False,
@@ -295,28 +293,7 @@ class StagingService:
 
         STAGING_DIR.mkdir(parents=True, exist_ok=True)
 
-        if (
-            download_torrent_file
-            and not release.magnet_url
-            and release.download_url.startswith("http")
-        ):
-            try:
-                client = await get_shared_client()
-                response = await client.get(release.download_url, timeout=60.0)
-                response.raise_for_status()
-                with open(torrent_path, "wb") as f:
-                    f.write(response.content)
-                logger.debug("Downloaded torrent file: %s", torrent_path)
-            except Exception:
-                logger.warning(
-                    "Failed to download torrent file from %s for %s — staging without local file; "
-                    "approval will use magnet URL if available",
-                    release.download_url,
-                    release.title,
-                    exc_info=True,
-                )
-        else:
-            logger.debug("Staging without local torrent file: %s", release.title)
+        logger.debug("Staging without local torrent file: %s", release.title)
 
         metainfo_observation = None
         if torrent_path.exists():
@@ -449,28 +426,6 @@ class StagingService:
 
     # ── Episode-centric TV helpers ─────────────────────────────────
 
-    async def _set_episode_status(
-        self,
-        *,
-        request_id: int,
-        season_number: int,
-        episode_number: int,
-        status: RequestStatus,
-    ) -> None:
-        """Set a single episode's status (episode-centric ground truth for TV)."""
-        result = await self.db.execute(
-            select(Episode)
-            .join(Season, Episode.season_id == Season.id)
-            .where(
-                Season.request_id == request_id,
-                Season.season_number == season_number,
-                Episode.episode_number == episode_number,
-            )
-        )
-        episode = result.scalar_one_or_none()
-        if episode:
-            _set_unless_available(episode, status)
-
     async def _recompute_tv_statuses(self, request_id: int) -> None:
         """Recompute Season.status and Request.status from episode ground truth.
 
@@ -510,41 +465,26 @@ class StagingService:
 
         This is the episode-centric path — episode status is ground truth.
         """
-        request_id = release.request_id
         coverage = cached_parse_release_coverage(release.title)
+        query = (
+            select(Episode)
+            .join(Season, Episode.season_id == Season.id)
+            .where(Season.request_id == release.request_id)
+        )
         if coverage.episode_number is not None and coverage.season_number is not None:
             # Single episode
-            await self._set_episode_status(
-                request_id=request_id,
-                season_number=coverage.season_number,
-                episode_number=coverage.episode_number,
-                status=status,
+            query = query.where(
+                Season.season_number == coverage.season_number,
+                Episode.episode_number == coverage.episode_number,
             )
-        elif coverage.is_complete_series:
-            # Complete series — set all episodes for all seasons
-            seasons_result = await self.db.execute(
-                select(Season).where(Season.request_id == request_id)
-            )
-            seasons = list(seasons_result.scalars().all())
-            for season in seasons:
-                episodes_result = await self.db.execute(
-                    select(Episode).where(Episode.season_id == season.id)
-                )
-                for ep in episodes_result.scalars().all():
-                    _set_unless_available(ep, status)
-        elif coverage.season_numbers:
-            # Season pack or multi-season pack
-            for season_num in coverage.season_numbers:
-                episodes_result = await self.db.execute(
-                    select(Episode)
-                    .join(Season, Episode.season_id == Season.id)
-                    .where(
-                        Season.request_id == request_id,
-                        Season.season_number == season_num,
-                    )
-                )
-                for ep in episodes_result.scalars().all():
-                    _set_unless_available(ep, status)
+        elif not coverage.is_complete_series:
+            # Season pack or multi-season pack (complete series matches every season)
+            if not coverage.season_numbers:
+                return
+            query = query.where(Season.season_number.in_(coverage.season_numbers))
+        result = await self.db.execute(query)
+        for episode in result.scalars().all():
+            _set_unless_available(episode, status)
 
     # ── Release handoff (use_releases) ──
 

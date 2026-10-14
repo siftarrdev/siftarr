@@ -179,13 +179,9 @@ class TestStagingServiceIntegration:
             indexer="Indexer A",
         )
 
-        with (
-            patch("app.siftarr.services.releases.staging_service.STAGING_DIR", tmp_path),
-            patch("app.siftarr.services.releases.staging_service.get_shared_client") as get_client,
-        ):
+        with patch("app.siftarr.services.releases.staging_service.STAGING_DIR", tmp_path):
             await service.save_release(release, request)
 
-        get_client.assert_not_called()
         assert not list(tmp_path.glob("*.torrent"))
         metadata = json.loads(next(tmp_path.glob("*.json")).read_text())
         assert metadata["release"]["download_url"] == release.download_url
