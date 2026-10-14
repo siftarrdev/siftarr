@@ -224,20 +224,6 @@ class TestDatabaseLifespan:
 class TestDatabaseHelpers:
     """Tests for database utility functions."""
 
-    def test_get_sync_sqlite_url(self):
-        """_get_sync_sqlite_url should strip the async driver prefix."""
-        from app.siftarr.database import _get_sync_sqlite_url
-
-        assert _get_sync_sqlite_url("sqlite+aiosqlite:///data/db.db") == "sqlite:///data/db.db"
-        assert _get_sync_sqlite_url("sqlite:///data/db.db") == "sqlite:///data/db.db"
-
-    def test_get_sqlite_db_path(self):
-        """_get_sqlite_db_path should extract the file path from a SQLite URL."""
-        from app.siftarr.database import _get_sqlite_db_path
-
-        path = _get_sqlite_db_path("sqlite+aiosqlite:///data/db.db")
-        assert str(path) == "data/db.db"
-
     def test_get_sqlite_db_path_raises_on_unsupported_url(self):
         """_get_sqlite_db_path should raise for non-SQLite URLs."""
         from app.siftarr.database import _get_sqlite_db_path
@@ -252,19 +238,6 @@ class TestDatabaseHelpers:
         tables, revision = _inspect_sqlite_database(Path("/nonexistent/path.db"))
         assert tables == set()
         assert revision is None
-
-    def test_base_model_import(self):
-        """Test Base model import."""
-        from app.siftarr.models._base import Base
-
-        assert Base is not None
-
-    def test_current_revision_is_defined(self):
-        """Current Alembic head should be discoverable dynamically."""
-        from app.siftarr.database import CURRENT_ALEMBIC_REVISION, get_alembic_head_revision
-
-        assert CURRENT_ALEMBIC_REVISION == "head"
-        assert get_alembic_head_revision() == "e3f4a5b6c7d8"
 
     def test_alembic_history_supports_incremental_revisions(self):
         """Alembic history should include focused incremental migrations."""

@@ -1,6 +1,5 @@
 """Write-only instrumentation helpers for stats metrics."""
 
-import inspect
 import json
 import logging
 from datetime import UTC, datetime
@@ -22,14 +21,9 @@ from app.siftarr.services.releases.release_storage import get_release_persistenc
 logger = logging.getLogger(__name__)
 
 
-def _json_dumps_safe(value: dict) -> str:
-    """Serialize instrumentation details without failing on test doubles."""
+def json_dumps_safe(value: dict) -> str:
+    """Serialize details, stringifying values JSON cannot encode."""
     return json.dumps(value, default=str)
-
-
-def _is_mock_session(db: AsyncSession) -> bool:
-    """Avoid instrumentation-only reads consuming mocked execute side effects."""
-    return type(db).__module__ == "unittest.mock"
 
 
 def resolution_bucket(resolution: str | None) -> str | None:
@@ -61,11 +55,9 @@ async def record_timing_event(
             event_name=event_name,
             correlation_id=str(request_id) if request_id is not None else None,
             duration_ms=duration_ms,
-            details=_json_dumps_safe(details) if details is not None else None,
+            details=json_dumps_safe(details) if details is not None else None,
         )
-        add_result = db.add(entry)
-        if inspect.isawaitable(add_result):
-            await add_result
+        db.add(entry)
         await db.flush()
     except Exception:
         logger.exception("Failed to record stats timing event: %s", event_name)
@@ -77,7 +69,7 @@ async def record_request_to_approval_timing(
     request_id: int | None,
     approved_at: datetime | None = None,
 ) -> None:
-    if request_id is None or _is_mock_session(db):
+    if request_id is None:
         return
     try:
         result = await db.execute(select(Request).where(Request.id == request_id))
@@ -146,7 +138,7 @@ async def record_staged_release_fact(db: AsyncSession, torrent: StagedTorrent) -
     """Record approval facts for a staged torrent."""
     release_id: int | None = None
     resolution: str | None = None
-    if torrent.request_id is not None and not _is_mock_session(db):
+    if torrent.request_id is not None:
         try:
             result = await db.execute(
                 select(Release).where(
@@ -173,19 +165,6 @@ async def record_staged_release_fact(db: AsyncSession, torrent: StagedTorrent) -
         selection_source=torrent.selection_source,
         release_id=release_id,
         staged_torrent_id=torrent.id,
-    )
-
-
-async def record_release_fact(db: AsyncSession, release: Release, *, selection_source: str) -> None:
-    """Record approval facts for a direct-send stored release."""
-    await record_selected_release_fact(
-        db,
-        request_id=release.request_id,
-        title=release.title,
-        indexer=release.indexer,
-        resolution=release.resolution,
-        selection_source=selection_source,
-        release_id=release.id,
     )
 
 

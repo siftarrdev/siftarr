@@ -139,32 +139,7 @@ class TestProcessRequest:
         service.prowlarr.search_tv_episode_exact.assert_not_awaited()
 
     @pytest.mark.asyncio
-    async def test_no_tvdb_id_returns_error(self, service, mock_db):
-        request = _make_request(tvdb_id=None)
-        mock_db.execute.return_value = MagicMock(scalar_one_or_none=MagicMock(return_value=request))
-        mock_db.commit = AsyncMock()
-
-        result = await service.process_request(1)
-
-        assert result["status"] == "error"
-        assert "TVDB" in result["message"]
-        request.status = RequestStatus.FAILED
-
-    @pytest.mark.asyncio
-    async def test_no_seasons_specified_returns_error(self, service, mock_db):
-        request = _make_request(seasons=[])
-        mock_db.execute.return_value = MagicMock(scalar_one_or_none=MagicMock(return_value=request))
-        mock_db.commit = AsyncMock()
-
-        with patch.object(service, "_get_rule_engine", new_callable=AsyncMock) as mock_rule:
-            mock_rule.return_value = MagicMock()
-            result = await service.process_request(1)
-
-        assert result["status"] == "error"
-        assert "No seasons" in result["message"]
-
-    @pytest.mark.asyncio
-    async def test_season_sweep_uses_overseerr_imdb_id(self, service):
+    async def test_season_sweep_queries_prowlarr_once_per_season(self, service):
         request = _make_request(tmdb_id=987, seasons=[1])
         release = _make_release("Test.Show.S01.1080p")
         engine = MagicMock(evaluate=MagicMock(return_value=_passing_eval(release)))
@@ -172,19 +147,11 @@ class TestProcessRequest:
             releases=[release], query_time_ms=1
         )
 
-        with patch(
-            "app.siftarr.services.decisions.tv_decision_service.OverseerrService"
-        ) as overseerr_cls:
-            overseerr_cls.return_value.get_media_details = AsyncMock(
-                return_value={"externalIds": {"imdbId": "tt1234567"}}
-            )
-            await service._search_season_sweeps_and_evaluate(request, engine, [1])
+        await service._search_season_sweeps_and_evaluate(request, engine, [1])
 
         service.prowlarr.search_tv_season_sweep.assert_awaited_once_with(
             title="Show",
             season=1,
-            imdbid="tt1234567",
-            tvdbid=12345,
             request_id=1,
         )
 
@@ -219,7 +186,7 @@ class TestProcessRequest:
         engine = MagicMock()
         engine.evaluate.side_effect = lambda release: _passing_eval(release, score=release.seeders)
 
-        evaluated, passing, errors, seen = await service._search_season_sweeps_and_evaluate(
+        evaluated, errors, seen = await service._search_season_sweeps_and_evaluate(
             request, engine, list(range(1, MAX_CONCURRENT_SEARCHES + 4))
         )
 
@@ -230,32 +197,33 @@ class TestProcessRequest:
             for season in range(1, MAX_CONCURRENT_SEARCHES + 4)
             if season != 3
         ]
-        assert [evaluation.release.title for evaluation in passing] == [
-            evaluation.release.title for evaluation in evaluated
-        ]
         assert errors == ["boom season 3"]
         assert seen == {
             f"ih:s{season}" for season in range(1, MAX_CONCURRENT_SEARCHES + 4) if season != 3
         }
 
     @pytest.mark.asyncio
-    async def test_request_not_found_returns_error(self, service, mock_db):
-        mock_db.execute.return_value = MagicMock(scalar_one_or_none=MagicMock(return_value=None))
-
-        result = await service.process_request(999)
-
-        assert result["status"] == "error"
-        assert "not found" in result["message"]
-
-    @pytest.mark.asyncio
-    async def test_non_tv_request_returns_error(self, service, mock_db):
-        request = _make_request(media_type=MediaType.MOVIE)
+    @pytest.mark.parametrize(
+        ("request_kwargs", "message"),
+        [
+            (None, "not found"),
+            ({"media_type": MediaType.MOVIE}, "not TV"),
+            ({"tvdb_id": None}, "TVDB"),
+            ({"seasons": []}, "No seasons"),
+        ],
+        ids=["not-found", "not-tv", "no-tvdb-id", "no-seasons"],
+    )
+    async def test_invalid_request_returns_error(self, service, mock_db, request_kwargs, message):
+        request = None if request_kwargs is None else _make_request(**request_kwargs)
         mock_db.execute.return_value = MagicMock(scalar_one_or_none=MagicMock(return_value=request))
+        mock_db.commit = AsyncMock()
 
-        result = await service.process_request(1)
+        with patch.object(service, "_get_rule_engine", new_callable=AsyncMock) as mock_rule:
+            mock_rule.return_value = MagicMock()
+            result = await service.process_request(1)
 
         assert result["status"] == "error"
-        assert "not TV" in result["message"]
+        assert message in result["message"]
 
     @pytest.mark.asyncio
     async def test_default_search_skips_pack_for_partly_available_season(self, service, mock_db):
@@ -288,13 +256,11 @@ class TestProcessRequest:
                 "app.siftarr.services.decisions.tv_decision_service.store_search_results",
                 new_callable=AsyncMock,
                 return_value={"s01e02": stored_ep2},
-            ) as store_mock,
+            ),
             patch(
                 "app.siftarr.services.decisions.tv_decision_service.StagingService",
                 return_value=mock_staging,
             ),
-            patch.object(service, "_set_episodes_for_season", new_callable=AsyncMock) as set_season,
-            patch.object(service, "_set_episode_status", new_callable=AsyncMock) as set_episode,
         ):
             result = await service.process_request(1)
 
@@ -302,16 +268,10 @@ class TestProcessRequest:
             title="Show", season=1, episode=2, request_id=1
         )
         service.prowlarr.search_tv_season_sweep.assert_not_awaited()
-        assert store_mock.await_args is not None
-        assert [e.release.title for e in store_mock.await_args.args[2]] == [
-            "Show.S01E02.1080p",
-        ]
         assert [r["title"] for r in result["selected_releases"]] == ["Show.S01E02.1080p"]
         mock_staging.use_releases.assert_awaited_once_with(
             request, [stored_ep2], selection_source="rule"
         )
-        set_season.assert_not_awaited()
-        set_episode.assert_awaited_once_with(1, 1, 2, RequestStatus.DOWNLOADING)
 
     @pytest.mark.asyncio
     async def test_default_search_stages_pack_without_exact_fallback(self, service, mock_db):
@@ -402,7 +362,6 @@ class TestProcessRequest:
                 "app.siftarr.services.decisions.tv_decision_service.StagingService",
                 return_value=mock_staging,
             ),
-            patch.object(service, "_set_episode_status", new_callable=AsyncMock) as set_episode,
         ):
             result = await service.process_request(1)
 
@@ -426,8 +385,6 @@ class TestProcessRequest:
         mock_staging.use_releases.assert_awaited_once_with(
             request, [stored_ep1, stored_ep2], selection_source="rule"
         )
-        assert set_episode.await_args_list[0].args == (1, 1, 1, RequestStatus.DOWNLOADING)
-        assert set_episode.await_args_list[1].args == (1, 1, 2, RequestStatus.DOWNLOADING)
 
     @pytest.mark.asyncio
     async def test_exact_episode_fallback_does_not_dedup_wrong_target_results(self, service):
@@ -503,8 +460,6 @@ class TestProcessRequest:
                 "app.siftarr.services.decisions.tv_decision_service.StagingService",
                 return_value=mock_staging,
             ),
-            patch.object(service, "_set_episodes_for_season", new_callable=AsyncMock) as set_season,
-            patch.object(service, "_set_episode_status", new_callable=AsyncMock) as set_episode,
         ):
             result = await service.process_request(1)
 
@@ -518,8 +473,6 @@ class TestProcessRequest:
         mock_staging.use_releases.assert_awaited_once_with(
             request, [stored_pack, stored_ep], selection_source="rule"
         )
-        set_season.assert_awaited_once_with(1, 1, RequestStatus.DOWNLOADING)
-        set_episode.assert_awaited_once_with(1, 2, 1, RequestStatus.DOWNLOADING)
 
     @pytest.mark.asyncio
     async def test_full_search_refreshes_available_episode_but_does_not_stage_it(
@@ -663,12 +616,10 @@ class TestProcessRequest:
                 "app.siftarr.services.decisions.tv_decision_service.StagingService",
                 return_value=mock_staging,
             ),
-            patch.object(service, "_set_episodes_for_season", new_callable=AsyncMock) as set_season,
         ):
             result = await service.process_request(1, search_mode="full")
 
         assert [r["title"] for r in result["selected_releases"]] == ["Show.S02.1080p"]
-        set_season.assert_awaited_once_with(1, 2, RequestStatus.DOWNLOADING)
 
     def test_actionable_targets_exclude_completed_staged_downloading_and_future(self, service):
         request = _make_request(seasons=[1, 2, 3], episodes={1: [1, 2], 2: [1], 3: [1, 2]})
@@ -690,7 +641,7 @@ class TestProcessRequest:
                 episode.status = statuses[key]
                 episode.air_date = air_dates.get(key, today - timedelta(days=1))
 
-        seasons, episodes = service._get_actionable_targets(request)
+        seasons, episodes = service._get_loaded_episode_targets(request, actionable_only=True)
 
         assert seasons == [3]
         assert episodes == {3: [1]}

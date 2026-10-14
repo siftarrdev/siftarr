@@ -8,9 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.siftarr.models.rule import Rule, RuleType, TVTarget
 from app.siftarr.services.decisions.rule_engine import (
-    ReleaseEvaluation,
     RuleEngine,
-    RuleMatch,
     SizeLimitRule,
     clear_engine_caches,
     increment_rule_version,
@@ -85,193 +83,107 @@ async def test_rule_engine_provider_rebuilds_after_rule_version_increment(monkey
     assert db.execute.await_count == 2
 
 
-class TestRuleEngine:
-    """Test cases for RuleEngine."""
+GB = 1024**3
 
-    def test_from_db_rules(self):
-        """Test creating RuleEngine from database rules."""
-        mock_rule1 = MagicMock(spec=Rule)
-        mock_rule1.is_enabled = True
-        mock_rule1.rule_type = RuleType.EXCLUSION
-        mock_rule1.id = 1
-        mock_rule1.name = "CAM rejection"
-        mock_rule1.pattern = "CAM|TS"
-        mock_rule1.score = 0
 
-        mock_rule2 = MagicMock(spec=Rule)
-        mock_rule2.is_enabled = True
-        mock_rule2.rule_type = RuleType.SCORER
-        mock_rule2.id = 2
-        mock_rule2.name = "x265 bonus"
-        mock_rule2.pattern = "x265"
-        mock_rule2.score = 50
+def _release(title: str = "Movie.2024.1080p.x264", size: float = 1024, **kwargs) -> ProwlarrRelease:
+    return ProwlarrRelease(
+        title=title,
+        size=int(size),
+        seeders=10,
+        leechers=2,
+        download_url="http://example.com",
+        indexer="test",
+        **kwargs,
+    )
 
-        engine = RuleEngine.from_db_rules(rules=[mock_rule1, mock_rule2])
 
-        assert len(engine.exclusion_patterns) == 1
-        assert len(engine.scorer_patterns) == 1
+def _db_rule(rule_type, name="rule", pattern="x", score=0, scope="both", **extra):
+    rule = MagicMock(spec=Rule)
+    rule.is_enabled = extra.pop("is_enabled", True)
+    rule.rule_type = rule_type
+    rule.media_scope = scope
+    rule.id = extra.pop("id", 1)
+    rule.name = name
+    rule.pattern = pattern
+    rule.score = score
+    for key, value in extra.items():
+        setattr(rule, key, value)
+    return rule
 
-    def test_from_db_rules_disabled_rules(self):
-        """Test that disabled rules are excluded."""
-        mock_rule = MagicMock(spec=Rule)
-        mock_rule.is_enabled = False
-        mock_rule.rule_type = RuleType.SCORER
-        mock_rule.id = 1
-        mock_rule.name = "Disabled"
-        mock_rule.pattern = "x265"
-        mock_rule.score = 50
 
-        engine = RuleEngine.from_db_rules(rules=[mock_rule])
+class TestFromDbRules:
+    def test_filters_by_enablement_and_media_scope_and_converts_sizes(self):
+        """Disabled and out-of-scope rules are dropped. Rule type values may be raw strings."""
+        rules = [
+            _db_rule("scorer", "Movie x265", "x265", 50, scope="movie", id=1),
+            _db_rule("requirement", "Require 1080p", "1080p", scope="both", id=2),
+            _db_rule("exclusion", "TV only", "HDTV", scope="tv", id=3),
+            _db_rule(RuleType.SCORER, "Disabled", "x264", 5, is_enabled=False, id=4),
+            _db_rule(
+                RuleType.SIZE_LIMIT,
+                "Movie Size",
+                "size_limit",
+                min_size_gb=1,
+                max_size_gb=10,
+                tv_target=TVTarget.SEASON_PACK,
+                id=5,
+            ),
+        ]
 
-        assert len(engine.scorer_patterns) == 0
-
-    def test_from_db_rules_size_limits(self):
-        """Test size limit conversion from DB rules to bytes."""
-        mock_rule = MagicMock(spec=Rule)
-        mock_rule.is_enabled = True
-        mock_rule.rule_type = RuleType.SIZE_LIMIT
-        mock_rule.id = 3
-        mock_rule.name = "Movie Size Limits"
-        mock_rule.pattern = "size_limit"
-        mock_rule.min_size_gb = 1
-        mock_rule.max_size_gb = 10
-        mock_rule.tv_target = TVTarget.SEASON_PACK
-
-        engine = RuleEngine.from_db_rules(rules=[mock_rule])
-
-        assert len(engine.size_limit_rules) == 1
-        assert engine.size_limit_rules[0].min_size_bytes == 1 * 1024 * 1024 * 1024
-        assert engine.size_limit_rules[0].max_size_bytes == 10 * 1024 * 1024 * 1024
-        assert engine.size_limit_rules[0].tv_target == TVTarget.SEASON_PACK
-
-    def test_from_db_rules_handles_string_types_and_movie_scope(self):
-        """Movie engines should include movie/both DB rules even when values are strings."""
-        movie_scorer = MagicMock(spec=Rule)
-        movie_scorer.is_enabled = True
-        movie_scorer.rule_type = "scorer"
-        movie_scorer.media_scope = "movie"
-        movie_scorer.id = 1
-        movie_scorer.name = "Movie x265"
-        movie_scorer.pattern = "x265"
-        movie_scorer.score = 50
-
-        both_requirement = MagicMock(spec=Rule)
-        both_requirement.is_enabled = True
-        both_requirement.rule_type = "requirement"
-        both_requirement.media_scope = "both"
-        both_requirement.id = 2
-        both_requirement.name = "Require 1080p"
-        both_requirement.pattern = "1080p"
-        both_requirement.score = 0
-
-        tv_exclusion = MagicMock(spec=Rule)
-        tv_exclusion.is_enabled = True
-        tv_exclusion.rule_type = "exclusion"
-        tv_exclusion.media_scope = "tv"
-        tv_exclusion.id = 3
-        tv_exclusion.name = "TV only"
-        tv_exclusion.pattern = "HDTV"
-        tv_exclusion.score = 0
-
-        engine = RuleEngine.from_db_rules(
-            rules=[movie_scorer, both_requirement, tv_exclusion],
-            media_type="movie",
-        )
+        engine = RuleEngine.from_db_rules(rules=rules, media_type="movie")
 
         assert engine.scorer_patterns == [(1, "Movie x265", "x265", 50)]
         assert engine.requirement_patterns == [(2, "Require 1080p", "1080p")]
         assert engine.exclusion_patterns == []
+        assert len(engine.size_limit_rules) == 1
+        size_rule = engine.size_limit_rules[0]
+        assert (size_rule.min_size_bytes, size_rule.max_size_bytes) == (1 * GB, 10 * GB)
+        assert size_rule.tv_target == TVTarget.SEASON_PACK
 
-    def test_from_db_rules_tv_scorers_score_season_pack_with_enum_and_raw_scope(self):
-        tv_scorer = MagicMock(spec=Rule)
-        tv_scorer.is_enabled = True
-        tv_scorer.rule_type = RuleType.SCORER
-        tv_scorer.media_scope = "TV"
-        tv_scorer.id = 1
-        tv_scorer.name = "Prefer x265"
-        tv_scorer.pattern = "x265"
-        tv_scorer.score = 50
+    def test_tv_engine_accepts_raw_string_values_in_any_case(self):
+        """Raw DB strings for type, scope, media type, and tv_target drive evaluation."""
+        rules = [
+            _db_rule("SCORER", "Prefer 1080p", "1080p", 25, scope="TV", id=1),
+            _db_rule(RuleType.SCORER, "Prefer x265", "x265", 50, scope="BoTh", id=2),
+            _db_rule(
+                "SIZE_LIMIT",
+                "TV Pack Size",
+                "size_limit",
+                scope="TV",
+                min_size_gb=5,
+                max_size_gb=None,
+                tv_target="SEASON_PACK",
+                id=3,
+            ),
+            _db_rule(
+                RuleType.SIZE_LIMIT,
+                "TV Episode Size",
+                "size_limit",
+                scope="tv",
+                min_size_gb=2,
+                max_size_gb=None,
+                tv_target="Episode",
+                id=4,
+            ),
+        ]
+        engine = RuleEngine.from_db_rules(rules=rules, media_type="TV")
 
-        both_scorer = MagicMock(spec=Rule)
-        both_scorer.is_enabled = True
-        both_scorer.rule_type = "SCORER"
-        both_scorer.media_scope = "BoTh"
-        both_scorer.id = 2
-        both_scorer.name = "Prefer MeGusta"
-        both_scorer.pattern = "MeGusta"
-        both_scorer.score = 100
+        small_pack = engine.evaluate(_release("Show.S01.1080p.x265", 4 * GB))
+        big_pack = engine.evaluate(_release("Show.S01.1080p.x265", 6 * GB))
+        small_episode = engine.evaluate(_release("Show.S01E01.1080p", 1 * GB))
+        good_episode = engine.evaluate(_release("Show.S01E01.1080p.x265", 3 * GB))
 
-        engine = RuleEngine.from_db_rules(
-            rules=[tv_scorer, both_scorer],
-            media_type="tv",
-        )
-        result = engine.evaluate(
-            ProwlarrRelease(
-                title="Show.S01.1080p.x265-MeGusta",
-                size=10 * 1024 * 1024 * 1024,
-                seeders=10,
-                leechers=2,
-                download_url="http://example.com",
-                indexer="test",
-            )
-        )
+        assert small_pack.rejection_reason == "Size 4.00 GB below minimum 5.00 GB"
+        assert small_episode.rejection_reason == "Size 1.00 GB below minimum 2.00 GB"
+        assert big_pack.passed is True
+        assert big_pack.total_score == 75
+        assert good_episode.passed is True
+        assert good_episode.total_score == 75
 
-        assert result.passed is True
-        assert result.total_score == 150
 
-    def test_from_db_rules_tv_scorers_score_episode_with_string_variants(self):
-        tv_scorer = MagicMock(spec=Rule)
-        tv_scorer.is_enabled = True
-        tv_scorer.rule_type = "scorer"
-        tv_scorer.media_scope = "Tv"
-        tv_scorer.id = 1
-        tv_scorer.name = "Prefer 1080p"
-        tv_scorer.pattern = "1080p"
-        tv_scorer.score = 25
-
-        both_scorer = MagicMock(spec=Rule)
-        both_scorer.is_enabled = True
-        both_scorer.rule_type = RuleType.SCORER
-        both_scorer.media_scope = "both"
-        both_scorer.id = 2
-        both_scorer.name = "Prefer x265"
-        both_scorer.pattern = "x265"
-        both_scorer.score = 50
-
-        engine = RuleEngine.from_db_rules(
-            rules=[tv_scorer, both_scorer],
-            media_type="TV",
-        )
-        result = engine.evaluate(
-            ProwlarrRelease(
-                title="Show.S01E01.1080p.x265",
-                size=2 * 1024 * 1024 * 1024,
-                seeders=10,
-                leechers=2,
-                download_url="http://example.com",
-                indexer="test",
-            )
-        )
-
-        assert result.passed is True
-        assert result.total_score == 75
-
-    def test_tv_scorer_phrase_matches_dotted_release_title(self):
-        engine = RuleEngine(scorer_patterns=[(1, "Prefer 1080p x265", "1080p x265", 40)])
-
-        result = engine.evaluate(
-            ProwlarrRelease(
-                title="Elsbeth.S03E01.1080p.WEB-DL.x265-GROUP",
-                size=2 * 1024 * 1024 * 1024,
-                seeders=10,
-                leechers=2,
-                download_url="http://example.com",
-                indexer="test",
-            )
-        )
-
-        assert result.passed is True
-        assert result.total_score == 40
+class TestRuleEngine:
+    """Test cases for RuleEngine."""
 
     @pytest.mark.parametrize(
         ("pattern", "title", "score"),
@@ -282,922 +194,327 @@ class TestRuleEngine:
             (r"(1080p x265)", "Silo.S03E10.1080p.WEB.x264-GROUP", 0),
             (r"^1080p x265$", "x265 1080p", 0),
             ("1080p x265", "Silo.S03E10.x265.WEB.1080p-GROUP", 40),
+            ("1080p x265", "Elsbeth.S03E01.1080p.WEB-DL.x265-GROUP", 40),
         ],
     )
     def test_phrase_fallback_preserves_regex_syntax(self, pattern, title, score):
         engine = RuleEngine(scorer_patterns=[(1, "Codec preference", pattern, 40)])
-        result = engine.evaluate(
-            ProwlarrRelease(
-                title=title,
-                size=1024**3,
-                seeders=10,
-                leechers=0,
-                download_url="http://example.com",
-                indexer="test",
-            )
-        )
+        result = engine.evaluate(_release(title, GB))
         assert result.passed is True
         assert result.total_score == score
 
-    def test_from_db_rules_normalizes_raw_tv_target_strings_for_size_rules(self):
-        pack_rule = MagicMock(spec=Rule)
-        pack_rule.is_enabled = True
-        pack_rule.rule_type = "SIZE_LIMIT"
-        pack_rule.media_scope = "TV"
-        pack_rule.id = 1
-        pack_rule.name = "TV Pack Size"
-        pack_rule.pattern = "size_limit"
-        pack_rule.min_size_gb = 5
-        pack_rule.max_size_gb = None
-        pack_rule.tv_target = "SEASON_PACK"
-
-        episode_rule = MagicMock(spec=Rule)
-        episode_rule.is_enabled = True
-        episode_rule.rule_type = RuleType.SIZE_LIMIT
-        episode_rule.media_scope = "tv"
-        episode_rule.id = 2
-        episode_rule.name = "TV Episode Size"
-        episode_rule.pattern = "size_limit"
-        episode_rule.min_size_gb = 2
-        episode_rule.max_size_gb = None
-        episode_rule.tv_target = "Episode"
-
-        engine = RuleEngine.from_db_rules(
-            rules=[pack_rule, episode_rule],
-            media_type="tv",
+    @pytest.mark.parametrize(
+        ("tv_target", "scope", "title", "size_gb", "min_gb", "max_gb", "reason"),
+        [
+            pytest.param(
+                None,
+                "both",
+                "Movie.2024.1080p",
+                0.5,
+                1,
+                None,
+                "Size 0.50 GB below minimum 1.00 GB",
+                id="movie-below-min",
+            ),
+            pytest.param(
+                None,
+                "both",
+                "Movie.2024.1080p",
+                20,
+                None,
+                10,
+                "Size 20.00 GB above maximum 10.00 GB",
+                id="movie-above-max",
+            ),
+            pytest.param(
+                None,
+                "both",
+                "Movie.2024.1080p",
+                4,
+                5,
+                None,
+                "Size 4.00 GB below minimum 5.00 GB",
+                id="movie-no-target",
+            ),
+            pytest.param(
+                TVTarget.SEASON_PACK,
+                "both",
+                "Show.S01-S03.1080p",
+                4,
+                5,
+                20,
+                "Size 1.33 GB below minimum 5.00 GB",
+                id="multi-season-pack-uses-per-season-size",
+            ),
+            pytest.param(
+                TVTarget.SEASON_PACK,
+                "both",
+                "Show.S01-S06.480p",
+                50,
+                None,
+                15,
+                None,
+                id="multi-season-pack-passes-per-season-max",
+            ),
+            pytest.param(
+                TVTarget.SEASON_PACK,
+                "both",
+                "Show.Complete.Series.1080p",
+                4,
+                5,
+                None,
+                "Size 4.00 GB below minimum 5.00 GB",
+                id="pack-target-applies-to-complete-series",
+            ),
+            pytest.param(
+                TVTarget.EPISODE,
+                "tv",
+                "Show.S01E01.1080p",
+                1,
+                2,
+                None,
+                "Size 1.00 GB below minimum 2.00 GB",
+                id="episode-target-uses-raw-size",
+            ),
+            pytest.param(
+                TVTarget.EPISODE,
+                "tv",
+                "Show.S01.1080p",
+                4,
+                5,
+                None,
+                None,
+                id="episode-target-skips-pack",
+            ),
+            pytest.param(
+                TVTarget.SEASON_PACK,
+                "tv",
+                "Show.S01E01.1080p",
+                1,
+                2,
+                None,
+                None,
+                id="pack-target-skips-episode",
+            ),
+            pytest.param(
+                TVTarget.EPISODE,
+                "both",
+                "Movie.2024.1080p",
+                4,
+                5,
+                None,
+                "Size 4.00 GB below minimum 5.00 GB",
+                id="both-episode-target-checks-movie",
+            ),
+            pytest.param(
+                TVTarget.EPISODE,
+                "both",
+                "Show.S01E01.1080p",
+                4,
+                5,
+                None,
+                "Size 4.00 GB below minimum 5.00 GB",
+                id="both-episode-target-checks-episode",
+            ),
+            pytest.param(
+                TVTarget.EPISODE,
+                "both",
+                "Show.S01.1080p",
+                4,
+                5,
+                None,
+                None,
+                id="both-episode-target-skips-pack",
+            ),
+            pytest.param(
+                TVTarget.SEASON_PACK,
+                "both",
+                "Movie.2024.1080p",
+                4,
+                5,
+                None,
+                "Size 4.00 GB below minimum 5.00 GB",
+                id="both-pack-target-checks-movie",
+            ),
+            pytest.param(
+                TVTarget.SEASON_PACK,
+                "both",
+                "Show.S01-S03.1080p",
+                4,
+                5,
+                None,
+                "Size 1.33 GB below minimum 5.00 GB",
+                id="both-pack-target-checks-pack",
+            ),
+            pytest.param(
+                TVTarget.SEASON_PACK,
+                "both",
+                "Show.S01E01.1080p",
+                4,
+                5,
+                None,
+                None,
+                id="both-pack-target-skips-episode",
+            ),
+        ],
+    )
+    def test_evaluate_size_limit_by_target_and_release_shape(
+        self, tv_target, scope, title, size_gb, min_gb, max_gb, reason
+    ):
+        engine = RuleEngine(
+            size_limit_rules=[
+                SizeLimitRule(
+                    rule_id=1,
+                    rule_name="Size",
+                    min_size_bytes=None if min_gb is None else int(min_gb * GB),
+                    max_size_bytes=None if max_gb is None else int(max_gb * GB),
+                    tv_target=tv_target,
+                    media_scope=scope,
+                )
+            ]
         )
 
-        pack_result = engine.evaluate(
-            ProwlarrRelease(
-                title="Show.S01.1080p",
-                size=4 * 1024 * 1024 * 1024,
-                seeders=10,
-                leechers=2,
-                download_url="http://example.com/pack",
-                indexer="test",
-            )
-        )
-        episode_result = engine.evaluate(
-            ProwlarrRelease(
-                title="Show.S01E01.1080p",
-                size=1 * 1024 * 1024 * 1024,
-                seeders=10,
-                leechers=2,
-                download_url="http://example.com/episode",
-                indexer="test",
-            )
-        )
+        result = engine.evaluate(_release(title, size_gb * GB))
 
-        assert pack_result.passed is False
-        assert pack_result.rejection_reason == "Size 4.00 GB below minimum 5.00 GB"
-        assert episode_result.passed is False
-        assert episode_result.rejection_reason == "Size 1.00 GB below minimum 2.00 GB"
+        assert result.rejection_reason == reason
+        assert result.passed is (reason is None)
 
     def test_evaluate_no_rules(self):
-        """Test evaluating with no rules."""
-        engine = RuleEngine()
-
-        release = ProwlarrRelease(
-            title="Test.Movie.2024.1080p.x264-RLSGRP",
-            size=1024,
-            seeders=10,
-            leechers=2,
-            download_url="http://example.com",
-            indexer="test",
-        )
-
-        result = engine.evaluate(release)
-
+        result = RuleEngine().evaluate(_release())
         assert result.passed is True
         assert result.total_score == 0
 
-    def test_evaluate_min_size_rejection(self):
-        """Test minimum size rejection."""
-        engine = RuleEngine(size_limit_rules=[(1, "Min Size", 1024 * 1024 * 1024, None)])
-
-        release = ProwlarrRelease(
-            title="Test.Movie.2024.1080p.x264-RLSGRP",
-            size=500 * 1024 * 1024,
-            seeders=10,
-            leechers=2,
-            download_url="http://example.com",
-            indexer="test",
-        )
-
-        result = engine.evaluate(release)
-
-        assert result.passed is False
-        assert result.rejection_reason is not None
-        assert "below minimum" in result.rejection_reason
-
-    def test_evaluate_max_size_rejection(self):
-        """Test maximum size rejection."""
-        engine = RuleEngine(size_limit_rules=[(1, "Max Size", None, 10 * 1024 * 1024)])
-
-        release = ProwlarrRelease(
-            title="Test.Movie.2024.1080p.x264-RLSGRP",
-            size=20 * 1024 * 1024,
-            seeders=10,
-            leechers=2,
-            download_url="http://example.com",
-            indexer="test",
-        )
-
-        result = engine.evaluate(release)
-
-        assert result.passed is False
-        assert result.rejection_reason is not None
-        assert "above maximum" in result.rejection_reason
-
-    def test_evaluate_tv_targeted_multi_season_pack_rule_uses_per_season_size(self):
-        """Season-pack limits compare multi-season packs by their covered seasons."""
-        engine = RuleEngine(
-            size_limit_rules=[
-                SizeLimitRule(
-                    rule_id=1,
-                    rule_name="TV Pack Size",
-                    min_size_bytes=5 * 1024 * 1024 * 1024,
-                    max_size_bytes=20 * 1024 * 1024 * 1024,
-                    tv_target=TVTarget.SEASON_PACK,
-                )
-            ]
-        )
-
-        release = ProwlarrRelease(
-            title="Show.S01-S03.1080p",
-            size=4 * 1024 * 1024 * 1024,
-            seeders=10,
-            leechers=2,
-            download_url="http://example.com",
-            indexer="test",
-        )
-
-        result = engine.evaluate(release)
-
-        assert result.passed is False
-        assert result.rejection_reason == "Size 1.33 GB below minimum 5.00 GB"
-
-    def test_evaluate_multi_season_pack_can_pass_total_size_limit(self):
-        engine = RuleEngine(
-            size_limit_rules=[
-                SizeLimitRule(
-                    rule_id=1,
-                    rule_name="TV Pack Size",
-                    min_size_bytes=None,
-                    max_size_bytes=15 * 1024 * 1024 * 1024,
-                    tv_target=TVTarget.SEASON_PACK,
-                )
-            ]
-        )
-        release = ProwlarrRelease(
-            title="Show.S01-S06.480p",
-            size=50 * 1024 * 1024 * 1024,
-            seeders=10,
-            leechers=2,
-            download_url="http://example.com",
-            indexer="test",
-        )
-
-        assert engine.evaluate(release).passed is True
-
-    def test_evaluate_tv_targeted_episode_rule_uses_raw_release_size(self):
-        """Episode-targeted size rules should still compare the raw release size."""
-        engine = RuleEngine(
-            size_limit_rules=[
-                SizeLimitRule(
-                    rule_id=1,
-                    rule_name="TV Episode Size",
-                    min_size_bytes=2 * 1024 * 1024 * 1024,
-                    max_size_bytes=None,
-                    tv_target=TVTarget.EPISODE,
-                )
-            ]
-        )
-
-        release = ProwlarrRelease(
-            title="Show.S01E01.1080p",
-            size=1 * 1024 * 1024 * 1024,
-            seeders=10,
-            leechers=2,
-            download_url="http://example.com",
-            indexer="test",
-        )
-
-        result = engine.evaluate(release)
-
-        assert result.passed is False
-        assert result.rejection_reason == "Size 1.00 GB below minimum 2.00 GB"
-
-    def test_evaluate_episode_target_rule_skips_season_pack(self):
-        """Episode-target size limits should not reject season packs."""
-        engine = RuleEngine(
-            size_limit_rules=[
-                SizeLimitRule(
-                    rule_id=1,
-                    rule_name="TV Episode Size",
-                    min_size_bytes=5 * 1024 * 1024 * 1024,
-                    max_size_bytes=None,
-                    tv_target=TVTarget.EPISODE,
-                )
-            ]
-        )
-
-        release = ProwlarrRelease(
-            title="Show.S01.1080p",
-            size=4 * 1024 * 1024 * 1024,
-            seeders=10,
-            leechers=2,
-            download_url="http://example.com",
-            indexer="test",
-        )
-
-        result = engine.evaluate(release)
-
-        assert result.passed is True
-        assert result.rejection_reason is None
-
-    def test_evaluate_season_pack_target_rule_skips_episode_release(self):
-        """Season-pack-target size limits should not reject episodes."""
-        engine = RuleEngine(
-            size_limit_rules=[
-                SizeLimitRule(
-                    rule_id=1,
-                    rule_name="TV Pack Size",
-                    min_size_bytes=2 * 1024 * 1024 * 1024,
-                    max_size_bytes=None,
-                    tv_target=TVTarget.SEASON_PACK,
-                )
-            ]
-        )
-
-        release = ProwlarrRelease(
-            title="Show.S01E01.1080p",
-            size=1 * 1024 * 1024 * 1024,
-            seeders=10,
-            leechers=2,
-            download_url="http://example.com",
-            indexer="test",
-        )
-
-        result = engine.evaluate(release)
-
-        assert result.passed is True
-        assert result.rejection_reason is None
-
-    def test_evaluate_movie_size_rule_without_tv_target(self):
-        """Movie size rules should still work without a TV target."""
-        engine = RuleEngine(
-            size_limit_rules=[
-                SizeLimitRule(
-                    rule_id=1,
-                    rule_name="Movie Size",
-                    min_size_bytes=5 * 1024 * 1024 * 1024,
-                    max_size_bytes=None,
-                    tv_target=None,
-                )
-            ]
-        )
-
-        release = ProwlarrRelease(
-            title="Movie.2024.1080p",
-            size=4 * 1024 * 1024 * 1024,
-            seeders=10,
-            leechers=2,
-            download_url="http://example.com",
-            indexer="test",
-        )
-
-        result = engine.evaluate(release)
-
-        assert result.passed is False
-        assert result.rejection_reason == "Size 4.00 GB below minimum 5.00 GB"
-
-    def test_evaluate_both_scope_episode_target_applies_to_movies_and_tv(self):
-        """Both-scoped episode rules should apply to movies and single episodes."""
-        engine = RuleEngine(
-            size_limit_rules=[
-                SizeLimitRule(
-                    rule_id=1,
-                    rule_name="Both Episode Target",
-                    min_size_bytes=5 * 1024 * 1024 * 1024,
-                    max_size_bytes=None,
-                    tv_target=TVTarget.EPISODE,
-                    media_scope="both",
-                )
-            ]
-        )
-
-        movie_release = ProwlarrRelease(
-            title="Movie.2024.1080p",
-            size=4 * 1024 * 1024 * 1024,
-            seeders=10,
-            leechers=2,
-            download_url="http://example.com",
-            indexer="test",
-        )
-        tv_episode_release = ProwlarrRelease(
-            title="Show.S01E01.1080p",
-            size=4 * 1024 * 1024 * 1024,
-            seeders=10,
-            leechers=2,
-            download_url="http://example.com",
-            indexer="test",
-        )
-
-        movie_result = engine.evaluate(movie_release)
-        tv_result = engine.evaluate(tv_episode_release)
-
-        assert movie_result.passed is False
-        assert movie_result.rejection_reason == "Size 4.00 GB below minimum 5.00 GB"
-        assert tv_result.passed is False
-
-    def test_evaluate_both_scope_season_target_applies_to_movies_and_tv(self):
-        """Both-scoped season-pack rules should apply to movies and TV packs."""
-        engine = RuleEngine(
-            size_limit_rules=[
-                SizeLimitRule(
-                    rule_id=1,
-                    rule_name="Both Pack Target",
-                    min_size_bytes=5 * 1024 * 1024 * 1024,
-                    max_size_bytes=None,
-                    tv_target=TVTarget.SEASON_PACK,
-                    media_scope="both",
-                )
-            ]
-        )
-
-        movie_release = ProwlarrRelease(
-            title="Movie.2024.1080p",
-            size=4 * 1024 * 1024 * 1024,
-            seeders=10,
-            leechers=2,
-            download_url="http://example.com",
-            indexer="test",
-        )
-        tv_pack_release = ProwlarrRelease(
-            title="Show.S01-S03.1080p",
-            size=4 * 1024 * 1024 * 1024,
-            seeders=10,
-            leechers=2,
-            download_url="http://example.com",
-            indexer="test",
-        )
-
-        movie_result = engine.evaluate(movie_release)
-        tv_result = engine.evaluate(tv_pack_release)
-
-        assert movie_result.passed is False
-        assert movie_result.rejection_reason == "Size 4.00 GB below minimum 5.00 GB"
-        assert tv_result.passed is False
-
-    def test_evaluate_both_episode_target_rule_skips_tv_packs(self):
-        """Both-scoped episode-target rules should size-check movies but skip TV packs."""
-        engine = RuleEngine(
-            size_limit_rules=[
-                SizeLimitRule(
-                    rule_id=1,
-                    rule_name="Both Episode Target",
-                    min_size_bytes=5 * 1024 * 1024 * 1024,
-                    max_size_bytes=None,
-                    tv_target=TVTarget.EPISODE,
-                    media_scope="both",
-                )
-            ]
-        )
-
-        movie_release = ProwlarrRelease(
-            title="Movie.2024.1080p",
-            size=4 * 1024 * 1024 * 1024,
-            seeders=10,
-            leechers=2,
-            download_url="http://example.com",
-            indexer="test",
-        )
-        tv_pack_release = ProwlarrRelease(
-            title="Show.S01.1080p",
-            size=4 * 1024 * 1024 * 1024,
-            seeders=10,
-            leechers=2,
-            download_url="http://example.com",
-            indexer="test",
-        )
-
-        movie_result = engine.evaluate(movie_release)
-        tv_pack_result = engine.evaluate(tv_pack_release)
-
-        assert movie_result.passed is False
-        assert movie_result.rejection_reason == "Size 4.00 GB below minimum 5.00 GB"
-        assert tv_pack_result.passed is True
-        assert tv_pack_result.rejection_reason is None
-
-    def test_evaluate_both_season_pack_target_rule_skips_tv_episodes(self):
-        """Both-scoped season-pack-target rules should size-check movies but skip TV episodes."""
-        engine = RuleEngine(
-            size_limit_rules=[
-                SizeLimitRule(
-                    rule_id=1,
-                    rule_name="Both Pack Target",
-                    min_size_bytes=5 * 1024 * 1024 * 1024,
-                    max_size_bytes=None,
-                    tv_target=TVTarget.SEASON_PACK,
-                    media_scope="both",
-                )
-            ]
-        )
-
-        movie_release = ProwlarrRelease(
-            title="Movie.2024.1080p",
-            size=4 * 1024 * 1024 * 1024,
-            seeders=10,
-            leechers=2,
-            download_url="http://example.com",
-            indexer="test",
-        )
-        tv_episode_release = ProwlarrRelease(
-            title="Show.S01E01.1080p",
-            size=4 * 1024 * 1024 * 1024,
-            seeders=10,
-            leechers=2,
-            download_url="http://example.com",
-            indexer="test",
-        )
-
-        movie_result = engine.evaluate(movie_release)
-        tv_episode_result = engine.evaluate(tv_episode_release)
-
-        assert movie_result.passed is False
-        assert movie_result.rejection_reason == "Size 4.00 GB below minimum 5.00 GB"
-        assert tv_episode_result.passed is True
-        assert tv_episode_result.rejection_reason is None
-
-    def test_evaluate_season_pack_target_rule_applies_to_complete_series(self):
-        engine = RuleEngine(
-            size_limit_rules=[
-                SizeLimitRule(
-                    rule_id=1,
-                    rule_name="TV Pack Size",
-                    min_size_bytes=5 * 1024 * 1024 * 1024,
-                    max_size_bytes=None,
-                    tv_target=TVTarget.SEASON_PACK,
-                )
-            ]
-        )
-        release = ProwlarrRelease(
-            title="Show.Complete.Series.1080p",
-            size=4 * 1024 * 1024 * 1024,
-            seeders=10,
-            leechers=2,
-            download_url="http://example.com",
-            indexer="test",
-        )
-
-        result = engine.evaluate(release)
-
-        assert result.passed is False
-        assert result.rejection_reason == "Size 4.00 GB below minimum 5.00 GB"
-
     def test_evaluate_exclusion_rejection(self):
-        """Test exclusion pattern rejection."""
-        engine = RuleEngine(
-            exclusion_patterns=[(1, "CAM rejection", r"CAM|TS|SCR|HDCAM")],
-        )
+        engine = RuleEngine(exclusion_patterns=[(1, "CAM rejection", r"CAM|TS|SCR|HDCAM")])
 
-        release = ProwlarrRelease(
-            title="Movie.2024.HDCAM.x264-RLSGRP",
-            size=1024,
-            seeders=10,
-            leechers=2,
-            download_url="http://example.com",
-            indexer="test",
-        )
-
-        result = engine.evaluate(release)
+        result = engine.evaluate(_release("Movie.2024.HDCAM.x264-RLSGRP"))
 
         assert result.passed is False
-        assert result.rejection_reason is not None
-        assert "exclusion" in result.rejection_reason.lower()
+        assert result.rejection_reason == "Matched exclusion pattern: CAM rejection"
 
     def test_evaluate_invalid_regex(self):
-        """Test handling of invalid regex pattern."""
-        engine = RuleEngine(
-            exclusion_patterns=[(1, "Bad regex", r"[invalid")],
-        )
+        """An invalid regex is ignored instead of raising."""
+        engine = RuleEngine(exclusion_patterns=[(1, "Bad regex", r"[invalid")])
 
-        release = ProwlarrRelease(
-            title="Test.Movie.2024.x264-RLSGRP",
-            size=1024,
-            seeders=10,
-            leechers=2,
-            download_url="http://example.com",
-            indexer="test",
-        )
-
-        result = engine.evaluate(release)
-
-        assert result.passed is True
-
-    def test_evaluate_requirement_match(self):
-        """Test requirement pattern match."""
-        engine = RuleEngine(
-            requirement_patterns=[(1, "HD required", r"1080p|720p")],
-        )
-
-        release = ProwlarrRelease(
-            title="Movie.2024.1080p.x264-RLSGRP",
-            size=1024,
-            seeders=10,
-            leechers=2,
-            download_url="http://example.com",
-            indexer="test",
-        )
-
-        result = engine.evaluate(release)
-
-        assert result.passed is True
-
-    def test_evaluate_requirement_no_match(self):
-        """Test requirement pattern no match."""
-        engine = RuleEngine(
-            requirement_patterns=[(1, "HD required", r"1080p|720p")],
-        )
-
-        release = ProwlarrRelease(
-            title="Movie.2024.480p.x264-RLSGRP",
-            size=1024,
-            seeders=10,
-            leechers=2,
-            download_url="http://example.com",
-            indexer="test",
-        )
-
-        result = engine.evaluate(release)
-
-        assert result.passed is False
-        assert result.rejection_reason is not None
-        assert "requirement" in result.rejection_reason.lower()
-
-    def test_evaluate_scorer(self):
-        """Test scorer pattern scoring."""
-        engine = RuleEngine(
-            scorer_patterns=[
-                (1, "x265 bonus", r"x265|HEVC", 50),
-                (2, "MeGusta bonus", r"MeGusta", 100),
-            ],
-        )
-
-        release = ProwlarrRelease(
-            title="Movie.2024.1080p.x265-MeGusta-RLSGRP",
-            size=1024,
-            seeders=10,
-            leechers=2,
-            download_url="http://example.com",
-            indexer="test",
-        )
-
-        result = engine.evaluate(release)
-
-        assert result.passed is True
-        assert result.total_score == 150
-
-    def test_evaluate_exposes_matches_rejection_and_score_per_release(self):
-        """Evaluation results should carry UI-ready matched rules and decisions per title."""
-        engine = RuleEngine(
-            size_limit_rules=[(1, "Movie Size", 1 * 1024**3, 2 * 1024**3)],
-            exclusion_patterns=[(2, "Reject CAM", r"CAM")],
-            scorer_patterns=[(3, "x265 bonus", r"x265|HEVC", 50)],
-        )
-
-        good = engine.evaluate(
-            ProwlarrRelease(
-                title="Movie.2024.1080p.x265-RLSGRP",
-                size=int(1.5 * 1024**3),
-                seeders=10,
-                leechers=2,
-                download_url="http://example.com/1",
-                indexer="test",
-            )
-        )
-        rejected = engine.evaluate(
-            ProwlarrRelease(
-                title="Movie.2024.HDCAM.x264-RLSGRP",
-                size=int(1.5 * 1024**3),
-                seeders=10,
-                leechers=2,
-                download_url="http://example.com/2",
-                indexer="test",
-            )
-        )
-
-        assert good.release.title == "Movie.2024.1080p.x265-RLSGRP"
-        assert good.passed is True
-        assert good.rejection_reason is None
-        assert good.total_score == 50
-        assert [
-            (match.rule_name, match.score_delta) for match in good.matches if match.matched
-        ] == [
-            ("Movie Size", 0),
-            ("x265 bonus", 50),
-        ]
-
-        assert rejected.release.title == "Movie.2024.HDCAM.x264-RLSGRP"
-        assert rejected.passed is False
-        assert rejected.rejection_reason == "Matched exclusion pattern: Reject CAM"
-        assert rejected.total_score == 0
-        assert [match.rule_name for match in rejected.matches if match.matched] == [
-            "Movie Size",
-            "Reject CAM",
-        ]
-        assert [(match.rule_name, match.rule_type, match.effect) for match in good.matches] == [
-            ("Movie Size", "size_limit", "size_limit"),
-            ("Reject CAM", "exclusion", "disallow"),
-            ("x265 bonus", "scorer", "allow"),
-        ]
-
-    def test_evaluate_batch(self):
-        """Test batch evaluation."""
-        engine = RuleEngine(
-            requirement_patterns=[(1, "HD", r"1080p")],
-            scorer_patterns=[(2, "x265", r"x265", 50)],
-        )
-
-        releases = [
-            ProwlarrRelease(
-                title="Movie.2024.1080p.x264-RLSGRP",
-                size=1024,
-                seeders=10,
-                leechers=2,
-                download_url="url1",
-                indexer="test",
-            ),
-            ProwlarrRelease(
-                title="Movie.2024.1080p.x265-RLSGRP",
-                size=1024,
-                seeders=10,
-                leechers=2,
-                download_url="url2",
-                indexer="test",
-            ),
-        ]
-
-        results = engine.evaluate_batch(releases)
-
-        assert len(results) == 2
-        assert results[0].total_score == 50
-        assert results[0].release.title == "Movie.2024.1080p.x265-RLSGRP"
-
-    def test_get_best_release(self):
-        """Test getting best release."""
-        engine = RuleEngine(
-            scorer_patterns=[(1, "x265", r"x265", 50)],
-        )
-
-        releases = [
-            ProwlarrRelease(
-                title="Movie.2024.1080p.x264-RLSGRP",
-                size=1024,
-                seeders=10,
-                leechers=2,
-                download_url="url1",
-                indexer="test",
-            ),
-            ProwlarrRelease(
-                title="Movie.2024.1080p.x265-RLSGRP",
-                size=1024,
-                seeders=10,
-                leechers=2,
-                download_url="url2",
-                indexer="test",
-            ),
-        ]
-
-        best = engine.get_best_release(releases)
-
-        assert best is not None
-        assert best.total_score == 50
-        assert best.release.title == "Movie.2024.1080p.x265-RLSGRP"
-
-    def test_get_best_release_none_pass(self):
-        """Test getting best release when none pass."""
-        engine = RuleEngine(
-            exclusion_patterns=[(1, "Reject", r"CAM")],
-        )
-
-        releases = [
-            ProwlarrRelease(
-                title="Movie.CAM.x264-RLSGRP",
-                size=1024,
-                seeders=10,
-                leechers=2,
-                download_url="url1",
-                indexer="test",
-            ),
-        ]
-
-        best = engine.get_best_release(releases)
-
-        assert best is None
-
-    def test_multiple_exclusions_first_match_rejects(self):
-        """Test that first matching exclusion rejects."""
-        engine = RuleEngine(
-            exclusion_patterns=[
-                (1, "CAM", r"CAM"),
-                (2, "TS", r"TS"),
-            ],
-        )
-
-        release = ProwlarrRelease(
-            title="Movie.TS.x264-RLSGRP",
-            size=1024,
-            seeders=10,
-            leechers=2,
-            download_url="http://example.com",
-            indexer="test",
-        )
-
-        result = engine.evaluate(release)
-
-        assert result.passed is False
+        assert engine.evaluate(_release("Test.Movie.2024.x264-RLSGRP")).passed is True
 
     def test_cam_ts_rule_does_not_match_normal_words(self):
-        """Test that the camera/TS exclusion does not match substrings in words."""
         engine = RuleEngine(
             exclusion_patterns=[
                 (1, "Reject Camera/TS/Screener", r"\b(?:CAM|TS|HDCAM|SCR|TELESYNC)\b"),
             ],
         )
 
-        release = ProwlarrRelease(
-            title="What a Girl Wants 2003 1080p WEBRip x264",
-            size=1024,
-            seeders=10,
-            leechers=2,
-            download_url="http://example.com",
-            indexer="test",
+        assert engine.evaluate(_release("What a Girl Wants 2003 1080p WEBRip x264")).passed is True
+
+    @pytest.mark.parametrize(
+        ("requirement", "title", "passed"),
+        [
+            (r"1080p|720p", "Movie.2024.1080p.x264-RLSGRP", True),
+            (r"1080p|720p", "Movie.2024.480p.x264-RLSGRP", False),
+        ],
+        ids=["requirement-met", "requirement-missing"],
+    )
+    def test_evaluate_requirement(self, requirement, title, passed):
+        engine = RuleEngine(requirement_patterns=[(1, "HD required", requirement)])
+
+        result = engine.evaluate(_release(title))
+
+        assert result.passed is passed
+        if not passed:
+            assert result.rejection_reason == "No requirement patterns matched"
+
+    def test_evaluate_scorer_sums_matching_rules(self):
+        engine = RuleEngine(
+            scorer_patterns=[
+                (1, "x265 bonus", r"x265|HEVC", 50),
+                (2, "MeGusta bonus", r"MeGusta", 100),
+                (3, "No match", r"AV1", 7),
+            ],
         )
 
-        result = engine.evaluate(release)
+        result = engine.evaluate(_release("Movie.2024.1080p.x265-MeGusta-RLSGRP"))
 
         assert result.passed is True
+        assert result.total_score == 150
 
-    def test_exclusion_matches_release_group_when_title_does_not_match(self):
-        """Exclusion pattern should match against release_group when title doesn't match."""
+    @pytest.mark.parametrize(
+        ("kind", "pattern", "fields", "passed", "score"),
+        [
+            ("exclusion", "BadGroup", {"release_group": "BadGroup"}, False, 0),
+            (
+                "exclusion",
+                "BadUploader",
+                {"release_group": "G", "uploaded_by": "BadUploader"},
+                False,
+                0,
+            ),
+            ("requirement", "MeGusta|LAMA", {"release_group": "MeGusta"}, True, 0),
+            (
+                "requirement",
+                "MeGusta",
+                {"release_group": "Other", "uploaded_by": "Other"},
+                False,
+                0,
+            ),
+            ("scorer", "LAMA", {"release_group": "LAMA"}, True, 100),
+            (
+                "scorer",
+                "TopUploader",
+                {"release_group": "G", "uploaded_by": "TopUploader"},
+                True,
+                100,
+            ),
+        ],
+        ids=[
+            "exclusion-release-group",
+            "exclusion-uploaded-by",
+            "requirement-release-group",
+            "requirement-no-field-matches",
+            "scorer-release-group",
+            "scorer-uploaded-by",
+        ],
+    )
+    def test_patterns_also_match_release_group_and_uploader(
+        self, kind, pattern, fields, passed, score
+    ):
+        """The title does not match. Release group or uploader decides the result."""
         engine = RuleEngine(
-            exclusion_patterns=[(1, "Bad Group", r"BadGroup")],
+            exclusion_patterns=[(1, "rule", pattern)] if kind == "exclusion" else [],
+            requirement_patterns=[(1, "rule", pattern)] if kind == "requirement" else [],
+            scorer_patterns=[(1, "rule", pattern, 100)] if kind == "scorer" else [],
         )
 
-        release = ProwlarrRelease(
-            title="Movie.2024.1080p.x264",
-            release_group="BadGroup",
-            size=1024,
-            seeders=10,
-            leechers=2,
-            download_url="http://example.com",
-            indexer="test",
-        )
+        result = engine.evaluate(_release("Movie.2024.1080p.x264", **fields))
 
-        result = engine.evaluate(release)
+        assert result.passed is passed
+        assert result.total_score == score
 
-        assert result.passed is False
-        assert "exclusion" in (result.rejection_reason or "").lower()
-
-    def test_exclusion_matches_uploaded_by_when_title_does_not_match(self):
-        """Exclusion pattern should match against uploaded_by when title doesn't match."""
+    def test_evaluate_exposes_matches_rejection_and_score_per_release(self):
+        """Evaluation results carry UI-ready matched rules and decisions per title."""
         engine = RuleEngine(
-            exclusion_patterns=[(1, "Bad Uploader", r"BadUploader")],
+            size_limit_rules=[(1, "Movie Size", 1 * GB, 2 * GB)],
+            exclusion_patterns=[(2, "Reject CAM", r"CAM")],
+            scorer_patterns=[(3, "x265 bonus", r"x265|HEVC", 50)],
         )
 
-        release = ProwlarrRelease(
-            title="Movie.2024.1080p.x264",
-            release_group="SomeGroup",
-            uploaded_by="BadUploader",
-            size=1024,
-            seeders=10,
-            leechers=2,
-            download_url="http://example.com",
-            indexer="test",
-        )
+        good = engine.evaluate(_release("Movie.2024.1080p.x265-RLSGRP", 1.5 * GB))
+        rejected = engine.evaluate(_release("Movie.2024.HDCAM.x264-RLSGRP", 1.5 * GB))
 
-        result = engine.evaluate(release)
-
-        assert result.passed is False
-        assert "exclusion" in (result.rejection_reason or "").lower()
-
-    def test_requirement_matches_release_group_when_title_does_not_match(self):
-        """Requirement pattern should match against release_group when title doesn't match."""
-        engine = RuleEngine(
-            requirement_patterns=[(1, "Group Required", r"MeGusta|LAMA")],
-        )
-
-        release = ProwlarrRelease(
-            title="Movie.2024.1080p.x264",
-            release_group="MeGusta",
-            size=1024,
-            seeders=10,
-            leechers=2,
-            download_url="http://example.com",
-            indexer="test",
-        )
-
-        result = engine.evaluate(release)
-
-        assert result.passed is True
-
-    def test_scorer_matches_release_group_when_title_does_not_match(self):
-        """Scorer pattern should score against release_group when title doesn't match."""
-        engine = RuleEngine(
-            scorer_patterns=[(1, "Prefer LAMA", r"LAMA", 100)],
-        )
-
-        release = ProwlarrRelease(
-            title="Movie.2024.1080p.x264",
-            release_group="LAMA",
-            size=1024,
-            seeders=10,
-            leechers=2,
-            download_url="http://example.com",
-            indexer="test",
-        )
-
-        result = engine.evaluate(release)
-
-        assert result.passed is True
-        assert result.total_score == 100
-
-    def test_scorer_matches_uploaded_by_when_title_does_not_match(self):
-        """Scorer pattern should score against uploaded_by when title doesn't match."""
-        engine = RuleEngine(
-            scorer_patterns=[(1, "Prefer Uploader", r"TopUploader", 50)],
-        )
-
-        release = ProwlarrRelease(
-            title="Movie.2024.1080p.x264",
-            release_group="SomeGroup",
-            uploaded_by="TopUploader",
-            size=1024,
-            seeders=10,
-            leechers=2,
-            download_url="http://example.com",
-            indexer="test",
-        )
-
-        result = engine.evaluate(release)
-
-        assert result.passed is True
-        assert result.total_score == 50
-
-    def test_no_match_when_all_fields_differ_from_pattern(self):
-        """Rule should not match when none of title, release_group, or uploaded_by match."""
-        engine = RuleEngine(
-            requirement_patterns=[(1, "Need MeGusta", r"MeGusta")],
-        )
-
-        release = ProwlarrRelease(
-            title="Movie.2024.1080p.x264",
-            release_group="OtherGroup",
-            uploaded_by="OtherUploader",
-            size=1024,
-            seeders=10,
-            leechers=2,
-            download_url="http://example.com",
-            indexer="test",
-        )
-
-        result = engine.evaluate(release)
-
-        assert result.passed is False
-
-    def test_rule_match_dataclass(self):
-        """Test RuleMatch dataclass."""
-        match = RuleMatch(
-            rule_id=1,
-            rule_name="Test",
-            matched=True,
-            score_delta=50,
-        )
-
-        assert match.rule_id == 1
-        assert match.matched is True
-        assert match.score_delta == 50
-
-    def test_release_evaluation_dataclass(self):
-        """Test ReleaseEvaluation dataclass."""
-        release = ProwlarrRelease(
-            title="Test",
-            size=1024,
-            seeders=10,
-            leechers=2,
-            download_url="http://example.com",
-            indexer="test",
-        )
-
-        evaluation = ReleaseEvaluation(
-            release=release,
-            passed=True,
-            total_score=100,
-            matches=[],
-        )
-
-        assert evaluation.passed is True
-        assert evaluation.total_score == 100
-        assert evaluation.rejection_reason is None
+        assert good.release.title == "Movie.2024.1080p.x265-RLSGRP"
+        assert good.passed is True
+        assert good.rejection_reason is None
+        assert good.total_score == 50
+        assert [(m.rule_name, m.score_delta) for m in good.matches if m.matched] == [
+            ("Movie Size", 0),
+            ("x265 bonus", 50),
+        ]
+        assert rejected.passed is False
+        assert rejected.rejection_reason == "Matched exclusion pattern: Reject CAM"
+        assert rejected.total_score == 0
+        assert [m.rule_name for m in rejected.matches if m.matched] == ["Movie Size", "Reject CAM"]
+        assert [(m.rule_name, m.rule_type, m.effect) for m in good.matches] == [
+            ("Movie Size", "size_limit", "size_limit"),
+            ("Reject CAM", "exclusion", "disallow"),
+            ("x265 bonus", "scorer", "allow"),
+        ]

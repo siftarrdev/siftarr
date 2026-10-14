@@ -1,7 +1,13 @@
 // @ts-nocheck
 // Dashboard Staged Module - Staged tab polling and bulk actions
 // =============================================================
-import { bindCheckboxRangeSelection, escapeHtml } from '/static/js/dashboard/core.js';
+import {
+  bindCheckboxRangeSelection,
+  escapeHtml,
+  fetchPageDoc,
+  postWithConfirm,
+  promptEachWarning,
+} from '/static/js/dashboard/core.js';
 // Torrent Status tab poll intervals. The active/downloading sub-tab refreshes
 // aggressively; completed torrents barely change, so they poll slowly.
 const ACTIVE_DOWNLOADS_POLL_INTERVAL_MS = 1000;
@@ -399,11 +405,8 @@ export async function refreshStagedTabData() {
   const restore = window.saveTabState('staged');
   stagedTabRefreshInFlight = true;
   try {
-    const response = await fetch(window.location.pathname, { headers: { Accept: 'text/html' } });
-    if (!response.ok) return;
-    const html = await response.text();
-    const parser = new DOMParser();
-    const doc = parser.parseFromString(html, 'text/html');
+    const doc = await fetchPageDoc();
+    if (!doc) return;
     const newContent = doc.getElementById('content-staged');
     if (!newContent) return;
     stagedContent.innerHTML = newContent.innerHTML;
@@ -428,11 +431,8 @@ export async function refreshDownloadingTabData() {
   const restore = window.saveTabState('downloading');
   downloadingTabRefreshInFlight = true;
   try {
-    const response = await fetch(window.location.pathname, { headers: { Accept: 'text/html' } });
-    if (!response.ok) return;
-    const html = await response.text();
-    const parser = new DOMParser();
-    const doc = parser.parseFromString(html, 'text/html');
+    const doc = await fetchPageDoc();
+    if (!doc) return;
     const newContent = doc.getElementById('content-downloading');
     if (!newContent) return;
     downloadingContent.innerHTML = newContent.innerHTML;
@@ -483,22 +483,8 @@ export async function postStagedAction(actionUrl, redirectTo = '/?tab=staged') {
   try {
     const formData = new FormData();
     formData.append('redirect_to', redirectTo);
-    let response = await fetch(actionUrl, {
-      method: 'POST',
-      headers: { Accept: 'application/json' },
-      body: formData,
-    });
-    if (response.status === 409) {
-      const conflict = await response.json().catch(() => null);
-      const warnings = conflict?.detail?.warnings || [];
-      const requested = new Set();
-      for (const warning of warnings) {
-        if (!window.confirm(`${warning.message}\n\nApprove anyway?`)) return;
-        if (warning.code) requested.add(warning.code);
-      }
-      requested.forEach((code) => formData.append(`confirm_${code}`, 'true'));
-      response = await fetch(actionUrl, { method: 'POST', headers: { Accept: 'application/json' }, body: formData });
-    }
+    const { response, cancelled } = await postWithConfirm(actionUrl, formData, promptEachWarning('Approve anyway?'));
+    if (cancelled) return;
     if (!response.ok) {
       const errorData = await response.json().catch(() => null);
       throw new Error(errorData?.detail || errorData?.message || `Server error: ${response.status}`);
@@ -531,29 +517,18 @@ export async function bulkStagedAction(action) {
     formData.append('action', action);
     selectedIds.forEach((id) => formData.append('torrent_ids', id));
     formData.append('redirect_to', '/?tab=staged');
-    let response = await fetch('/staged/bulk', {
-      method: 'POST',
-      headers: { Accept: 'application/json' },
-      body: formData,
-    });
-    if (response.status === 409) {
-      const conflict = await response.json().catch(() => null);
-      const warnings = conflict?.detail?.warnings || [];
+    const { response, cancelled } = await postWithConfirm('/staged/bulk', formData, (warnings) => {
       const byCode = new Map();
       warnings.forEach((warning) => {
         if (!byCode.has(warning.code)) byCode.set(warning.code, []);
         byCode.get(warning.code).push(`#${warning.torrent_id} ${warning.title}: ${warning.message}`);
       });
-      for (const [code, messages] of byCode) {
-        if (!window.confirm(`${messages.join('\n')}\n\nApprove these anyway?`)) return;
-        formData.append(`confirm_${code}`, 'true');
-      }
-      response = await fetch('/staged/bulk', {
-        method: 'POST',
-        headers: { Accept: 'application/json' },
-        body: formData,
-      });
-    }
+      return Array.from(byCode, ([code, messages]) => ({
+        text: `${messages.join('\n')}\n\nApprove these anyway?`,
+        code,
+      }));
+    });
+    if (cancelled) return;
     if (!response.ok) {
       const errorData = await response.json().catch(() => null);
       throw new Error(errorData?.detail || errorData?.message || `Server error: ${response.status}`);

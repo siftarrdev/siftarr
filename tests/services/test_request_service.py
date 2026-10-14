@@ -1,6 +1,6 @@
 """Unit tests for app.siftarr.services.request_service."""
 
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import MagicMock
 
 import pytest
 from fastapi import HTTPException
@@ -14,6 +14,7 @@ from app.siftarr.services.request_service import (
     selection_redirect_url,
     validate_tv_request,
 )
+from tests.factories import make_request
 
 
 def _make_request(**overrides) -> MagicMock:
@@ -31,113 +32,83 @@ def _make_request(**overrides) -> MagicMock:
     return req
 
 
-# -- validate_tv_request --------------------------------------------------------
+def test_validate_tv_request_accepts_tv_and_rejects_movie() -> None:
+    validate_tv_request(_make_request(media_type=MediaType.TV))
+
+    with pytest.raises(HTTPException) as exc_info:
+        validate_tv_request(_make_request(media_type=MediaType.MOVIE))
+    assert exc_info.value.status_code == 400
+    assert "not a TV show" in exc_info.value.detail
 
 
-class TestValidateTvRequest:
-    def test_tv_request_passes(self) -> None:
-        request = _make_request(media_type=MediaType.TV)
-        validate_tv_request(request)  # should not raise
-
-    def test_movie_request_raises_400(self) -> None:
-        request = _make_request(media_type=MediaType.MOVIE)
-        with pytest.raises(HTTPException) as exc_info:
-            validate_tv_request(request)
-        assert exc_info.value.status_code == 400
-        assert "not a TV show" in exc_info.value.detail
+def test_ensure_tvdb_id_returns_id() -> None:
+    assert ensure_tvdb_id(_make_request(tvdb_id=123)) == 123
 
 
-# -- ensure_tvdb_id --------------------------------------------------------------
+@pytest.mark.parametrize("tvdb_id", [None, 0], ids=["none", "zero"])
+def test_ensure_tvdb_id_rejects_missing_id(tvdb_id) -> None:
+    with pytest.raises(HTTPException) as exc_info:
+        ensure_tvdb_id(_make_request(tvdb_id=tvdb_id))
+    assert exc_info.value.status_code == 400
+    assert "No TVDB ID" in exc_info.value.detail
 
 
-class TestEnsureTvdbId:
-    def test_present_tvdb_id_passes_and_returns_id(self) -> None:
-        request = _make_request(tvdb_id=123)
-        result = ensure_tvdb_id(request)
-        assert result == 123
-
-    def test_none_tvdb_id_raises_400(self) -> None:
-        request = _make_request(tvdb_id=None)
-        with pytest.raises(HTTPException) as exc_info:
-            ensure_tvdb_id(request)
-        assert exc_info.value.status_code == 400
-        assert "No TVDB ID" in exc_info.value.detail
-
-    def test_zero_tvdb_id_raises_400(self) -> None:
-        # tvdb_id = 0 is falsy and should also be rejected
-        request = _make_request(tvdb_id=0)
-        with pytest.raises(HTTPException) as exc_info:
-            ensure_tvdb_id(request)
-        assert exc_info.value.status_code == 400
-
-
-# -- selection_redirect_url ------------------------------------------------------
-
-
-class TestSelectionRedirectUrl:
-    def test_returns_redirect_to_when_provided(self) -> None:
-        request = _make_request(status=RequestStatus.PENDING)
-        assert selection_redirect_url("/?tab=active", request) == "/?tab=active"
-
-    def test_returns_pending_tab_for_pending_request(self) -> None:
-        request = _make_request(status=RequestStatus.PENDING)
-        assert selection_redirect_url(None, request) == "/?tab=pending"
-
-    def test_returns_active_tab_for_non_pending_request(self) -> None:
-        request = _make_request(status=RequestStatus.SEARCHING)
-        assert selection_redirect_url(None, request) == "/?tab=active"
-
-    def test_returns_active_tab_for_completed_request(self) -> None:
-        request = _make_request(status=RequestStatus.COMPLETED)
-        assert selection_redirect_url(None, request) == "/?tab=active"
-
-    def test_redirect_to_takes_priority_over_status(self) -> None:
-        request = _make_request(status=RequestStatus.SEARCHING)
-        assert selection_redirect_url("/custom", request) == "/custom"
-
-    def test_prefers_staged_tab_when_requested(self) -> None:
-        request = _make_request(status=RequestStatus.PENDING)
-        assert selection_redirect_url(None, request, prefer_staged_view=True) == "/?tab=staged"
+@pytest.mark.parametrize(
+    ("redirect_to", "status", "prefer_staged", "expected"),
+    [
+        ("/?tab=active", RequestStatus.PENDING, False, "/?tab=active"),
+        ("/custom", RequestStatus.SEARCHING, False, "/custom"),
+        (None, RequestStatus.PENDING, False, "/?tab=pending"),
+        (None, RequestStatus.SEARCHING, False, "/?tab=active"),
+        (None, RequestStatus.COMPLETED, False, "/?tab=active"),
+        (None, RequestStatus.PENDING, True, "/?tab=staged"),
+        ("https://evil.example/", RequestStatus.PENDING, True, "/?tab=staged"),
+    ],
+    ids=[
+        "explicit-redirect",
+        "explicit-redirect-beats-status",
+        "pending",
+        "searching",
+        "completed",
+        "prefer-staged",
+        "external-redirect-rejected",
+    ],
+)
+def test_selection_redirect_url(redirect_to, status, prefer_staged, expected) -> None:
+    request = _make_request(status=status)
+    result = selection_redirect_url(redirect_to, request, prefer_staged_view=prefer_staged)
+    assert result == expected
 
 
-# -- bulk_redirect_url ----------------------------------------------------------
+@pytest.mark.parametrize(
+    ("redirect_to", "expected"),
+    [
+        ("/?tab=active", "/?tab=active"),
+        (None, "/?tab=pending"),
+        ("", "/?tab=pending"),
+        ("https://evil.example/", "/?tab=pending"),
+        ("//evil.example/", "/?tab=pending"),
+        ("/\\evil.example/", "/?tab=pending"),
+    ],
+    ids=[
+        "explicit",
+        "none-defaults-to-pending",
+        "empty-defaults-to-pending",
+        "absolute-url-rejected",
+        "scheme-relative-rejected",
+        "backslash-rejected",
+    ],
+)
+def test_bulk_redirect_url(redirect_to, expected) -> None:
+    assert bulk_redirect_url(redirect_to) == expected
 
 
-class TestBulkRedirectUrl:
-    def test_returns_redirect_to_when_provided(self) -> None:
-        assert bulk_redirect_url("/?tab=active") == "/?tab=active"
+@pytest.mark.asyncio
+async def test_load_request_or_404(db) -> None:
+    stored = await make_request(db)
 
-    def test_defaults_to_pending_tab(self) -> None:
-        assert bulk_redirect_url(None) == "/?tab=pending"
-
-    def test_empty_string_defaults_to_pending(self) -> None:
-        # empty string is falsy, so it falls through to the default
-        assert bulk_redirect_url("") == "/?tab=pending"
-
-
-# -- load_request_or_404 ---------------------------------------------------------
-
-
-class TestLoadRequestOr404:
-    @pytest.mark.asyncio
-    async def test_returns_request_when_found(self) -> None:
-        mock_request = _make_request()
-        result_mock = MagicMock()
-        result_mock.scalar_one_or_none.return_value = mock_request
-        db = AsyncMock()
-        db.execute.return_value = result_mock
-
-        request = await load_request_or_404(db, 1)
-        assert request is mock_request
-
-    @pytest.mark.asyncio
-    async def test_raises_404_when_not_found(self) -> None:
-        result_mock = MagicMock()
-        result_mock.scalar_one_or_none.return_value = None
-        db = AsyncMock()
-        db.execute.return_value = result_mock
-
-        with pytest.raises(HTTPException) as exc_info:
-            await load_request_or_404(db, 999)
-        assert exc_info.value.status_code == 404
-        assert "not found" in exc_info.value.detail.lower()
+    assert (await load_request_or_404(db, stored.id)).id == stored.id
+    with pytest.raises(HTTPException) as exc_info:
+        await load_request_or_404(db, stored.id + 999)
+    assert exc_info.value.status_code == 404
+    assert "not found" in exc_info.value.detail.lower()

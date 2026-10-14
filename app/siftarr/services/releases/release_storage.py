@@ -2,7 +2,7 @@
 
 import logging
 from datetime import datetime
-from typing import Any, cast
+from typing import Any
 
 from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -13,7 +13,6 @@ from app.siftarr.services.decisions.rule_engine import ReleaseEvaluation
 from app.siftarr.services.integrations.prowlarr_service import ProwlarrRelease
 from app.siftarr.services.releases.release_parser import (
     cached_parse_release_coverage,
-    parse_season_episode,
     parse_stored_release_coverage,
     serialize_release_coverage,
 )
@@ -121,6 +120,53 @@ def _observation_metadata(release: ProwlarrRelease) -> dict[str, object]:
     }
 
 
+def release_columns(
+    release: ProwlarrRelease, evaluation: ReleaseEvaluation, *, source: str
+) -> dict[str, Any]:
+    """Map a Prowlarr release and its evaluation to Release column values."""
+    coverage = cached_parse_release_coverage(release.title)
+    rejection_reason = evaluation.rejection_reason
+    return {
+        "title": release.title,
+        "size": release.size,
+        "seeders": release.seeders,
+        "leechers": release.leechers,
+        "download_url": release.download_url,
+        "magnet_url": release.magnet_url,
+        "info_hash": release.info_hash,
+        "indexer": release.indexer,
+        "publish_date": release.publish_date,
+        "resolution": release.resolution,
+        "codec": release.codec,
+        "release_group": release.release_group,
+        "files": release.files,
+        "uploaded_by": release.uploaded_by,
+        "season_number": coverage.season_number,
+        "episode_number": coverage.episode_number,
+        "season_coverage": serialize_release_coverage(coverage),
+        "score": evaluation.total_score,
+        "passed_rules": evaluation.passed,
+        "rejection_reason": rejection_reason[:500]
+        if isinstance(rejection_reason, str) and rejection_reason
+        else None,
+        "search_source": source,
+    }
+
+
+def _evidence_columns(release: ProwlarrRelease, evaluation: ReleaseEvaluation) -> dict[str, Any]:
+    coverage = cached_parse_release_coverage(release.title)
+    return {
+        "rule_evidence": compact_rule_evidence(evaluation),
+        "release_parse_metadata": {
+            "season_number": coverage.season_number,
+            "episode_number": coverage.episode_number,
+            "season_numbers": list(coverage.season_numbers),
+            "is_complete_series": coverage.is_complete_series,
+            **_observation_metadata(release),
+        },
+    }
+
+
 async def store_search_results(
     db: AsyncSession,
     request_id: int,
@@ -183,79 +229,21 @@ async def store_search_results(
             continue
         seen_keys.add(dedupe_key)
 
-        parsed = parse_season_episode(release.title)
-        coverage = cached_parse_release_coverage(release.title)
-        rule_evidence = compact_rule_evidence(evaluation)
-        parse_metadata = {
-            "season_number": parsed.season_number,
-            "episode_number": parsed.episode_number,
-            "season_numbers": list(coverage.season_numbers),
-            "is_complete_series": coverage.is_complete_series,
-            **_observation_metadata(release),
+        columns = {
+            **release_columns(release, evaluation, source=source),
+            **_evidence_columns(release, evaluation),
         }
 
         existing = existing_by_key.get(dedupe_key)
         if existing is not None:
-            # UPDATE existing record
-            existing.size = release.size
-            existing.seeders = release.seeders
-            existing.leechers = release.leechers
-            existing.download_url = release.download_url
-            existing.magnet_url = release.magnet_url
-            existing.info_hash = release.info_hash
-            existing.indexer = release.indexer
-            existing.publish_date = release.publish_date
-            existing.resolution = release.resolution
-            existing.codec = release.codec
-            existing.release_group = release.release_group
-            existing.files = release.files
-            existing.uploaded_by = release.uploaded_by
-            existing.season_number = parsed.season_number
-            existing.episode_number = parsed.episode_number
-            existing.season_coverage = serialize_release_coverage(coverage)
-            existing.score = evaluation.total_score
-            existing.passed_rules = evaluation.passed
-            existing.rejection_reason = (
-                evaluation.rejection_reason[:500] if evaluation.rejection_reason else None
-            )
-            existing.rule_evidence = rule_evidence
-            cast(Any, existing).release_parse_metadata = parse_metadata
-            existing.search_source = source
+            for name, value in columns.items():
+                setattr(existing, name, value)
             records_by_key[dedupe_key] = existing
-            matched_keys.add(dedupe_key)
         else:
-            # INSERT new record
-            record = Release(
-                request_id=request_id,
-                title=release.title,
-                size=release.size,
-                seeders=release.seeders,
-                leechers=release.leechers,
-                download_url=release.download_url,
-                magnet_url=release.magnet_url,
-                info_hash=release.info_hash,
-                indexer=release.indexer,
-                publish_date=release.publish_date,
-                resolution=release.resolution,
-                codec=release.codec,
-                release_group=release.release_group,
-                files=release.files,
-                uploaded_by=release.uploaded_by,
-                season_number=parsed.season_number,
-                episode_number=parsed.episode_number,
-                season_coverage=serialize_release_coverage(coverage),
-                score=evaluation.total_score,
-                passed_rules=evaluation.passed,
-                rejection_reason=evaluation.rejection_reason[:500]
-                if evaluation.rejection_reason
-                else None,
-                rule_evidence=rule_evidence,
-                release_parse_metadata=parse_metadata,
-                search_source=source,
-            )
+            record = Release(request_id=request_id, **columns)
             db.add(record)
             records_by_key[dedupe_key] = record
-            matched_keys.add(dedupe_key)
+        matched_keys.add(dedupe_key)
 
     # Delete existing records not matched by any new evaluation
     stale_records = [
@@ -333,9 +321,6 @@ async def persist_manual_release(
     if not (release.magnet_url or release.download_url):
         raise RuntimeError(f"Release '{release.title}' has no usable download source.")
 
-    parsed = parse_season_episode(release.title)
-    coverage = cached_parse_release_coverage(release.title)
-
     if release.info_hash:
         filters = [Release.request_id == request.id, Release.info_hash == release.info_hash]
     else:
@@ -348,66 +333,17 @@ async def persist_manual_release(
     existing_result = await db.execute(select(Release).where(*filters))
     record = existing_result.scalar_one_or_none()
 
+    columns = {
+        **release_columns(release, evaluation, source="manual"),
+        **_evidence_columns(release, evaluation),
+    }
     if record is None:
-        record = Release(
-            request_id=request.id,
-            title=release.title,
-            size=release.size,
-            seeders=release.seeders,
-            leechers=release.leechers,
-            download_url=release.download_url,
-            magnet_url=release.magnet_url,
-            info_hash=release.info_hash,
-            indexer=release.indexer,
-            publish_date=release.publish_date,
-            resolution=release.resolution,
-            codec=release.codec,
-            release_group=release.release_group,
-            files=release.files,
-            uploaded_by=release.uploaded_by,
-            season_number=parsed.season_number,
-            episode_number=parsed.episode_number,
-            season_coverage=serialize_release_coverage(coverage),
-            score=evaluation.total_score,
-            passed_rules=evaluation.passed,
-            rejection_reason=evaluation.rejection_reason[:500]
-            if evaluation.rejection_reason
-            else None,
-            search_source="manual",
-        )
+        record = Release(request_id=request.id, **columns)
         db.add(record)
     else:
-        record.size = release.size
-        record.seeders = release.seeders
-        record.leechers = release.leechers
-        record.download_url = release.download_url
-        record.magnet_url = release.magnet_url
-        record.info_hash = release.info_hash
-        record.indexer = release.indexer
-        record.publish_date = release.publish_date
-        record.resolution = release.resolution
-        record.codec = release.codec
-        record.release_group = release.release_group
-        record.files = release.files
-        record.uploaded_by = release.uploaded_by
-        record.season_number = parsed.season_number
-        record.episode_number = parsed.episode_number
-        record.season_coverage = serialize_release_coverage(coverage)
-        record.score = evaluation.total_score
-        record.passed_rules = evaluation.passed
-        record.rejection_reason = (
-            evaluation.rejection_reason[:500] if evaluation.rejection_reason else None
-        )
-        record.search_source = "manual"
+        for name, value in columns.items():
+            setattr(record, name, value)
 
-    record.rule_evidence = compact_rule_evidence(evaluation)
-    record.release_parse_metadata = {
-        "season_number": parsed.season_number,
-        "episode_number": parsed.episode_number,
-        "season_numbers": list(coverage.season_numbers),
-        "is_complete_series": coverage.is_complete_series,
-        **_observation_metadata(release),
-    }
     await db.commit()
     await db.refresh(record)
     return record

@@ -142,24 +142,7 @@ async def load_tv_seasons_with_episodes(
     request_id: int,
 ) -> tuple[list[Any], list[Any]]:
     """Load seasons and episodes without per-season queries."""
-    from app.siftarr.models.episode import Episode
-    from app.siftarr.models.season import Season
-
-    seasons_result = await db.execute(
-        select(Season).where(Season.request_id == request_id).order_by(Season.season_number)
-    )
-    seasons = list(seasons_result.scalars().all())
-    if not seasons:
-        return [], []
-
-    season_ids = [season.id for season in seasons]
-    episodes_result = await db.execute(
-        select(Episode)
-        .where(Episode.season_id.in_(season_ids))
-        .order_by(Episode.season_id, Episode.episode_number)
-    )
-    episodes = list(episodes_result.scalars().all())
-    return seasons, episodes
+    return (await load_tv_seasons_with_episodes_bulk(db, {request_id}))[request_id]
 
 
 async def load_tv_seasons_with_episodes_bulk(

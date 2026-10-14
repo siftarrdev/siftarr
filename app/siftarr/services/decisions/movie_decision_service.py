@@ -142,7 +142,6 @@ class MovieDecisionService:
                 failures=[search_result.error],
                 outcome="pending",
                 status="completed",
-                counts={"total": 0, "passed": 0, "rejected": 0, "staged": 0, "sent": 0},
                 error=search_result.error,
             )
             return {
@@ -180,7 +179,6 @@ class MovieDecisionService:
                 failures=["No releases found"],
                 outcome="pending",
                 status="completed",
-                counts={"total": 0, "passed": 0, "rejected": 0, "staged": 0, "sent": 0},
             )
 
             logger.info(

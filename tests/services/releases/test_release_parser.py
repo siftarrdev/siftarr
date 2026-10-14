@@ -17,51 +17,89 @@ from app.siftarr.services.releases.release_parser import (
 from app.siftarr.services.releases.release_serializers import serialize_target_scope
 
 
-class TestParseSeasonEpisode:
-    def test_s01e05_extracts_season_and_episode(self):
-        result = parse_season_episode(".S01E05.")
-        assert result == ParsedSeasonEpisode(season_number=1, episode_number=5)
+@pytest.mark.parametrize(
+    ("text", "season", "episode"),
+    [
+        (".S01E05.", 1, 5),
+        (".s01e05.", 1, 5),
+        (".S12E03.", 12, 3),
+        (".S01E100.", 1, 100),
+        ("(S03E07)", 3, 7),
+        ("_S04E10_", 4, 10),
+        (".S01E03.S02E05.", 1, 3),
+        (".S01.", 1, None),
+        (".S05.1080p.", 5, None),
+        (".Season.2.", 2, None),
+        (".Season2.", 2, None),
+        ("Show.S01-S03.1080p", 1, None),
+        ("Some.Random.Title", None, None),
+        ("Movie.4K.Bluray", None, None),
+        ("", None, None),
+        ("Show.Complete.Series.1080p", None, None),
+    ],
+    ids=[
+        "episode",
+        "lowercase",
+        "two-digit-season",
+        "three-digit-episode",
+        "parentheses",
+        "underscores",
+        "multiple-returns-first",
+        "season-pack",
+        "season-pack-with-quality",
+        "season-word-dot",
+        "season-word-no-dot",
+        "multi-season-returns-first",
+        "no-match",
+        "4k-not-season",
+        "empty",
+        "complete-series-unparsed",
+    ],
+)
+def test_parse_season_episode(text, season, episode):
+    assert parse_season_episode(text) == ParsedSeasonEpisode(
+        season_number=season, episode_number=episode
+    )
 
 
 class TestTVReleaseIdentity:
-    def test_accepts_matching_title_without_explicit_year(self):
+    @pytest.mark.parametrize(
+        ("request_title", "request_year", "release_title"),
+        [
+            ("Parenthood", 2010, "Parenthood.S01E01.1080p.WEB-DL"),
+            ("Let’s", 2026, "Lets.S01E01.1080p.WEB-DL"),
+        ],
+        ids=["no-explicit-year", "unicode-apostrophe"],
+    )
+    def test_accepts(self, request_title, request_year, release_title):
         assert (
             tv_release_identity_rejection_reason(
-                request_title="Parenthood",
-                request_year=2010,
-                release_title="Parenthood.S01E01.1080p.WEB-DL",
+                request_title=request_title,
+                request_year=request_year,
+                release_title=release_title,
             )
             is None
         )
 
-    def test_accepts_release_without_metadata_unicode_apostrophe(self):
-        assert (
-            tv_release_identity_rejection_reason(
-                request_title="Let’s",
-                request_year=2026,
-                release_title="Lets.S01E01.1080p.WEB-DL",
-            )
-            is None
-        )
-
-    def test_rejects_episode_title_containing_requested_show_name(self):
+    @pytest.mark.parametrize(
+        ("request_title", "request_year", "release_title"),
+        [
+            ("Parenthood", 2010, "Evil.S03E08.The.Demon.of.Parenthood.1080p"),
+            ("Top Gear", 2002, "Top.Gear.US.S01E01.1080p"),
+            ("Parenthood", 2010, "Parenthood.2025.S01.1080p"),
+        ],
+        ids=["episode-title-contains-show", "longer-show-name-prefix", "wrong-year"],
+    )
+    def test_rejects(self, request_title, request_year, release_title):
         reason = tv_release_identity_rejection_reason(
-            request_title="Parenthood",
-            request_year=2010,
-            release_title="Evil.S03E08.The.Demon.of.Parenthood.1080p",
+            request_title=request_title,
+            request_year=request_year,
+            release_title=release_title,
         )
         assert reason is not None
         assert reason.startswith("TV identity mismatch")
 
-    def test_rejects_longer_show_name_with_matching_prefix(self):
-        reason = tv_release_identity_rejection_reason(
-            request_title="Top Gear",
-            request_year=2002,
-            release_title="Top.Gear.US.S01E01.1080p",
-        )
-        assert reason is not None
-
-    def test_rejects_matching_title_with_wrong_year(self):
+    def test_wrong_year_reason_names_both_years(self):
         assert (
             tv_release_identity_rejection_reason(
                 request_title="Parenthood",
@@ -71,244 +109,123 @@ class TestTVReleaseIdentity:
             == "TV identity mismatch: release year 2025 does not match request year 2010"
         )
 
-    def test_s02e12_extracts_season_and_episode(self):
-        result = parse_season_episode(".S02E12.")
-        assert result == ParsedSeasonEpisode(season_number=2, episode_number=12)
 
-    def test_s01_season_pack(self):
-        result = parse_season_episode(".S01.")
-        assert result == ParsedSeasonEpisode(season_number=1, episode_number=None)
-
-    def test_season_2_pack(self):
-        result = parse_season_episode(".Season.2.")
-        assert result == ParsedSeasonEpisode(season_number=2, episode_number=None)
-
-    def test_season2_without_dot(self):
-        result = parse_season_episode(".Season2.")
-        assert result == ParsedSeasonEpisode(season_number=2, episode_number=None)
-
-    def test_no_match_returns_none(self):
-        result = parse_season_episode("Some.Random.Title")
-        assert result == ParsedSeasonEpisode(season_number=None, episode_number=None)
-
-    def test_4k_returns_none(self):
-        result = parse_season_episode("Movie.4K.Bluray")
-        assert result == ParsedSeasonEpisode(season_number=None, episode_number=None)
-
-    def test_empty_string_returns_none(self):
-        result = parse_season_episode("")
-        assert result == ParsedSeasonEpisode(season_number=None, episode_number=None)
-
-    def test_multiple_matches_returns_first(self):
-        result = parse_season_episode(".S01E03.S02E05.")
-        assert result == ParsedSeasonEpisode(season_number=1, episode_number=3)
-
-    def test_season_episode_with_parentheses(self):
-        result = parse_season_episode("(S03E07)")
-        assert result == ParsedSeasonEpisode(season_number=3, episode_number=7)
-
-    def test_season_episode_with_underscores(self):
-        result = parse_season_episode("_S04E10_")
-        assert result == ParsedSeasonEpisode(season_number=4, episode_number=10)
-
-    def test_season_pack_not_confused_by_episode_in_adjacent_text(self):
-        result = parse_season_episode(".S05.1080p.")
-        assert result == ParsedSeasonEpisode(season_number=5, episode_number=None)
-
-    def test_season_episode_takes_priority_over_season_pack(self):
-        result = parse_season_episode(".S01E02.")
-        assert result.season_number == 1
-        assert result.episode_number == 2
-
-    def test_season_episode_case_insensitive(self):
-        result = parse_season_episode(".s01e05.")
-        assert result == ParsedSeasonEpisode(season_number=1, episode_number=5)
-
-    def test_two_digit_season(self):
-        result = parse_season_episode(".S12E03.")
-        assert result == ParsedSeasonEpisode(season_number=12, episode_number=3)
-
-    def test_three_digit_episode(self):
-        result = parse_season_episode(".S01E100.")
-        assert result == ParsedSeasonEpisode(season_number=1, episode_number=100)
-
-    def test_multi_season_pack_returns_first_season_for_legacy_callers(self):
-        result = parse_season_episode("Show.S01-S03.1080p")
-        assert result == ParsedSeasonEpisode(season_number=1, episode_number=None)
-
-    def test_complete_series_without_season_numbers_stays_unparsed_for_legacy_callers(self):
-        result = parse_season_episode("Show.Complete.Series.1080p")
-        assert result == ParsedSeasonEpisode(season_number=None, episode_number=None)
+def _coverage(*seasons, episode=None, complete=False):
+    return ParsedReleaseCoverage(
+        season_numbers=tuple(seasons), episode_number=episode, is_complete_series=complete
+    )
 
 
 class TestParseReleaseCoverage:
-    def test_exact_episode_coverage_and_display_scope(self):
-        title = "Show.S01E02.1080p"
-        assert parse_release_coverage(title) == ParsedReleaseCoverage(
-            season_numbers=(1,), episode_number=2
-        )
-        assert serialize_target_scope(media_type=MediaType.TV, title=title) == {
-            "type": "single_episode",
-            "season_number": 1,
-            "episode_number": 2,
-        }
+    @pytest.mark.parametrize(
+        ("title", "expected"),
+        [
+            ("Show.S01E02.1080p", _coverage(1, episode=2)),
+            ("Show.S01E02.S01-S03.1080p", _coverage(1, episode=2)),
+            ("Show.S01E02.Complete.1080p", _coverage(1, episode=2)),
+            (".S01.", _coverage(1)),
+            ("Show.S01.S02.S03.1080p", _coverage(1, 2, 3)),
+            ("Show.S01-S05.1080p", _coverage(1, 2, 3, 4, 5)),
+            ("Show.S01-07.1080p", _coverage(*range(1, 8))),
+            ("Show.S1-7.1080p", _coverage(*range(1, 8))),
+            ("Show.Season 1-3.1080p", _coverage(1, 2, 3)),
+            ("Show.Seasons 1 thru 7.1080p", _coverage(*range(1, 8))),
+            ("Show.Season 1 through 5.1080p", _coverage(1, 2, 3, 4, 5)),
+            ("Show.SEASONS 2 THRU 9.1080p", _coverage(*range(2, 10))),
+            ("Show.Seasons 3 through 6.720p", _coverage(3, 4, 5, 6)),
+            ("Show.Complete.Series.1080p", _coverage(complete=True)),
+            ("Show.Complete.1080p", _coverage(complete=True)),
+            ("Show.S01-S03.Complete.Series.1080p", _coverage(1, 2, 3, complete=True)),
+            ("Show.Complete.S01.1080p", _coverage(1)),
+            ("Show.S01.Complete.1080p", _coverage(1)),
+            ("Movie.4K.Bluray", _coverage()),
+        ],
+        ids=[
+            "episode",
+            "episode-beats-pack",
+            "complete-episode-stays-episode",
+            "single-season",
+            "repeated-season-tokens",
+            "sxx-range",
+            "compact-range",
+            "compact-single-digit-range",
+            "season-word-range",
+            "thru",
+            "through",
+            "thru-uppercase",
+            "through-720p",
+            "complete-series",
+            "bare-complete",
+            "complete-series-with-seasons",
+            "complete-single-season-prefix-stays-single-season",
+            "complete-single-season-suffix-stays-single-season",
+            "no-match",
+        ],
+    )
+    def test_coverage(self, title, expected):
+        assert parse_release_coverage(title) == expected
 
-    def test_single_season_pack(self):
-        result = parse_release_coverage(".S01.")
-        assert result == ParsedReleaseCoverage(season_numbers=(1,), episode_number=None)
+    @pytest.mark.parametrize(
+        ("title", "scope"),
+        [
+            (
+                "Show.S01E02.1080p",
+                {"type": "single_episode", "season_number": 1, "episode_number": 2},
+            ),
+            (
+                "Show.S01-S05.1080p",
+                {"type": "multi_season_pack", "season_numbers": [1, 2, 3, 4, 5]},
+            ),
+            ("Show.Complete.Series.1080p", {"type": "complete_series"}),
+            ("Movie.4K.Bluray", {"type": "unknown"}),
+            (
+                "Show.S01E01-E03.1080p",
+                {"type": "multi_episode_pack", "season_number": 1, "first_episode_number": 1},
+            ),
+        ],
+        ids=["single-episode", "multi-season", "complete-series", "unknown", "multi-episode"],
+    )
+    def test_target_scope(self, title, scope):
+        assert serialize_target_scope(media_type=MediaType.TV, title=title) == scope
 
-    def test_multi_season_sxx_range(self):
-        result = parse_release_coverage("Show.S01-S05.1080p")
-        assert result == ParsedReleaseCoverage(season_numbers=(1, 2, 3, 4, 5), episode_number=None)
-        assert serialize_target_scope(media_type=MediaType.TV, title="Show.S01-S05.1080p") == {
-            "type": "multi_season_pack",
-            "season_numbers": [1, 2, 3, 4, 5],
-        }
-
-    def test_multi_season_compact_sxx_range_without_repeated_s(self):
-        result = parse_release_coverage("Show.S01-07.1080p")
-        assert result == ParsedReleaseCoverage(
-            season_numbers=(1, 2, 3, 4, 5, 6, 7),
-            episode_number=None,
-        )
-
-    def test_multi_season_compact_single_digit_sxx_range(self):
-        result = parse_release_coverage("Show.S1-7.1080p")
-        assert result == ParsedReleaseCoverage(
-            season_numbers=(1, 2, 3, 4, 5, 6, 7),
-            episode_number=None,
-        )
-
-    def test_multi_season_word_range(self):
-        result = parse_release_coverage("Show.Season 1-3.1080p")
-        assert result == ParsedReleaseCoverage(season_numbers=(1, 2, 3), episode_number=None)
-
-    def test_repeated_season_tokens(self):
-        result = parse_release_coverage("Show.S01.S02.S03.1080p")
-        assert result == ParsedReleaseCoverage(season_numbers=(1, 2, 3), episode_number=None)
-
-    def test_episode_takes_priority_over_pack_coverage(self):
-        result = parse_release_coverage("Show.S01E02.S01-S03.1080p")
-        assert result == ParsedReleaseCoverage(season_numbers=(1,), episode_number=2)
-
-    def test_complete_series_flag_without_season_numbers(self):
-        result = parse_release_coverage("Show.Complete.Series.1080p")
-        assert result == ParsedReleaseCoverage(
-            season_numbers=(),
-            episode_number=None,
-            is_complete_series=True,
-        )
-        assert serialize_target_scope(
-            media_type=MediaType.TV, title="Show.Complete.Series.1080p"
-        ) == {"type": "complete_series"}
-
-    def test_bare_complete_marks_complete_series(self):
-        result = parse_release_coverage("Show.Complete.1080p")
-        assert result == ParsedReleaseCoverage(
-            season_numbers=(),
-            episode_number=None,
-            is_complete_series=True,
-        )
-
-    def test_complete_series_with_season_numbers(self):
-        result = parse_release_coverage("Show.S01-S03.Complete.Series.1080p")
-        assert result == ParsedReleaseCoverage(
-            season_numbers=(1, 2, 3),
-            episode_number=None,
-            is_complete_series=True,
-        )
-
-    def test_complete_single_season_prefix_stays_single_season(self):
-        result = parse_release_coverage("Show.Complete.S01.1080p")
-        assert result == ParsedReleaseCoverage(
-            season_numbers=(1,),
-            episode_number=None,
-        )
-
-    def test_complete_single_season_suffix_stays_single_season(self):
-        result = parse_release_coverage("Show.S01.Complete.1080p")
-        assert result == ParsedReleaseCoverage(
-            season_numbers=(1,),
-            episode_number=None,
-        )
-
-    def test_complete_episode_title_stays_exact_episode(self):
-        result = parse_release_coverage("Show.S01E02.Complete.1080p")
-        assert result == ParsedReleaseCoverage(
-            season_numbers=(1,),
-            episode_number=2,
-        )
-
-    def test_no_match_returns_empty_coverage(self):
-        result = parse_release_coverage("Movie.4K.Bluray")
-        assert result == ParsedReleaseCoverage(season_numbers=(), episode_number=None)
-        assert serialize_target_scope(media_type=MediaType.TV, title="Movie.4K.Bluray") == {
-            "type": "unknown"
-        }
-
-    def test_multi_episode_pack_classifies_separately_from_exact_episode_or_season_pack(self):
+    def test_multi_episode_pack_is_not_exact_single_episode(self):
         title = "Show.S01E01-E03.1080p"
-        assert parse_release_coverage(title) == ParsedReleaseCoverage(
-            season_numbers=(1,), episode_number=1
-        )
+        assert parse_release_coverage(title) == _coverage(1, episode=1)
         assert is_multi_episode_release(title) is True
         assert is_exact_single_episode_release(title, 1, 1) is False
-        assert serialize_target_scope(media_type=MediaType.TV, title=title) == {
-            "type": "multi_episode_pack",
-            "season_number": 1,
-            "first_episode_number": 1,
-        }
-
-    def test_multi_season_thru_range(self):
-        result = parse_release_coverage("Show.Seasons 1 thru 7.1080p")
-        assert result == ParsedReleaseCoverage(
-            season_numbers=(1, 2, 3, 4, 5, 6, 7),
-            episode_number=None,
-        )
-
-    def test_multi_season_through_range(self):
-        result = parse_release_coverage("Show.Season 1 through 5.1080p")
-        assert result == ParsedReleaseCoverage(
-            season_numbers=(1, 2, 3, 4, 5),
-            episode_number=None,
-        )
-
-    def test_multi_season_thru_range_case_insensitive(self):
-        result = parse_release_coverage("Show.SEASONS 2 THRU 9.1080p")
-        assert result == ParsedReleaseCoverage(
-            season_numbers=(2, 3, 4, 5, 6, 7, 8, 9),
-            episode_number=None,
-        )
-
-    def test_multi_season_through_range_with_optional_season_prefix(self):
-        result = parse_release_coverage("Show.Seasons 3 through 6.720p")
-        assert result == ParsedReleaseCoverage(
-            season_numbers=(3, 4, 5, 6),
-            episode_number=None,
-        )
 
 
-class TestIsExactSingleEpisodeRelease:
-    def test_exact_single_episode_match(self):
-        assert is_exact_single_episode_release("Show.S01E02.1080p", 1, 2) is True
-
-    def test_wrong_season(self):
-        assert is_exact_single_episode_release("Show.S01E02.1080p", 2, 2) is False
-
-    def test_wrong_episode(self):
-        assert is_exact_single_episode_release("Show.S01E02.1080p", 1, 3) is False
-
-    def test_multi_episode_e01e02(self):
-        assert is_exact_single_episode_release("Show.S01E01E02.1080p", 1, 1) is False
-
-    def test_range_episode_dash_e02(self):
-        assert is_exact_single_episode_release("Show.S01E01-E02.1080p", 1, 1) is False
-
-    def test_season_pack_no_episode(self):
-        assert is_exact_single_episode_release("Show.S01.1080p", 1, 1) is False
-
-    def test_complete_series(self):
-        assert is_exact_single_episode_release("Show.Complete.1080p", 1, 1) is False
+@pytest.mark.parametrize(
+    ("title", "season", "episode", "expected"),
+    [
+        ("Show.S01E02.1080p", 1, 2, True),
+        ("Show.S03E07.720p.WEB-DL", 3, 7, True),
+        ("show.s01e02.1080p", 1, 2, True),
+        ("Show.S01E02.1080p", 2, 2, False),
+        ("Show.S01E02.1080p", 1, 3, False),
+        ("Show.S01E01E02.1080p", 1, 1, False),
+        ("Show.S01E01-E02.1080p", 1, 1, False),
+        ("Show.S01E02.E03.1080p", 1, 2, False),
+        ("Show.S01.1080p", 1, 1, False),
+        ("Show.Complete.1080p", 1, 1, False),
+        ("Some.Random.Title", 1, 1, False),
+    ],
+    ids=[
+        "match",
+        "match-with-resolution",
+        "case-insensitive",
+        "wrong-season",
+        "wrong-episode",
+        "multi-episode-e01e02",
+        "range-dash-e02",
+        "multi-episode-extra-token",
+        "season-pack",
+        "complete-series",
+        "no-pattern",
+    ],
+)
+def test_is_exact_single_episode_release(title, season, episode, expected):
+    assert is_exact_single_episode_release(title, season, episode) is expected
 
 
 class TestMovieReleaseIdentity:
@@ -317,12 +234,23 @@ class TestMovieReleaseIdentity:
         assert result.title == "The.Cheetah.Girls"
         assert result.year == 2003
 
-    def test_exact_title_variant_passes(self):
+    @pytest.mark.parametrize(
+        ("request_title", "request_year", "release_title"),
+        [
+            ("The Cheetah Girls", 2003, "the.cheetah-girls.(2003).1080p.WEB-DL"),
+            ("The Cheetah Girls", 2003, "The.Cheetah.Girls.1080p.WEB-DL"),
+            ("1917", 2019, "1917.2019.1080p.BluRay.x265"),
+            ("Blade Runner 2049", 2017, "Blade.Runner.2049.2017.1080p.WEB-DL"),
+            ("2012", 2009, "2012.2009.1080p.BluRay.x264"),
+        ],
+        ids=["title-variant", "missing-release-year", "1917", "blade-runner-2049", "2012"],
+    )
+    def test_accepts(self, request_title, request_year, release_title):
         assert (
             movie_release_identity_rejection_reason(
-                request_title="The Cheetah Girls",
-                request_year=2003,
-                release_title="the.cheetah-girls.(2003).1080p.WEB-DL",
+                request_title=request_title,
+                request_year=request_year,
+                release_title=release_title,
             )
             is None
         )
@@ -345,51 +273,3 @@ class TestMovieReleaseIdentity:
         assert (
             reason == "Movie identity mismatch: release year 2005 does not match request year 2003"
         )
-
-    def test_missing_release_year_does_not_reject_exact_title(self):
-        assert (
-            movie_release_identity_rejection_reason(
-                request_title="The Cheetah Girls",
-                request_year=2003,
-                release_title="The.Cheetah.Girls.1080p.WEB-DL",
-            )
-            is None
-        )
-
-    @pytest.mark.parametrize(
-        ("request_title", "request_year", "release_title"),
-        [
-            ("1917", 2019, "1917.2019.1080p.BluRay.x265"),
-            ("Blade Runner 2049", 2017, "Blade.Runner.2049.2017.1080p.WEB-DL"),
-            ("2012", 2009, "2012.2009.1080p.BluRay.x264"),
-        ],
-    )
-    def test_exact_titles_with_year_like_tokens_pass(
-        self, request_title, request_year, release_title
-    ):
-        assert (
-            movie_release_identity_rejection_reason(
-                request_title=request_title,
-                request_year=request_year,
-                release_title=release_title,
-            )
-            is None
-        )
-
-    def test_no_pattern_at_all(self):
-        assert is_exact_single_episode_release("Some.Random.Title", 1, 1) is False
-
-    def test_exact_match_with_resolution_suffix(self):
-        assert is_exact_single_episode_release("Show.S03E07.720p.WEB-DL", 3, 7) is True
-
-    def test_multi_episode_with_additional_token(self):
-        assert is_exact_single_episode_release("Show.S01E02.E03.1080p", 1, 2) is False
-
-    def test_case_insensitive(self):
-        assert is_exact_single_episode_release("show.s01e02.1080p", 1, 2) is True
-
-    def test_two_digit_season(self):
-        assert is_exact_single_episode_release("Show.S12E05.1080p", 12, 5) is True
-
-    def test_three_digit_episode(self):
-        assert is_exact_single_episode_release("Show.S01E100.1080p", 1, 100) is True

@@ -4,13 +4,11 @@ import json
 import logging
 import os
 import secrets
-from collections.abc import AsyncGenerator
 from typing import Any
 
 from fastapi import APIRouter, Depends, File, Form, Query, Request, UploadFile
 from fastapi.responses import (
     HTMLResponse,
-    JSONResponse,
     RedirectResponse,
     Response,
     StreamingResponse,
@@ -19,58 +17,31 @@ from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.siftarr import database as db_mod
 from app.siftarr.config import get_settings, reload_settings
 from app.siftarr.database import get_db
-from app.siftarr.services.admin.plex_polling_service import PlexPollingService
-from app.siftarr.services.admin.scheduler_service import (
-    PLEX_POLL_JOB_NAME,
-    PLEX_RECENT_SCAN_JOB_NAME,
-)
 from app.siftarr.services.admin.settings_service import (
     ENV_KEY_MAP,
     SettingsBackupError,
     SettingsStore,
-    build_effective_settings,
     build_manual_plex_job_message,
-    build_sse_progress,
+    import_overseerr_requests,
     mask_secret,
-    prepare_overseerr_import,
     record_initial_plex_sync_completion,
-)
-from app.siftarr.services.admin.settings_service import (
-    build_plex_job_statuses as build_plex_job_statuses_svc,
+    rescan_plex_generator,
+    rescan_plex_requests,
+    sync_overseerr_generator,
 )
 from app.siftarr.services.admin.settings_service import (
     build_settings_page_context as build_settings_page_context_svc,
-)
-from app.siftarr.services.admin.settings_service import (
-    import_overseerr_requests as import_overseerr_requests_svc,
-)
-from app.siftarr.services.admin.settings_service import (
-    rescan_plex_generator as rescan_plex_generator_svc,
-)
-from app.siftarr.services.admin.settings_service import (
-    rescan_plex_requests as rescan_plex_requests_svc,
-)
-from app.siftarr.services.admin.settings_service import (
-    rescan_plex_tv_request as rescan_plex_tv_request_svc,
-)
-from app.siftarr.services.admin.settings_service import (
-    run_bounded_with_progress as run_bounded_with_progress_svc,
-)
-from app.siftarr.services.admin.settings_service import (
-    sync_overseerr_generator as sync_overseerr_generator_svc,
 )
 from app.siftarr.services.decisions.rule_service import RuleService
 from app.siftarr.services.integrations.connection_tester import (
     ConnectionTester,
     ConnectionTestResult,
 )
-from app.siftarr.services.integrations.overseerr_service import OverseerrService
 from app.siftarr.services.integrations.plex_service import PlexService
-from app.siftarr.services.lifecycle.unreleased_service import evaluate_imported_request
 from app.siftarr.services.releases.release_storage import clear_release_search_cache
+from app.siftarr.services.utils.sse import sse_response
 from app.siftarr.templating import configure_templates
 
 router = APIRouter(prefix="/settings", tags=["settings"])
@@ -116,15 +87,6 @@ class ApiKeyResponse(BaseModel):
 # ── Convenience helpers (not pass-through; provide router-level defaults) ──
 
 
-async def _build_plex_job_statuses(db) -> list[dict[str, Any]]:
-    """Build Plex job statuses with router-scoped job name constants."""
-    return await build_plex_job_statuses_svc(
-        db,
-        recent_scan_job_name=PLEX_RECENT_SCAN_JOB_NAME,
-        poll_job_name=PLEX_POLL_JOB_NAME,
-    )
-
-
 async def _build_settings_page_context(
     request: Request,
     db: AsyncSession,
@@ -138,7 +100,6 @@ async def _build_settings_page_context(
     return await build_settings_page_context_svc(
         request,
         db,
-        build_plex_job_statuses_func=_build_plex_job_statuses,
         effective_settings_override=effective_settings,
     )
 
@@ -197,62 +158,6 @@ def _restart_scheduler_if_running() -> None:
     if scheduler_service is not None and scheduler_service.scheduler is not None:
         scheduler_service.stop()
         scheduler_service.start()
-
-
-async def _run_bounded_with_progress(
-    items: list[Any],
-    limit: int,
-    worker,
-    *,
-    on_event,
-    phase: str,
-) -> list[Any]:
-    """Thin wrapper that injects router-level SSE progress builder."""
-    return await run_bounded_with_progress_svc(
-        items,
-        limit,
-        worker,
-        on_event=on_event,
-        phase=phase,
-        build_sse_progress_func=build_sse_progress,
-    )
-
-
-async def _rescan_plex_tv_request(
-    request_id: int,
-    plex,
-    runtime_settings,
-) -> bool:
-    """Thin wrapper that injects router-level session maker and logger."""
-    return await rescan_plex_tv_request_svc(
-        request_id,
-        plex,
-        runtime_settings,
-        session_maker=db_mod.async_session_maker,
-        logger=logger,
-    )
-
-
-async def _rescan_plex_requests(
-    db,
-    runtime_settings,
-    plex,
-    *,
-    on_event=None,
-    shallow: bool = False,
-) -> tuple[int, int, int]:
-    """Convenience wrapper that injects router-level service defaults."""
-    return await rescan_plex_requests_svc(
-        db,
-        runtime_settings,
-        plex,
-        on_event=on_event,
-        shallow=shallow,
-        plex_polling_service_cls=PlexPollingService,
-        build_sse_progress_func=build_sse_progress,
-        run_bounded_with_progress_func=_run_bounded_with_progress,
-        rescan_plex_tv_request_func=_rescan_plex_tv_request,
-    )
 
 
 async def _clear_runtime_settings(store: SettingsStore, *keys: str) -> None:
@@ -524,22 +429,6 @@ async def restore_settings_backup(
 # ── Connection testing API routes ─────────────────────────────────────────
 
 
-@router.get("/api/connections", response_model=dict)
-async def get_connections_api(db: AsyncSession = Depends(get_db)) -> dict:
-    """Get current connection settings (for API)."""
-    store = SettingsStore(db)
-    effective = await store.get_effective_dict()
-    return {
-        "overseerr_url": effective["overseerr_url"],
-        "overseerr_api_key": effective["overseerr_api_key"],
-        "prowlarr_url": effective["prowlarr_url"],
-        "prowlarr_api_key": effective["prowlarr_api_key"],
-        "qbittorrent_url": effective["qbittorrent_url"],
-        "qbittorrent_api_key": effective["qbittorrent_api_key"],
-        "tz": effective["tz"],
-    }
-
-
 @router.post("/api/test/overseerr", response_model=ConnectionTestResponse)
 async def test_overseerr_connection(db: AsyncSession = Depends(get_db)) -> ConnectionTestResponse:
     """Test connection to Overseerr."""
@@ -664,7 +553,7 @@ async def rescan_plex(
     try:
         runtime_settings = get_settings()
         plex = PlexService(settings=runtime_settings)
-        tv_resynced, tv_failed, completed = await _rescan_plex_requests(
+        tv_resynced, tv_failed, completed = await rescan_plex_requests(
             db,
             runtime_settings,
             plex,
@@ -733,7 +622,6 @@ async def run_recent_plex_scan(
         "Recent Plex scan",
         result,
     )
-    context["plex_jobs"] = await _build_plex_job_statuses(db)
     return templates.TemplateResponse(request, "settings.html", context)
 
 
@@ -755,7 +643,6 @@ async def run_plex_poll(
         "Plex poll",
         result,
     )
-    context["plex_jobs"] = await _build_plex_job_statuses(db)
     return templates.TemplateResponse(request, "settings.html", context)
 
 
@@ -775,28 +662,6 @@ async def run_qbit_move(
     result = await scheduler_service.trigger_download_completion_now()
     context["message"], context["message_type"] = _qbit_move_message(result)
     return templates.TemplateResponse(request, "settings.html", context)
-
-
-@router.post("/api/run-qbit-move")
-async def run_qbit_move_api() -> JSONResponse:
-    """API endpoint for manually triggering guarded qBittorrent move workflow."""
-    scheduler_service = _get_scheduler_service()
-    if scheduler_service is None:
-        return JSONResponse(
-            {"status": "error", "error": "Scheduler not available"}, status_code=503
-        )
-    result = await scheduler_service.trigger_download_completion_now()
-    status_code = 409 if result.status == "locked" else 500 if result.status == "error" else 200
-    return JSONResponse(
-        {
-            "status": result.status,
-            "moved": result.moved,
-            "removed": result.removed,
-            "errors": result.errors,
-            "error": result.error,
-        },
-        status_code=status_code,
-    )
 
 
 # ── Maintenance routes ─────────────────────────────────────────────────────
@@ -858,26 +723,11 @@ async def rescan_plex_stream(
     def mark_initial_gate_complete() -> None:
         record_initial_plex_sync_completion(gate_id, user_id)
 
-    async def _inner() -> AsyncGenerator[str]:
-        async for event in rescan_plex_generator_svc(
+    return sse_response(
+        rescan_plex_generator(
             shallow=partial,
-            async_session_maker=db_mod.async_session_maker,
-            plex_service_cls=PlexService,
-            rescan_plex_requests_func=_rescan_plex_requests,
-            build_sse_progress_func=build_sse_progress,
-            logger=logger,
             on_full_sync_complete=mark_initial_gate_complete,
-        ):
-            yield event
-
-    return StreamingResponse(
-        _inner(),
-        media_type="text/event-stream",
-        headers={
-            "Cache-Control": "no-cache",
-            "Connection": "keep-alive",
-            "X-Accel-Buffering": "no",
-        },
+        )
     )
 
 
@@ -885,29 +735,7 @@ async def rescan_plex_stream(
 async def sync_overseerr_stream() -> StreamingResponse:
     """Stream Overseerr sync progress via SSE."""
 
-    async def _inner() -> AsyncGenerator[str]:
-        async for event in sync_overseerr_generator_svc(
-            async_session_maker=db_mod.async_session_maker,
-            build_effective_settings_func=build_effective_settings,
-            import_overseerr_requests_func=import_overseerr_requests_svc,
-            build_sse_progress_func=build_sse_progress,
-            logger=logger,
-            overseerr_service_cls=OverseerrService,
-            plex_service_cls=PlexService,
-            evaluate_imported_request_func=evaluate_imported_request,
-            prepare_overseerr_import_func=prepare_overseerr_import,
-        ):
-            yield event
-
-    return StreamingResponse(
-        _inner(),
-        media_type="text/event-stream",
-        headers={
-            "Cache-Control": "no-cache",
-            "Connection": "keep-alive",
-            "X-Accel-Buffering": "no",
-        },
-    )
+    return sse_response(sync_overseerr_generator())
 
 
 @router.post("/sync-overseerr")
@@ -929,14 +757,9 @@ async def sync_overseerr(
 
     try:
         runtime_settings = get_settings()
-        synced_count, skipped_count = await import_overseerr_requests_svc(
+        synced_count, skipped_count = await import_overseerr_requests(
             db,
             runtime_settings,
-            overseerr_service_cls=OverseerrService,
-            plex_service_cls=PlexService,
-            evaluate_imported_request_func=evaluate_imported_request,
-            prepare_overseerr_import_func=prepare_overseerr_import,
-            logger=logger,
         )
         if synced_count > 0:
             context["message"] = f"Synced {synced_count} new request(s) from Overseerr"

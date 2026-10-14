@@ -1,11 +1,12 @@
 """Tests for OverseerrService."""
 
-from unittest.mock import AsyncMock, MagicMock, patch
+import json
 
 import httpx
 import pytest
 
-from app.siftarr.services.integrations import overseerr_service
+from app.siftarr.config import Settings
+from app.siftarr.services.integrations import overseerr_service as overseerr_module
 from app.siftarr.services.integrations.overseerr_service import (
     OverseerrFetchError,
     OverseerrService,
@@ -17,787 +18,326 @@ from app.siftarr.services.integrations.overseerr_service import (
 
 @pytest.fixture(autouse=True)
 def clear_cache_between_tests():
-    overseerr_service.clear_media_details_cache()
+    overseerr_module.clear_media_details_cache()
     yield
-    overseerr_service.clear_media_details_cache()
+    overseerr_module.clear_media_details_cache()
 
 
-class TestOverseerrService:
-    """Test cases for OverseerrService."""
+def _unconfigured(url, api_key) -> OverseerrService:
+    return OverseerrService(Settings(overseerr_url=url, overseerr_api_key=api_key))
 
-    def test_init(self):
-        """Test service initialization."""
-        with patch(
-            "app.siftarr.services.integrations.overseerr_service.get_settings"
-        ) as mock_get_settings:
-            mock_settings = MagicMock()
-            mock_settings.overseerr_url = "http://localhost:5055"
-            mock_settings.overseerr_api_key = "test_api_key"
-            mock_get_settings.return_value = mock_settings
 
-            service = OverseerrService()
+class TestUnconfigured:
+    @pytest.mark.parametrize(
+        ("url", "api_key"),
+        [("", "test"), (None, "test"), ("http://localhost:5055", "")],
+        ids=["empty_url", "unset_url", "empty_api_key"],
+    )
+    async def test_every_call_is_skipped_without_http(self, http_stub, url, api_key):
+        """Missing config must short-circuit; an unset URL must not become the string "None"."""
+        service = _unconfigured(url, api_key)
 
-            assert service.base_url == "http://localhost:5055"
-            assert service.api_key == "test_api_key"
+        assert service.base_url in ("", "http://localhost:5055")
+        assert await service.get_requests() == []
+        assert await service.get_request(1) is None
+        assert await service.get_media_details("movie", 123) is None
+        assert await service.decline_request(1) is False
+        assert await service.approve_request(1) is False
+        assert http_stub.requests == []
 
-    def test_init_strips_trailing_slash(self):
-        """Test that URL trailing slash is stripped."""
-        with patch(
-            "app.siftarr.services.integrations.overseerr_service.get_settings"
-        ) as mock_get_settings:
-            mock_settings = MagicMock()
-            mock_settings.overseerr_url = "http://localhost:5055/"
-            mock_settings.overseerr_api_key = "test_api_key"
-            mock_get_settings.return_value = mock_settings
+    def test_unset_url_gives_empty_base_url(self):
+        assert _unconfigured(None, "test").base_url == ""
 
-            service = OverseerrService()
 
-            assert service.base_url == "http://localhost:5055"
+class TestGetRequests:
+    @pytest.mark.parametrize(
+        ("kwargs", "expected_params"),
+        [
+            ({}, {"take": "100", "skip": "0", "filter": "approved"}),
+            ({"status": None, "limit": 50, "skip": 100}, {"take": "50", "skip": "100"}),
+        ],
+        ids=["default_filter", "no_filter"],
+    )
+    async def test_success_builds_request(
+        self, overseerr_service, http_stub, kwargs, expected_params
+    ):
+        http_stub.reply(httpx.Response(200, json={"results": [{"id": 1}, {"id": 2}]}))
 
-    @pytest.mark.asyncio
-    async def test_close_is_noop(self):
-        """Test closing is a no-op with shared client."""
-        with patch(
-            "app.siftarr.services.integrations.overseerr_service.get_settings"
-        ) as mock_get_settings:
-            mock_settings = MagicMock()
-            mock_settings.overseerr_url = "http://localhost:5055"
-            mock_settings.overseerr_api_key = "test"
-            mock_get_settings.return_value = mock_settings
+        result = await overseerr_service.get_requests(**kwargs)
 
-            service = OverseerrService()
-            await service.close()
+        assert result == [{"id": 1}, {"id": 2}]
+        (request,) = http_stub.requests
+        assert request.url.path == "/api/v1/request"
+        assert dict(request.url.params) == expected_params
+        assert request.headers["X-Api-Key"] == "test"
 
-    @pytest.mark.asyncio
-    async def test_get_requests_no_url(self):
-        """Test get_requests when URL is empty."""
-        with patch(
-            "app.siftarr.services.integrations.overseerr_service.get_settings"
-        ) as mock_get_settings:
-            mock_settings = MagicMock()
-            mock_settings.overseerr_url = ""
-            mock_settings.overseerr_api_key = "test"
-            mock_get_settings.return_value = mock_settings
+    @pytest.mark.parametrize(
+        "outcome",
+        [httpx.Response(401), httpx.ConnectError("Network error")],
+        ids=["unauthorized", "network_error"],
+    )
+    async def test_failures_return_empty_list(self, overseerr_service, http_stub, outcome):
+        http_stub.reply(outcome)
 
-            service = OverseerrService()
-            result = await service.get_requests()
+        assert await overseerr_service.get_requests() == []
 
-            assert result == []
-
-    @pytest.mark.asyncio
-    async def test_get_requests_no_api_key(self):
-        """Test get_requests when API key is empty."""
-        with patch(
-            "app.siftarr.services.integrations.overseerr_service.get_settings"
-        ) as mock_get_settings:
-            mock_settings = MagicMock()
-            mock_settings.overseerr_url = "http://localhost:5055"
-            mock_settings.overseerr_api_key = ""
-            mock_get_settings.return_value = mock_settings
-
-            service = OverseerrService()
-            result = await service.get_requests()
-
-            assert result == []
-
-    @pytest.mark.asyncio
-    async def test_get_requests_success(self):
-        """Test successful get_requests."""
-        with patch(
-            "app.siftarr.services.integrations.overseerr_service.get_settings"
-        ) as mock_get_settings:
-            mock_settings = MagicMock()
-            mock_settings.overseerr_url = "http://localhost:5055"
-            mock_settings.overseerr_api_key = "test"
-            mock_get_settings.return_value = mock_settings
-
-            service = OverseerrService()
-            mock_client = AsyncMock()
-            mock_response = MagicMock()
-            mock_response.status_code = 200
-            mock_response.json.return_value = {"results": [{"id": 1}, {"id": 2}]}
-            mock_client.get = AsyncMock(return_value=mock_response)
-
-            with patch(
-                "app.siftarr.services.integrations.overseerr_service.get_shared_client",
-                return_value=mock_client,
-            ):
-                result = await service.get_requests()
-
-            assert len(result) == 2
-            mock_client.get.assert_called_once()
-            call_kwargs = mock_client.get.call_args
-            assert call_kwargs[0][0] == "http://localhost:5055/api/v1/request"
-
-    @pytest.mark.asyncio
-    async def test_get_requests_without_filter(self):
-        """Test get_requests omits filter when status is not provided."""
-        with patch(
-            "app.siftarr.services.integrations.overseerr_service.get_settings"
-        ) as mock_get_settings:
-            mock_settings = MagicMock()
-            mock_settings.overseerr_url = "http://localhost:5055"
-            mock_settings.overseerr_api_key = "test"
-            mock_get_settings.return_value = mock_settings
-
-            service = OverseerrService()
-            mock_client = AsyncMock()
-            mock_response = MagicMock()
-            mock_response.status_code = 200
-            mock_response.json.return_value = {"results": []}
-            mock_client.get = AsyncMock(return_value=mock_response)
-
-            with patch(
-                "app.siftarr.services.integrations.overseerr_service.get_shared_client",
-                return_value=mock_client,
-            ):
-                await service.get_requests(status=None, limit=50, skip=100)
-
-            mock_client.get.assert_called_once()
-
-    @staticmethod
-    def _configured_service_with_responses(*responses):
-        mock_settings = MagicMock()
-        mock_settings.overseerr_url = "http://localhost:5055"
-        mock_settings.overseerr_api_key = "test"
-        service = OverseerrService(settings=mock_settings)
-        mock_client = AsyncMock()
-        mock_client.get = AsyncMock(side_effect=list(responses))
-        return service, mock_client
-
-    @staticmethod
-    def _response(status_code, payload=None):
-        response = MagicMock()
-        response.status_code = status_code
-        response.json.return_value = payload
-        return response
-
-    @pytest.mark.asyncio
-    async def test_get_all_requests_paginates(self):
+    async def test_get_all_requests_paginates(self, overseerr_service, http_stub):
         """get_all_requests aggregates pages until a short page."""
-        service, mock_client = self._configured_service_with_responses(
-            self._response(200, {"results": [{"id": 1}]}),
-            self._response(200, {"results": [{"id": 2}]}),
-            self._response(200, {"results": []}),
+        http_stub.reply(
+            httpx.Response(200, json={"results": [{"id": 1}]}),
+            httpx.Response(200, json={"results": [{"id": 2}]}),
+            httpx.Response(200, json={"results": []}),
         )
-        with patch(
-            "app.siftarr.services.integrations.overseerr_service.get_shared_client",
-            return_value=mock_client,
-        ):
-            result = await service.get_all_requests(status=None, page_size=1)
+
+        result = await overseerr_service.get_all_requests(status=None, page_size=1)
 
         assert result == [{"id": 1}, {"id": 2}]
 
-    @pytest.mark.asyncio
     @pytest.mark.parametrize(
         "failure",
-        [
-            httpx.ConnectTimeout("timeout"),
-            MagicMock(status_code=500),
-        ],
+        [httpx.ConnectTimeout("timeout"), httpx.Response(500)],
+        ids=["timeout", "http_500"],
     )
-    async def test_get_all_requests_raises_when_a_later_page_fails(self, failure):
+    async def test_get_all_requests_raises_when_a_later_page_fails(
+        self, overseerr_service, http_stub, failure
+    ):
         """A failed page must not be returned as a shorter, complete-looking list."""
-        first_page = self._response(200, {"results": [{"id": 1}]})
-        service, mock_client = self._configured_service_with_responses(first_page, failure)
-        with (
-            patch(
-                "app.siftarr.services.integrations.overseerr_service.get_shared_client",
-                return_value=mock_client,
-            ),
-            pytest.raises(OverseerrFetchError),
-        ):
-            await service.get_all_requests(status=None, page_size=1)
+        http_stub.reply(httpx.Response(200, json={"results": [{"id": 1}]}), failure)
 
-    @pytest.mark.asyncio
-    async def test_get_all_requests_raises_when_page_limit_is_reached(self):
-        service, mock_client = self._configured_service_with_responses(
-            self._response(200, {"results": [{"id": 1}]}),
-            self._response(200, {"results": [{"id": 2}]}),
+        with pytest.raises(OverseerrFetchError):
+            await overseerr_service.get_all_requests(status=None, page_size=1)
+
+    async def test_get_all_requests_raises_when_page_limit_is_reached(
+        self, overseerr_service, http_stub
+    ):
+        http_stub.reply(
+            httpx.Response(200, json={"results": [{"id": 1}]}),
+            httpx.Response(200, json={"results": [{"id": 2}]}),
         )
-        with (
-            patch(
-                "app.siftarr.services.integrations.overseerr_service.get_shared_client",
-                return_value=mock_client,
-            ),
-            pytest.raises(OverseerrFetchError),
-        ):
-            await service.get_all_requests(status=None, page_size=1, max_pages=2)
 
-    @pytest.mark.asyncio
+        with pytest.raises(OverseerrFetchError):
+            await overseerr_service.get_all_requests(status=None, page_size=1, max_pages=2)
+
     @pytest.mark.parametrize(
         ("outcome", "expected"),
         [
-            (MagicMock(status_code=200), True),
-            (MagicMock(status_code=404), False),
-            (MagicMock(status_code=500), None),
+            (httpx.Response(200), True),
+            (httpx.Response(404), False),
+            (httpx.Response(500), None),
             (httpx.ConnectTimeout("timeout"), None),
         ],
+        ids=["found", "missing", "server_error", "timeout"],
     )
-    async def test_request_exists_only_reports_missing_on_404(self, outcome, expected):
-        service, mock_client = self._configured_service_with_responses(outcome)
-        with patch(
-            "app.siftarr.services.integrations.overseerr_service.get_shared_client",
-            return_value=mock_client,
-        ):
-            assert await service.request_exists(42) is expected
+    async def test_request_exists_only_reports_missing_on_404(
+        self, overseerr_service, http_stub, outcome, expected
+    ):
+        http_stub.reply(outcome)
 
-    def test_normalize_media_status_numeric(self):
-        """Test numeric media statuses are normalized."""
-        assert OverseerrService.normalize_media_status(2) == "pending"
-        assert OverseerrService.normalize_media_status(4) == "partially_available"
-        assert OverseerrService.normalize_media_status(5) == "available"
+        assert await overseerr_service.request_exists(42) is expected
 
-    def test_normalize_request_status_numeric(self):
-        """Test numeric request statuses are normalized."""
-        assert OverseerrService.normalize_request_status(1) == "pending"
-        assert OverseerrService.normalize_request_status(2) == "approved"
-        assert OverseerrService.normalize_request_status(5) == "completed"
 
-    @pytest.mark.asyncio
-    async def test_get_requests_unauthorized(self):
-        """Test get_requests with 401 response."""
-        with patch(
-            "app.siftarr.services.integrations.overseerr_service.get_settings"
-        ) as mock_get_settings:
-            mock_settings = MagicMock()
-            mock_settings.overseerr_url = "http://localhost:5055"
-            mock_settings.overseerr_api_key = "test"
-            mock_get_settings.return_value = mock_settings
+@pytest.mark.parametrize(
+    ("status", "expected"),
+    [(2, "pending"), (4, "partially_available"), (5, "available")],
+)
+def test_normalize_media_status_numeric(status, expected):
+    assert OverseerrService.normalize_media_status(status) == expected
 
-            service = OverseerrService()
-            mock_client = AsyncMock()
-            mock_response = MagicMock()
-            mock_response.status_code = 401
-            mock_client.get = AsyncMock(return_value=mock_response)
 
-            with patch(
-                "app.siftarr.services.integrations.overseerr_service.get_shared_client",
-                return_value=mock_client,
-            ):
-                result = await service.get_requests()
+@pytest.mark.parametrize(
+    ("status", "expected"), [(1, "pending"), (2, "approved"), (5, "completed")]
+)
+def test_normalize_request_status_numeric(status, expected):
+    assert OverseerrService.normalize_request_status(status) == expected
 
-            assert result == []
 
-    @pytest.mark.asyncio
-    async def test_get_requests_network_error(self):
-        """Test get_requests with network error."""
-        import httpx
+class TestMediaDetails:
+    @pytest.mark.parametrize(
+        ("response", "expected"),
+        [
+            (
+                httpx.Response(200, json={"id": 123, "title": "Test Movie"}),
+                {"id": 123, "title": "Test Movie"},
+            ),
+            (httpx.Response(404), None),
+        ],
+        ids=["found", "not_found"],
+    )
+    async def test_get_media_details(self, overseerr_service, http_stub, response, expected):
+        http_stub.reply(response)
 
-        with patch(
-            "app.siftarr.services.integrations.overseerr_service.get_settings"
-        ) as mock_get_settings:
-            mock_settings = MagicMock()
-            mock_settings.overseerr_url = "http://localhost:5055"
-            mock_settings.overseerr_api_key = "test"
-            mock_get_settings.return_value = mock_settings
+        assert await overseerr_service.get_media_details("movie", 123) == expected
+        assert http_stub.requests[0].url.path == "/api/v1/movie/123"
 
-            service = OverseerrService()
-            mock_client = AsyncMock()
-            mock_client.get = AsyncMock(side_effect=httpx.RequestError("Network error"))
-
-            with patch(
-                "app.siftarr.services.integrations.overseerr_service.get_shared_client",
-                return_value=mock_client,
-            ):
-                result = await service.get_requests()
-
-            assert result == []
-
-    @pytest.mark.asyncio
-    async def test_get_request_no_url(self):
-        """Test get_request when not configured."""
-        with patch(
-            "app.siftarr.services.integrations.overseerr_service.get_settings"
-        ) as mock_get_settings:
-            mock_settings = MagicMock()
-            mock_settings.overseerr_url = ""
-            mock_settings.overseerr_api_key = "test"
-            mock_get_settings.return_value = mock_settings
-
-            service = OverseerrService()
-            result = await service.get_request(1)
-
-            assert result is None
-
-    @pytest.mark.asyncio
-    async def test_get_media_details_no_url(self):
-        """Test get_media_details when not configured."""
-        with patch(
-            "app.siftarr.services.integrations.overseerr_service.get_settings"
-        ) as mock_get_settings:
-            mock_settings = MagicMock()
-            mock_settings.overseerr_url = ""
-            mock_settings.overseerr_api_key = "test"
-            mock_get_settings.return_value = mock_settings
-
-            service = OverseerrService()
-            result = await service.get_media_details("movie", 123)
-
-            assert result is None
-
-    @pytest.mark.asyncio
-    async def test_get_media_details_success(self):
-        """Test successful get_media_details."""
-        with patch(
-            "app.siftarr.services.integrations.overseerr_service.get_settings"
-        ) as mock_get_settings:
-            mock_settings = MagicMock()
-            mock_settings.overseerr_url = "http://localhost:5055"
-            mock_settings.overseerr_api_key = "test"
-            mock_get_settings.return_value = mock_settings
-
-            service = OverseerrService()
-            mock_client = AsyncMock()
-            mock_response = MagicMock()
-            mock_response.status_code = 200
-            mock_response.json.return_value = {"id": 123, "title": "Test Movie"}
-            mock_client.get = AsyncMock(return_value=mock_response)
-
-            with patch(
-                "app.siftarr.services.integrations.overseerr_service.get_shared_client",
-                return_value=mock_client,
-            ):
-                result = await service.get_media_details("movie", 123)
-
-                assert result is not None
-                assert result["id"] == 123
-
-    @pytest.mark.asyncio
-    async def test_get_media_details_not_found(self):
-        """Test get_media_details with 404 response."""
-        with patch(
-            "app.siftarr.services.integrations.overseerr_service.get_settings"
-        ) as mock_get_settings:
-            mock_settings = MagicMock()
-            mock_settings.overseerr_url = "http://localhost:5055"
-            mock_settings.overseerr_api_key = "test"
-            mock_get_settings.return_value = mock_settings
-
-            service = OverseerrService()
-            mock_client = AsyncMock()
-            mock_response = MagicMock()
-            mock_response.status_code = 404
-            mock_client.get = AsyncMock(return_value=mock_response)
-
-            with patch(
-                "app.siftarr.services.integrations.overseerr_service.get_shared_client",
-                return_value=mock_client,
-            ):
-                result = await service.get_media_details("movie", 999)
-
-            assert result is None
-
-    @pytest.mark.asyncio
-    async def test_decline_request_success(self):
-        """Test declining a request successfully."""
-        with patch(
-            "app.siftarr.services.integrations.overseerr_service.get_settings"
-        ) as mock_get_settings:
-            mock_settings = MagicMock()
-            mock_settings.overseerr_url = "http://localhost:5055"
-            mock_settings.overseerr_api_key = "test"
-            mock_get_settings.return_value = mock_settings
-
-            service = OverseerrService()
-            mock_client = AsyncMock()
-            mock_response = MagicMock()
-            mock_response.status_code = 200
-            mock_client.post = AsyncMock(return_value=mock_response)
-
-            with patch(
-                "app.siftarr.services.integrations.overseerr_service.get_shared_client",
-                return_value=mock_client,
-            ):
-                result = await service.decline_request(123)
-
-            assert result is True
-            mock_client.post.assert_called_once()
-
-    @pytest.mark.asyncio
-    async def test_decline_request_with_reason(self):
-        """Test decline with reason in body."""
-        with patch(
-            "app.siftarr.services.integrations.overseerr_service.get_settings"
-        ) as mock_get_settings:
-            mock_settings = MagicMock()
-            mock_settings.overseerr_url = "http://localhost:5055"
-            mock_settings.overseerr_api_key = "test"
-            mock_get_settings.return_value = mock_settings
-
-            service = OverseerrService()
-            mock_client = AsyncMock()
-            mock_response = MagicMock()
-            mock_response.status_code = 200
-            mock_client.post = AsyncMock(return_value=mock_response)
-
-            with patch(
-                "app.siftarr.services.integrations.overseerr_service.get_shared_client",
-                return_value=mock_client,
-            ):
-                result = await service.decline_request(123, reason="Test reason")
-
-            assert result is True
-            mock_client.post.assert_called_once()
-            call_args = mock_client.post.call_args
-            assert call_args[1]["json"] == {"reason": "Test reason"}
-
-    @pytest.mark.asyncio
-    async def test_decline_request_failure(self):
-        """Test decline returns False on failure."""
-        with patch(
-            "app.siftarr.services.integrations.overseerr_service.get_settings"
-        ) as mock_get_settings:
-            mock_settings = MagicMock()
-            mock_settings.overseerr_url = "http://localhost:5055"
-            mock_settings.overseerr_api_key = "test"
-            mock_get_settings.return_value = mock_settings
-
-            service = OverseerrService()
-            mock_client = AsyncMock()
-            mock_response = MagicMock()
-            mock_response.status_code = 400
-            mock_client.post = AsyncMock(return_value=mock_response)
-
-            with patch(
-                "app.siftarr.services.integrations.overseerr_service.get_shared_client",
-                return_value=mock_client,
-            ):
-                result = await service.decline_request(123)
-
-            assert result is False
-
-    @pytest.mark.asyncio
-    async def test_approve_request_success(self):
-        """Test approving a request successfully."""
-        with patch(
-            "app.siftarr.services.integrations.overseerr_service.get_settings"
-        ) as mock_get_settings:
-            mock_settings = MagicMock()
-            mock_settings.overseerr_url = "http://localhost:5055"
-            mock_settings.overseerr_api_key = "test"
-            mock_get_settings.return_value = mock_settings
-
-            service = OverseerrService()
-            mock_client = AsyncMock()
-            mock_response = MagicMock()
-            mock_response.status_code = 200
-            mock_client.post = AsyncMock(return_value=mock_response)
-
-            with patch(
-                "app.siftarr.services.integrations.overseerr_service.get_shared_client",
-                return_value=mock_client,
-            ):
-                result = await service.approve_request(123)
-
-            assert result is True
-            mock_client.post.assert_called_once_with(
-                "http://localhost:5055/api/v1/request/123/approve",
-                headers={"X-Api-Key": "test"},
-            )
-
-    @pytest.mark.asyncio
-    async def test_approve_request_failure(self):
-        """Test approve returns False on failure."""
-        with patch(
-            "app.siftarr.services.integrations.overseerr_service.get_settings"
-        ) as mock_get_settings:
-            mock_settings = MagicMock()
-            mock_settings.overseerr_url = "http://localhost:5055"
-            mock_settings.overseerr_api_key = "test"
-            mock_get_settings.return_value = mock_settings
-
-            service = OverseerrService()
-            mock_client = AsyncMock()
-            mock_response = MagicMock()
-            mock_response.status_code = 400
-            mock_client.post = AsyncMock(return_value=mock_response)
-
-            with patch(
-                "app.siftarr.services.integrations.overseerr_service.get_shared_client",
-                return_value=mock_client,
-            ):
-                result = await service.approve_request(123)
-
-            assert result is False
-
-    @pytest.mark.asyncio
-    async def test_approve_request_missing_config(self):
-        """Test approve returns False without config."""
-        with patch(
-            "app.siftarr.services.integrations.overseerr_service.get_settings"
-        ) as mock_get_settings:
-            mock_settings = MagicMock()
-            mock_settings.overseerr_url = ""
-            mock_settings.overseerr_api_key = "test"
-            mock_get_settings.return_value = mock_settings
-
-            assert await OverseerrService().approve_request(123) is False
-
-    @pytest.mark.asyncio
-    async def test_approve_request_network_error(self):
-        """Test approve handles request errors."""
-        import httpx
-
-        with patch(
-            "app.siftarr.services.integrations.overseerr_service.get_settings"
-        ) as mock_get_settings:
-            mock_settings = MagicMock()
-            mock_settings.overseerr_url = "http://localhost:5055"
-            mock_settings.overseerr_api_key = "test"
-            mock_get_settings.return_value = mock_settings
-
-            service = OverseerrService()
-            mock_client = AsyncMock()
-            mock_client.post = AsyncMock(side_effect=httpx.RequestError("Network error"))
-
-            with patch(
-                "app.siftarr.services.integrations.overseerr_service.get_shared_client",
-                return_value=mock_client,
-            ):
-                result = await service.approve_request(123)
-
-            assert result is False
-
-    @pytest.mark.asyncio
-    async def test_get_media_details_uses_ttl_cache(self):
+    async def test_uses_ttl_cache(self, overseerr_service, http_stub):
         """Media details should reuse a cached response within the TTL window."""
-        overseerr_service._MEDIA_DETAILS_CACHE.clear()
-        with patch(
-            "app.siftarr.services.integrations.overseerr_service.get_settings"
-        ) as mock_get_settings:
-            mock_settings = MagicMock()
-            mock_settings.overseerr_url = "http://localhost:5055"
-            mock_settings.overseerr_api_key = "test"
-            mock_get_settings.return_value = mock_settings
+        http_stub.reply(httpx.Response(200, json={"id": 123, "title": "Test Show"}))
 
-            service = OverseerrService()
-            mock_client = AsyncMock()
-            mock_response = MagicMock()
-            mock_response.status_code = 200
-            mock_response.json.return_value = {"id": 123, "title": "Test Show"}
-            mock_client.get = AsyncMock(return_value=mock_response)
+        first = await overseerr_service.get_media_details("tv", 123)
+        second = await overseerr_service.get_media_details("tv", 123)
 
-            with patch(
-                "app.siftarr.services.integrations.overseerr_service.get_shared_client",
-                return_value=mock_client,
-            ):
-                first = await service.get_media_details("tv", 123)
-                second = await service.get_media_details("tv", 123)
+        assert first == second == {"id": 123, "title": "Test Show"}
+        assert len(http_stub.requests) == 1
 
-            assert first == second == {"id": 123, "title": "Test Show"}
-            mock_client.get.assert_awaited_once()
-
-    def test_clear_media_details_cache_empties_cache(self):
-        """Media details cache clear helper should empty the app-side cache."""
-        overseerr_service._MEDIA_DETAILS_CACHE.clear()
-        overseerr_service._MEDIA_DETAILS_CACHE.update(
+    def test_clear_cache_empties_cache(self):
+        overseerr_module._MEDIA_DETAILS_CACHE.update(
             {("tv", 1): (1.0, {"id": 1}), ("movie", 2): (2.0, {"id": 2})}
         )
 
-        cleared = overseerr_service.clear_media_details_cache()
-
-        assert cleared == 2
-        assert overseerr_service._MEDIA_DETAILS_CACHE == {}
+        assert overseerr_module.clear_media_details_cache() == 2
+        assert overseerr_module._MEDIA_DETAILS_CACHE == {}
 
 
 class TestMediaDetailsCacheBounds:
     @pytest.fixture
-    def cached_service(self, monkeypatch):
-        settings = MagicMock(overseerr_url="http://localhost:5055", overseerr_api_key="test")
-        service = OverseerrService(settings=settings)
-        client = AsyncMock()
-        response = MagicMock(status_code=200)
-        response.json.return_value = {"id": 123}
-        client.get.return_value = response
-        monkeypatch.setattr(overseerr_service, "get_shared_client", AsyncMock(return_value=client))
-        monkeypatch.setattr(overseerr_service, "_MEDIA_DETAILS_CACHE_MAX_SIZE", 2)
-        return service, client
+    def cached(self, overseerr_service, http_stub, monkeypatch):
+        http_stub.default = httpx.Response(200, json={"id": 123})
+        monkeypatch.setattr(overseerr_module, "_MEDIA_DETAILS_CACHE_MAX_SIZE", 2)
+        return overseerr_service, http_stub
 
-    async def test_evicts_least_recently_used_entry(self, cached_service):
-        service, client = cached_service
+    async def test_evicts_least_recently_used_entry(self, cached):
+        service, stub = cached
         await service.get_media_details("tv", 1)
         await service.get_media_details("tv", 2)
         await service.get_media_details("tv", 1)
-        assert client.get.await_count == 2
+        assert len(stub.requests) == 2
 
         await service.get_media_details("tv", 3)
-        assert list(overseerr_service._MEDIA_DETAILS_CACHE) == [("tv", 1), ("tv", 3)]
+        assert list(overseerr_module._MEDIA_DETAILS_CACHE) == [("tv", 1), ("tv", 3)]
         await service.get_media_details("tv", 2)
-        assert client.get.await_count == 4
-        assert len(overseerr_service._MEDIA_DETAILS_CACHE) == 2
+        assert len(stub.requests) == 4
+        assert len(overseerr_module._MEDIA_DETAILS_CACHE) == 2
 
-    async def test_prunes_expired_entries_even_when_not_requested(
-        self, cached_service, monkeypatch
-    ):
-        service, client = cached_service
-        monkeypatch.setattr(overseerr_service.time, "monotonic", lambda: 100.0)
+    async def test_prunes_expired_entries_even_when_not_requested(self, cached, monkeypatch):
+        service, stub = cached
+        monkeypatch.setattr(overseerr_module.time, "monotonic", lambda: 100.0)
         await service.get_media_details("tv", 1)
         await service.get_media_details("tv", 2)
 
-        monkeypatch.setattr(overseerr_service.time, "monotonic", lambda: 160.0)
+        monkeypatch.setattr(overseerr_module.time, "monotonic", lambda: 160.0)
         await service.get_media_details("tv", 3)
-        assert list(overseerr_service._MEDIA_DETAILS_CACHE) == [("tv", 3)]
+        assert list(overseerr_module._MEDIA_DETAILS_CACHE) == [("tv", 3)]
         await service.get_media_details("tv", 1)
-        assert client.get.await_count == 4
+        assert len(stub.requests) == 4
 
-    async def test_failed_refresh_does_not_retain_expired_data(self, cached_service, monkeypatch):
-        service, client = cached_service
-        monkeypatch.setattr(overseerr_service.time, "monotonic", lambda: 100.0)
+    async def test_failed_refresh_does_not_retain_expired_data(self, cached, monkeypatch):
+        service, stub = cached
+        monkeypatch.setattr(overseerr_module.time, "monotonic", lambda: 100.0)
         await service.get_media_details("tv", 1)
-        monkeypatch.setattr(overseerr_service.time, "monotonic", lambda: 161.0)
-        client.get.return_value.status_code = 503
+        monkeypatch.setattr(overseerr_module.time, "monotonic", lambda: 161.0)
+        stub.default = httpx.Response(503)
 
         assert await service.get_media_details("tv", 1) is None
-        assert not overseerr_service._MEDIA_DETAILS_CACHE
+        assert not overseerr_module._MEDIA_DETAILS_CACHE
 
 
-class TestExtractPosterPath:
-    """Tests for extract_poster_path helper."""
+class TestDeclineAndApprove:
+    @pytest.mark.parametrize(
+        ("kwargs", "status", "expected_ok", "expected_body"),
+        [
+            ({}, 200, True, {}),
+            ({"reason": "Test reason"}, 200, True, {"reason": "Test reason"}),
+            ({}, 400, False, {}),
+        ],
+        ids=["no_reason", "with_reason", "rejected"],
+    )
+    async def test_decline_request(
+        self, overseerr_service, http_stub, kwargs, status, expected_ok, expected_body
+    ):
+        http_stub.reply(httpx.Response(status))
 
-    def test_bare_tmdb_path(self):
-        """Bare TMDB path like /abc123.jpg should pass through unchanged."""
-        assert (
-            extract_poster_path("/kSf9svfD2WiLhrs9AP2Uih2Wq3T.jpg")
-            == "/kSf9svfD2WiLhrs9AP2Uih2Wq3T.jpg"
-        )
+        assert await overseerr_service.decline_request(123, **kwargs) is expected_ok
 
-    def test_overseerr_proxied_path(self):
-        """Overseerr proxied form /images/original/... should strip prefix."""
-        assert (
-            extract_poster_path("/images/original/kSf9svfD2WiLhrs9AP2Uih2Wq3T.jpg")
-            == "/kSf9svfD2WiLhrs9AP2Uih2Wq3T.jpg"
-        )
+        (request,) = http_stub.requests
+        assert request.method == "POST"
+        assert request.url.path == "/api/v1/request/123/decline"
+        assert json.loads(request.content) == expected_body
 
-    def test_overseerr_proxied_path_w500(self):
-        """Overseerr proxied form with w500 size should also strip prefix."""
-        assert (
-            extract_poster_path("/images/w500/kSf9svfD2WiLhrs9AP2Uih2Wq3T.jpg")
-            == "/kSf9svfD2WiLhrs9AP2Uih2Wq3T.jpg"
-        )
+    @pytest.mark.parametrize(
+        ("outcome", "expected_ok"),
+        [
+            (httpx.Response(200), True),
+            (httpx.Response(400), False),
+            (httpx.ConnectError("Network error"), False),
+        ],
+        ids=["ok", "rejected", "network_error"],
+    )
+    async def test_approve_request(self, overseerr_service, http_stub, outcome, expected_ok):
+        http_stub.reply(outcome)
 
-    def test_overseerr_proxied_path_truncated(self):
-        """Truncated proxied path with no actual filename returns slash (edge case of split logic)."""
-        # /images/original/ splits to ['', 'images', 'original', ''] -> f"/{''}" -> "/"
-        assert extract_poster_path("/images/original/") == "/"
+        assert await overseerr_service.approve_request(123) is expected_ok
 
-    def test_overseerr_proxied_path_too_short(self):
-        """Proxied path with only two segments should return None."""
-        assert extract_poster_path("/images/") is None
-
-    def test_full_tmdb_url(self):
-        """Full TMDB URL should extract the bare poster path."""
-        assert extract_poster_path("https://image.tmdb.org/t/p/original/abc.jpg") == "/abc.jpg"
-
-    def test_full_tmdb_url_with_w500(self):
-        """Full TMDB URL with w500 size should still extract the bare path."""
-        assert extract_poster_path("https://image.tmdb.org/t/p/w500/abc.jpg") == "/abc.jpg"
-
-    def test_full_tmdb_url_no_t_p_prefix(self):
-        """Full TMDB URL without /t/p/ structure should return None."""
-        assert extract_poster_path("https://image.tmdb.org/something/abc.jpg") is None
-
-    def test_full_overseerr_url(self):
-        """Full URL pointing to Overseerr instance should extract the TMDB portion."""
-        assert extract_poster_path("http://overseerr:5055/images/original/abc.jpg") == "/abc.jpg"
-
-    def test_full_overseerr_https_url(self):
-        """HTTPS Overseerr URL should also extract the TMDB portion."""
-        assert (
-            extract_poster_path("https://overseerr.example.com/images/w500/abc.jpg") == "/abc.jpg"
-        )
-
-    def test_none_input(self):
-        """None input should return None."""
-        assert extract_poster_path(None) is None
-
-    def test_empty_string_input(self):
-        """Empty string input should return None."""
-        assert extract_poster_path("") is None
-
-    def test_whitespace_string_input(self):
-        """Whitespace-only string should return None."""
-        assert extract_poster_path("   ") is None
-
-    def test_path_starting_with_images_not_proxied(self):
-        """A path starting with /images but not /images/ (no trailing slash) should not match proxied form."""
-        # This starts with "/" and not "/images", so it passes through as a bare TMDB path
-        # Wait - /imagesXXX starts with "/" and does not start with "/images" only if...
-        # "/imagesfoo" starts with "/" and not with "/images" — but actually it does start with "/images" prefix.
-        # Let me re-read the logic: `poster.startswith("/") and not poster.startswith("/images")`
-        # "/imagesfoo" starts with "/images" so it's NOT caught by the bare path rule.
-        # It also doesn't start with "/images/" so it's not caught by the proxied rule.
-        # Falls through to return None.
-        assert extract_poster_path("/imagesfoo/bar.jpg") is None
+        (request,) = http_stub.requests
+        assert str(request.url) == "http://localhost:5055/api/v1/request/123/approve"
+        assert request.headers["X-Api-Key"] == "test"
 
 
-class TestBuildPosterUrl:
-    """Tests for build_poster_url helper."""
+@pytest.mark.parametrize(
+    ("poster", "expected"),
+    [
+        ("/kSf9svfD2WiLhrs9AP2Uih2Wq3T.jpg", "/kSf9svfD2WiLhrs9AP2Uih2Wq3T.jpg"),
+        ("/images/original/abc.jpg", "/abc.jpg"),
+        ("/images/w500/abc.jpg", "/abc.jpg"),
+        ("/images/original/", "/"),
+        ("/images/", None),
+        ("https://image.tmdb.org/t/p/original/abc.jpg", "/abc.jpg"),
+        ("https://image.tmdb.org/t/p/w500/abc.jpg", "/abc.jpg"),
+        ("https://image.tmdb.org/something/abc.jpg", None),
+        ("http://overseerr:5055/images/original/abc.jpg", "/abc.jpg"),
+        ("https://overseerr.example.com/images/w500/abc.jpg", "/abc.jpg"),
+        (None, None),
+        ("", None),
+        ("   ", None),
+        ("/imagesfoo/bar.jpg", None),
+    ],
+    ids=[
+        "bare_tmdb",
+        "proxied_original",
+        "proxied_w500",
+        "proxied_no_filename",
+        "proxied_too_short",
+        "tmdb_url",
+        "tmdb_url_w500",
+        "tmdb_url_no_tp_prefix",
+        "overseerr_http_url",
+        "overseerr_https_url",
+        "none",
+        "empty",
+        "whitespace",
+        "images_prefix_not_proxied",
+    ],
+)
+def test_extract_poster_path(poster, expected):
+    assert extract_poster_path(poster) == expected
 
-    def test_none_input(self):
-        """None poster path should return None."""
-        assert build_poster_url(None) is None
 
-    def test_empty_string_input(self):
-        """Empty string should return None."""
-        assert build_poster_url("") is None
-
-    def test_bare_tmdb_path(self):
-        """Bare TMDB path should produce a properly encoded proxied URL."""
-        result = build_poster_url("/abc123.jpg")
-        assert result == "/api/poster?path=%2Fabc123.jpg"
-
-    def test_overseerr_proxied_path(self):
-        """Overseerr proxied path should strip prefix and produce proxied URL."""
-        result = build_poster_url("/images/original/abc.jpg")
-        assert result == "/api/poster?path=%2Fabc.jpg"
-
-    def test_full_tmdb_url(self):
-        """Full TMDB URL should extract path and produce proxied URL."""
-        result = build_poster_url("https://image.tmdb.org/t/p/original/abc.jpg")
-        assert result == "/api/poster?path=%2Fabc.jpg"
-
-    def test_path_with_special_characters(self):
-        """Path with special characters should be URL-encoded."""
-        result = build_poster_url("/path with spaces.jpg")
-        assert result is not None
-        assert "path=" in result
-        # The path should be URL-encoded (spaces become %20)
-        assert "%2Fpath%20with%20spaces.jpg" in result
+@pytest.mark.parametrize(
+    ("poster", "expected"),
+    [
+        (None, None),
+        ("", None),
+        ("/abc123.jpg", "/api/poster?path=%2Fabc123.jpg"),
+        ("/images/original/abc.jpg", "/api/poster?path=%2Fabc.jpg"),
+        ("https://image.tmdb.org/t/p/original/abc.jpg", "/api/poster?path=%2Fabc.jpg"),
+        ("/path with spaces.jpg", "/api/poster?path=%2Fpath%20with%20spaces.jpg"),
+    ],
+    ids=["none", "empty", "bare", "proxied", "tmdb_url", "url_encoded"],
+)
+def test_build_poster_url(poster, expected):
+    assert build_poster_url(poster) == expected
 
 
-class TestBuildOverseerrMediaUrl:
-    """Tests for build_overseerr_media_url helper."""
-
-    def test_none_overseerr_url(self):
-        """None Overseerr URL should return None."""
-        assert build_overseerr_media_url(None, "movie", 123) is None
-
-    def test_none_tmdb_id(self):
-        """None TMDB ID should return None."""
-        assert build_overseerr_media_url("http://overseerr:5055", "movie", None) is None
-
-    def test_empty_overseerr_url(self):
-        """Empty string Overseerr URL should return None."""
-        assert build_overseerr_media_url("", "movie", 123) is None
-
-    def test_valid_movie_url(self):
-        """Valid movie inputs should build correct URL."""
-        assert (
-            build_overseerr_media_url("http://overseerr:5055", "movie", 123)
-            == "http://overseerr:5055/movie/123"
-        )
-
-    def test_valid_tv_url(self):
-        """Valid TV inputs should build correct URL."""
-        assert (
-            build_overseerr_media_url("http://overseerr:5055", "tv", 456)
-            == "http://overseerr:5055/tv/456"
-        )
-
-    def test_strips_trailing_slash(self):
-        """Trailing slash in Overseerr URL should be stripped."""
-        assert (
-            build_overseerr_media_url("http://overseerr:5055/", "movie", 123)
-            == "http://overseerr:5055/movie/123"
-        )
+@pytest.mark.parametrize(
+    ("base", "media_type", "tmdb_id", "expected"),
+    [
+        (None, "movie", 123, None),
+        ("", "movie", 123, None),
+        ("http://overseerr:5055", "movie", None, None),
+        ("http://overseerr:5055", "movie", 123, "http://overseerr:5055/movie/123"),
+        ("http://overseerr:5055", "tv", 456, "http://overseerr:5055/tv/456"),
+        ("http://overseerr:5055/", "movie", 123, "http://overseerr:5055/movie/123"),
+    ],
+    ids=["none_url", "empty_url", "none_id", "movie", "tv", "trailing_slash"],
+)
+def test_build_overseerr_media_url(base, media_type, tmdb_id, expected):
+    assert build_overseerr_media_url(base, media_type, tmdb_id) == expected

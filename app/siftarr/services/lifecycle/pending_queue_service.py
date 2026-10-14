@@ -1,6 +1,6 @@
 from datetime import UTC, datetime, timedelta
 
-from sqlalchemy import func, select
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.siftarr.models.episode import Episode
@@ -50,15 +50,6 @@ class PendingQueueService:
             await self.db.refresh(request)
         return request
 
-    async def get_by_request_id(self, request_id: int) -> Request | None:
-        """Get pending queue entry by request ID."""
-        result = await self.db.execute(
-            select(Request)
-            .where(Request.id == request_id)
-            .where(Request.next_retry_at.is_not(None))
-        )
-        return result.scalar_one_or_none()
-
     async def get_ready_for_retry(self) -> list[Request]:
         """
         Get all pending items that are ready for retry.
@@ -70,15 +61,6 @@ class PendingQueueService:
             select(Request)
             .where(Request.next_retry_at.is_not(None))
             .where(Request.next_retry_at <= now)
-            .order_by(Request.next_retry_at)
-        )
-        return list(result.scalars().all())
-
-    async def get_all_pending(self) -> list[Request]:
-        """Get all pending items, regardless of retry time."""
-        result = await self.db.execute(
-            select(Request)
-            .where(Request.next_retry_at.is_not(None))
             .order_by(Request.next_retry_at)
         )
         return list(result.scalars().all())
@@ -180,31 +162,3 @@ class PendingQueueService:
         if commit:
             await self.db.commit()
         return True
-
-    async def get_queue_stats(self) -> dict:
-        """Get statistics about the pending queue using SQL aggregates."""
-        now = datetime.now(UTC)
-        total_result = await self.db.execute(
-            select(func.count()).select_from(Request).where(Request.next_retry_at.is_not(None))
-        )
-        total = total_result.scalar() or 0
-
-        ready_result = await self.db.execute(
-            select(func.count())
-            .select_from(Request)
-            .where(Request.next_retry_at.is_not(None))
-            .where(Request.next_retry_at <= now)
-        )
-        ready = ready_result.scalar() or 0
-
-        oldest_result = await self.db.execute(
-            select(func.min(Request.next_retry_at)).where(Request.next_retry_at.is_not(None))
-        )
-        oldest = oldest_result.scalar()
-
-        return {
-            "total_pending": total,
-            "ready_for_retry": ready,
-            "waiting_for_retry": total - ready,
-            "oldest_pending": oldest,
-        }

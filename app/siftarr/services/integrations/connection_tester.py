@@ -19,6 +19,50 @@ class ConnectionTester:
     """Service for testing connections to external services."""
 
     @staticmethod
+    async def _probe_http(
+        label: str,
+        endpoint: str,
+        headers: dict[str, str],
+        auth_detail: str,
+        read_version: bool,
+    ) -> ConnectionTestResult:
+        """GET a status endpoint and map the outcome to a ConnectionTestResult."""
+        try:
+            client = await get_shared_client()
+            response = await client.get(endpoint, headers=headers, timeout=10.0)
+            if response.status_code == 200:
+                details = None
+                if read_version:
+                    details = f"Version: {response.json().get('version', 'unknown')}"
+                return ConnectionTestResult(
+                    success=True,
+                    message=f"Successfully connected to {label}",
+                    details=details,
+                )
+            if response.status_code == 401:
+                return ConnectionTestResult(
+                    success=False,
+                    message="Authentication failed",
+                    details=auth_detail,
+                )
+            return ConnectionTestResult(
+                success=False,
+                message=f"HTTP Error: {response.status_code}",
+            )
+        except httpx.TimeoutException:
+            return ConnectionTestResult(
+                success=False,
+                message="Connection timeout",
+                details=f"{label} did not respond in time",
+            )
+        except httpx.RequestError as e:
+            return ConnectionTestResult(
+                success=False,
+                message="Connection failed",
+                details=str(e),
+            )
+
+    @staticmethod
     async def test_overseerr(settings: Settings) -> ConnectionTestResult:
         """Test connection to Overseerr.
 
@@ -43,40 +87,9 @@ class ConnectionTester:
         endpoint = f"{str(settings.overseerr_url).rstrip('/')}/api/v1/status"
         headers = {"X-Api-Key": settings.overseerr_api_key}
 
-        try:
-            client = await get_shared_client()
-            response = await client.get(endpoint, headers=headers, timeout=10.0)
-            if response.status_code == 200:
-                data = response.json()
-                version = data.get("version", "unknown")
-                return ConnectionTestResult(
-                    success=True,
-                    message="Successfully connected to Overseerr",
-                    details=f"Version: {version}",
-                )
-            elif response.status_code == 401:
-                return ConnectionTestResult(
-                    success=False,
-                    message="Authentication failed",
-                    details="Invalid API key",
-                )
-            else:
-                return ConnectionTestResult(
-                    success=False,
-                    message=f"HTTP Error: {response.status_code}",
-                )
-        except httpx.TimeoutException:
-            return ConnectionTestResult(
-                success=False,
-                message="Connection timeout",
-                details="Overseerr did not respond in time",
-            )
-        except httpx.RequestError as e:
-            return ConnectionTestResult(
-                success=False,
-                message="Connection failed",
-                details=str(e),
-            )
+        return await ConnectionTester._probe_http(
+            "Overseerr", endpoint, headers, "Invalid API key", read_version=True
+        )
 
     @staticmethod
     async def test_prowlarr(settings: Settings) -> ConnectionTestResult:
@@ -103,40 +116,9 @@ class ConnectionTester:
         endpoint = f"{str(settings.prowlarr_url).rstrip('/')}/api/v1/system/status"
         headers = {"X-Api-Key": settings.prowlarr_api_key}
 
-        try:
-            client = await get_shared_client()
-            response = await client.get(endpoint, headers=headers, timeout=10.0)
-            if response.status_code == 200:
-                data = response.json()
-                version = data.get("version", "unknown")
-                return ConnectionTestResult(
-                    success=True,
-                    message="Successfully connected to Prowlarr",
-                    details=f"Version: {version}",
-                )
-            elif response.status_code == 401:
-                return ConnectionTestResult(
-                    success=False,
-                    message="Authentication failed",
-                    details="Invalid API key",
-                )
-            else:
-                return ConnectionTestResult(
-                    success=False,
-                    message=f"HTTP Error: {response.status_code}",
-                )
-        except httpx.TimeoutException:
-            return ConnectionTestResult(
-                success=False,
-                message="Connection timeout",
-                details="Prowlarr did not respond in time",
-            )
-        except httpx.RequestError as e:
-            return ConnectionTestResult(
-                success=False,
-                message="Connection failed",
-                details=str(e),
-            )
+        return await ConnectionTester._probe_http(
+            "Prowlarr", endpoint, headers, "Invalid API key", read_version=True
+        )
 
     @staticmethod
     async def test_qbittorrent(settings: Settings) -> ConnectionTestResult:
@@ -220,34 +202,6 @@ class ConnectionTester:
         endpoint = f"{str(settings.plex_url).rstrip('/')}/status"
         headers = {"X-Plex-Token": settings.plex_token, "Accept": "application/json"}
 
-        try:
-            client = await get_shared_client()
-            response = await client.get(endpoint, headers=headers, timeout=10.0)
-            if response.status_code == 200:
-                return ConnectionTestResult(
-                    success=True,
-                    message="Successfully connected to Plex",
-                )
-            elif response.status_code == 401:
-                return ConnectionTestResult(
-                    success=False,
-                    message="Authentication failed",
-                    details="Invalid Plex token",
-                )
-            else:
-                return ConnectionTestResult(
-                    success=False,
-                    message=f"HTTP Error: {response.status_code}",
-                )
-        except httpx.TimeoutException:
-            return ConnectionTestResult(
-                success=False,
-                message="Connection timeout",
-                details="Plex did not respond in time",
-            )
-        except httpx.RequestError as e:
-            return ConnectionTestResult(
-                success=False,
-                message="Connection failed",
-                details=str(e),
-            )
+        return await ConnectionTester._probe_http(
+            "Plex", endpoint, headers, "Invalid Plex token", read_version=False
+        )

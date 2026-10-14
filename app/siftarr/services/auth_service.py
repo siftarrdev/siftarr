@@ -118,38 +118,6 @@ def is_browser_request(request: Request) -> bool:
     return "text/html" in accept or accept in {"", "*/*"}
 
 
-async def verify_api_key(request: Request) -> None:
-    """FastAPI dependency that verifies the API key via header.
-
-    Checks ``X-API-Key`` header first, then ``Authorization: Bearer <key>``.
-    Returns 401 if the key is missing or invalid (unless auth is disabled).
-    """
-    settings = get_settings()
-    if not settings.auth_enabled:
-        return
-
-    key = _extract_api_key(request)
-    if not _api_key_matches(key, settings.api_key):
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid or missing API key",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
-
-
-async def require_api_key(request: Request) -> None:
-    """Require a valid non-placeholder API key regardless of browser session/auth toggle."""
-    settings = get_settings()
-    key = _extract_api_key(request)
-    if _api_key_matches(key, settings.api_key):
-        return
-    raise HTTPException(
-        status_code=status.HTTP_401_UNAUTHORIZED,
-        detail="Invalid or missing API key",
-        headers={"WWW-Authenticate": "Bearer"},
-    )
-
-
 async def require_session_or_api_key(request: Request) -> None:
     """Require a valid browser session or API key regardless of auth toggle."""
     if get_session_user(request) is not None:

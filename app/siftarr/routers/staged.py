@@ -8,7 +8,6 @@ import re
 from dataclasses import asdict
 from datetime import UTC, datetime
 from typing import Any, cast
-from urllib.parse import urlsplit
 
 from fastapi import APIRouter, BackgroundTasks, Depends, Form, HTTPException, Query
 from fastapi import Request as FastAPIRequest
@@ -18,7 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.siftarr.config import get_settings
 from app.siftarr.database import get_db
-from app.siftarr.models.activity_log import ActivityLog, EventType
+from app.siftarr.models.activity_log import EventType
 from app.siftarr.models.release import Release
 from app.siftarr.models.request import (
     MediaType,
@@ -27,13 +26,17 @@ from app.siftarr.models.request import (
     is_terminal_request_status,
 )
 from app.siftarr.models.staged_torrent import StagedTorrent
+from app.siftarr.routers._responses import (
+    finalize_action_response,
+    safe_local_redirect_url,
+    wants_json,
+)
 from app.siftarr.services import staging_decision_log
 from app.siftarr.services.admin.plex_polling_service import CheckRequestResult, PlexPollingService
 from app.siftarr.services.auth_service import require_session_or_api_key
 from app.siftarr.services.decisions.rule_engine_provider import get_rule_engine
 from app.siftarr.services.integrations.plex_service import PlexService
 from app.siftarr.services.integrations.qbittorrent_service import (
-    BulkAddResult,
     BulkTorrentPayload,
     MediaCategory,
     QbittorrentService,
@@ -280,19 +283,6 @@ async def get_staged_alternatives(
     return JSONResponse(payload)
 
 
-def _safe_local_redirect_url(redirect_to: str | None, default: str) -> str:
-    """Return redirect_to only when it is a same-origin absolute path."""
-    if not redirect_to or "\\" in redirect_to or not redirect_to.startswith("/"):
-        return default
-    if redirect_to.startswith("//"):
-        return default
-
-    parsed = urlsplit(redirect_to)
-    if parsed.scheme or parsed.netloc:
-        return default
-    return redirect_to
-
-
 def _build_torrent_payload(torrent: StagedTorrent | None) -> dict[str, Any] | None:
     """Convert a staged torrent into a compact serializable payload."""
     if torrent is None:
@@ -389,16 +379,6 @@ def _engine_fingerprint(engine: object) -> str:
     return hashlib.sha256(encoded.encode()).hexdigest()
 
 
-def _wants_json(http_request: FastAPIRequest) -> bool:
-    return "application/json" in http_request.headers.get("accept", "")
-
-
-def _progress_percent(progress: float | None) -> float | None:
-    if progress is None:
-        return None
-    return round(progress * 100, 1)
-
-
 async def _approval_warnings(
     db: AsyncSession, torrent: StagedTorrent, request: Request | None
 ) -> list[dict[str, str]]:
@@ -486,38 +466,6 @@ async def _approval_warnings(
     if disposition:
         warnings.append(ReleaseWarning("rejected", disposition.reason or "Release was rejected"))
     return [{"code": warning.code, "message": warning.message} for warning in warnings]
-
-
-def _download_completed_torrent_ids(details: str | None) -> set[int]:
-    if not details:
-        return set()
-    try:
-        payload = json.loads(details)
-    except TypeError, ValueError:
-        return set()
-    if not isinstance(payload, dict):
-        return set()
-
-    torrent_ids: set[int] = set()
-    torrent_id = payload.get("torrent_id")
-    if isinstance(torrent_id, int):
-        torrent_ids.add(torrent_id)
-    for item in payload.get("done_torrents") or []:
-        if isinstance(item, dict) and isinstance(item.get("torrent_id"), int):
-            torrent_ids.add(item["torrent_id"])
-    return torrent_ids
-
-
-async def _finalize_action_response(
-    http_request: FastAPIRequest,
-    message: str,
-    *,
-    redirect_url: str = "/?tab=staged",
-    payload: dict[str, Any] | None = None,
-):
-    if _wants_json(http_request):
-        return JSONResponse({"status": "ok", "message": message, **(payload or {})})
-    return RedirectResponse(url=redirect_url, status_code=303)
 
 
 async def _approve_torrent(
@@ -874,17 +822,6 @@ async def _resolve_download_completion(
     return reconcile_result.available, None
 
 
-def _should_refresh_staged_tab(
-    *,
-    qbit_complete: bool,
-    plex_available: bool,
-    request_status: str,
-    resolved_request_status: str,
-) -> bool:
-    """Return whether the staged tab should immediately refresh server-rendered state."""
-    return plex_available or resolved_request_status != request_status
-
-
 @router.post("/{torrent_id}/approve", response_model=None)
 async def approve_staged_torrent(
     torrent_id: int,
@@ -951,7 +888,7 @@ async def approve_staged_torrent(
     if success:
         _delete_staging_files(cleanup_paths)
 
-    return await _finalize_action_response(
+    return finalize_action_response(
         http_request,
         "Torrent approved successfully",
         redirect_url="/?tab=staged",
@@ -980,7 +917,7 @@ async def discard_staged_torrent(
     await _discard_torrent(torrent, db)
     await db.commit()
 
-    return await _finalize_action_response(
+    return finalize_action_response(
         http_request,
         "Torrent discarded successfully",
         redirect_url="/?tab=staged",
@@ -1011,10 +948,10 @@ async def delete_downloading_torrent(
         )
 
     await db.commit()
-    return await _finalize_action_response(
+    return finalize_action_response(
         http_request,
         "Download deleted; request returned to pending.",
-        redirect_url=_safe_local_redirect_url(redirect_to, "/?tab=downloading"),
+        redirect_url=safe_local_redirect_url(redirect_to, "/?tab=downloading"),
         payload={
             "torrent_id": torrent.id,
             "torrent_status": "discarded",
@@ -1037,7 +974,7 @@ async def bulk_staged_action(
 ) -> RedirectResponse | JSONResponse:
     """Apply an approve/discard action to multiple staged torrents."""
     if not torrent_ids:
-        return await _finalize_action_response(
+        return finalize_action_response(
             http_request,
             "No staged torrents were selected.",
             redirect_url="/?tab=staged",
@@ -1100,24 +1037,6 @@ async def bulk_staged_action(
             torrent.rejection_override = _confirmation_given(confirm_rejected)
 
         bulk_results = await qbittorrent.add_torrents_bulk(payloads) if payloads else []
-        if not isinstance(bulk_results, list):
-            # Compatibility for older unit mocks; production service always returns a list.
-            bulk_results = []
-            for payload in payloads:
-                torrent = next(item for item in torrents if item.id == payload.key)
-                torrent_hash = await qbittorrent.add_torrent(
-                    torrent_path=payload.torrent_path,
-                    magnet_uri=payload.magnet_uri,
-                    category=payload.category,
-                )
-                bulk_results.append(
-                    BulkAddResult(
-                        key=payload.key,
-                        success=torrent_hash is not None,
-                        torrent_hash=torrent_hash,
-                    )
-                )
-
         results_by_id = {result.key: result for result in bulk_results}
         for torrent in torrents:
             result = results_by_id.get(torrent.id)
@@ -1164,7 +1083,7 @@ async def bulk_staged_action(
         message = f"{message} Failed {len(failed)}: " + ", ".join(
             f"#{item['id']} {item['title']}" for item in failed
         )
-    if _wants_json(http_request):
+    if wants_json(http_request):
         return JSONResponse(
             {
                 "status": "partial" if failed else "ok",
@@ -1174,7 +1093,7 @@ async def bulk_staged_action(
                 "refresh": ["staged", "downloading"] if action == "approve" else ["staged"],
             }
         )
-    return await _finalize_action_response(
+    return finalize_action_response(
         http_request,
         message,
         redirect_url="/?tab=staged",
@@ -1292,153 +1211,8 @@ async def replace_staged_torrent(
     await db.commit()
     _delete_staging_files(cleanup_paths)
 
-    redirect_url = _safe_local_redirect_url(redirect_to, "/?tab=staged")
+    redirect_url = safe_local_redirect_url(redirect_to, "/?tab=staged")
     return RedirectResponse(url=redirect_url, status_code=303)
-
-
-@router.get("/download-status")
-async def get_download_status(
-    db: AsyncSession = Depends(get_db),
-) -> JSONResponse:
-    """Return qBittorrent progress for all approved torrents."""
-    result = await db.execute(select(StagedTorrent).where(StagedTorrent.status == "approved"))
-    torrents = list(result.scalars().all())
-
-    if not torrents:
-        return JSONResponse({"torrents": []})
-
-    # Collect request IDs for status lookup
-    request_ids = {t.request_id for t in torrents if t.request_id is not None}
-    request_statuses: dict[int, RequestStatus] = {}
-    if request_ids:
-        req_result = await db.execute(
-            select(Request.id, Request.status).where(Request.id.in_(request_ids))
-        )
-        for req_id, req_status in req_result.all():
-            request_statuses[req_id] = req_status
-
-    # Approved torrents are active downloads in their own right.  TV requests
-    # with mixed episode states can derive back to PENDING/SEARCHING while a
-    # torrent is still downloading, so only drop rows for terminal requests.
-    torrents = [
-        torrent
-        for torrent in torrents
-        if torrent.request_id is None
-        or not is_terminal_request_status(request_statuses.get(torrent.request_id))
-    ]
-
-    if not torrents:
-        return JSONResponse({"torrents": []})
-
-    waiting_plex_torrent_ids: set[int] = set()
-    legacy_waiting_plex_request_ids: set[int] = set()
-    downloading_request_ids = {
-        request_id
-        for request_id, status in request_statuses.items()
-        if status == RequestStatus.DOWNLOADING
-    }
-    if downloading_request_ids:
-        logs_result = await db.execute(
-            select(ActivityLog.request_id, ActivityLog.details).where(
-                ActivityLog.request_id.in_(downloading_request_ids),
-                ActivityLog.event_type == EventType.DOWNLOAD_COMPLETED.value,
-            )
-        )
-        for request_id, details in logs_result.all():
-            if request_id is None:
-                continue
-            torrent_ids = _download_completed_torrent_ids(details)
-            if torrent_ids:
-                waiting_plex_torrent_ids.update(torrent_ids)
-            else:
-                legacy_waiting_plex_request_ids.add(request_id)
-
-    active_torrent_ids = {torrent.id for torrent in torrents}
-    waiting_plex_torrent_ids &= active_torrent_ids
-
-    runtime_settings = get_settings()
-    qbittorrent = QbittorrentService(settings=runtime_settings)
-
-    torrent_data = []
-    for torrent in torrents:
-        info: dict[str, Any] | None = None
-        qbit_progress: float | None = None
-        qbit_state: str | None = None
-
-        # Try to get progress via stored info_hash first, then magnet URL,
-        # then fall back to name matching
-        torrent_hash: str | None = _torrent_known_hash(torrent)
-        if not torrent_hash and torrent.magnet_url:
-            m = _BTIH_RE.search(torrent.magnet_url)
-            if m:
-                torrent_hash = m.group(1).lower()
-
-        if torrent_hash:
-            info = await qbittorrent.get_torrent_info(torrent_hash)
-            if info:
-                qbit_progress = info.get("progress")
-                qbit_state = info.get("state")
-        else:
-            info = await qbittorrent.get_torrent_info_by_name(torrent.title)
-            if info:
-                qbit_progress = info.get("progress")
-                qbit_state = info.get("state")
-
-        request_status_value = request_statuses.get(torrent.request_id or -1)
-        if isinstance(request_status_value, RequestStatus):
-            request_status = request_status_value.value
-        elif request_status_value is not None:
-            request_status = str(request_status_value)
-        else:
-            request_status = "unknown"
-
-        # Only treat qBittorrent as "done" when we can confirm progress >= 1.0.
-        # Do NOT treat "not found" (None) as done — name matching is unreliable
-        # and would falsely mark a downloading torrent as complete.
-        qbit_complete = qbit_progress is not None and qbit_progress >= 1.0
-        # waiting_for_plex is set when the download_completion service logged a
-        # DOWNLOAD_COMPLETED event, OR when we have confirmed (via a non-None
-        # progress) that the torrent is done in qBittorrent.
-        waiting_for_plex = (
-            torrent.id in waiting_plex_torrent_ids
-            or (
-                torrent.request_id in legacy_waiting_plex_request_ids
-                and not (qbit_progress is not None and qbit_progress < 1.0)
-            )
-            or (qbit_complete and request_status == RequestStatus.DOWNLOADING.value)
-        )
-        plex_available = False
-        resolved_request_status = request_status
-
-        torrent_data.append(
-            {
-                "id": torrent.id,
-                "title": torrent.title,
-                "request_id": torrent.request_id,
-                "request_status": resolved_request_status,
-                "qbit_progress": qbit_progress,
-                "qbit_progress_percent": _progress_percent(qbit_progress),
-                "qbit_state": qbit_state,
-                "qbit_eta_seconds": info.get("eta") if info else None,
-                "qbit_download_speed": info.get("dlspeed") if info else None,
-                "qbit_complete": qbit_complete,
-                "waiting_for_plex": waiting_for_plex,
-                "plex_available": plex_available,
-                "move_status": torrent.move_status
-                if isinstance(torrent.move_status, str)
-                else None,
-                "moved_path": torrent.moved_path if isinstance(torrent.moved_path, str) else None,
-                "move_error": torrent.move_error if isinstance(torrent.move_error, str) else None,
-                "refresh_staged_tab": _should_refresh_staged_tab(
-                    qbit_complete=qbit_complete,
-                    plex_available=plex_available,
-                    request_status=request_status,
-                    resolved_request_status=resolved_request_status,
-                ),
-            }
-        )
-
-    return JSONResponse({"torrents": torrent_data})
 
 
 @router.post("/{torrent_id}/check-now")

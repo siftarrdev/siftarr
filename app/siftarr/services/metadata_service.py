@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-from typing import Any, cast
+from typing import Any
 
 from app.siftarr.config import Settings
 from app.siftarr.services.dashboard.dashboard_service import DashboardOverseerrDetails
@@ -12,24 +12,6 @@ from app.siftarr.services.integrations.overseerr_service import (
     build_overseerr_media_url,
     build_poster_url,
 )
-
-
-def extract_imdb_id(media: dict[str, object] | None) -> str | None:
-    """Return an IMDb ID from common Overseerr media detail shapes."""
-    if not media:
-        return None
-    for key in ("imdbId", "imdb_id", "imdbID"):
-        value = media.get(key)
-        if value:
-            return str(value)
-    external_ids = media.get("externalIds")
-    if isinstance(external_ids, dict):
-        typed_external_ids = cast("dict[str, object]", external_ids)
-        for key in ("imdbId", "imdb_id", "imdbID"):
-            value = typed_external_ids.get(key)
-            if value:
-                return str(value)
-    return None
 
 
 class MetadataService:

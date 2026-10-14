@@ -8,11 +8,6 @@ from app.siftarr.services.admin.plex_polling_service import PlexPollingService
 
 
 @pytest.fixture
-def mock_db():
-    return AsyncMock()
-
-
-@pytest.fixture
 def mock_plex():
     plex = AsyncMock()
     plex.settings = SimpleNamespace(
@@ -28,5 +23,6 @@ def mock_plex():
 
 
 @pytest.fixture
-def service(mock_db, mock_plex):
-    return PlexPollingService(mock_db, mock_plex)
+def service(db, mock_plex):
+    """Polling service backed by the shared in-memory database and a mocked Plex client."""
+    return PlexPollingService(db, mock_plex)

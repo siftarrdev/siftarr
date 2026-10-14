@@ -32,18 +32,15 @@ from app.siftarr.services.integrations.qbittorrent_service import QbittorrentSer
 from app.siftarr.services.lifecycle.activity_log_service import ActivityLogService
 from app.siftarr.services.lifecycle.lifecycle_service import LifecycleService
 from app.siftarr.services.lifecycle.pending_queue_service import PendingQueueService
-from app.siftarr.services.metadata_service import extract_imdb_id
 from app.siftarr.services.releases.release_parser import (
     cached_parse_release_coverage,
     is_exact_single_episode_release,
-    serialize_release_coverage,
     tv_release_identity_rejection_reason,
 )
 from app.siftarr.services.releases.release_serializers import (
-    apply_release_size_per_season_metadata,
+    apply_known_season_metadata,
     finalize_releases,
     season_pack_release_sort_key,
-    serialize_evaluated_release,
     serialize_stored_evaluated_release,
 )
 from app.siftarr.services.releases.release_storage import (
@@ -129,19 +126,11 @@ class SearchService:
         )
         await self.db.commit()
         staging_service = StagingService(self.db)
-        if force_download:
-            return await staging_service.use_releases(
-                request,
-                [stored_release],
-                selection_source="manual",
-                force_download=True,
-                identity_override=identity_override,
-                rejection_override=rejection_override,
-            )
         return await staging_service.use_releases(
             request,
             [stored_release],
             selection_source="manual",
+            force_download=force_download,
             identity_override=identity_override,
             rejection_override=rejection_override,
         )
@@ -386,8 +375,6 @@ class SearchService:
         self, request_id: int, *, season_number: int | None = None
     ) -> list[Release]:
         """Load stored TV releases for request/season cache reuse."""
-        if type(self.db).__module__.startswith("unittest.mock"):
-            return []
         try:
             result = await self.db.execute(
                 select(Release).where(Release.request_id == request_id).order_by(Release.id)
@@ -435,56 +422,17 @@ class SearchService:
         scope: dict[str, object],
     ) -> list[Release]:
         engine = await self._build_rule_engine(media_type="tv")
-        evaluations = [
-            self._evaluation_for_release(engine.evaluate(release), release) for release in releases
-        ]
+        evaluations = [engine.evaluate(release) for release in releases]
         for evaluation in evaluations:
             identity = identity_warning(request, evaluation.release)
             if identity:
                 evaluation.passed = False
                 evaluation.rejection_reason = identity.message
         await apply_dispositions(self.db, request, evaluations)
-        try:
-            stored_by_key = await store_search_results(
-                self.db, request.id, evaluations, scope=scope, source="adhoc"
-            )
-        except StopAsyncIteration, StopIteration:
-            return [
-                self._transient_release_from_evaluation(request.id, evaluation)
-                for evaluation in evaluations
-            ]
-        return self._dedupe_stored_releases(list(stored_by_key.values()))
-
-    def _transient_release_from_evaluation(
-        self, request_id: int, evaluation: ReleaseEvaluation
-    ) -> Release:
-        release = evaluation.release
-        coverage = cached_parse_release_coverage(release.title)
-        rejection_reason = evaluation.rejection_reason
-        return Release(
-            request_id=request_id,
-            title=release.title,
-            size=release.size,
-            seeders=release.seeders,
-            leechers=release.leechers,
-            download_url=release.download_url,
-            magnet_url=release.magnet_url,
-            info_hash=release.info_hash,
-            indexer=release.indexer,
-            publish_date=release.publish_date,
-            resolution=release.resolution,
-            codec=release.codec,
-            release_group=release.release_group,
-            files=release.files,
-            uploaded_by=release.uploaded_by,
-            season_number=coverage.season_number,
-            episode_number=coverage.episode_number,
-            season_coverage=serialize_release_coverage(coverage),
-            score=evaluation.total_score,
-            passed_rules=evaluation.passed,
-            rejection_reason=rejection_reason if isinstance(rejection_reason, str) else None,
-            search_source="adhoc",
+        stored_by_key = await store_search_results(
+            self.db, request.id, evaluations, scope=scope, source="adhoc"
         )
+        return self._dedupe_stored_releases(list(stored_by_key.values()))
 
     def _filter_serialize_stored_tv_releases(
         self,
@@ -497,24 +445,14 @@ class SearchService:
         for release in releases:
             if not self._stored_release_matches_display_scope(release, scope):
                 continue
-            evaluation = self._evaluation_from_stored_release(release)
+            evaluation = (
+                None if release.rule_evidence else self._evaluation_from_stored_release(release)
+            )
             payload = serialize_stored_evaluated_release(
                 release, evaluation, media_type=MediaType.TV
             )
             if known_total_seasons is not None:
-                payload["known_total_seasons"] = known_total_seasons
-                covered_seasons = payload.get("covered_seasons")
-                payload["covers_all_known_seasons"] = bool(
-                    known_total_seasons
-                    and (
-                        payload.get("is_complete_series")
-                        or (
-                            isinstance(covered_seasons, list)
-                            and len(covered_seasons) >= known_total_seasons
-                        )
-                    )
-                )
-                apply_release_size_per_season_metadata(payload)
+                apply_known_season_metadata(payload, known_total_seasons)
             payloads.append(payload)
         return payloads
 
@@ -577,8 +515,6 @@ class SearchService:
     async def _auto_stage_best_stored_episode(
         self, request: Any, releases: list[Release], *, scope: dict[str, object]
     ) -> None:
-        if type(self.db).__module__.startswith("unittest.mock"):
-            return
         candidates = [
             release
             for release in releases
@@ -601,118 +537,6 @@ class SearchService:
                 request.id,
                 stored_release.title,
             )
-
-    async def _find_stored_release(
-        self,
-        request_id: int,
-        evaluation: ReleaseEvaluation,
-    ) -> Release | None:
-        """Look up the stored :class:`Release` record for an evaluation.
-
-        Returns *None* when the record is not found or the query fails
-        (caller degrades gracefully).
-        """
-        try:
-            result = await self.db.execute(
-                select(Release).where(
-                    Release.request_id == request_id,
-                    Release.title == evaluation.release.title,
-                )
-            )
-            return result.scalar_one_or_none()
-        except Exception:
-            logger.warning(
-                "Could not find stored release for auto-stage: request_id=%s title=%s",
-                request_id,
-                evaluation.release.title,
-                exc_info=True,
-            )
-            return None
-
-    async def _persist_and_serialize_tv_evaluations(
-        self,
-        request_id: int,
-        evaluations: list[ReleaseEvaluation],
-        *,
-        scope: dict[str, object],
-        coverages: list[Any],
-        known_total_seasons: int | None = None,
-    ) -> list[dict[str, object]]:
-        """Persist scoped TV evaluations and serialize with IDs; tolerate pure mocks."""
-        try:
-            stored_by_key = await store_search_results(
-                self.db, request_id, evaluations, scope=scope, source="adhoc"
-            )
-        except StopAsyncIteration, StopIteration:
-            releases = [
-                serialize_evaluated_release(
-                    evaluation.release,
-                    evaluation,
-                    coverage=coverages[index] if index < len(coverages) else None,
-                    known_total_seasons=known_total_seasons,
-                )
-                for index, evaluation in enumerate(evaluations)
-            ]
-        else:
-            releases = [
-                serialize_stored_evaluated_release(stored, evaluation, media_type=MediaType.TV)
-                for evaluation in evaluations
-                if (
-                    stored := stored_by_key.get(
-                        get_release_persistence_key(
-                            title=evaluation.release.title, info_hash=evaluation.release.info_hash
-                        )
-                    )
-                )
-                is not None
-            ]
-
-        if known_total_seasons is not None:
-            for release in releases:
-                release["known_total_seasons"] = known_total_seasons
-                apply_release_size_per_season_metadata(release)
-        return releases
-
-    def _evaluation_for_release(
-        self, evaluation: ReleaseEvaluation, release: ProwlarrRelease
-    ) -> ReleaseEvaluation:
-        """Return an evaluation object bound to the release, isolating shared mocks."""
-        bound = copy(evaluation)
-        bound.release = release
-        return bound
-
-    async def _search_tv(
-        self,
-        request: Any,
-        *,
-        season: int | None = None,
-        episode: int | None = None,
-        cacheable: bool = False,
-    ) -> Any:
-        """Execute a Prowlarr TV search by TVDB ID.
-
-        Args:
-            request: The request model.
-            season: Optional season number.
-            episode: Optional episode number.
-            cacheable: Whether the result may be cached.  Dashboard-triggered
-                searches (the common case) pass ``False`` so the user always
-                sees fresh results.
-        """
-        from app.siftarr.services.request_service import ensure_tvdb_id
-
-        tvdb_id = ensure_tvdb_id(request)
-        runtime_settings = get_settings()
-        prowlarr = ProwlarrService(settings=runtime_settings)
-        result = await prowlarr.search_by_tvdbid(
-            tvdbid=tvdb_id,
-            title=request.title,
-            season=season,
-            episode=episode,
-            year=request.year,
-            cacheable=cacheable,
-        )
-        return self._filter_tv_identity(request, result)
 
     async def _search_tv_episode_exact(
         self,
@@ -743,9 +567,8 @@ class SearchService:
         """Run an explicit-refresh paginated season sweep for ad hoc TV searches."""
         from app.siftarr.services.request_service import ensure_tvdb_id
 
-        tvdb_id = ensure_tvdb_id(request)
+        ensure_tvdb_id(request)
         runtime_settings = get_settings()
-        imdb_id = await self._load_imdb_id(request)
         prowlarr = ProwlarrService(settings=runtime_settings)
         logger.info(
             "TV season sweep requested: request_id=%s title=%s season=%s source=prowlarr",
@@ -756,8 +579,6 @@ class SearchService:
         result = await prowlarr.search_tv_season_sweep(
             title=request.title,
             season=season_number,
-            imdbid=imdb_id,
-            tvdbid=tvdb_id,
             cacheable=False,
             request_id=getattr(request, "id", None),
         )
@@ -771,11 +592,8 @@ class SearchService:
         """
         runtime_settings = get_settings()
         prowlarr = ProwlarrService(settings=runtime_settings)
-        search = getattr(prowlarr, "search_tv_packs_broad", None)
-        if search is None:
-            return None
         try:
-            result = await search(
+            result = await prowlarr.search_tv_packs_broad(
                 title=request.title,
                 cacheable=False,
                 request_id=getattr(request, "id", None),
@@ -792,39 +610,15 @@ class SearchService:
             return None
         return self._filter_tv_identity(request, result)
 
-    async def _load_imdb_id(self, request: Any) -> str | None:
-        tmdb_id = getattr(request, "tmdb_id", None)
-        if not tmdb_id:
-            return None
-        try:
-            details = await OverseerrService(settings=get_settings()).get_media_details(
-                "tv", tmdb_id
-            )
-        except Exception:
-            logger.warning(
-                "IMDb metadata lookup failed for request_id=%s",
-                getattr(request, "id", None),
-                exc_info=True,
-            )
-            return None
-        return extract_imdb_id(details if isinstance(details, dict) else None)
-
     async def _requested_season_numbers(self, request: Any) -> list[int]:
-        seasons_load_failed = False
         try:
             seasons = getattr(request, "seasons", None) or []
         except Exception:
-            seasons = []
-            seasons_load_failed = True
-        seasons_are_mocked = type(seasons).__module__.startswith("unittest.mock")
-        if seasons_are_mocked:
             seasons = []
         values = [getattr(season, "season_number", None) for season in seasons]
         season_numbers = sorted({season for season in values if isinstance(season, int)})
         if season_numbers:
             return season_numbers
-        if not seasons_load_failed and seasons_are_mocked:
-            return []
         request_id = getattr(request, "id", None)
         if request_id is None:
             return []

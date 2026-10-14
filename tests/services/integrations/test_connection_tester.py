@@ -1,303 +1,137 @@
 """Tests for ConnectionTester."""
 
+from contextlib import contextmanager
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import httpx
 import pytest
+import qbittorrentapi
 
-from app.siftarr.services.integrations.connection_tester import (
-    ConnectionTester,
-    ConnectionTestResult,
+from app.siftarr.services.integrations.connection_tester import ConnectionTester
+
+HTTP_SERVICES = ["overseerr", "prowlarr"]
+ALL_SERVICES = ["overseerr", "prowlarr", "qbittorrent"]
+
+
+@pytest.fixture
+def mock_settings():
+    settings = MagicMock()
+    settings.overseerr_url = "http://localhost:5055"
+    settings.overseerr_api_key = "test_key"
+    settings.prowlarr_url = "http://localhost:9696"
+    settings.prowlarr_api_key = "test_key"
+    settings.qbittorrent_url = "http://localhost:8080"
+    settings.qbittorrent_api_key = "qbt_test_key"
+    return settings
+
+
+def _run(service: str, settings):
+    return getattr(ConnectionTester, f"test_{service}")(settings)
+
+
+@contextmanager
+def patched_http(*, response=None, error=None):
+    client = AsyncMock()
+    client.get = AsyncMock(return_value=response, side_effect=error)
+    client.__aenter__.return_value = client
+    client.__aexit__.return_value = None
+    with patch("httpx.AsyncClient", return_value=client):
+        yield
+
+
+def _response(status_code: int, payload: dict | None = None):
+    response = MagicMock()
+    response.status_code = status_code
+    response.json.return_value = payload or {}
+    return response
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("service", ALL_SERVICES)
+@pytest.mark.parametrize(
+    ("field", "expected"),
+    [("url", "url is not configured"), ("api_key", "api key is not configured")],
+    ids=["no_url", "no_api_key"],
 )
+async def test_missing_config_fails_without_network(mock_settings, service, field, expected):
+    setattr(mock_settings, f"{service}_{field}", "")
+
+    result = await _run(service, mock_settings)
+
+    assert result.success is False
+    assert expected in result.message.lower()
 
 
-class TestConnectionTestResult:
-    """Test cases for ConnectionTestResult."""
+@pytest.mark.asyncio
+@pytest.mark.parametrize("service,version", [("overseerr", "1.0.0"), ("prowlarr", "2.0.0")])
+async def test_http_service_success_reports_version(mock_settings, service, version):
+    with patched_http(response=_response(200, {"version": version})):
+        result = await _run(service, mock_settings)
 
-    def test_init(self):
-        """Test ConnectionTestResult initialization."""
-        result = ConnectionTestResult(
-            success=True,
-            message="Connected",
-            details="Version 1.0",
-        )
-        assert result.success is True
-        assert result.message == "Connected"
-        assert result.details == "Version 1.0"
-
-    def test_init_without_details(self):
-        """Test ConnectionTestResult without details."""
-        result = ConnectionTestResult(success=False, message="Failed")
-        assert result.success is False
-        assert result.message == "Failed"
-        assert result.details is None
+    assert result.success is True
+    assert result.details is not None
+    assert version in result.details
 
 
-class TestConnectionTester:
-    """Test cases for ConnectionTester."""
+@pytest.mark.asyncio
+@pytest.mark.parametrize("service", HTTP_SERVICES)
+@pytest.mark.parametrize(
+    ("kwargs", "expected"),
+    [
+        ({"response": _response(401)}, "authentication failed"),
+        ({"response": _response(500)}, "http error: 500"),
+        ({"error": httpx.TimeoutException("Timeout")}, "timeout"),
+        ({"error": httpx.RequestError("Connection refused")}, "connection failed"),
+    ],
+    ids=["unauthorized", "http_500", "timeout", "request_error"],
+)
+async def test_http_service_failure_modes(mock_settings, service, kwargs, expected):
+    with patched_http(**kwargs):
+        result = await _run(service, mock_settings)
 
-    @pytest.fixture
-    def mock_settings(self):
-        """Create mock settings."""
-        settings = MagicMock()
-        settings.overseerr_url = "http://localhost:5055"
-        settings.overseerr_api_key = "test_key"
-        settings.prowlarr_url = "http://localhost:9696"
-        settings.prowlarr_api_key = "test_key"
-        settings.qbittorrent_url = "http://localhost:8080"
-        settings.qbittorrent_api_key = "qbt_test_key"
-        settings.qbittorrent_api_key = "qbt_test_key"
-        return settings
+    assert result.success is False
+    assert expected in result.message.lower()
 
-    @pytest.mark.asyncio
-    async def test_test_overseerr_no_url(self, mock_settings):
-        """Test Overseerr test with no URL configured."""
-        mock_settings.overseerr_url = ""
 
-        result = await ConnectionTester.test_overseerr(mock_settings)
+@pytest.mark.asyncio
+async def test_qbittorrent_success_reports_api_version(mock_settings):
+    client = MagicMock()
+    client.app.web_api_version = "v2.0"
 
-        assert result.success is False
-        assert "URL is not configured" in result.message
-
-    @pytest.mark.asyncio
-    async def test_test_overseerr_no_api_key(self, mock_settings):
-        """Test Overseerr test with no API key configured."""
-        mock_settings.overseerr_api_key = ""
-
-        result = await ConnectionTester.test_overseerr(mock_settings)
-
-        assert result.success is False
-        assert "API key is not configured" in result.message
-
-    @pytest.mark.asyncio
-    async def test_test_overseerr_success(self, mock_settings):
-        """Test successful Overseerr connection."""
-        mock_response = MagicMock()
-        mock_response.status_code = 200
-        mock_response.json.return_value = {"version": "1.0.0"}
-
-        with patch("httpx.AsyncClient") as mock_client_class:
-            mock_client = AsyncMock()
-            mock_client.get = AsyncMock(return_value=mock_response)
-            mock_client.__aenter__.return_value = mock_client
-            mock_client.__aexit__.return_value = None
-            mock_client_class.return_value = mock_client
-
-            result = await ConnectionTester.test_overseerr(mock_settings)
-
-            assert result.success is True
-            assert result.details is not None
-            assert "1.0.0" in result.details
-
-    @pytest.mark.asyncio
-    async def test_test_overseerr_unauthorized(self, mock_settings):
-        """Test Overseerr with invalid API key."""
-        mock_response = MagicMock()
-        mock_response.status_code = 401
-
-        with patch("httpx.AsyncClient") as mock_client_class:
-            mock_client = AsyncMock()
-            mock_client.get = AsyncMock(return_value=mock_response)
-            mock_client.__aenter__.return_value = mock_client
-            mock_client.__aexit__.return_value = None
-            mock_client_class.return_value = mock_client
-
-            result = await ConnectionTester.test_overseerr(mock_settings)
-
-            assert result.success is False
-            assert "Authentication failed" in result.message
-
-    @pytest.mark.asyncio
-    async def test_test_overseerr_http_error(self, mock_settings):
-        """Test Overseerr with HTTP error."""
-        mock_response = MagicMock()
-        mock_response.status_code = 500
-
-        with patch("httpx.AsyncClient") as mock_client_class:
-            mock_client = AsyncMock()
-            mock_client.get = AsyncMock(return_value=mock_response)
-            mock_client.__aenter__.return_value = mock_client
-            mock_client.__aexit__.return_value = None
-            mock_client_class.return_value = mock_client
-
-            result = await ConnectionTester.test_overseerr(mock_settings)
-
-            assert result.success is False
-            assert "HTTP Error: 500" in result.message
-
-    @pytest.mark.asyncio
-    async def test_test_overseerr_timeout(self, mock_settings):
-        """Test Overseerr connection timeout."""
-        import httpx
-
-        with patch("httpx.AsyncClient") as mock_client_class:
-            mock_client = AsyncMock()
-            mock_client.get = AsyncMock(side_effect=httpx.TimeoutException("Timeout"))
-            mock_client.__aenter__.return_value = mock_client
-            mock_client.__aexit__.return_value = None
-            mock_client_class.return_value = mock_client
-
-            result = await ConnectionTester.test_overseerr(mock_settings)
-
-            assert result.success is False
-            assert "timeout" in result.message.lower()
-
-    @pytest.mark.asyncio
-    async def test_test_overseerr_request_error(self, mock_settings):
-        """Test Overseerr with request error."""
-        import httpx
-
-        with patch("httpx.AsyncClient") as mock_client_class:
-            mock_client = AsyncMock()
-            mock_client.get = AsyncMock(side_effect=httpx.RequestError("Connection refused"))
-            mock_client.__aenter__.return_value = mock_client
-            mock_client.__aexit__.return_value = None
-            mock_client_class.return_value = mock_client
-
-            result = await ConnectionTester.test_overseerr(mock_settings)
-
-            assert result.success is False
-            assert "Connection failed" in result.message
-
-    @pytest.mark.asyncio
-    async def test_test_prowlarr_no_url(self, mock_settings):
-        """Test Prowlarr test with no URL configured."""
-        mock_settings.prowlarr_url = ""
-
-        result = await ConnectionTester.test_prowlarr(mock_settings)
-
-        assert result.success is False
-        assert "URL is not configured" in result.message
-
-    @pytest.mark.asyncio
-    async def test_test_prowlarr_no_api_key(self, mock_settings):
-        """Test Prowlarr test with no API key configured."""
-        mock_settings.prowlarr_api_key = ""
-
-        result = await ConnectionTester.test_prowlarr(mock_settings)
-
-        assert result.success is False
-        assert "API key is not configured" in result.message
-
-    @pytest.mark.asyncio
-    async def test_test_prowlarr_success(self, mock_settings):
-        """Test successful Prowlarr connection."""
-        mock_response = MagicMock()
-        mock_response.status_code = 200
-        mock_response.json.return_value = {"version": "2.0.0"}
-
-        with patch("httpx.AsyncClient") as mock_client_class:
-            mock_client = AsyncMock()
-            mock_client.get = AsyncMock(return_value=mock_response)
-            mock_client.__aenter__.return_value = mock_client
-            mock_client.__aexit__.return_value = None
-            mock_client_class.return_value = mock_client
-
-            result = await ConnectionTester.test_prowlarr(mock_settings)
-
-        assert result.success is True
-        assert result.details is not None
-        assert "2.0.0" in result.details
-
-    @pytest.mark.asyncio
-    async def test_test_prowlarr_unauthorized(self, mock_settings):
-        """Test Prowlarr with invalid API key."""
-        mock_response = MagicMock()
-        mock_response.status_code = 401
-
-        with patch("httpx.AsyncClient") as mock_client_class:
-            mock_client = AsyncMock()
-            mock_client.get = AsyncMock(return_value=mock_response)
-            mock_client.__aenter__.return_value = mock_client
-            mock_client.__aexit__.return_value = None
-            mock_client_class.return_value = mock_client
-
-            result = await ConnectionTester.test_prowlarr(mock_settings)
-
-            assert result.success is False
-
-    @pytest.mark.asyncio
-    async def test_test_prowlarr_timeout(self, mock_settings):
-        """Test Prowlarr connection timeout."""
-        import httpx
-
-        with patch("httpx.AsyncClient") as mock_client_class:
-            mock_client = AsyncMock()
-            mock_client.get = AsyncMock(side_effect=httpx.TimeoutException("Timeout"))
-            mock_client.__aenter__.return_value = mock_client
-            mock_client.__aexit__.return_value = None
-            mock_client_class.return_value = mock_client
-
-            result = await ConnectionTester.test_prowlarr(mock_settings)
-
-            assert result.success is False
-
-    @pytest.mark.asyncio
-    async def test_test_qbittorrent_no_url(self, mock_settings):
-        """Test qBittorrent test with no URL configured."""
-        mock_settings.qbittorrent_url = ""
-
+    with (
+        patch("qbittorrentapi.Client", return_value=client),
+        patch("asyncio.to_thread", AsyncMock()),
+    ):
         result = await ConnectionTester.test_qbittorrent(mock_settings)
 
-        assert result.success is False
-        assert "URL is not configured" in result.message
+    assert result.success is True
+    assert result.details is not None
+    assert "Web API Version" in result.details
 
-    @pytest.mark.asyncio
-    async def test_test_qbittorrent_no_api_key(self, mock_settings):
-        """Test qBittorrent test with no API key configured."""
-        mock_settings.qbittorrent_api_key = ""
 
+@pytest.mark.asyncio
+async def test_qbittorrent_succeeds_when_version_lookup_fails(mock_settings):
+    with (
+        patch("qbittorrentapi.Client", return_value=MagicMock()),
+        patch("asyncio.to_thread", AsyncMock(side_effect=Exception("Failed"))),
+    ):
         result = await ConnectionTester.test_qbittorrent(mock_settings)
 
-        assert result.success is False
-        assert "api key" in result.message.lower()
+    assert result.success is True
 
-    @pytest.mark.asyncio
-    async def test_test_qbittorrent_success(self, mock_settings):
-        """Test successful qBittorrent connection."""
 
-        mock_client = MagicMock()
-        mock_client.app.web_api_version = "v2.0"
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("error", "expected"),
+    [
+        (qbittorrentapi.LoginFailed("Invalid"), "authentication failed"),
+        (Exception("Connection refused"), "connection failed"),
+    ],
+    ids=["login_failed", "connection_error"],
+)
+async def test_qbittorrent_failure_modes(mock_settings, error, expected):
+    with patch("qbittorrentapi.Client", side_effect=error):
+        result = await ConnectionTester.test_qbittorrent(mock_settings)
 
-        with (
-            patch("qbittorrentapi.Client", return_value=mock_client),
-            patch("asyncio.to_thread", AsyncMock()),
-        ):
-            result = await ConnectionTester.test_qbittorrent(mock_settings)
-
-        assert result.success is True
-        assert result.details is not None
-        assert "Web API Version" in result.details
-
-    @pytest.mark.asyncio
-    async def test_test_qbittorrent_login_failed(self, mock_settings):
-        """Test qBittorrent with invalid API key."""
-        import qbittorrentapi
-
-        with patch("qbittorrentapi.Client", side_effect=qbittorrentapi.LoginFailed("Invalid")):
-            result = await ConnectionTester.test_qbittorrent(mock_settings)
-
-            assert result.success is False
-            assert "Authentication failed" in result.message
-
-    @pytest.mark.asyncio
-    async def test_test_qbittorrent_version_check_failed(self, mock_settings):
-        """Test qBittorrent when version check fails but login succeeds."""
-
-        mock_client = MagicMock()
-
-        with (
-            patch("qbittorrentapi.Client", return_value=mock_client),
-            patch("asyncio.to_thread", AsyncMock(side_effect=Exception("Failed"))),
-        ):
-            result = await ConnectionTester.test_qbittorrent(mock_settings)
-
-        assert result.success is True
-
-    @pytest.mark.asyncio
-    async def test_test_qbittorrent_connection_error(self, mock_settings):
-        """Test qBittorrent with connection error."""
-        with patch("qbittorrentapi.Client", side_effect=Exception("Connection refused")):
-            result = await ConnectionTester.test_qbittorrent(mock_settings)
-
-            assert result.success is False
-            assert "Connection failed" in result.message
+    assert result.success is False
+    assert expected in result.message.lower()

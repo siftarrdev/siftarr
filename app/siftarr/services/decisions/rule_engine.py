@@ -22,15 +22,6 @@ _rule_version: int = 0
 _engine_cache: dict[str, tuple[RuleEngine, int]] = {}
 
 
-def get_rule_version() -> int:
-    """Return the current rule version.
-
-    Incrementing this version signals that in-memory :class:`RuleEngine`
-    caches should be rebuilt.
-    """
-    return _rule_version
-
-
 def increment_rule_version() -> None:
     """Mark the rule set as changed so cached engines are invalidated."""
     global _rule_version  # noqa: PLW0603
@@ -321,25 +312,6 @@ class RuleEngine:
             scorer_patterns=scorers,
         )
 
-    def _to_bytes(self, size_str: str) -> int | None:
-        """Convert size string like '5GB' to bytes."""
-        size_str = size_str.strip().upper()
-        multipliers = {
-            "B": 1,
-            "KB": 1024,
-            "MB": 1024**2,
-            "GB": 1024**3,
-            "TB": 1024**4,
-        }
-        for suffix, mult in multipliers.items():
-            if size_str.endswith(suffix):
-                try:
-                    num = float(size_str[: -len(suffix)])
-                    return int(num * mult)
-                except ValueError:
-                    return None
-        return None
-
     @staticmethod
     def _format_size_gb(size_bytes: int) -> str:
         """Format bytes using the dashboard's 2-decimal GiB display."""
@@ -531,28 +503,3 @@ class RuleEngine:
             matches=matches,
             rejection_reason=rejection_reason,
         )
-
-    def evaluate_batch(self, releases: list[ProwlarrRelease]) -> list[ReleaseEvaluation]:
-        """
-        Evaluate multiple releases and return sorted by score (highest first).
-
-        Only returns releases that passed all filters.
-        """
-        results = [self.evaluate(r) for r in releases]
-
-        # Filter to only passed releases
-        passed = [r for r in results if r.passed]
-
-        # Sort by score descending
-        passed.sort(key=lambda x: x.total_score, reverse=True)
-
-        return passed
-
-    def get_best_release(self, releases: list[ProwlarrRelease]) -> ReleaseEvaluation | None:
-        """
-        Get the best release from a list.
-
-        Returns the highest-scoring release that passes all rules, or None if none pass.
-        """
-        evaluated = self.evaluate_batch(releases)
-        return evaluated[0] if evaluated else None

@@ -361,16 +361,28 @@ class StatsService:
         return self._multi_series(rows, stats_range)
 
     async def _indexer_behavior(self, stats_range: StatsRange) -> list[dict[str, Any]]:
-        stmt = (
-            select(
-                func.date(StatsReleaseFact.approved_at),
-                StatsReleaseFact.indexer,
-                func.count(StatsReleaseFact.id),
-            )
-            .group_by(func.date(StatsReleaseFact.approved_at), StatsReleaseFact.indexer)
-            .order_by(func.date(StatsReleaseFact.approved_at), StatsReleaseFact.indexer)
+        return await self._indexer_series(
+            StatsReleaseFact.approved_at,
+            StatsReleaseFact.indexer,
+            StatsReleaseFact.id,
+            stats_range,
         )
-        stmt = _apply_range(stmt, StatsReleaseFact.approved_at, stats_range)
+
+    async def _indexer_series(
+        self,
+        day_column: Any,
+        indexer_column: Any,
+        id_column: Any,
+        stats_range: StatsRange,
+        *conditions: Any,
+    ) -> list[dict[str, Any]]:
+        stmt = (
+            select(func.date(day_column), indexer_column, func.count(id_column))
+            .where(*conditions)
+            .group_by(func.date(day_column), indexer_column)
+            .order_by(func.date(day_column), indexer_column)
+        )
+        stmt = _apply_range(stmt, day_column, stats_range)
         result = await self.db.execute(stmt)
         rows = [
             (str(day), indexer or "Unknown", int(count or 0))
@@ -472,23 +484,13 @@ class StatsService:
         )
 
     async def _historical_indexer_behavior(self, stats_range: StatsRange) -> list[dict[str, Any]]:
-        stmt = (
-            select(
-                func.date(StagedTorrent.updated_at),
-                StagedTorrent.indexer,
-                func.count(StagedTorrent.id),
-            )
-            .where(StagedTorrent.status == STAGED_STATUS_APPROVED)
-            .group_by(func.date(StagedTorrent.updated_at), StagedTorrent.indexer)
-            .order_by(func.date(StagedTorrent.updated_at), StagedTorrent.indexer)
+        return await self._indexer_series(
+            StagedTorrent.updated_at,
+            StagedTorrent.indexer,
+            StagedTorrent.id,
+            stats_range,
+            StagedTorrent.status == STAGED_STATUS_APPROVED,
         )
-        stmt = _apply_range(stmt, StagedTorrent.updated_at, stats_range)
-        result = await self.db.execute(stmt)
-        rows = [
-            (str(day), indexer or "Unknown", int(count or 0))
-            for day, indexer, count in result.all()
-        ]
-        return self._multi_series(rows, stats_range)
 
     @staticmethod
     def _timing_average(processing_times: list[dict[str, Any]], key: str) -> float | None:

@@ -16,6 +16,40 @@ export function escapeHtml(value) {
     .replaceAll("'", '&#39;');
 }
 
+/**
+ * POST form data as JSON-accepting fetch. On a 409 with `detail.warnings`, ask the user
+ * to confirm each prompt, append `confirm_<code>=true` for the confirmed codes, and
+ * re-POST once. `buildPrompts` maps the server warnings to confirm() prompts.
+ * Returns `cancelled: true` (no retry) when the user declines any prompt.
+ */
+export async function postWithConfirm(url, formData, buildPrompts) {
+  const post = () => fetch(url, { method: 'POST', headers: { Accept: 'application/json' }, body: formData });
+  let response = await post();
+  if (response.status === 409) {
+    const conflict = await response.json().catch(() => null);
+    const codes = new Set();
+    for (const prompt of buildPrompts(conflict?.detail?.warnings || [])) {
+      if (!window.confirm(prompt.text)) return { response, cancelled: true };
+      if (prompt.code) codes.add(prompt.code);
+    }
+    codes.forEach((code) => formData.append(`confirm_${code}`, 'true'));
+    response = await post();
+  }
+  return { response, cancelled: false };
+}
+
+/** One confirm() prompt per warning: "<message>\n\n<suffix>". */
+export function promptEachWarning(suffix) {
+  return (warnings) => warnings.map((warning) => ({ text: `${warning.message}\n\n${suffix}`, code: warning.code }));
+}
+
+/** Fetch the current page HTML and parse it, or return null when the request fails. */
+export async function fetchPageDoc() {
+  const response = await fetch(window.location.pathname, { headers: { Accept: 'text/html' } });
+  if (!response.ok) return null;
+  return new DOMParser().parseFromString(await response.text(), 'text/html');
+}
+
 export function setActiveTab(tabName) {
   const url = new URL(window.location);
   url.searchParams.set('tab', tabName);
@@ -256,11 +290,8 @@ export async function refreshCurrentTabContent() {
 
   const restore = window.saveTabState(tabName);
   try {
-    const response = await fetch(window.location.pathname, { headers: { Accept: 'text/html' } });
-    if (!response.ok) return;
-    const html = await response.text();
-    const parser = new DOMParser();
-    const doc = parser.parseFromString(html, 'text/html');
+    const doc = await fetchPageDoc();
+    if (!doc) return;
 
     // Update tab content
     const newTabContent = doc.getElementById('content-' + tabName);
