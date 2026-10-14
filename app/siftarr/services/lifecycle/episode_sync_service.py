@@ -116,10 +116,6 @@ class EpisodeSyncService:
     def plex(self) -> PlexService | None:
         return self._plex
 
-    def set_plex(self, plex: PlexService) -> None:
-        """Set the Plex service instance."""
-        self._plex = plex
-
     async def _persist_episode_availability(
         self,
         request: Request,

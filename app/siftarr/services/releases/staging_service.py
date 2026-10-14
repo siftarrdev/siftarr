@@ -11,7 +11,6 @@ import re
 from datetime import UTC, datetime
 from pathlib import Path
 
-import httpx
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -57,53 +56,6 @@ from app.siftarr.services.utils.torrent_metainfo import inspect_torrent_metainfo
 STAGING_DIR = Path("/data/staging")
 
 logger = logging.getLogger(__name__)
-
-
-# ── Torrent download / validation helpers (merged from torrent_service.py) ──
-
-
-async def download_torrent(url: str, save_path: Path) -> bool:
-    """
-    Download a torrent file from URL.
-
-    Args:
-        url: The URL to download from.
-        save_path: Where to save the file.
-
-    Returns:
-        True if successful, False otherwise.
-    """
-    if not url.startswith("http"):
-        return False
-
-    client = await get_shared_client()
-    try:
-        response = await client.get(url, timeout=60.0)
-        response.raise_for_status()
-
-        content = response.content
-        if not content.startswith(b"d8:"):
-            return False
-
-        with open(save_path, "wb") as f:
-            f.write(content)
-        return True
-    except httpx.RequestError, httpx.HTTPStatusError:
-        return False
-
-
-def validate_torrent_file(path: Path) -> bool:
-    """
-    Validate that a file is a valid torrent.
-
-    Torrent files start with ``d8:`` (bencode dictionary).
-    """
-    try:
-        with open(path, "rb") as f:
-            header = f.read(10)
-            return header.startswith(b"d8:")
-    except OSError:
-        return False
 
 
 # ── Handoff helpers (moved from staging_actions.py) ──
@@ -265,18 +217,6 @@ class StagingService:
 
     def __init__(self, db: AsyncSession) -> None:
         self.db = db
-
-    # ── Torrent helpers (merged from TorrentService) ──
-
-    @staticmethod
-    async def download_torrent(url: str, save_path: Path) -> bool:
-        """Download a torrent file from URL (delegates to module-level helper)."""
-        return await download_torrent(url, save_path)
-
-    @staticmethod
-    def validate_torrent_file(path: Path) -> bool:
-        """Validate that a file is a valid torrent."""
-        return validate_torrent_file(path)
 
     # ── Filename helpers ──
 
@@ -484,20 +424,6 @@ class StagingService:
 
     # ── Staged torrent queries ──
 
-    async def get_staged_torrent(self, torrent_id: int) -> StagedTorrent | None:
-        """Get a staged torrent by ID."""
-        result = await self.db.execute(select(StagedTorrent).where(StagedTorrent.id == torrent_id))
-        return result.scalar_one_or_none()
-
-    async def get_all_staged(self) -> list[StagedTorrent]:
-        """Get all staged torrents."""
-        result = await self.db.execute(
-            select(StagedTorrent)
-            .where(StagedTorrent.status == "staged")
-            .order_by(StagedTorrent.created_at.desc())
-        )
-        return list(result.scalars().all())
-
     # ── File management ──
 
     async def delete_staged_files(self, staged: StagedTorrent) -> bool:
@@ -514,40 +440,6 @@ class StagingService:
             return True
         except OSError:
             return False
-
-    async def scan_staging_directory(self) -> list[dict]:
-        """
-        Scan the staging directory and sync with database.
-
-        Returns list of any orphaned files found.
-        """
-        orphaned = []
-
-        if not STAGING_DIR.exists():
-            return orphaned
-
-        json_files = list(STAGING_DIR.glob("*.json"))
-
-        for json_file in json_files:
-            result = await self.db.execute(
-                select(StagedTorrent).where(StagedTorrent.json_path == str(json_file))
-            )
-            staged = result.scalar_one_or_none()
-
-            if not staged:
-                orphaned.append(
-                    {
-                        "json_path": str(json_file),
-                        "torrent_path": str(json_file.with_suffix(".torrent")),
-                    }
-                )
-
-        return orphaned
-
-    @staticmethod
-    def is_staging_enabled(db: AsyncSession) -> bool:
-        """Check if staging mode is enabled."""
-        return False
 
     # ── Episode-centric TV helpers ─────────────────────────────────
 

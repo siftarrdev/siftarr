@@ -328,32 +328,6 @@ async def test_settings_page_includes_plex_job_status_and_manual_job_actions(
         AsyncMock(
             return_value={
                 **base_context(),
-                "plex_jobs": [
-                    {
-                        "label": "Recent Plex Scan",
-                        "description": "Recent-additions scan for active requests",
-                        "last_success": "2026-04-19 12:00:00",
-                        "last_run": "2026-04-19 12:05:00",
-                        "last_started": "2026-04-19 12:04:00",
-                        "locked": False,
-                        "lock_owner": None,
-                        "last_error": None,
-                        "run_summary": "Recent scan completed; completed 2, matched 0, scanned 4",
-                        "metrics_snapshot": "completed=2, scanned=4",
-                    },
-                    {
-                        "label": "Plex Poll",
-                        "description": "Active-request availability poll",
-                        "last_success": None,
-                        "last_run": None,
-                        "last_started": None,
-                        "locked": True,
-                        "lock_owner": "worker-1",
-                        "last_error": "plex timeout",
-                        "run_summary": "Skipped due to lock (worker-1)",
-                        "metrics_snapshot": "completed=0, scanned=0",
-                    },
-                ],
             }
         ),
     )

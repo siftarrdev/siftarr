@@ -10,7 +10,6 @@ from typing import Any
 from fastapi import APIRouter, Depends, File, Form, Query, Request, UploadFile
 from fastapi.responses import (
     HTMLResponse,
-    JSONResponse,
     RedirectResponse,
     Response,
     StreamingResponse,
@@ -23,10 +22,6 @@ from app.siftarr import database as db_mod
 from app.siftarr.config import get_settings, reload_settings
 from app.siftarr.database import get_db
 from app.siftarr.services.admin.plex_polling_service import PlexPollingService
-from app.siftarr.services.admin.scheduler_service import (
-    PLEX_POLL_JOB_NAME,
-    PLEX_RECENT_SCAN_JOB_NAME,
-)
 from app.siftarr.services.admin.settings_service import (
     ENV_KEY_MAP,
     SettingsBackupError,
@@ -37,9 +32,6 @@ from app.siftarr.services.admin.settings_service import (
     mask_secret,
     prepare_overseerr_import,
     record_initial_plex_sync_completion,
-)
-from app.siftarr.services.admin.settings_service import (
-    build_plex_job_statuses as build_plex_job_statuses_svc,
 )
 from app.siftarr.services.admin.settings_service import (
     build_settings_page_context as build_settings_page_context_svc,
@@ -116,15 +108,6 @@ class ApiKeyResponse(BaseModel):
 # ── Convenience helpers (not pass-through; provide router-level defaults) ──
 
 
-async def _build_plex_job_statuses(db) -> list[dict[str, Any]]:
-    """Build Plex job statuses with router-scoped job name constants."""
-    return await build_plex_job_statuses_svc(
-        db,
-        recent_scan_job_name=PLEX_RECENT_SCAN_JOB_NAME,
-        poll_job_name=PLEX_POLL_JOB_NAME,
-    )
-
-
 async def _build_settings_page_context(
     request: Request,
     db: AsyncSession,
@@ -138,7 +121,6 @@ async def _build_settings_page_context(
     return await build_settings_page_context_svc(
         request,
         db,
-        build_plex_job_statuses_func=_build_plex_job_statuses,
         effective_settings_override=effective_settings,
     )
 
@@ -524,22 +506,6 @@ async def restore_settings_backup(
 # ── Connection testing API routes ─────────────────────────────────────────
 
 
-@router.get("/api/connections", response_model=dict)
-async def get_connections_api(db: AsyncSession = Depends(get_db)) -> dict:
-    """Get current connection settings (for API)."""
-    store = SettingsStore(db)
-    effective = await store.get_effective_dict()
-    return {
-        "overseerr_url": effective["overseerr_url"],
-        "overseerr_api_key": effective["overseerr_api_key"],
-        "prowlarr_url": effective["prowlarr_url"],
-        "prowlarr_api_key": effective["prowlarr_api_key"],
-        "qbittorrent_url": effective["qbittorrent_url"],
-        "qbittorrent_api_key": effective["qbittorrent_api_key"],
-        "tz": effective["tz"],
-    }
-
-
 @router.post("/api/test/overseerr", response_model=ConnectionTestResponse)
 async def test_overseerr_connection(db: AsyncSession = Depends(get_db)) -> ConnectionTestResponse:
     """Test connection to Overseerr."""
@@ -733,7 +699,6 @@ async def run_recent_plex_scan(
         "Recent Plex scan",
         result,
     )
-    context["plex_jobs"] = await _build_plex_job_statuses(db)
     return templates.TemplateResponse(request, "settings.html", context)
 
 
@@ -755,7 +720,6 @@ async def run_plex_poll(
         "Plex poll",
         result,
     )
-    context["plex_jobs"] = await _build_plex_job_statuses(db)
     return templates.TemplateResponse(request, "settings.html", context)
 
 
@@ -775,28 +739,6 @@ async def run_qbit_move(
     result = await scheduler_service.trigger_download_completion_now()
     context["message"], context["message_type"] = _qbit_move_message(result)
     return templates.TemplateResponse(request, "settings.html", context)
-
-
-@router.post("/api/run-qbit-move")
-async def run_qbit_move_api() -> JSONResponse:
-    """API endpoint for manually triggering guarded qBittorrent move workflow."""
-    scheduler_service = _get_scheduler_service()
-    if scheduler_service is None:
-        return JSONResponse(
-            {"status": "error", "error": "Scheduler not available"}, status_code=503
-        )
-    result = await scheduler_service.trigger_download_completion_now()
-    status_code = 409 if result.status == "locked" else 500 if result.status == "error" else 200
-    return JSONResponse(
-        {
-            "status": result.status,
-            "moved": result.moved,
-            "removed": result.removed,
-            "errors": result.errors,
-            "error": result.error,
-        },
-        status_code=status_code,
-    )
 
 
 # ── Maintenance routes ─────────────────────────────────────────────────────

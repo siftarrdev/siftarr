@@ -139,19 +139,20 @@ def test_pagination_filters_legacy_links_corrupt_and_retention(client):
 
     headers = {"X-API-Key": "valid-api-key"}
     page = client.get("/staged/decision-log?page_size=1", headers=headers).json()
-    assert page["total"] == 3
+    # Expired, legacy (unversioned), and corrupt entries are all skipped.
+    assert page["total"] == 2
     assert page["has_next"] is True
 
     assert client.get("/staged/decision-log?media_type=tv", headers=headers).json()["total"] == 1
     assert (
         client.get("/staged/decision-log?event_type=replacement", headers=headers).json()["total"]
-        == 1
+        == 0
     )
     assert (
         client.get("/staged/decision-log?selection_source=manual", headers=headers).json()["total"]
         == 1
     )
-    assert client.get("/staged/decision-log?request_id=3", headers=headers).json()["total"] == 1
+    assert client.get("/staged/decision-log?request_id=3", headers=headers).json()["total"] == 0
     assert client.get("/staged/decision-log?title=great", headers=headers).json()["total"] == 1
     assert (
         client.get("/staged/decision-log?rule_name=preferred", headers=headers).json()["total"] == 2

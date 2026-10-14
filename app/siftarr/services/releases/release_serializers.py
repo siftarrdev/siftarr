@@ -427,11 +427,6 @@ def tv_target_scopes_overlap(
     return _episode_sets_overlap(left_set, right_set)
 
 
-def _scope_seasons(scope: SerializedObject) -> set[int]:
-    """Extract season numbers from a scope via ``scope_to_episode_set``."""
-    return {s for (s, e) in scope_to_episode_set(scope)}
-
-
 def _load_staged_release_identity(staged_torrent: Any) -> dict[str, object]:
     json_path = getattr(staged_torrent, "json_path", None)
     if not json_path:

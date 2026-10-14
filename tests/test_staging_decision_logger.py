@@ -161,27 +161,6 @@ def test_log_manual_discard_decision_records_rejection(tmp_path):
     assert payload["failures"][0]["rejected_release"]["id"] == torrent.id
 
 
-def test_normalizes_legacy_and_preserves_full_links():
-    legacy = {
-        "logged_at": "2026-01-01T00:00:00+00:00",
-        "event_type": "rule_accept",
-        "request": {"id": 1, "title": "Movie", "media_type": "movie"},
-        "approved_torrent": {
-            "id": 2,
-            "title": "Movie.1080p",
-            "selection_source": "rule",
-            "download_url": "https://indexer/download/full",
-            "magnet_url": "magnet:?xt=urn:btih:abc",
-        },
-    }
-
-    normalized = staging_decision_log.normalize_entry(legacy)
-
-    assert normalized["schema_version"] == 1
-    assert normalized["selected_release"]["download_url"] == "https://indexer/download/full"
-    assert normalized["selected_release"]["magnet_url"] == "magnet:?xt=urn:btih:abc"
-
-
 def test_read_entries_missing_corrupt_and_retention(tmp_path):
     missing = tmp_path / "missing.jsonl"
     assert staging_decision_log.read_entries(missing) == []
@@ -191,9 +170,11 @@ def test_read_entries_missing_corrupt_and_retention(tmp_path):
     current = datetime.now(UTC).isoformat()
     path.write_text(
         "not-json\n"
-        + json.dumps({"logged_at": old, "event_type": "rule_accept"})
+        + json.dumps({"logged_at": datetime.now(UTC).isoformat(), "event_type": "legacy"})
         + "\n"
-        + json.dumps({"logged_at": current, "event_type": "rule_accept"})
+        + json.dumps({"schema_version": 1, "logged_at": old, "event_type": "rule_accept"})
+        + "\n"
+        + json.dumps({"schema_version": 1, "logged_at": current, "event_type": "rule_accept"})
         + "\n",
         encoding="utf-8",
     )

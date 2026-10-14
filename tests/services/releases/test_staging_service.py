@@ -77,11 +77,6 @@ class TestStagingServiceUnit:
         assert "My_Movie_2019" in result
         assert "123" in result
 
-    def test_is_staging_enabled(self):
-        """Test staging enabled check."""
-        result = StagingService.is_staging_enabled(MagicMock())
-        assert result is False
-
     @pytest.mark.asyncio
     async def test_rule_selection_rejects_zero_seeder_release(self, mock_db):
         """Automatic selections must never hand off torrents with no seeders."""

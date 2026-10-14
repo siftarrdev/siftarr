@@ -147,7 +147,6 @@ async def test_run_recent_plex_scan_reports_success(monkeypatch, mock_db, base_c
         "_build_settings_page_context",
         AsyncMock(return_value=base_context()),
     )
-    monkeypatch.setattr(settings, "_build_plex_job_statuses", AsyncMock(return_value=[]))
 
     scheduler = MagicMock()
     scheduler.trigger_recent_plex_scan_now = AsyncMock(
@@ -188,7 +187,6 @@ async def test_run_recent_plex_scan_reports_partial_completion(monkeypatch, mock
         "_build_settings_page_context",
         AsyncMock(return_value=base_context()),
     )
-    monkeypatch.setattr(settings, "_build_plex_job_statuses", AsyncMock(return_value=[]))
 
     scheduler = MagicMock()
     scheduler.trigger_recent_plex_scan_now = AsyncMock(
@@ -228,7 +226,6 @@ async def test_run_plex_poll_reports_completion(monkeypatch, mock_db, base_conte
         "_build_settings_page_context",
         AsyncMock(return_value=base_context()),
     )
-    monkeypatch.setattr(settings, "_build_plex_job_statuses", AsyncMock(return_value=[]))
 
     scheduler = MagicMock()
     scheduler.trigger_plex_poll_now = AsyncMock(
@@ -260,7 +257,6 @@ async def test_run_plex_poll_reports_lock_contention(monkeypatch, mock_db, base_
         "_build_settings_page_context",
         AsyncMock(return_value=base_context()),
     )
-    monkeypatch.setattr(settings, "_build_plex_job_statuses", AsyncMock(return_value=[]))
 
     scheduler = MagicMock()
     scheduler.trigger_plex_poll_now = AsyncMock(

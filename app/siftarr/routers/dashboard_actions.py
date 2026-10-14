@@ -294,20 +294,6 @@ async def _deny_request_record(
     await lifecycle_service.transition(request.id, RequestStatus.DENIED, reason=reason)
 
 
-@router.post("/{request_id}/search")
-async def search_request_now(
-    request_id: int,
-    redirect_to: str | None = Form(default=None),
-    db: AsyncSession = Depends(get_db),
-) -> RedirectResponse:
-    """Trigger a manual torrent search for a request."""
-    request = await load_request_or_404(db, request_id)
-
-    service = SearchService(db)
-    await service.process_request_search(request)
-    return RedirectResponse(url=redirect_to or "/?tab=pending", status_code=303)
-
-
 @router.post("/bulk", response_model=None)
 async def bulk_request_action(
     http_request: FastAPIRequest,

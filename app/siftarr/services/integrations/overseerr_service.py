@@ -85,10 +85,6 @@ def build_overseerr_media_url(
     return f"{str(overseerr_url).rstrip('/')}/{media_type}/{tmdb_id}"
 
 
-class OverseerrApiError(RuntimeError):
-    """Raised when an Overseerr mutation fails."""
-
-
 class OverseerrFetchError(RuntimeError):
     """Raised when Overseerr data could not be fetched completely."""
 
@@ -116,7 +112,7 @@ class OverseerrService:
     def __init__(self, settings: Settings | None = None) -> None:
         """Initialize the Overseerr service."""
         self.settings = settings or get_settings()
-        self.base_url = str(self.settings.overseerr_url).rstrip("/")
+        self.base_url = (self.settings.overseerr_url or "").rstrip("/")
         self.api_key = self.settings.overseerr_api_key
 
     @classmethod
@@ -145,9 +141,6 @@ class OverseerrService:
 
     async def _get_client(self) -> httpx.AsyncClient:
         return await get_shared_client()
-
-    async def close(self) -> None:
-        pass
 
     async def get_requests(
         self,

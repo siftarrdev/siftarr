@@ -55,20 +55,6 @@ class TestOverseerrService:
             assert service.base_url == "http://localhost:5055"
 
     @pytest.mark.asyncio
-    async def test_close_is_noop(self):
-        """Test closing is a no-op with shared client."""
-        with patch(
-            "app.siftarr.services.integrations.overseerr_service.get_settings"
-        ) as mock_get_settings:
-            mock_settings = MagicMock()
-            mock_settings.overseerr_url = "http://localhost:5055"
-            mock_settings.overseerr_api_key = "test"
-            mock_get_settings.return_value = mock_settings
-
-            service = OverseerrService()
-            await service.close()
-
-    @pytest.mark.asyncio
     async def test_get_requests_no_url(self):
         """Test get_requests when URL is empty."""
         with patch(
@@ -83,6 +69,29 @@ class TestOverseerrService:
             result = await service.get_requests()
 
             assert result == []
+
+    @pytest.mark.asyncio
+    async def test_get_requests_unset_url_skips_http(self):
+        """An unset (None) URL must not become the string "None" and must skip HTTP."""
+        with (
+            patch(
+                "app.siftarr.services.integrations.overseerr_service.get_settings"
+            ) as mock_get_settings,
+            patch(
+                "app.siftarr.services.integrations.overseerr_service.get_shared_client"
+            ) as mock_get_client,
+        ):
+            mock_settings = MagicMock()
+            mock_settings.overseerr_url = None
+            mock_settings.overseerr_api_key = "test"
+            mock_get_settings.return_value = mock_settings
+
+            service = OverseerrService()
+            result = await service.get_requests()
+
+            assert service.base_url == ""
+            assert result == []
+            mock_get_client.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_get_requests_no_api_key(self):

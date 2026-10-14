@@ -122,15 +122,15 @@ def test_browser_routes_redirect_but_api_routes_return_401_or_accept_api_key(cli
             f"/auth/login?next={path.replace('/', '%2F')}"
         )
 
-    api_response = client.get("/settings/api/connections", headers={"accept": "application/json"})
+    api_response = client.get("/settings/api/api-key", headers={"accept": "application/json"})
     assert api_response.status_code == 401
 
     authed_api_response = client.get(
-        "/settings/api/connections",
+        "/settings/api/api-key",
         headers={"accept": "application/json", "X-API-Key": "valid-api-key"},
     )
     assert authed_api_response.status_code == 200
-    assert authed_api_response.json()["tz"] == "UTC"
+    assert authed_api_response.json()["api_key"] == "valid-api-key"
 
 
 def test_plex_claim_relogin_denial_logout_and_next_flow(client, monkeypatch):

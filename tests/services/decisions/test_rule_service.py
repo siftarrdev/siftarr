@@ -57,34 +57,6 @@ class TestRuleService:
         assert result[0].rule_type == RuleType.EXCLUSION
 
     @pytest.mark.asyncio
-    async def test_get_exclusions(self, mock_db, service):
-        """Test getting exclusion rules."""
-        with patch.object(service, "get_rules_by_type", return_value=[]) as mock_get:
-            await service.get_exclusions()
-            mock_get.assert_called_once_with(RuleType.EXCLUSION)
-
-    @pytest.mark.asyncio
-    async def test_get_requirements(self, mock_db, service):
-        """Test getting requirement rules."""
-        with patch.object(service, "get_rules_by_type", return_value=[]) as mock_get:
-            await service.get_requirements()
-            mock_get.assert_called_once_with(RuleType.REQUIREMENT)
-
-    @pytest.mark.asyncio
-    async def test_get_scorers(self, mock_db, service):
-        """Test getting scorer rules."""
-        with patch.object(service, "get_rules_by_type", return_value=[]) as mock_get:
-            await service.get_scorers()
-            mock_get.assert_called_once_with(RuleType.SCORER)
-
-    @pytest.mark.asyncio
-    async def test_get_size_limits(self, mock_db, service):
-        """Test getting size limit rules."""
-        with patch.object(service, "get_rules_by_type", return_value=[]) as mock_get:
-            await service.get_size_limits()
-            mock_get.assert_called_once_with(RuleType.SIZE_LIMIT)
-
-    @pytest.mark.asyncio
     async def test_get_rule_by_id(self, mock_db, service):
         """Test getting a rule by ID."""
         mock_rule = MagicMock(spec=Rule, id=1)
@@ -178,26 +150,6 @@ class TestRuleService:
         assert mock_rule.name == "Original"
         assert mock_rule.pattern == "OriginalPattern"
         assert mock_rule.score == 50
-
-    @pytest.mark.asyncio
-    @pytest.mark.asyncio
-    async def test_upsert_size_limit_rule_updates_tv_target_and_description(self, mock_db, service):
-        """Upsert should persist TV target on existing size rules."""
-        existing_rule = MagicMock(spec=Rule)
-
-        with patch.object(service, "get_size_limit_rule_by_scope", return_value=existing_rule):
-            result = await service.upsert_size_limit_rule(
-                media_scope="tv",
-                min_size_gb=2.5,
-                max_size_gb=8.0,
-                tv_target=TVTarget.SEASON_PACK,
-            )
-
-        assert result == existing_rule
-        assert existing_rule.tv_target == TVTarget.SEASON_PACK
-        assert existing_rule.description == "min 2.5 GB, max 8.0 GB, TV season packs only"
-        mock_db.commit.assert_called_once()
-        mock_db.refresh.assert_called_once_with(existing_rule)
 
     @pytest.mark.asyncio
     async def test_delete_rule(self, mock_db, service):

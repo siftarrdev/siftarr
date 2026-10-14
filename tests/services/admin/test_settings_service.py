@@ -1,3 +1,4 @@
+import asyncio
 import os
 from datetime import UTC, datetime, timedelta
 from typing import Any, cast
@@ -17,6 +18,7 @@ from app.siftarr.services.admin.settings_service import (
     SettingsStore,
     is_sync_timestamp_stale,
     parse_sync_timestamp,
+    prepare_overseerr_import,
     serialize_sync_timestamp,
 )
 from app.siftarr.services.auth_service import require_auth
@@ -320,7 +322,7 @@ async def test_startup_loaded_api_key_authenticates_programmatic_requests(sessio
 
     class Request:
         session = {}
-        scope = {"method": "GET", "path": "/settings/api/connections"}
+        scope = {"method": "GET", "path": "/settings/api/api-key"}
         headers = {"X-API-Key": "persisted-api-key", "accept": "application/json"}
 
     assert get_settings().api_key == "persisted-api-key"
@@ -360,3 +362,24 @@ async def test_settings_store_records_and_checks_sync_staleness(session_maker):
         async with session.begin():
             store = SettingsStore(session)
             assert await store.is_sync_stale("plex", now=now) is False
+
+
+async def test_prepare_overseerr_import_uses_plex_username_for_requester():
+    class FakeOverseerr:
+        async def get_media_details(self, media_type, media_id):
+            return {"title": "Movie", "releaseDate": "2020-01-01"}
+
+    prepared = await prepare_overseerr_import(
+        {
+            "id": 7,
+            "media": {"tmdbId": 11, "mediaType": "movie"},
+            "requestedBy": {"plexUsername": "plex-user", "displayName": "Display"},
+        },
+        FakeOverseerr(),
+        asyncio.Semaphore(1),
+        {},
+        asyncio.Lock(),
+    )
+
+    assert prepared is not None
+    assert prepared.requester_username == "plex-user"

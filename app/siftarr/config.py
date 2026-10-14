@@ -103,8 +103,6 @@ class Settings(BaseSettings):
 
     # System settings
     tz: str = "UTC"
-    puid: int = 1000
-    pgid: int = 1000
 
     # Overseerr settings
     overseerr_url: str | None = None

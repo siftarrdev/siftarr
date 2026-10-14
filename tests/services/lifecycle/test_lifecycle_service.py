@@ -88,17 +88,6 @@ class TestLifecycleService:
         mock_db.commit.assert_not_called()
 
     @pytest.mark.asyncio
-    async def test_get_request_status(self, mock_db, service):
-        """Test getting request status."""
-        mock_result = MagicMock()
-        mock_result.scalar_one_or_none.return_value = RequestStatus.SEARCHING
-        mock_db.execute.return_value = mock_result
-
-        result = await service.get_request_status(1)
-
-        assert result == RequestStatus.SEARCHING
-
-    @pytest.mark.asyncio
     async def test_get_active_requests(self, mock_db, service):
         """Test getting active requests."""
         mock_requests = [
@@ -128,24 +117,6 @@ class TestLifecycleService:
 
         assert len(result) == 1
         assert result[0].status == RequestStatus.PENDING
-
-    @pytest.mark.asyncio
-    async def test_get_requests_stats(self, mock_db, service):
-        """Test getting request statistics using SQL aggregates."""
-        mock_result = MagicMock()
-        mock_result.all.return_value = [
-            (RequestStatus.COMPLETED, 2),
-            (RequestStatus.PENDING, 1),
-            (RequestStatus.FAILED, 1),
-        ]
-        mock_db.execute.return_value = mock_result
-
-        result = await service.get_requests_stats()
-
-        assert result["total"] == 4
-        assert result["by_status"]["completed"] == 2
-        assert result["by_status"]["pending"] == 1
-        assert result["by_status"]["failed"] == 1
 
     @pytest.mark.asyncio
     async def test_update_request_metadata(self, mock_db, service):

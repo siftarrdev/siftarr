@@ -70,18 +70,6 @@ class RuleService:
         )
         return list(result.scalars().all())
 
-    async def get_exclusions(self) -> list[Rule]:
-        return await self.get_rules_by_type(RuleType.EXCLUSION)
-
-    async def get_requirements(self) -> list[Rule]:
-        return await self.get_rules_by_type(RuleType.REQUIREMENT)
-
-    async def get_scorers(self) -> list[Rule]:
-        return await self.get_rules_by_type(RuleType.SCORER)
-
-    async def get_size_limits(self) -> list[Rule]:
-        return await self.get_rules_by_type(RuleType.SIZE_LIMIT)
-
     async def get_rule_by_id(self, rule_id: int) -> Rule | None:
         result = await self.db.execute(select(Rule).where(Rule.id == rule_id))
         return result.scalar_one_or_none()
@@ -205,67 +193,6 @@ class RuleService:
         clear_search_cache()
         increment_rule_version()
         return rule
-
-    async def get_all_size_limit_rules(self) -> list[Rule]:
-        return await self.get_all_rules_by_type(RuleType.SIZE_LIMIT)
-
-    async def get_size_limit_rule_by_scope(
-        self, media_scope: str, tv_target: TVTarget | None = None
-    ) -> Rule | None:
-        result = await self.db.execute(
-            select(Rule)
-            .where(Rule.rule_type == RuleType.SIZE_LIMIT)
-            .where(Rule.media_scope == media_scope)
-            .where(Rule.tv_target == tv_target)
-        )
-        return result.scalar_one_or_none()
-
-    async def upsert_size_limit_rule(
-        self,
-        media_scope: str,
-        min_size_gb: float | None,
-        max_size_gb: float | None,
-        tv_target: TVTarget | None = None,
-        is_enabled: bool = True,
-    ) -> Rule:
-        rule = await self.get_size_limit_rule_by_scope(media_scope, tv_target)
-        description_bits = []
-        if min_size_gb is not None:
-            description_bits.append(f"min {min_size_gb} GB")
-        if max_size_gb is not None:
-            description_bits.append(f"max {max_size_gb} GB")
-        if tv_target == TVTarget.EPISODE:
-            description_bits.append("TV episodes only")
-        elif tv_target == TVTarget.SEASON_PACK:
-            description_bits.append("TV season packs only")
-        description = ", ".join(description_bits) if description_bits else "No limits configured"
-
-        if rule:
-            rule.name = SIZE_LIMIT_RULE_NAME
-            rule.pattern = "size_limit"
-            rule.min_size_gb = min_size_gb
-            rule.max_size_gb = max_size_gb
-            rule.tv_target = tv_target
-            rule.is_enabled = is_enabled
-            rule.description = description
-            await self.db.commit()
-            await self.db.refresh(rule)
-            clear_search_cache()
-            increment_rule_version()
-            return rule
-
-        return await self.create_rule(
-            name=SIZE_LIMIT_RULE_NAME,
-            rule_type=RuleType.SIZE_LIMIT,
-            pattern="size_limit",
-            media_scope=media_scope,
-            score=0,
-            min_size_gb=min_size_gb,
-            max_size_gb=max_size_gb,
-            tv_target=tv_target,
-            is_enabled=is_enabled,
-            description=description,
-        )
 
     @staticmethod
     def serialize_rule(rule: Rule) -> dict[str, Any]:

@@ -1,8 +1,7 @@
 import logging
-import time
 from datetime import UTC, datetime
 
-from sqlalchemy import and_, func, or_, select
+from sqlalchemy import and_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -38,9 +37,6 @@ class LifecycleService:
     - completed: Confirmed in qBittorrent
     - failed: Max retries exceeded or error
     """
-
-    _stats_cache: tuple[dict | None, float] = (None, 0.0)
-    _STATS_CACHE_TTL = 30  # seconds
 
     def __init__(self, db: AsyncSession):
         self.db = db
@@ -200,11 +196,6 @@ class LifecycleService:
 
         return request
 
-    async def get_request_status(self, request_id: int) -> RequestStatus | None:
-        """Get the current status of a request."""
-        result = await self.db.execute(select(Request.status).where(Request.id == request_id))
-        return result.scalar_one_or_none()
-
     async def get_active_requests(
         self,
         limit: int = 100,
@@ -259,37 +250,6 @@ class LifecycleService:
             .limit(limit)
         )
         return list(result.scalars().all())
-
-    async def get_requests_stats(self) -> dict:
-        """Get statistics about all requests using SQL aggregates.
-
-        For TV requests, status is derived from episodes so we count them
-        separately and distribute across status buckets based on episode
-        aggregates.
-
-        Results are cached in-memory for 30 seconds to avoid repeated
-        aggregate queries on every settings page load.
-        """
-        cached, timestamp = self.__class__._stats_cache
-        if cached is not None and time.monotonic() - timestamp < self.__class__._STATS_CACHE_TTL:
-            return cached
-
-        result = await self.db.execute(
-            select(Request.status, func.count()).group_by(Request.status)
-        )
-        rows = result.all()
-        by_status = {status.value: 0 for status in RequestStatus}
-        total = 0
-        for status, count in rows:
-            by_status[status.value] = count
-            total += count
-
-        stats = {
-            "total": total,
-            "by_status": by_status,
-        }
-        self.__class__._stats_cache = (stats, time.monotonic())
-        return stats
 
     async def update_request_metadata(
         self,
