@@ -1,0 +1,3 @@
+# Run package.json scripts and their CLIs on Bun, so Node.js is not required.
+[run]
+bun = true

@@ -13,7 +13,7 @@ DOCKERFILE = Path(__file__).resolve().parents[1] / "docker" / "Dockerfile"
 
 def _tailwind_stage() -> str:
     content = DOCKERFILE.read_text(encoding="utf-8")
-    start = content.index("FROM node:")
+    start = content.index("AS frontend-builder")
     end = content.index("FROM python:")
     return content[start:end]
 
@@ -29,7 +29,7 @@ def test_tailwind_stage_scans_the_whole_app_tree():
 def test_tailwind_stage_copies_sources_before_building():
     stage = _tailwind_stage()
 
-    assert stage.index("COPY app/ ./app/") < stage.index("npm run build:css")
+    assert stage.index("COPY app/ ./app/") < stage.index("bun run build:css")
 
 
 def test_tailwind_output_is_copied_into_the_runtime_image():

@@ -60,7 +60,9 @@ Primary flow:
 - `ty.toml` — static type checker configuration (Python version target)
 - `uv.lock` — locked dependency graph for `uv`
 - `package.json` — Tailwind and incremental TypeScript builds plus frontend format, lint, typecheck, and test scripts
-- `tsconfig.json` / `tsconfig.build.json` — strict no-emit TypeScript checking and the browser-output build mapping
+- `tsconfig.json`: strict no-emit TypeScript config used by `bun run typecheck:frontend`
+- `bun.lock`: locked frontend dependency graph for Bun (replaces `package-lock.json`)
+- `bunfig.toml`: runs package.json scripts and their CLIs on Bun
 - `eslint.config.mjs` / `.prettierrc.json` — JavaScript linting and formatting policy for browser code under `app/siftarr/static/js/`
 - `node_modules/` — JavaScript dependencies (gitignored)
 
@@ -284,7 +286,7 @@ Tests mirror the service subpackage organization under `tests/services/`:
 - `db/alembic/env.py` — Alembic environment wiring
 - `db/alembic/versions/` — focused schema migrations for incremental production upgrades
 - container and FastAPI startup apply Alembic migrations to `head` before background work starts; FastAPI startup then seeds default rules for empty databases
-- `docker/Dockerfile` — multi-stage production image build (Node stage builds Tailwind CSS, Python stage runs the app)
+- `docker/Dockerfile` — multi-stage production image build (Bun stage builds Tailwind CSS, Python stage runs the app)
 - `docker/docker-compose.yml` — local container orchestration with `docker/siftarr-rules.json` mounted for empty-database rule seeding
 - `docker/rebuild-run-logs.sh` — rebuild, run, and log-tail helper; converts dirty Git versions to PEP 440 before passing the Docker build version (use when deps change)
 - `docker/dev-up.sh` — fast dev loop with volume mounts and uvicorn --reload; uses the same PEP 440-safe build-version conversion (daily use, no rebuild)
@@ -301,18 +303,18 @@ After changing custom styles, Tailwind theme values, or Tailwind classes in
 templates, rebuild the CSS:
 
 ```bash
-npm run build:css
+bun run build:css
 ```
 
-The Docker multi-stage build uses Node 20 to rebuild Tailwind CSS and the migrated
+The Docker multi-stage build uses Bun 1.4.3 to rebuild Tailwind CSS and the migrated
 TypeScript modules automatically.
 
 ## Incremental TypeScript build
 
-All migrated browser modules live in `frontend-src/`; `npm run build:frontend`
+All migrated browser modules live in `frontend-src/`; `bun run build:frontend`
 compiles them to the existing static paths and promotes the dashboard entrypoint
 to `app/siftarr/static/js/dashboard.js`. Commit generated JavaScript and use
-`npm run verify:frontend-build` to detect stale output. The largest legacy
+`bun run verify:frontend-build` to detect stale output. The largest legacy
 dashboard modules retain narrowly scoped transitional `@ts-nocheck` exceptions;
 these are permitted by the dashboard ESLint override but do not disable the
 compiler for the rest of the TypeScript tree.
@@ -329,11 +331,11 @@ rebuild (`docker/rebuild-run-logs.sh`).
 Run in this order:
 
 ```bash
-npm run format:js:check
-npm run lint:js
-npm run typecheck:frontend
-npm run verify:frontend-build
-npm run test:js
+bun run format:js:check
+bun run lint:js
+bun run typecheck:frontend
+bun run verify:frontend-build
+bun run test:js
 uv run ruff format .
 uv run ruff check .
 uv run ty check

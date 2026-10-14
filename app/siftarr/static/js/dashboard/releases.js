@@ -1,6 +1,3 @@
-// @ts-nocheck
-// Dashboard Releases Module - Release card rendering and search actions
-// ====================================================================
 import { escapeHtml } from './core.js';
 import { dashboardState } from './core/state.js';
 function renderAnnotation(value, toneClass = 'text-gray-400', dataAttr = '') {
@@ -106,9 +103,6 @@ function formatRelativePublishAge(publishDate) {
   const years = Math.floor(days / 365);
   return years === 1 ? '1 year ago' : `${years} years ago`;
 }
-// Condense a backend rejection reason into a few words for the end of the meta
-// line. The offending value itself is already highlighted red in that line, so
-// the verdict only needs to name the limit that was breached.
 function summarizeRejectionReason(reason) {
   const text = String(reason || '').trim();
   if (!text) return 'rejected';
@@ -123,8 +117,6 @@ function summarizeRejectionReason(reason) {
       return 'rejected: ' + text.replace(pattern, replacement);
     }
   }
-  // Unknown reason: keep it, lower-cased and clipped so one long sentence
-  // cannot push the rest of the meta line off the row.
   const compact = text.charAt(0).toLowerCase() + text.slice(1);
   return 'rejected: ' + (compact.length > 48 ? compact.slice(0, 47).trimEnd() + '…' : compact);
 }
@@ -177,13 +169,6 @@ function renderIconAction(kind, label, attrs = '', disabled = false) {
     '</button>'
   );
 }
-// Render a release card in the calm, score-first layout. Movie list items wrap
-// the row in `<li>`; TV episode buckets (Phase 3) pass `{ bucket: true }` to
-// render a bordered `<div>` variant with tighter spacing. Both variants share
-// the score gutter + title/meta body + a single right-aligned action. Staged
-// (active selection) cards carry inline Approve + Discard; conflicting siblings
-// show Replace; passed releases show Stage; rejected releases dim and inline the
-// rejection reason as the meta line, with a Force action.
 function renderReleaseCard(release, requestId, options = {}) {
   const bucket = !!(options && options.bucket);
   const releaseScope = release.target_scope || {};
@@ -218,9 +203,6 @@ function renderReleaseCard(release, requestId, options = {}) {
     ? '<span class="inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-medium bg-cyan-900/60 text-cyan-300 ring-1 ring-inset ring-cyan-700/40">Staged</span>'
     : '';
   const titleText = escapeHtml(release.title);
-  // Long release titles get two wrapped lines at <lg (with a modest type
-  // down-step) instead of a single truncated line, and truncate on desktop
-  // where the row is wide enough.
   const RELEASE_TITLE_CLASS =
     'text-[13px] leading-snug text-white font-medium overflow-wrap-anywhere line-clamp-2 lg:line-clamp-none lg:truncate';
   const titleHtml = stagedBadge
@@ -232,10 +214,6 @@ function renderReleaseCard(release, requestId, options = {}) {
       stagedBadge +
       '</div>'
     : '<div class="' + RELEASE_TITLE_CLASS + '">' + titleText + '</div>';
-  // Rejected releases keep their full meta line — the annotation tones already
-  // turn the offending value red (see `releaseAnnotationTone`), so the line
-  // stays useful for comparison — and gain a short red verdict at the end.
-  // The untrimmed reason lives in the `title` for the full detail.
   const metaParts = [
     renderAnnotation(
       release.resolution,
@@ -267,8 +245,6 @@ function renderReleaseCard(release, requestId, options = {}) {
       '</div>'
     : '';
   const coverageHtml = !rejected && options.coverageHtml ? options.coverageHtml : '';
-  // `basis-[70%]` lets the action button reflow onto its own line at narrow
-  // widths instead of squeezing the title down to a few characters.
   const bodyHtml =
     '<div class="min-w-0 flex-1 basis-[70%] lg:basis-auto">' + titleHtml + metaHtml + coverageHtml + '</div>';
   const storedReleaseId = release.stored_release_id || release.id;
@@ -319,12 +295,12 @@ function renderReleaseCard(release, requestId, options = {}) {
       renderIconAction(
         'approve',
         'Approve and download now',
-        ' onclick="inlineStagedAction(\'/staged/' + stagedId + '/approve\', this)"',
+        ` onclick="inlineStagedAction('/staged/` + stagedId + `/approve', this)"`,
       ) +
       renderIconAction(
         'reject',
         'Reject staged release',
-        ' onclick="inlineStagedAction(\'/staged/' + stagedId + '/discard\', this)"',
+        ` onclick="inlineStagedAction('/staged/` + stagedId + `/discard', this)"`,
       ) +
       '</div>';
   } else {
@@ -362,15 +338,9 @@ function renderReleaseCard(release, requestId, options = {}) {
       '</div>';
   }
   if (bucket) {
-    // Staged cards are a recessed dark box: the fill alone separates them
-    // from the row behind, so they carry no outline. Unstaged cards keep the
-    // quiet border because they sit on the same tone as their container.
     const outerClass = activeSelectionMode
       ? 'rounded-xl bg-surface-950'
       : 'rounded-xl border border-gray-700/40 bg-surface-800';
-    // Compact rows: an episode drawer often lists a dozen candidates, so the
-    // card is padded just enough to stay readable (title + meta on two tight
-    // lines) without turning the drawer into a scroll marathon.
     return (
       '<div class="' +
       outerClass +
@@ -429,8 +399,6 @@ function renderCoverageBadge(release) {
     '</div>'
   );
 }
-// ── Season pack helpers (shared by the inline per-season drawer and the
-// "Season packs" scope tab) ──
 const SEASON_PACK_ICON_SVG =
   '<svg class="w-3.5 h-3.5 text-brand-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4"/></svg>';
 function isMultiSeasonRelease(release) {
@@ -443,9 +411,6 @@ function isMultiSeasonRelease(release) {
     coveredSeasons.length > 1
   );
 }
-// Single source of truth for "this episode needs nothing further". The backend
-// enum only has `completed`, but older payloads (and the Plex sync path) can
-// still surface `available`, so both are treated as complete.
 function isEpisodeComplete(episode) {
   const status = episode && episode.status;
   return status === 'available' || status === 'completed';
@@ -488,10 +453,6 @@ function findDetailsSeason(requestId, seasonNumber) {
     }) || null
   );
 }
-// Coverage line for a single-season pack. The backend parser treats a season
-// pack as covering the entire season (episode granularity is not parsed for
-// packs), so the bar is full-width; the label compares that coverage to the
-// episodes still needed (non-available/completed) in the season.
 function renderPackCoverage(release, season) {
   const scope = release.target_scope || {};
   if (scope.type !== 'season_pack') return '';
@@ -513,14 +474,11 @@ function renderPackCoverage(release, season) {
     '</div>'
   );
 }
-// Shared pack row renderer: a bucket-variant release card with an episode
-// coverage line (single-season packs) or the season-coverage badge
-// (multi-season / complete-series packs).
 function renderPackRow(release, requestId, season) {
   const coverageHtml = isMultiSeasonRelease(release)
     ? renderCoverageBadge(release)
     : renderPackCoverage(release, season);
-  return renderReleaseCard(release, requestId, { bucket: true, coverageHtml: coverageHtml });
+  return renderReleaseCard(release, requestId, { bucket: true, coverageHtml });
 }
 const SEASON_PACK_SEARCH_BUTTON_CLASS =
   'shrink-0 rounded-lg bg-brand-600 hover:bg-brand-500 px-2.5 py-1 text-[11px] font-semibold text-white';
@@ -535,11 +493,6 @@ function renderSeasonPackRows(releases, requestId, season) {
         .join('')
     : SEASON_PACK_EMPTY_MESSAGE;
 }
-// Active staged torrents whose scope covers a whole season (or the series).
-// These are the reason an episode can show "Replace" with no visible staged
-// candidate: the staged item is a pack, and its cached release row may have been
-// purged from the release cache, so the pack rows alone cannot explain the
-// state. Surfacing them keeps the drawer honest about what is actually staged.
 function stagedPacksForSeason(stagedTorrents, seasonNumber) {
   return (stagedTorrents || []).filter(function (torrent) {
     if (torrent.status && torrent.status !== 'staged') return false;
@@ -551,9 +504,6 @@ function stagedPacksForSeason(stagedTorrents, seasonNumber) {
     return false;
   });
 }
-// Staged packs already present in the cached pack rows render there (with their
-// score/meta and the inline Staged pill), so only unmatched ones need a
-// synthetic row.
 function stagedPacksMissingFromRows(stagedPacks, releases) {
   const cachedTitles = new Set(
     (releases || []).map(function (r) {
@@ -564,7 +514,6 @@ function stagedPacksMissingFromRows(stagedPacks, releases) {
     return !cachedTitles.has(String(staged.title || ''));
   });
 }
-// Short type-only label for prose ("covered by a staged season pack").
 function stagedScopeTypeLabel(staged) {
   const type = (staged.target_scope || {}).type;
   if (type === 'complete_series') return 'complete series';
@@ -580,8 +529,6 @@ function stagedScopeLabel(staged) {
   if (scope.type === 'season_pack') return 'Season pack' + (seasons.length ? ' · S' + seasons.join(', S') : '');
   return 'Staged selection';
 }
-// Synthetic row for a staged pack with no cached release row. Mirrors the
-// recessed dark staged card, minus the score/meta the cache would have carried.
 function renderStagedPackRow(staged, _requestId) {
   const actions = staged.id
     ? '<div class="ml-auto flex items-center gap-1.5 shrink-0">' +
@@ -589,16 +536,16 @@ function renderStagedPackRow(staged, _requestId) {
       renderIconAction(
         'approve',
         'Approve and download now',
-        ' onclick="inlineStagedAction(\'/staged/' +
+        ` onclick="inlineStagedAction('/staged/` +
           staged.id +
-          '/approve\', this); event.preventDefault(); event.stopPropagation();"',
+          `/approve', this); event.preventDefault(); event.stopPropagation();"`,
       ) +
       renderIconAction(
         'reject',
         'Reject staged release',
-        ' onclick="inlineStagedAction(\'/staged/' +
+        ` onclick="inlineStagedAction('/staged/` +
           staged.id +
-          '/discard\', this); event.preventDefault(); event.stopPropagation();"',
+          `/discard', this); event.preventDefault(); event.stopPropagation();"`,
       ) +
       '</div>'
     : '';
@@ -630,17 +577,12 @@ function renderStagedPackRows(stagedPacks, requestId) {
     })
     .join('');
 }
-// Inline "Season packs" sub-drawer rendered as the first row inside each
-// season's accordion in the "All results" scope. Brand-tinted so it stands
-// apart from episode rows; the id keeps open/closed state across re-renders
-// via captureDetailsAccordionState/restoreDetailsAccordionState.
 function renderSeasonPacksDrawer(requestId, season, seasonPacks, stagedPacks) {
   const seasonNumber = season.season_number;
   const orphanStaged = stagedPacksMissingFromRows(stagedPacks, seasonPacks);
   const countParts = [];
   if (orphanStaged.length) countParts.push(orphanStaged.length + ' staged');
   countParts.push(seasonPacks.length + ' cached');
-  // A staged pack the user cannot see is the whole problem, so open the drawer.
   const openAttr = orphanStaged.length ? ' open' : '';
   return (
     '<details id="season-packs-details-' +
@@ -669,16 +611,11 @@ function renderSeasonPacksDrawer(requestId, season, seasonPacks, stagedPacks) {
     seasonNumber +
     '">' +
     renderStagedPackRows(orphanStaged, requestId) +
-    // With a staged pack shown, the "nothing cached" prompt would be
-    // actively confusing, so it is suppressed.
     (seasonPacks.length || !orphanStaged.length ? renderSeasonPackRows(seasonPacks, requestId, season) : '') +
     '</div>' +
     '</details>'
   );
 }
-// Per-season group card for the "Season packs" scope tab: header row with
-// pack count + needed-episode summary + a per-season "Search packs" button,
-// followed by the shared pack rows.
 function renderSeasonPackGroup(requestId, season, seasonPacks, stagedPacks) {
   const seasonNumber = season.season_number;
   const total = (season.episodes || []).length;
@@ -713,9 +650,6 @@ function renderSeasonPackGroup(requestId, season, seasonPacks, stagedPacks) {
     '</div>'
   );
 }
-// Active staged torrents whose scope spans more than one season (multi-season
-// packs and complete-series packs). These are what the "Multi-season packs"
-// group has to let the user manage, not just per-season packs.
 function stagedMultiSeasonPacks(stagedTorrents) {
   return (stagedTorrents || []).filter(function (torrent) {
     if (torrent.status && torrent.status !== 'staged') return false;
@@ -724,9 +658,6 @@ function stagedMultiSeasonPacks(stagedTorrents) {
     return scope.type === 'season_pack' && Array.isArray(scope.season_numbers) && scope.season_numbers.length > 1;
   });
 }
-// "Multi-season packs" group at the bottom of the "Season packs" scope tab.
-// Carries its own search action plus any staged multi-season pack so the pack
-// can be approved or discarded without hunting through the season groups.
 function renderMultiSeasonPackGroup(requestId, multiSeasonReleases, stagedPacks) {
   const orphanStaged = stagedPacksMissingFromRows(stagedPacks, multiSeasonReleases);
   const countParts = [];
@@ -830,11 +761,6 @@ function episodeStatusBadge(status) {
   };
   return colors[status] || 'badge-gray';
 }
-// Render a single TV scope chip for the "Show: All results · Season packs ·
-// Complete series" filter bar. The active chip uses the brand fill; inactive
-// chips use a quiet bordered pill. Clicking switches `detailsControlState.scope`
-// (client-only) via `setDetailsScope`, which re-renders the TV branch without a
-// backend reload.
 function renderScopeChip(requestId, value, label, count, activeScope) {
   const isActive = (activeScope || 'all') === value;
   const classes = isActive
@@ -846,7 +772,7 @@ function renderScopeChip(requestId, value, label, count, activeScope) {
     requestId +
     ", '" +
     value +
-    '\')" class="' +
+    `')" class="` +
     classes +
     '">' +
     escapeHtml(label) +
@@ -867,13 +793,8 @@ function renderSeasonAccordion(data) {
       : 'No season information available.';
     return '<div class="text-gray-500 text-sm">' + escapeHtml(emptyState) + '</div>';
   }
-  // Client-only scope (detailsControlState.scope). Defaults to 'all' when the
-  // control state has not been initialized yet.
   const controls = (window.detailsControlState && window.detailsControlState[requestId]) || {};
   const scope = controls.scope || 'all';
-  // Collect multi-season pack + complete-series releases (now behind scope
-  // chips, not their own nested <details> drawers). Reuses the same
-  // releases_by_season scan + dedup as the previous deep accordion.
   const seenMultiSeasonReleases = new Set();
   const multiSeasonReleases = [];
   const completeSeriesReleases = [];
@@ -890,9 +811,6 @@ function renderSeasonAccordion(data) {
       }
     });
   });
-  // Single-season packs grouped under their actual season. releases_by_season
-  // buckets multi-season packs under every covered season, so filter those out
-  // here — they live in the dedicated "Multi-season packs" group instead.
   const packsBySeason = {};
   let singleSeasonPackCount = 0;
   tvInfo.seasons.forEach(function (season) {
@@ -904,18 +822,14 @@ function renderSeasonAccordion(data) {
     singleSeasonPackCount += packs.length;
   });
   const totalPackCount = singleSeasonPackCount + multiSeasonReleases.length;
-  // Staged packs that span seasons are managed in the multi-season group and
-  // (when they cover everything) in the complete-series tab.
   const stagedMultiSeason = stagedMultiSeasonPacks(data.active_staged_torrents);
   const stagedCompleteSeries = stagedMultiSeason.filter(function (staged) {
     return (staged.target_scope || {}).type === 'complete_series';
   });
-  // Aggregate availability text from tv_info.aggregate_counts (e.g. "3 of 10 available").
   const aggregateCounts = tvInfo.aggregate_counts || {};
   const aggregateAvailable = Number(aggregateCounts.available || 0);
   const aggregateTotal = Number(aggregateCounts.total || 0);
   const aggregateText = aggregateAvailable + ' of ' + aggregateTotal + ' available';
-  // Total episode count across seasons drives the "All results" chip count.
   const totalEpisodeCount = tvInfo.seasons.reduce(function (sum, season) {
     return sum + (season.episodes || []).length;
   }, 0);
@@ -929,7 +843,6 @@ function renderSeasonAccordion(data) {
     escapeHtml(aggregateText) +
     '</span>' +
     '</div>';
-  // ── Section: All results (2-level Season → Episode accordion) ──
   const panelToggle = '<div class="flex justify-end">' + renderTvAccordionToggle('panel', requestId) + '</div>';
   const seasonAccordion = tvInfo.seasons
     .map(function (season) {
@@ -954,10 +867,7 @@ function renderSeasonAccordion(data) {
       if (season.staged_count) summaryBits.push(season.staged_count + ' staged');
       if (season.pending_count) summaryBits.push(season.pending_count + ' pending');
       if (season.unreleased_count) summaryBits.push(season.unreleased_count + ' unreleased');
-      const availableText = summaryBits.join(' \u00B7 ');
-      // Secondary season actions sit on their own quiet second line (indented
-      // to clear the chevron) so the headline row only carries the season
-      // name, progress summary, pack chip, and status badge.
+      const availableText = summaryBits.join(' · ');
       const seasonLinks =
         '<div class="flex flex-wrap items-center gap-5 pl-7 text-xs">' +
         (hasMarkable
@@ -982,10 +892,6 @@ function renderSeasonAccordion(data) {
             'episode-details-' + requestId + '-' + season.season_number + '-' + ep.episode_number;
           const isStaged = ep.status === 'staged';
           const isComplete = isEpisodeComplete(ep);
-          // Completed episodes collapse by default even when they have cached
-          // releases — there is nothing left to act on. They remain manually
-          // expandable, and captureDetailsAccordionState/restoreDetailsAccordionState
-          // keeps a manual expansion across re-renders.
           const isOpen = !isComplete && (episodeReleases.length > 0 || isStaged);
           const cachedEpisodeRowsHtml = episodeReleases.length
             ? episodeReleases
@@ -997,10 +903,6 @@ function renderSeasonAccordion(data) {
           const stagedTorrent = isStaged
             ? stagedTorrentForEpisode(data.active_staged_torrents, season.season_number, ep.episode_number)
             : null;
-          // When the staged item is a pack rather than this episode's own
-          // release, the status badge says so ("staged via season pack").
-          // Otherwise the row shows "Replace" on every cached candidate with
-          // nothing on screen explaining what it would replace.
           const coveringPack =
             stagedTorrent && (stagedTorrent.target_scope || {}).type !== 'single_episode' ? stagedTorrent : null;
           const statusLabel = coveringPack
@@ -1008,9 +910,6 @@ function renderSeasonAccordion(data) {
             : ep.status || 'unknown';
           const episodeBucketHtml = cachedEpisodeRowsHtml;
           const showInlineActions = !isComplete;
-          // Episodes read as divider-separated rows inside the season body
-          // (see the wrapper's `divide-y`) rather than boxes nested in boxes;
-          // only staged/open rows get a background tint.
           return (
             '<details id="' +
             episodeDetailsId +
@@ -1121,7 +1020,6 @@ function renderSeasonAccordion(data) {
     .join('');
   const allSection =
     '<div class="space-y-3.5"' + (scope === 'all' ? '' : ' hidden') + '>' + panelToggle + seasonAccordion + '</div>';
-  // ── Section: Season packs (per-season groups + multi-season group) ──
   const packsHelperRow =
     '<div class="flex flex-wrap items-center justify-between gap-2">' +
     '<span class="text-xs text-gray-500">Packs grouped by season. Coverage compares pack contents to episodes you still need.</span>' +
@@ -1149,9 +1047,6 @@ function renderSeasonAccordion(data) {
     seasonPackGroups +
     renderMultiSeasonPackGroup(requestId, multiSeasonReleases, stagedMultiSeason) +
     '</div>';
-  // ── Section: Complete series (flat list of complete-series releases) ──
-  // Complete-series packs come back from the same broad multi-season query,
-  // so the tab exposes that search rather than sending the user elsewhere.
   const completeSeriesHelperRow =
     '<div class="flex flex-wrap items-center justify-between gap-2">' +
     '<span class="text-xs text-gray-500">Packs covering every season. Searching also refreshes the multi-season pack group.</span>' +
@@ -1201,11 +1096,6 @@ async function markSeasonAvailable(requestId, seasonId) {
     console.error('Failed to mark season available:', e);
   }
 }
-// Stream a per-season pack search into every pack container for that season —
-// the inline drawer in the "All results" scope and the season group in the
-// "Season packs" scope share the same data attribute. Results are persisted
-// server-side, so on completion the details modal reloads (preserving UI
-// state) to rebuild counts, chips, and groups from the cached payload.
 function searchSeasonPacks(requestId, seasonNumber) {
   return new Promise(function (resolve) {
     var containers = document.querySelectorAll('[data-season-pack-results="' + requestId + '-' + seasonNumber + '"]');
@@ -1242,8 +1132,6 @@ function searchSeasonPacks(requestId, seasonNumber) {
     );
   });
 }
-// Stream a multi-season pack search into the "Multi-season packs" group in the
-// "Season packs" scope tab.
 function searchMultiSeasonPacks(requestId) {
   return new Promise(function (resolve) {
     var containers = document.querySelectorAll('[data-multi-season-pack-results="' + requestId + '"]');
@@ -1275,10 +1163,6 @@ function searchMultiSeasonPacks(requestId) {
     );
   });
 }
-// "Search all seasons" in the Season packs tab: run the per-season pack
-// searches sequentially (each one streams progress and reloads the modal),
-// then the broad multi-season/complete-series query, which no per-season sweep
-// can surface.
 async function searchAllSeasonPacks(requestId, btn = null) {
   var data = window.currentDetailsData;
   var seasons = ((data && data.tv_info && data.tv_info.seasons) || []).filter(isSeasonPackEligible);
@@ -1294,8 +1178,6 @@ async function searchAllSeasonPacks(requestId, btn = null) {
     }
     await searchMultiSeasonPacks(requestId);
   } finally {
-    // The modal re-renders after each search, so the original button node is
-    // usually gone; only restore it if it is still attached.
     if (btn && btn.isConnected) {
       btn.disabled = false;
       btn.textContent = originalText;
@@ -1319,7 +1201,6 @@ async function searchEpisode(requestId, seasonNumber, episodeNumber) {
             return renderReleaseCard(r, requestId);
           })
           .join('') || '<div class="text-gray-500 text-sm py-2">No results found for this episode.</div>';
-      // Refresh the details modal to update episode status badge, season counts, and active stage banner
       await window.reloadOpenDetailsIfActive(requestId);
     },
   );
@@ -1346,7 +1227,12 @@ async function submitReleaseAction(btn, approveNow = false) {
       const conflict = await resp.json().catch(() => null);
       const warnings = conflict?.detail?.warnings || [];
       for (const warning of warnings) {
-        if (!window.confirm(`${warning.message}\n\nContinue with this exact release?`)) return;
+        if (
+          !window.confirm(`${warning.message}
+
+Continue with this exact release?`)
+        )
+          return;
         if (warning.code) formData.append(`confirm_${warning.code}`, 'true');
       }
       resp = await fetch(url, { method: 'POST', headers: { Accept: 'application/json' }, body: formData });
@@ -1418,7 +1304,12 @@ async function stageIndividualEpisodes(btn, requestId, seasonNumber) {
       const conflict = await resp.json().catch(() => null);
       const warnings = conflict?.detail?.warnings || [];
       for (const warning of warnings) {
-        if (!window.confirm(`${warning.message}\n\nContinue?`)) return;
+        if (
+          !window.confirm(`${warning.message}
+
+Continue?`)
+        )
+          return;
         if (warning.code) formData.append(`confirm_${warning.code}`, 'true');
       }
       resp = await fetch(actionUrl, { method: 'POST', headers: { Accept: 'application/json' }, body: formData });
@@ -1437,11 +1328,6 @@ async function stageIndividualEpisodes(btn, requestId, seasonNumber) {
     window.showToast('Error: ' + err.message);
   }
 }
-// Inline Approve/Discard on a staged release card. Mirrors `postStagedAction`
-// (staged.js): POST `redirect_to='/?tab=staged'` to the action URL, then refresh
-// the staged tab and reload the open details modal so the card re-renders with
-// the new staged state. Disables the clicked button and shows "…" while in
-// flight.
 async function inlineStagedAction(actionUrl, btn = null) {
   const originalContent = btn ? btn.innerHTML : '';
   const approvedEpisodeDetailsId = actionUrl.endsWith('/approve')
@@ -1464,7 +1350,12 @@ async function inlineStagedAction(actionUrl, btn = null) {
       const conflict = await response.json().catch(() => null);
       const warnings = conflict?.detail?.warnings || [];
       for (const warning of warnings) {
-        if (!window.confirm(`${warning.message}\n\nApprove anyway?`)) return;
+        if (
+          !window.confirm(`${warning.message}
+
+Approve anyway?`)
+        )
+          return;
         if (warning.code) formData.append(`confirm_${warning.code}`, 'true');
       }
       response = await fetch(actionUrl, { method: 'POST', headers: { Accept: 'application/json' }, body: formData });
@@ -1474,8 +1365,6 @@ async function inlineStagedAction(actionUrl, btn = null) {
       throw new Error(errorData?.detail || errorData?.message || `Server error: ${response.status}`);
     }
     const data = await response.json().catch(() => ({}));
-    // These are independent reads; run them concurrently so approval does
-    // not wait for a full staged-tab render before updating open details.
     await Promise.all([
       window.refreshStagedTabData ? window.refreshStagedTabData() : Promise.resolve(),
       window.openRequestDetails && dashboardState.currentRequestId
@@ -1621,6 +1510,7 @@ function updateTvAccordionControls() {
     button.setAttribute('aria-expanded', allOpen ? 'true' : 'false');
   });
 }
+
 export {
   renderReleaseCard,
   renderSearchLoadingState,
@@ -1648,7 +1538,6 @@ export {
   toggleTvSeasonDetails,
   updateTvAccordionControls,
 };
-// Temporary compatibility facade for HTML onclick handlers and unconverted modules.
 Object.assign(window, {
   renderReleaseCard,
   renderSearchLoadingState,

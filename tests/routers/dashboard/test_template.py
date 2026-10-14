@@ -899,9 +899,13 @@ def test_dashboard_active_unreleased_toggle_removed_and_filters_refresh_navigati
 def test_torrent_status_poll_intervals_are_named_constants():
     """Active downloads poll every 1s, completed torrents every 10s."""
     js = _read_dashboard_js()
+    # The build may reprint numeric literals (10000 -> 1e4), so check the source.
+    staged_ts = os.path.join(os.path.dirname(__file__), "../../../frontend-src/dashboard/staged.ts")
+    with open(staged_ts, encoding="utf-8") as handle:
+        ts = handle.read()
 
-    assert "const ACTIVE_DOWNLOADS_POLL_INTERVAL_MS = 1000;" in js
-    assert "const COMPLETED_TORRENTS_POLL_INTERVAL_MS = 10000;" in js
+    assert "const ACTIVE_DOWNLOADS_POLL_INTERVAL_MS = 1000;" in ts
+    assert "const COMPLETED_TORRENTS_POLL_INTERVAL_MS = 10000;" in ts
     assert "setInterval(_patchStagedDownloadStatus, _currentPollIntervalMs())" in js
 
 

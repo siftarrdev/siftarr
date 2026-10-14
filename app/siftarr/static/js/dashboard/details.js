@@ -1,6 +1,3 @@
-// @ts-nocheck
-// Dashboard Details Module - Request details modal and timeline
-// =============================================================
 import { escapeHtml, getVisibleRequests, setPoster, updateNavigationButtons } from './core.js';
 import { dashboardState } from './core/state.js';
 const detailsControlState = window.detailsControlState || {};
@@ -22,9 +19,6 @@ function cancelLiveDetailsRefresh(requestId = null) {
   state.pending = false;
   state.requestId = null;
 }
-// SSE can report several committed result batches in quick succession.  Keep
-// the DB-backed details render responsive without replacing the modal DOM for
-// every batch.
 function scheduleLiveDetailsRefresh(requestId) {
   const modal = document.getElementById('request-details-modal');
   if (!modal || modal.classList.contains('hidden') || window.activeDetailsRequestId !== requestId) return;
@@ -54,10 +48,6 @@ async function reloadOpenDetailsIfActive(requestId) {
   await openRequestDetails(requestId, dashboardState.currentDetailsIndex, { preserveUiState: true });
 }
 function defaultDetailsControls() {
-  // `scope` is client-only (TV accordion: 'all' | 'season_packs' | 'complete_series').
-  // It is deliberately NOT sent in `buildDetailsUrl` — the backend filter/sort
-  // contract is unchanged; scope chips re-render client-side via
-  // `applyLocalReleaseSort`.
   return { title: '', resolution: 'all', sort: 'score', direction: 'desc', scope: 'all' };
 }
 function getDetailsControls(requestId) {
@@ -175,10 +165,6 @@ function reloadDetailsWithControls(debounceMs = 0) {
     run();
   }
 }
-// Client-only TV scope-chip handler. Switches the TV accordion between
-// "All results" (Season → Episode), "Season packs", and "Complete series"
-// without a backend reload — `applyLocalReleaseSort` re-renders the TV branch
-// from the cached `currentDetailsData`. No backend contract change.
 function setDetailsScope(requestId, scope) {
   const controls = getDetailsControls(requestId);
   controls.scope = scope;
@@ -243,7 +229,6 @@ async function openRequestDetails(requestId, explicitIndex = null, options = {})
   const tvSearchBtn = document.getElementById('request-details-tv-search-btn');
   const tvFullSearchBtn = document.getElementById('request-details-tv-full-search-btn');
   ensureDetailsControlHandlers();
-  // Build navigation context from currently visible rows
   if (explicitIndex !== null) {
     dashboardState.currentDetailsIndex = explicitIndex;
   } else {
@@ -284,13 +269,7 @@ async function openRequestDetails(requestId, explicitIndex = null, options = {})
   }
   dashboardState.currentTvSeasons = [];
   setPoster(null, 'Loading poster');
-  // #release-results-header and #release-controls are hidden on mobile by
-  // default (the mobile filter chip toggles #release-controls) and shown on
-  // desktop via lg:flex. Avoid removing `hidden` here — that would surface
-  // them on <lg. Desktop visibility is handled by the lg:flex classes.
   document.getElementById('release-controls').classList.add('hidden');
-  // Reset the mobile filter chip to collapsed whenever the modal (re)opens so
-  // the <lg view starts with the controls hidden behind the single chip.
   const mobileFilterChip = document.querySelector('[onclick="toggleMobileFilter()"]');
   if (mobileFilterChip) {
     mobileFilterChip.setAttribute('aria-expanded', 'false');
@@ -304,9 +283,6 @@ async function openRequestDetails(requestId, explicitIndex = null, options = {})
     resetDetailsControls(requestId, { updateInputs: true });
     delete detailsAutoSearchStarted[requestId];
   }
-  // The Activity overlay always starts closed on a fresh modal open. Open
-  // state does not persist across reopens, but prev/next navigation reuses an
-  // already-visible modal and should not close a panel the user just opened.
   if (modal.classList.contains('hidden')) closeActivityPanel();
   modal.classList.remove('hidden');
   try {
@@ -315,13 +291,8 @@ async function openRequestDetails(requestId, explicitIndex = null, options = {})
       throw new Error(`Server error: ${response.status}`);
     }
     const data = await response.json();
-    // A navigation or a newer live-refresh request won the race.
     if (window.detailsLoadToken !== loadToken) return;
     title.textContent = data.request.title;
-    // Mobile subtitle in the header card: a compact "year · type · status"
-    // line. The details API only exposes type + status today (year/age/by
-    // are absent), so only non-empty segments are joined to avoid stray
-    // separators.
     const subtitleSegments = [
       data.request.year ? escapeHtml(String(data.request.year)) : '',
       data.request.media_type ? escapeHtml(String(data.request.media_type)) : '',
@@ -329,9 +300,6 @@ async function openRequestDetails(requestId, explicitIndex = null, options = {})
     ].filter(Boolean);
     meta.textContent = subtitleSegments.join(' · ');
     overview.textContent = data.overseerr?.overview || 'No synopsis available.';
-    // Mirror the synopsis into the mobile synopsis <details> body so the
-    // collapsed rail synopsis (desktop-only) and the mobile synopsis stay
-    // in sync without duplicating the #request-details-overview ID.
     const mobileOverview = document.querySelector('[data-mobile-overview]');
     if (mobileOverview) mobileOverview.textContent = overview.textContent;
     const metaRow = document.getElementById('request-details-meta-row');
@@ -420,9 +388,6 @@ async function openRequestDetails(requestId, explicitIndex = null, options = {})
     if (data.auto_search_eligible && !detailsAutoSearchStarted[requestId]) {
       detailsAutoSearchStarted[requestId] = true;
       if (data.request.media_type === 'tv') {
-        // The season accordion is useful before the first result arrives:
-        // it exposes episode names, air dates, and status while the SSE
-        // progress toast reports the search state. Do not replace it.
         searchTvRequestNew({ auto: true });
       } else {
         releases.innerHTML = window.renderMovieSearchLoadingState();
@@ -439,16 +404,6 @@ async function openRequestDetails(requestId, explicitIndex = null, options = {})
       '<div class="text-red-400 text-sm">Failed to load request details. Check that Overseerr is reachable.</div>';
   }
 }
-// Render the desktop left-rail stat list (`#request-details-stats`):
-// Cached results / Passed / Rejected / Staged / Last search. Desktop-only
-// (the element is `hidden lg:block`); the mobile header card omits stats.
-// Field names come from `serialize_request_details_response`:
-//   - data.total_releases          -> Cached results
-//   - data.releases[].passed       -> Passed (truthy) / Rejected (falsy)
-//   - data.active_staged_torrents  -> Staged count (plural list length when
-//                                     present; falls back to the singular
-//                                     `active_staged_torrent` flag)
-//   - data.timeline[].created_at   -> latest entry timestamp -> "Last search"
 function renderDetailsStats(data) {
   const statsEl = document.getElementById('request-details-stats');
   if (!statsEl) return;
@@ -474,10 +429,6 @@ function renderDetailsStats(data) {
 function detailsStatRow(label, ddClass, value) {
   return `<div class="flex justify-between gap-3"><dt class="text-gray-500">${escapeHtml(label)}</dt><dd class="${ddClass}">${escapeHtml(value)}</dd></div>`;
 }
-// Derive a relative "Last search" string from the latest timeline entry's
-// `created_at` timestamp. Reuses the repo's `formatRelativePublishAge` helper
-// (exported from releases.js) when present; falls back to "—" when there is no
-// timeline, no parseable timestamp, or the formatter yields an empty string.
 function formatDetailsLastSearch(timeline) {
   if (!Array.isArray(timeline) || timeline.length === 0) return '—';
   let latestMs = null;
@@ -553,10 +504,6 @@ async function loadSearchHistory() {
   if (!isCurrentLoad()) return;
   updateActivityCount(null, runsCount);
 }
-// Update the "Activity · N" count shown on the modal-header toggle button.
-// `renderTimeline` and `loadSearchHistory` each contribute their segment count;
-// the running total is cached on the dataset of #activity-count so
-// independent loaders can collaborate without one clobbering the other.
 function updateActivityCount(timelineDelta, runsDelta) {
   const el = document.getElementById('activity-count');
   if (!el) return;
@@ -593,7 +540,7 @@ async function confirmLargeTvSearch(requestId = dashboardState.currentRequestId)
     window.pendingLargeTvSearchChoice = resolve;
     window.isLargeTvSearchChoiceOpen = true;
     modal.classList.remove('hidden');
-    modal.querySelector('[onclick="chooseLargeTvSearch(\'all\')"]')?.focus();
+    modal.querySelector(`[onclick="chooseLargeTvSearch('all')"]`)?.focus();
   });
 }
 function chooseLargeTvSearch(choice) {
@@ -848,11 +795,6 @@ function renderTimeline(timelineData, options = {}) {
     })
     .join('');
 }
-// Activity panel: an overlay popup pinned to the right third of the details
-// modal body (full width <lg), opened from the "Activity · N" button in the
-// modal header. It is closed on every breakpoint by default and on every fresh
-// modal open; `#activity-backdrop` dims the rest of the body and closes the
-// panel on click.
 function isActivityPanelOpen() {
   const panel = document.getElementById('activity-panel');
   return !!panel && !panel.classList.contains('hidden');
@@ -866,8 +808,6 @@ function setActivityPanelOpen(open) {
   panel.classList.toggle('hidden', !open);
   if (backdrop) backdrop.classList.toggle('hidden', !open);
   if (toggle) toggle.setAttribute('aria-expanded', open ? 'true' : 'false');
-  // Move focus into the overlay on open and hand it back to the header
-  // trigger on close, so keyboard users are not left on hidden content.
   if (open && !wasOpen) {
     panel.querySelector('button')?.focus();
   } else if (!open && wasOpen && toggle) {
@@ -883,9 +823,6 @@ function closeActivityPanel() {
 function toggleActivityPanel() {
   setActivityPanelOpen(!isActivityPanelOpen());
 }
-// Mobile filter chip toggle: expands/collapses #release-controls on <lg.
-// #release-controls is `hidden lg:flex` in the template, so toggling `hidden`
-// only affects mobile — on desktop `lg:flex` overrides `hidden` regardless.
 function toggleMobileFilter() {
   const controls = document.getElementById('release-controls');
   if (!controls) return;
@@ -894,6 +831,7 @@ function toggleMobileFilter() {
   controls.classList.toggle('hidden', !willShow);
   if (chip) chip.setAttribute('aria-expanded', willShow ? 'true' : 'false');
 }
+
 export {
   applyDetailsControls,
   applyLocalReleaseSort,
@@ -923,7 +861,6 @@ export {
   toggleMobileFilter,
   updateReleaseCountText,
 };
-// Temporary compatibility facade for HTML onclick handlers and unconverted release/SSE modules.
 Object.assign(window, {
   detailsControlState,
   detailsAutoSearchStarted,

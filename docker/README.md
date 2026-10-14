@@ -11,7 +11,7 @@ Build from the repository root with the Dockerfile in this directory:
 docker build -f docker/Dockerfile -t siftarr:latest .
 ```
 
-The image uses a Node 20 stage to build Tailwind CSS, then a `python:3.14-slim`
+The image uses a Bun 1.4.3 stage to build Tailwind CSS, then a `python:3.14-slim`
 runtime stage that installs `uv`, syncs locked dependencies, copies the app and
 Alembic files, and runs through `docker/entrypoint.sh`. The default command
 starts Uvicorn on port `8000`.

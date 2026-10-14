@@ -1,6 +1,3 @@
-// @ts-nocheck
-// Dashboard Modals Module - Modal dialogs and toast notifications
-// ===============================================================
 import { refreshCurrentTabContent } from './core.js';
 function showToast(message) {
   const container = document.getElementById('toast-container');
@@ -45,7 +42,6 @@ function showSearchProgressToast(title, message, items) {
     '<div class="text-[10px] uppercase tracking-wide text-gray-500 mb-1">Searching for</div>' +
     '<ul class="search-progress-items space-y-1 text-gray-300 max-h-28 overflow-y-auto"></ul>' +
     '</div>';
-  // Populate items list
   const itemsWrap = el.querySelector('.search-progress-items-wrap');
   const itemsList = el.querySelector('.search-progress-items');
   if (itemsList && itemsWrap && items.length) {
@@ -64,7 +60,6 @@ function showSearchProgressToast(title, message, items) {
     }
   }
   container.appendChild(el);
-  // Animate bar
   const bar = el.querySelector('.search-progress-bar');
   if (bar) {
     requestAnimationFrame(() => {
@@ -74,7 +69,6 @@ function showSearchProgressToast(title, message, items) {
       if (bar) bar.style.width = '90%';
     }, 150);
   }
-  // Fade in
   requestAnimationFrame(() => {
     el.classList.remove('opacity-0');
     el.classList.add('opacity-100');
@@ -157,7 +151,7 @@ function collectBulkSearchTitles(form, searchAll = false) {
 async function submitSearchRequest(action, body, redirectTo) {
   const response = await fetch(action, {
     method: 'POST',
-    body: body,
+    body,
     headers: { Accept: 'text/html' },
   });
   if (!response.ok) throw new Error('Search request failed (' + response.status + ')');
@@ -196,7 +190,7 @@ async function postToAction(action, redirectTo, trigger = null, scope = null) {
     const match = action.match(/\/requests\/(\d+)\/search/);
     const requestId = match ? parseInt(match[1], 10) : null;
     if (requestId) {
-      function resetTrigger() {
+      let resetTrigger = function () {
         trigger.disabled = false;
         trigger.innerHTML = trigger.dataset.originalText || trigger.textContent;
         trigger.removeAttribute('aria-busy');
@@ -207,7 +201,7 @@ async function postToAction(action, redirectTo, trigger = null, scope = null) {
               control.disabled = false;
             });
         }
-      }
+      };
       const isTv = String(row?.dataset.type || '').toLowerCase() === 'tv';
       if (isTv) {
         try {
@@ -217,8 +211,6 @@ async function postToAction(action, redirectTo, trigger = null, scope = null) {
             return;
           }
           if (searchChoice === 'packs') {
-            // Pack searches render into the TV details accordion, so open it
-            // directly on that scope before starting the selected search.
             window.detailsAutoSearchStarted[requestId] = true;
             await window.openRequestDetails(requestId, null, { focusTvScope: 'season_packs' });
             window.isTvScopeSearchRunning = true;
@@ -270,11 +262,9 @@ async function handleBulkDenyAction(event, form) {
   event.preventDefault();
   const submitter = event.submitter;
   const formData = new FormData(form);
-  // Ensure action is set
   if (submitter && submitter.value) {
     formData.set('action', submitter.value);
   }
-  // Collect selected request IDs from checkboxes
   const checkboxes = getDedupedCheckedBulkCheckboxes(form);
   const ids = checkboxes.map((cb) => cb.value).filter(Boolean);
   if (ids.length === 0) {
@@ -294,7 +284,6 @@ async function handleBulkDenyAction(event, form) {
       const errorData = await response.json().catch(() => null);
       throw new Error(errorData?.detail || `Server error: ${response.status}`);
     }
-    // Uncheck all selected checkboxes
     checkboxes.forEach((cb) => (cb.checked = false));
     window.showToast('Request(s) denied');
     await refreshCurrentTabContent();
@@ -308,11 +297,9 @@ async function handleBulkDenyAction(event, form) {
 function handleBulkRequestActionSubmit(event, form) {
   const submitter = event.submitter;
   if (!submitter) return true;
-  // Handle deny actions via fetch
   if (submitter.value === 'deny') {
     return handleBulkDenyAction(event, form);
   }
-  // Search actions
   if (submitter.dataset.searchSubmitControl !== 'true') return true;
   if (form.dataset.searchSubmitting === 'true') return false;
   event.preventDefault();
@@ -354,7 +341,6 @@ function handleBulkRequestActionSubmit(event, form) {
           });
         }
         resetSubmitter();
-        // Refresh stats cards after search completes
         refreshCurrentTabContent();
       },
       function () {
@@ -453,6 +439,7 @@ if (document.readyState === 'loading') {
 } else {
   bindDenyModalHandlers();
 }
+
 export {
   showToast,
   showSearchProgressToast,
@@ -469,7 +456,6 @@ export {
   closeReplaceModal,
   bindSelectAll,
 };
-// Temporary compatibility facade for HTML onclick handlers and unconverted modules.
 Object.assign(window, {
   showToast,
   showSearchProgressToast,
