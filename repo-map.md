@@ -213,7 +213,7 @@ Business logic and integrations, organized into thematic subpackages:
 - `release_parser.py` — parse release names; classifies exact episodes, season/multi-season/complete-series packs, multi-episode packs; `cached_parse_release_coverage` (lru_cache, maxsize=4096)
 - `release_serializers.py` — API-facing serialization helpers
 - `release_storage.py` — release persistence and reconstruction helpers; `store_search_results()` scopes cleanup by search source
-- `staging_service.py` — stage/send workflows, staged torrent handling, torrent download/validation, release handoff
+- `staging_service.py` — stage/send workflows, staged torrent handling, and release handoff; sets TV episode statuses for handed-off releases without downgrading COMPLETED episodes
 - `release_disposition_service.py` / `release_validation_service.py` — identity keys and target scopes, durable rejection matching, and shared identity/disposition handoff checks
 
 **`utils/`** — Shared utility modules
