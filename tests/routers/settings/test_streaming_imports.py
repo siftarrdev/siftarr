@@ -217,7 +217,6 @@ async def test_overseerr_import_skips_terminal_and_current_workflow_stale_links(
             for index, status in enumerate(
                 (
                     RequestStatus.COMPLETED,
-                    RequestStatus.FAILED,
                     RequestStatus.DENIED,
                     RequestStatus.STAGED,
                     RequestStatus.DOWNLOADING,
@@ -239,6 +238,34 @@ async def test_overseerr_import_skips_terminal_and_current_workflow_stale_links(
             assert row.retry_count == 2
         activity = (await session.execute(select(ActivityLog))).scalars().all()
         assert activity == []
+
+    await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_overseerr_import_denies_failed_request_deleted_upstream():
+    """A FAILED request whose Seerr request was deleted must not linger as a duplicate."""
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+    session_maker = async_sessionmaker(engine, expire_on_commit=False)
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+
+    async with session_maker() as session:
+        session.add(
+            RequestModel(
+                external_id="183",
+                media_type=MediaType.MOVIE,
+                title="Deleted Upstream",
+                status=RequestStatus.FAILED,
+                overseerr_request_id=183,
+            )
+        )
+        await session.commit()
+
+        await _run_import_with_requests(session, [], deleted_upstream_ids=frozenset({183}))
+
+        row = (await session.execute(select(RequestModel))).scalar_one()
+        assert row.status == RequestStatus.DENIED
 
     await engine.dispose()
 

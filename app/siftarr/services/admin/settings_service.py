@@ -32,6 +32,7 @@ SYNC_STALE_AFTER = 24 * 60 * 60
 STALE_OVERSEERR_CLEANUP_STATUSES: tuple[RequestStatus, ...] = (
     RequestStatus.PENDING,
     RequestStatus.SEARCHING,
+    RequestStatus.FAILED,
 )
 
 _FULL_PLEX_SYNC_LOCK = asyncio.Lock()
