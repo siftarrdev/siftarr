@@ -50,6 +50,23 @@ class _NoopPlexService:
         self.settings = settings
 
 
+def _stub_request_link_helpers(monkeypatch, linked_ids=()):
+    """Stub Seerr link lookups so scripted fake sessions only see the queries under test.
+
+    Each Seerr request is treated as new media with no existing local row.
+    """
+    monkeypatch.setattr(
+        settings_service,
+        "linked_overseerr_request_ids",
+        AsyncMock(return_value=set(linked_ids)),
+    )
+    monkeypatch.setattr(
+        settings_service, "get_linked_overseerr_request_ids", AsyncMock(return_value=[])
+    )
+    monkeypatch.setattr(settings_service, "find_request_for_media", AsyncMock(return_value=None))
+    monkeypatch.setattr(settings_service, "add_overseerr_link", AsyncMock())
+
+
 async def _noop_evaluate_imported_request(*_args, **_kwargs):
     return None
 
@@ -1006,6 +1023,7 @@ async def test_rescan_plex_uses_bounded_parallel_workers_and_reports_counts(
 @pytest.mark.asyncio
 async def test_sync_overseerr_prefetches_with_bounded_parallelism(monkeypatch, base_context):
     """Overseerr sync should cap metadata fetch concurrency and keep DB writes serial."""
+    _stub_request_link_helpers(monkeypatch)
 
     class FakeDB:
         def __init__(self):
@@ -1023,6 +1041,12 @@ async def test_sync_overseerr_prefetches_with_bounded_parallelism(monkeypatch, b
 
             params = statement.compile().params
             entity = columns[0].get("entity") if columns else None
+
+            if entity is RequestModel and not params:
+                # Existing external IDs lookup.
+                result = MagicMock()
+                result.fetchall.return_value = []
+                return result
 
             if entity is RequestModel:
                 request_id = next(iter(params.values()))
@@ -1221,6 +1245,9 @@ async def test_sync_overseerr_uses_available_request_id_when_external_id_collide
     monkeypatch, base_context, existing_rows, expected_external_id
 ):
     """A new Seerr request must not disappear behind an ambiguous external ID."""
+    _stub_request_link_helpers(
+        monkeypatch, linked_ids=[r[1] for r in existing_rows if r[1] is not None]
+    )
 
     class FakeDB:
         def __init__(self):
@@ -1311,6 +1338,7 @@ async def test_sync_overseerr_logs_request_level_degraded_tv_sync_once(
     monkeypatch, base_context, caplog
 ):
     """Overseerr import should surface one request-level degraded sync warning."""
+    _stub_request_link_helpers(monkeypatch)
 
     class FakeDB:
         def __init__(self):
@@ -1328,6 +1356,12 @@ async def test_sync_overseerr_logs_request_level_degraded_tv_sync_once(
 
             params = statement.compile().params
             entity = columns[0].get("entity") if columns else None
+
+            if entity is RequestModel and not params:
+                # Existing external IDs lookup.
+                result = MagicMock()
+                result.fetchall.return_value = []
+                return result
 
             if entity is RequestModel:
                 request_id = next(iter(params.values()))
@@ -1476,6 +1510,7 @@ async def test_sync_overseerr_fresh_tv_import_bounds_work_and_preserves_state_on
     monkeypatch, base_context, caplog
 ):
     """Fresh TV import should fail fast on Plex ReadError without per-season spam."""
+    _stub_request_link_helpers(monkeypatch)
 
     class FakeDB:
         def __init__(self):
@@ -1493,6 +1528,12 @@ async def test_sync_overseerr_fresh_tv_import_bounds_work_and_preserves_state_on
 
             params = statement.compile().params
             entity = columns[0].get("entity") if columns else None
+
+            if entity is RequestModel and not params:
+                # Existing external IDs lookup.
+                result = MagicMock()
+                result.fetchall.return_value = []
+                return result
 
             if entity is RequestModel:
                 request_id = next(iter(params.values()))

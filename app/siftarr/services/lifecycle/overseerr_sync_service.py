@@ -9,6 +9,7 @@ from app.siftarr.models.activity_log import EventType
 from app.siftarr.models.request import Request
 from app.siftarr.services.integrations.overseerr_service import OverseerrService
 from app.siftarr.services.lifecycle.activity_log_service import ActivityLogService
+from app.siftarr.services.lifecycle.request_link_service import get_linked_overseerr_request_ids
 
 logger = logging.getLogger(__name__)
 
@@ -39,15 +40,37 @@ async def approve_overseerr_request_best_effort(
     *,
     reason: str,
 ) -> bool:
-    """Approve a linked Overseerr request without blocking local lifecycle work."""
-    overseerr_request_id = getattr(request, "overseerr_request_id", None) if request else None
-    if request is None or not isinstance(overseerr_request_id, int) or overseerr_request_id <= 0:
+    """Approve every linked Overseerr request without blocking local lifecycle work.
+
+    One local request can fulfil several Seerr requests (for example separate
+    season requests), so each linked request is approved.
+    """
+    if request is None:
+        return False
+    overseerr_request_ids = await get_linked_overseerr_request_ids(db, request)
+    if not overseerr_request_ids:
         return False
 
-    try:
-        approved = await OverseerrService(settings=get_settings()).approve_request(
-            overseerr_request_id
+    service = OverseerrService(settings=get_settings())
+    any_approved = False
+    for overseerr_request_id in overseerr_request_ids:
+        any_approved = (
+            await _approve_one(db, service, request, overseerr_request_id, reason=reason)
+            or any_approved
         )
+    return any_approved
+
+
+async def _approve_one(
+    db: AsyncSession,
+    service: OverseerrService,
+    request: Request,
+    overseerr_request_id: int,
+    *,
+    reason: str,
+) -> bool:
+    try:
+        approved = await service.approve_request(overseerr_request_id)
     except Exception:
         logger.exception(
             "Overseerr approval sync failed for request_id=%s overseerr_request_id=%s",
