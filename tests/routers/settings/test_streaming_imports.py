@@ -366,8 +366,7 @@ async def test_rescan_plex_full_resyncs_non_completed_tv_and_reports_weighted_pr
         ]
     )
 
-    async def poll(on_progress, priority_only=True):
-        assert priority_only is False
+    async def poll(on_progress):
         await on_progress(
             {
                 "phase": "poll",

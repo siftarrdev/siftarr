@@ -5,7 +5,7 @@ import contextlib
 import json
 import logging
 import os
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any
@@ -243,14 +243,14 @@ class SettingsStore:
         await self.load_into_environ(clear_existing=False)
         return {"mode": mode, "restored": len(backup_settings)}
 
-    async def get_plex_sso_status(self, db_values: dict[str, str] | None = None) -> dict[str, Any]:
+    async def get_plex_sso_status(self, db_values: dict[str, str]) -> dict[str, Any]:
         """Return Plex SSO claim metadata without exposing the stored token."""
-        values = db_values if db_values is not None else await self.get_all()
-        token = values.get("plex_token") or os.environ.get("PLEX_TOKEN")
+        token = db_values.get("plex_token") or os.environ.get("PLEX_TOKEN")
         return {
-            "plex_claimed_id": values.get("plex_claimed_id") or os.environ.get("PLEX_CLAIMED_ID"),
-            "plex_username": values.get("plex_username") or os.environ.get("PLEX_USERNAME"),
-            "plex_thumb": values.get("plex_thumb") or os.environ.get("PLEX_THUMB"),
+            "plex_claimed_id": db_values.get("plex_claimed_id")
+            or os.environ.get("PLEX_CLAIMED_ID"),
+            "plex_username": db_values.get("plex_username") or os.environ.get("PLEX_USERNAME"),
+            "plex_thumb": db_values.get("plex_thumb") or os.environ.get("PLEX_THUMB"),
             "plex_token_present": bool(token),
         }
 
@@ -426,30 +426,13 @@ def _masked_settings_payload(settings: Any) -> dict[str, Any]:
     }
 
 
-async def build_effective_settings(db: AsyncSession | None = None) -> dict[str, Any]:
-    """Build the effective flattened settings payload (secrets masked)."""
-    del db
-    return _masked_settings_payload(get_settings())
-
-
 async def build_settings_page_context(
     request,
     db: AsyncSession,
     *,
-    effective_settings_override: dict[str, Any] | None = None,
+    effective_settings: dict[str, Any],
 ) -> dict[str, Any]:
-    """Build the shared context required by the settings page.
-
-    When *effective_settings_override* is provided it is used directly
-    instead of calling :func:`build_effective_settings`.  Callers that
-    already have a merged dict (e.g. from :class:`SettingsStore`) should
-    pass it here to avoid a redundant round-trip.
-    """
-    if effective_settings_override is not None:
-        effective_settings = effective_settings_override
-    else:
-        effective_settings = await build_effective_settings()
-
+    """Build the shared context required by the settings page."""
     staging_enabled = get_settings().staging_mode_enabled
 
     queue_service = PendingQueueService(db)
@@ -506,36 +489,6 @@ def parse_settings_backup(payload: bytes | str) -> dict[str, str]:
     return parsed
 
 
-def build_plex_run_outcome_summary(
-    metrics_payload: dict[str, Any] | None,
-    *,
-    locked: bool = False,
-    lock_owner: str | None = None,
-    last_error: str | None = None,
-) -> str | None:
-    """Summarize the last known operator-facing outcome for a Plex job."""
-    if locked:
-        return f"Skipped due to lock ({lock_owner or 'another worker'})"
-
-    if not isinstance(metrics_payload, dict):
-        return "No completed run recorded"
-
-    scanned = metrics_payload.get("scanned_items")
-    matched = metrics_payload.get("matched_requests")
-    skipped = _coerce_int(metrics_payload.get("skipped_on_error_items"))
-    completed = _coerce_int(metrics_payload.get("completed_requests"))
-
-    if scanned is not None:
-        if skipped or last_error:
-            return (
-                "Recent scan partial; "
-                f"completed {completed}, matched {matched or 0}, scanned {scanned}, errors {max(skipped, 1)}"
-            )
-        return f"Recent scan completed; completed {completed}, matched {matched or 0}, scanned {scanned}"
-
-    return f"Plex poll completed; transitioned {completed} request(s)"
-
-
 def build_manual_plex_job_message(job_label: str, result: Any) -> tuple[str, str]:
     """Build a concise manual-trigger status message for Plex jobs."""
     if result.status == "locked":
@@ -543,24 +496,27 @@ def build_manual_plex_job_message(job_label: str, result: Any) -> tuple[str, str
     if result.status != "completed":
         return f"{job_label} failed: {result.error}", "error"
 
-    message = f"{job_label} completed. Transitioned {result.completed_requests} request(s)."
-    outcome_summary = build_plex_run_outcome_summary(result.metrics_payload)
-    if outcome_summary and outcome_summary.startswith("Recent scan completed;"):
-        message = (
-            f"{job_label} completed. Transitioned {result.completed_requests} request(s). "
-            f"{outcome_summary}."
-        )
-    elif outcome_summary and outcome_summary.startswith("Recent scan partial;"):
-        message = (
-            f"{job_label} completed partially. "
-            f"Transitioned {result.completed_requests} request(s). "
-            f"{outcome_summary.removeprefix('Recent scan partial; ').capitalize()}."
-        )
-    elif outcome_summary and outcome_summary.startswith("Plex poll completed;"):
-        message = (
-            f"{job_label} completed. "
-            f"{outcome_summary.removeprefix('Plex poll completed; ').capitalize()}."
-        )
+    transitioned = f"Transitioned {result.completed_requests} request(s)."
+    message = f"{job_label} completed. {transitioned}"
+    metrics = result.metrics_payload
+    if isinstance(metrics, dict):
+        scanned = metrics.get("scanned_items")
+        matched = metrics.get("matched_requests")
+        skipped = _coerce_int(metrics.get("skipped_on_error_items"))
+        completed = _coerce_int(metrics.get("completed_requests"))
+        if scanned is None:
+            message = f"{job_label} completed. Transitioned {completed} request(s)."
+        elif skipped:
+            details = (
+                f"completed {completed}, matched {matched or 0}, "
+                f"scanned {scanned}, errors {max(skipped, 1)}"
+            )
+            message = f"{job_label} completed partially. {transitioned} {details.capitalize()}."
+        else:
+            message = (
+                f"{message} Recent scan completed; completed {completed}, "
+                f"matched {matched or 0}, scanned {scanned}."
+            )
 
     return message, "success"
 
@@ -935,38 +891,39 @@ async def rescan_plex_requests(
             )
         )
 
-    completed = await polling_service.poll(on_progress=emit_polling_progress, priority_only=False)
+    completed = await polling_service.poll(on_progress=emit_polling_progress)
     return tv_resynced, tv_failed, completed
 
 
+def _start_event_task(
+    run: Callable[[Callable[[dict[str, Any]], Awaitable[None]]], Awaitable[Any]],
+) -> tuple[asyncio.Task[Any], asyncio.Queue[dict[str, Any] | None]]:
+    """Run *run* as a task that queues its progress events.
+
+    The queue receives a ``None`` sentinel after the task finishes, whether it
+    returns or raises. The task itself is not awaited here; the caller awaits it
+    after draining so exceptions propagate as before.
+    """
+    queue: asyncio.Queue[dict[str, Any] | None] = asyncio.Queue()
+
+    async def emit(payload: dict[str, Any]) -> None:
+        await queue.put(payload)
+
+    async def run_and_signal_done() -> Any:
+        try:
+            return await run(emit)
+        finally:
+            await queue.put(None)
+
+    return asyncio.create_task(run_and_signal_done()), queue
+
+
 async def _drain_task_events(
-    task: asyncio.Task[Any],
     queue: asyncio.Queue[dict[str, Any] | None],
 ) -> AsyncIterator[str]:
-    """Yield queued progress payloads as SSE events until *task* finishes.
-
-    Task exceptions are not raised here; the caller awaits *task* afterwards.
-    """
-    get_task = asyncio.create_task(queue.get())
-    while True:
-        done, _pending = await asyncio.wait({task, get_task}, return_when=asyncio.FIRST_COMPLETED)
-        if get_task in done:
-            payload = get_task.result()
-            if payload is not None:
-                yield serialize_sse(payload)
-            get_task = asyncio.create_task(queue.get())
-            continue
-
-        if task in done:
-            if not get_task.done():
-                get_task.cancel()
-                with contextlib.suppress(asyncio.CancelledError):
-                    await get_task
-            while not queue.empty():
-                payload = queue.get_nowait()
-                if payload is not None:
-                    yield serialize_sse(payload)
-            return
+    """Yield queued progress payloads as SSE events until the task signals done."""
+    while (payload := await queue.get()) is not None:
+        yield serialize_sse(payload)
 
 
 async def rescan_plex_generator(
@@ -997,21 +954,16 @@ async def rescan_plex_generator(
         async with _new_session() as db:
             runtime_settings = get_settings()
             plex = PlexService(settings=runtime_settings)
-            queue: asyncio.Queue[dict[str, Any] | None] = asyncio.Queue()
-
-            async def emit(payload: dict[str, Any]) -> None:
-                await queue.put(payload)
-
-            task = asyncio.create_task(
-                rescan_plex_requests(
+            task, queue = _start_event_task(
+                lambda on_event: rescan_plex_requests(
                     db,
                     runtime_settings,
                     plex,
-                    on_event=emit,
+                    on_event=on_event,
                     shallow=shallow,
                 )
             )
-            async for event in _drain_task_events(task, queue):
+            async for event in _drain_task_events(queue):
                 yield event
 
             scanned, errors, completed = await task
@@ -1486,15 +1438,10 @@ async def sync_overseerr_generator() -> AsyncIterator[str]:
                 )
                 return
 
-            queue: asyncio.Queue[dict[str, Any] | None] = asyncio.Queue()
-
-            async def emit(payload: dict[str, Any]) -> None:
-                await queue.put(payload)
-
-            task = asyncio.create_task(
-                import_overseerr_requests(db, runtime_settings, on_event=emit)
+            task, queue = _start_event_task(
+                lambda on_event: import_overseerr_requests(db, runtime_settings, on_event=on_event)
             )
-            async for event in _drain_task_events(task, queue):
+            async for event in _drain_task_events(queue):
                 yield event
 
             synced_count, skipped_count = await task
