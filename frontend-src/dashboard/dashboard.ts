@@ -42,17 +42,8 @@ function initDashboard() {
   const pendingSelectAll = document.getElementById('pending-select-all');
 
   document.addEventListener('input', (event) => {
-    const handlers = {
-      'filter-input': window.filterTable,
-      'pending-filter-input': window.filterPendingTable,
-      'staged-filter-input': window.filterStagedTable,
-      'downloading-filter-input': window.filterDownloadingTable,
-      'finished-filter-input': window.filterFinishedTable,
-      'rejected-filter-input': window.filterRejectedTable,
-      'unreleased-filter-input': window.filterUnreleasedTable,
-      'release-filter-input': window.filterReleaseCards,
-    };
-    handlers[event.target?.id]?.();
+    if (event.target?.id === 'release-filter-input') window.filterReleaseCards();
+    else window.filterTabByInput(event.target?.id);
   });
 
   // Bind select all checkboxes
