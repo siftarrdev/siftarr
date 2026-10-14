@@ -37,7 +37,6 @@ from app.siftarr.services.auth_service import require_session_or_api_key
 from app.siftarr.services.decisions.rule_engine_provider import get_rule_engine
 from app.siftarr.services.integrations.plex_service import PlexService
 from app.siftarr.services.integrations.qbittorrent_service import (
-    BulkAddResult,
     BulkTorrentPayload,
     MediaCategory,
     QbittorrentService,
@@ -1038,24 +1037,6 @@ async def bulk_staged_action(
             torrent.rejection_override = _confirmation_given(confirm_rejected)
 
         bulk_results = await qbittorrent.add_torrents_bulk(payloads) if payloads else []
-        if not isinstance(bulk_results, list):
-            # Compatibility for older unit mocks; production service always returns a list.
-            bulk_results = []
-            for payload in payloads:
-                torrent = next(item for item in torrents if item.id == payload.key)
-                torrent_hash = await qbittorrent.add_torrent(
-                    torrent_path=payload.torrent_path,
-                    magnet_uri=payload.magnet_uri,
-                    category=payload.category,
-                )
-                bulk_results.append(
-                    BulkAddResult(
-                        key=payload.key,
-                        success=torrent_hash is not None,
-                        torrent_hash=torrent_hash,
-                    )
-                )
-
         results_by_id = {result.key: result for result in bulk_results}
         for torrent in torrents:
             result = results_by_id.get(torrent.id)

@@ -211,3 +211,54 @@ def test_tv_conflict_scope(incoming, active, expected_conflicts):
     )
 
     assert [row.title for row in conflicts] == expected_conflicts
+
+
+async def test_force_download_keeps_new_approved_row_and_removes_old_stage(
+    db, monkeypatch, qbittorrent
+):
+    _staging_mode(monkeypatch, True)
+    request = await make_request(db)
+    await make_staged_torrent(db, request, title="Example Movie 2025 720p")
+    release = await make_release(db, request, magnet_url="magnet:?xt=urn:btih:abc")
+
+    await StagingService(db).use_releases(
+        request, [release], selection_source="manual", force_download=True
+    )
+
+    rows = (await db.execute(select(StagedTorrent))).scalars().all()
+    assert [(row.title, row.status, row.info_hash) for row in rows] == [
+        (release.title, "approved", "a" * 40)
+    ]
+
+
+@pytest.mark.parametrize(
+    ("force_download", "picked_status"),
+    [(False, RequestStatus.STAGED), (True, RequestStatus.DOWNLOADING)],
+    ids=["staged", "force-download"],
+)
+async def test_manual_season_pack_does_not_downgrade_completed_episodes(
+    db, session_maker, monkeypatch, qbittorrent, force_download, picked_status
+):
+    _staging_mode(monkeypatch, True)
+    request = await make_request(db, media_type=MediaType.TV, title="Show")
+    season = await make_season(db, request, 1, episodes=3)
+    first = (await db.execute(select(Episode).where(Episode.episode_number == 1))).scalar_one()
+    first.status = RequestStatus.COMPLETED
+    release = _tv_release(request, 1, S01)
+    db.add(release)
+    await db.commit()
+
+    await StagingService(db).use_releases(
+        request, [release], selection_source="manual", force_download=force_download
+    )
+
+    async with session_maker() as fresh:
+        episodes = (await fresh.execute(select(Episode))).scalars().all()
+        persisted_season = await fresh.get(Season, season.id)
+    assert {ep.episode_number: ep.status for ep in episodes} == {
+        1: RequestStatus.COMPLETED,
+        2: picked_status,
+        3: picked_status,
+    }
+    assert persisted_season is not None
+    assert persisted_season.status == picked_status

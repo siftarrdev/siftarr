@@ -193,6 +193,12 @@ async def _set_request_status(
     # Callers should set episode statuses and recompute instead.
 
 
+def _set_unless_available(episode: Episode, status: RequestStatus) -> None:
+    """Set a covered episode's status without downgrading a COMPLETED episode."""
+    if episode.status != RequestStatus.COMPLETED:
+        episode.status = status
+
+
 def _get_media_category(request: Request) -> MediaCategory:
     """Map a request media type to a qBittorrent category."""
     if request.media_type == MediaType.MOVIE:
@@ -463,7 +469,7 @@ class StagingService:
         )
         episode = result.scalar_one_or_none()
         if episode:
-            episode.status = status
+            _set_unless_available(episode, status)
 
     async def _recompute_tv_statuses(self, request_id: int) -> None:
         """Recompute Season.status and Request.status from episode ground truth.
@@ -498,7 +504,9 @@ class StagingService:
 
         Parses the release title to determine which episodes it covers
         (single episode, season pack, multi-season pack, or complete series)
-        and sets each covered episode's status.
+        and sets each covered episode's status. Episodes already on Plex
+        (COMPLETED) keep their status, so a pack pick on a partly available
+        season does not mark available episodes for download.
 
         This is the episode-centric path — episode status is ground truth.
         """
@@ -523,7 +531,7 @@ class StagingService:
                     select(Episode).where(Episode.season_id == season.id)
                 )
                 for ep in episodes_result.scalars().all():
-                    ep.status = status
+                    _set_unless_available(ep, status)
         elif coverage.season_numbers:
             # Season pack or multi-season pack
             for season_num in coverage.season_numbers:
@@ -536,7 +544,7 @@ class StagingService:
                     )
                 )
                 for ep in episodes_result.scalars().all():
-                    ep.status = status
+                    _set_unless_available(ep, status)
 
     # ── Release handoff (use_releases) ──
 
@@ -699,6 +707,7 @@ class StagingService:
 
         qbittorrent = QbittorrentService(settings=runtime_settings)
         added_hashes: list[str] = []
+        tracked_ids: set[int] = set()
         for release in usable_releases:
             source = release.magnet_url or release.download_url
             if not source:
@@ -772,6 +781,7 @@ class StagingService:
                 await self.db.flush()
             elif normalized_hash:
                 tracked.info_hash = normalized_hash
+            tracked_ids.add(tracked.id)
             await record_staged_release_fact(self.db, tracked)
             activity_log = ActivityLogService(self.db)
             await activity_log.log(
@@ -798,7 +808,13 @@ class StagingService:
             )
 
         if force_download:
-            active_staged = await _get_active_staged_torrents(self.db, request.id)
+            # Retire only rows that were active before this handoff. The
+            # approved rows tracked above are also "active" and must survive.
+            active_staged = [
+                staged
+                for staged in await _get_active_staged_torrents(self.db, request.id)
+                if staged.id not in tracked_ids
+            ]
             superseded_by_id: dict[int, StagedTorrent] = {}
             for release in usable_releases:
                 for staged in _filter_active_staged_torrents_for_release(
@@ -814,15 +830,15 @@ class StagingService:
                     list(superseded_by_id.values()),
                 )
 
-        await self.db.commit()
         if request.media_type == MediaType.TV:
             # Episode-centric: set covered episode statuses, then recompute
             for release in usable_releases:
                 await self._apply_release_to_episodes(release, RequestStatus.DOWNLOADING)
-                await self._recompute_tv_statuses(request.id)
+            await self._recompute_tv_statuses(request.id)
         else:
-            await _set_request_status(self.db, request, RequestStatus.DOWNLOADING)
-        await queue_service.remove_from_queue(request.id)
+            await _set_request_status(self.db, request, RequestStatus.DOWNLOADING, commit=False)
+        await queue_service.remove_from_queue(request.id, commit=False)
+        await self.db.commit()
         logger.info(
             "Request downloading: request_id=%s torrent_count=%s",
             request.id,

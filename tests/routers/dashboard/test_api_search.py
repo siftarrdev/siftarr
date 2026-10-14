@@ -14,6 +14,7 @@ from app.siftarr.models.stats_metrics import StatsTimingEvent
 from app.siftarr.services.dashboard import search_service
 from app.siftarr.services.dashboard.dashboard_service import serialize_tv_search_response
 from app.siftarr.services.dashboard.search_service import SearchService
+from app.siftarr.services.decisions.rule_engine import ReleaseEvaluation
 from app.siftarr.services.integrations.prowlarr_service import ProwlarrRelease, ProwlarrSearchResult
 from app.siftarr.services.request_service import load_request_or_404
 from tests.factories import make_request, make_season
@@ -76,17 +77,18 @@ def prowlarr(monkeypatch) -> AsyncMock:
     return service
 
 
-def _stub_rules(monkeypatch, scores: dict[str, float] | None = None, default: float = 12.5):
+def _stub_rules(monkeypatch, scores: dict[str, int] | None = None, default: int = 12):
     """Replace the rule engine with one that scores releases by title."""
     monkeypatch.setattr(
         search_service.RuleEngine,
         "from_db_rules",
         MagicMock(
             return_value=MagicMock(
-                evaluate=lambda release: MagicMock(
-                    total_score=(scores or {}).get(release.title, default),
+                evaluate=lambda release: ReleaseEvaluation(
+                    release=release,
                     passed=True,
-                    rejection_reason=None,
+                    total_score=(scores or {}).get(release.title, default),
+                    matches=[],
                 )
             )
         ),
@@ -290,9 +292,11 @@ async def test_search_season_packs_prioritizes_size_limit_passes(db, show, prowl
         "from_db_rules",
         MagicMock(
             return_value=MagicMock(
-                evaluate=lambda release: MagicMock(
-                    total_score=scores[release.title],
+                evaluate=lambda release: ReleaseEvaluation(
+                    release=release,
                     passed=False,
+                    total_score=scores[release.title],
+                    matches=[],
                     rejection_reason=reasons[release.title],
                 )
             )

@@ -261,8 +261,6 @@ class TestProcessRequest:
                 "app.siftarr.services.decisions.tv_decision_service.StagingService",
                 return_value=mock_staging,
             ),
-            patch.object(service, "_set_episodes_for_season", new_callable=AsyncMock) as set_season,
-            patch.object(service, "_set_episode_status", new_callable=AsyncMock) as set_episode,
         ):
             result = await service.process_request(1)
 
@@ -274,8 +272,6 @@ class TestProcessRequest:
         mock_staging.use_releases.assert_awaited_once_with(
             request, [stored_ep2], selection_source="rule"
         )
-        set_season.assert_not_awaited()
-        set_episode.assert_awaited_once_with(1, 1, 2, RequestStatus.DOWNLOADING)
 
     @pytest.mark.asyncio
     async def test_default_search_stages_pack_without_exact_fallback(self, service, mock_db):
@@ -366,7 +362,6 @@ class TestProcessRequest:
                 "app.siftarr.services.decisions.tv_decision_service.StagingService",
                 return_value=mock_staging,
             ),
-            patch.object(service, "_set_episode_status", new_callable=AsyncMock) as set_episode,
         ):
             result = await service.process_request(1)
 
@@ -390,8 +385,6 @@ class TestProcessRequest:
         mock_staging.use_releases.assert_awaited_once_with(
             request, [stored_ep1, stored_ep2], selection_source="rule"
         )
-        assert set_episode.await_args_list[0].args == (1, 1, 1, RequestStatus.DOWNLOADING)
-        assert set_episode.await_args_list[1].args == (1, 1, 2, RequestStatus.DOWNLOADING)
 
     @pytest.mark.asyncio
     async def test_exact_episode_fallback_does_not_dedup_wrong_target_results(self, service):
@@ -467,8 +460,6 @@ class TestProcessRequest:
                 "app.siftarr.services.decisions.tv_decision_service.StagingService",
                 return_value=mock_staging,
             ),
-            patch.object(service, "_set_episodes_for_season", new_callable=AsyncMock) as set_season,
-            patch.object(service, "_set_episode_status", new_callable=AsyncMock) as set_episode,
         ):
             result = await service.process_request(1)
 
@@ -482,8 +473,6 @@ class TestProcessRequest:
         mock_staging.use_releases.assert_awaited_once_with(
             request, [stored_pack, stored_ep], selection_source="rule"
         )
-        set_season.assert_awaited_once_with(1, 1, RequestStatus.DOWNLOADING)
-        set_episode.assert_awaited_once_with(1, 2, 1, RequestStatus.DOWNLOADING)
 
     @pytest.mark.asyncio
     async def test_full_search_refreshes_available_episode_but_does_not_stage_it(
@@ -627,12 +616,10 @@ class TestProcessRequest:
                 "app.siftarr.services.decisions.tv_decision_service.StagingService",
                 return_value=mock_staging,
             ),
-            patch.object(service, "_set_episodes_for_season", new_callable=AsyncMock) as set_season,
         ):
             result = await service.process_request(1, search_mode="full")
 
         assert [r["title"] for r in result["selected_releases"]] == ["Show.S02.1080p"]
-        set_season.assert_awaited_once_with(1, 2, RequestStatus.DOWNLOADING)
 
     def test_actionable_targets_exclude_completed_staged_downloading_and_future(self, service):
         request = _make_request(seasons=[1, 2, 3], episodes={1: [1, 2], 2: [1], 3: [1, 2]})
