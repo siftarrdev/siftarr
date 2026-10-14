@@ -674,6 +674,26 @@ async def deny_request(
     )
 
 
+async def _recalc_movie_status(
+    db: AsyncSession,
+    request: RequestModel,
+    season: Season,
+    *,
+    refresh_episodes: bool = False,
+) -> None:
+    """Persist season and request status for a movie request.
+
+    TV season and request statuses are derived from episodes on read, so TV
+    requests are left untouched.
+    """
+    if request.media_type == MediaType.TV:
+        return
+    if refresh_episodes:
+        await db.refresh(season, ["episodes"])
+    season.status = derive_season_status(list(season.episodes))
+    request.status = derive_request_status_from_episodes(list(season.episodes))
+
+
 @router.post("/{request_id}/episodes/{episode_id}/mark-available")
 async def mark_episode_available(
     request_id: int,
@@ -706,24 +726,7 @@ async def mark_episode_available(
     request = req_result.scalar_one_or_none()
     if not request:
         raise HTTPException(status_code=404, detail="Request not found")
-    await db.refresh(request, ["seasons"])
-
-    if request.media_type == MediaType.TV:
-        # Derive season status from episodes (don't write for TV)
-        await db.refresh(season, ["episodes"])
-        _ = derive_season_status(list(season.episodes))
-        # Derive request status from all episodes
-        all_episodes: list[Episode] = []
-        for s in request.seasons:
-            await db.refresh(s, ["episodes"])
-            all_episodes.extend(s.episodes)
-        _ = derive_request_status_from_episodes(all_episodes)
-    else:
-        # Movie: persist season and request status directly
-        await db.refresh(season, ["episodes"])
-        season.status = derive_season_status(list(season.episodes))
-        all_episodes = list(season.episodes)
-        request.status = derive_request_status_from_episodes(all_episodes)
+    await _recalc_movie_status(db, request, season, refresh_episodes=True)
 
     activity_log = ActivityLogService(db)
     await activity_log.log(
@@ -770,21 +773,7 @@ async def mark_season_all_available(
     request = req_result.scalar_one_or_none()
     if not request:
         raise HTTPException(status_code=404, detail="Request not found")
-    await db.refresh(request, ["seasons"])
-
-    if request.media_type == MediaType.TV:
-        # Derive season status from episodes (don't persist for TV)
-        _ = derive_season_status(list(season.episodes))
-        # Derive request status from all episodes across all seasons
-        all_episodes: list[Episode] = []
-        for s in request.seasons:
-            await db.refresh(s, ["episodes"])
-            all_episodes.extend(s.episodes)
-        _ = derive_request_status_from_episodes(all_episodes)
-    else:
-        season.status = derive_season_status(list(season.episodes))
-        all_episodes = list(season.episodes)
-        request.status = derive_request_status_from_episodes(all_episodes)
+    await _recalc_movie_status(db, request, season)
 
     await db.commit()
     return JSONResponse({"status": "ok"})
