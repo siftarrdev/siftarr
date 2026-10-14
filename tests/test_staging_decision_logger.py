@@ -7,14 +7,13 @@ import pytest
 
 from app.siftarr.models.request import MediaType, Request
 from app.siftarr.models.staged_torrent import StagedTorrent
-from app.siftarr.routers import staged
 from app.siftarr.services import staging_decision_log
 
 
 @pytest.fixture
 def log_path(monkeypatch, tmp_path):
     path = tmp_path / "decision-log.jsonl"
-    monkeypatch.setattr(staged, "STAGING_DECISION_LOG_PATH", path)
+    monkeypatch.setattr(staging_decision_log, "STAGING_DECISION_LOG_PATH", path)
     return path
 
 
@@ -57,7 +56,7 @@ def test_log_staging_decision_records_rule_accept(log_path, tmp_path):
     )
     torrent = _torrent(10, json_path=str(sidecar_path))
 
-    staged.log_staging_decision(
+    staging_decision_log.log_staging_decision(
         request=_request(), approved_torrent=torrent, rules_selected_torrent=torrent
     )
 
@@ -75,7 +74,7 @@ def test_log_staging_decision_records_manual_override(log_path):
     approved = _torrent(11, selection_source="manual", score=72)
     rules_selected = _torrent(12, status="approved", score=90)
 
-    staged.log_staging_decision(
+    staging_decision_log.log_staging_decision(
         request=_request(), approved_torrent=approved, rules_selected_torrent=rules_selected
     )
 
@@ -90,7 +89,7 @@ def test_log_manual_discard_decision_records_rejection(log_path):
     request = _request(7)
     torrent = _torrent(13, request_id=7, selection_source="manual", status="discarded")
 
-    staged.log_manual_discard_decision(request=request, rejected_torrent=torrent)
+    staging_decision_log.log_manual_discard_decision(request=request, rejected_torrent=torrent)
 
     payload = _logged(log_path)
     assert payload["event_type"] == "manual_reject"

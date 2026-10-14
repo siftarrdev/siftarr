@@ -63,6 +63,11 @@ from app.siftarr.services.releases.release_validation_service import (
     identity_warning,
 )
 from app.siftarr.services.search_history_service import SearchHistoryService
+from app.siftarr.services.staging_decision_log import (
+    log_manual_discard_decision,
+    log_replacement_decision,
+    log_staging_decision,
+)
 from app.siftarr.services.stats_metrics_service import record_staged_release_fact
 
 logger = logging.getLogger(__name__)
@@ -162,8 +167,6 @@ def _delete_staging_files(paths: list[tuple[str, str]]) -> None:
             pass
 
 
-STAGING_DECISION_LOG_PATH = staging_decision_log.STAGING_DECISION_LOG_PATH
-
 router = APIRouter(prefix="/staged", tags=["staged"])
 
 
@@ -227,7 +230,7 @@ async def get_decision_log(
         "rule_name": rule_name,
         "outcome": outcome,
     }
-    entries = staging_decision_log.read_entries(STAGING_DECISION_LOG_PATH)
+    entries = staging_decision_log.read_entries()
     filtered: list[dict[str, Any]] = []
     for entry in entries:
         raw_request = entry.get("request")
@@ -297,65 +300,6 @@ def _build_torrent_payload(torrent: StagedTorrent | None) -> dict[str, Any] | No
         "status": torrent.status,
         "selection_source": torrent.selection_source,
     }
-
-
-def log_staging_decision(
-    *,
-    request: Request | None,
-    approved_torrent: StagedTorrent,
-    rules_selected_torrent: StagedTorrent | None,
-) -> None:
-    """Append a final staging approval decision for later rule tuning."""
-    original_path = staging_decision_log.STAGING_DECISION_LOG_PATH
-    staging_decision_log.STAGING_DECISION_LOG_PATH = STAGING_DECISION_LOG_PATH
-    try:
-        staging_decision_log.log_staging_decision(
-            request=request,
-            approved_torrent=approved_torrent,
-            rules_selected_torrent=rules_selected_torrent,
-        )
-    finally:
-        staging_decision_log.STAGING_DECISION_LOG_PATH = original_path
-
-
-def log_replacement_decision(
-    *,
-    request: Request | None,
-    new_torrent: StagedTorrent,
-    replaced_torrent: StagedTorrent,
-    reason: str | None = None,
-) -> None:
-    """Append a replacement decision when an approved torrent is replaced."""
-    original_path = staging_decision_log.STAGING_DECISION_LOG_PATH
-    staging_decision_log.STAGING_DECISION_LOG_PATH = STAGING_DECISION_LOG_PATH
-    try:
-        staging_decision_log.log_replacement_decision(
-            request=request,
-            new_torrent=new_torrent,
-            replaced_torrent=replaced_torrent,
-            reason=reason,
-        )
-    finally:
-        staging_decision_log.STAGING_DECISION_LOG_PATH = original_path
-
-
-def log_manual_discard_decision(
-    *,
-    request: Request | None,
-    rejected_torrent: StagedTorrent,
-    reason: str = "Manually discarded",
-) -> None:
-    """Append a manual discard/rejection decision for later rule tuning."""
-    original_path = staging_decision_log.STAGING_DECISION_LOG_PATH
-    staging_decision_log.STAGING_DECISION_LOG_PATH = STAGING_DECISION_LOG_PATH
-    try:
-        staging_decision_log.log_manual_discard_decision(
-            request=request,
-            rejected_torrent=rejected_torrent,
-            reason=reason,
-        )
-    finally:
-        staging_decision_log.STAGING_DECISION_LOG_PATH = original_path
 
 
 def _confirmation_given(value: object) -> bool:

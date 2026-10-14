@@ -162,8 +162,8 @@ def build_decision_entry(
     }
 
 
-def append_entry(entry: Mapping[str, Any], path: Path | None = None) -> None:
-    log_path = path or STAGING_DECISION_LOG_PATH
+def append_entry(entry: Mapping[str, Any]) -> None:
+    log_path = STAGING_DECISION_LOG_PATH
     normalized = normalize_entry(entry)
     if not _is_retained(normalized):
         return
