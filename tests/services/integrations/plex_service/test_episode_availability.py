@@ -64,7 +64,7 @@ async def test_get_episode_availability_uses_bounded_parallel_fetches(service, m
 
         return season_episodes[season_rating_key]
 
-    monkeypatch.setattr(service._episodes, "_get_metadata_children_strict", get_children)
+    monkeypatch.setattr(service, "_get_metadata_children_strict", get_children)
 
     availability_task = asyncio.create_task(service.get_episode_availability("show-1"))
 
@@ -110,7 +110,7 @@ async def test_get_episode_availability_preserves_deterministic_filtering(servic
             ],
         }[rating_key]
 
-    monkeypatch.setattr(service._episodes, "_get_metadata_children_strict", get_children)
+    monkeypatch.setattr(service, "_get_metadata_children_strict", get_children)
 
     availability = await service.get_episode_availability("show-1")
     assert availability == {(2, 2): False, (2, 1): True, (1, 1): True}
@@ -152,7 +152,7 @@ async def test_get_episode_availability_result_stops_after_first_transient_failu
             return [{"type": "episode", "index": 1, "Media": [{"id": 3}]}]
         return []
 
-    monkeypatch.setattr(service._episodes, "_get_metadata_children_strict", get_children)
+    monkeypatch.setattr(service, "_get_metadata_children_strict", get_children)
 
     result = await service.get_episode_availability_result("show-1")
 
@@ -170,7 +170,7 @@ async def test_get_episode_availability_uses_shared_inconclusive_path(service, m
     async def get_result(_: str):
         return PlexEpisodeAvailabilityResult(availability={}, authoritative=False)
 
-    monkeypatch.setattr(service._episodes, "_get_episode_availability_result", get_result)
+    monkeypatch.setattr(service, "_get_episode_availability_result", get_result)
 
     availability = await service.get_episode_availability("show-1")
 

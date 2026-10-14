@@ -195,7 +195,7 @@ Business logic and integrations, organized into thematic subpackages:
 - `qbittorrent_service.py` — qBittorrent download client integration; includes idempotent single/bulk torrent add, unfinished/completed listing, serialized `save_path`/`seeding_time` access, `set_torrent_location()` with `move=True`, and torrent deletion with configurable file removal
 - `overseerr_service.py` — Overseerr request management integration; media-details cache has a 60s TTL, expiry pruning, and a 512-entry LRU bound
 - `connection_tester.py` — external connectivity test helpers
-- `plex_service/` — Plex media server integration (lookup, scan, episode availability)
+- `plex_service/` — Plex media server integration: `service.py` (`PlexService` lookup, scan, episode availability), `cache.py` (scan-cycle cache), `models.py`
 
 **`lifecycle/`** — Request/media lifecycle and state
 - `lifecycle_service.py` — request lifecycle status transitions (TV DOWNLOADING transitions can be scoped to a release title's episode coverage); 30s TTL stats cache

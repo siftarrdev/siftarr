@@ -21,7 +21,7 @@ def mock_client(service, monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_iter_full_library_items_uses_pagination(service, mock_client):
+async def test_iter_library_items_uses_pagination(service, mock_client):
     sections_response = MagicMock()
     sections_response.status_code = 200
     sections_response.json.return_value = {
@@ -57,7 +57,7 @@ async def test_iter_full_library_items_uses_pagination(service, mock_client):
     }
     mock_client.get.side_effect = [sections_response, page_one, page_two]
 
-    items = [item async for item in service.iter_full_library_items("movie", page_size=2)]
+    items = [item async for item in service.iter_library_items("movie", page_size=2)]
 
     assert [item["rating_key"] for item in items] == ["101", "102", "103"]
     assert items[0]["section_key"] == "7"
