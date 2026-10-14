@@ -305,10 +305,7 @@ async def persist_manual_release(
     existing_result = await db.execute(select(Release).where(*filters))
     record = existing_result.scalar_one_or_none()
 
-    columns = {
-        **release_columns(release, evaluation, source="manual"),
-        **_evidence_columns(release, evaluation),
-    }
+    columns = release_columns(release, evaluation, source="manual")
     if record is None:
         record = Release(request_id=request.id, **columns)
         db.add(record)
