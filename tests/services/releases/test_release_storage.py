@@ -19,17 +19,6 @@ EPISODE_TITLE = "Show.S01E01.1080p.WEB-DL-GRP"
 PACK_TITLE = "Show.S01.1080p.WEB-DL-GRP"
 
 
-@pytest.fixture
-async def db_session():
-    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-    session_maker = async_sessionmaker(engine, expire_on_commit=False)
-    async with session_maker() as session:
-        yield session
-    await engine.dispose()
-
-
 def _evaluation(title: str, *, info_hash: str | None = None, score: int = 10) -> ReleaseEvaluation:
     release = ProwlarrRelease(
         title=title,
@@ -44,41 +33,48 @@ def _evaluation(title: str, *, info_hash: str | None = None, score: int = 10) ->
     return ReleaseEvaluation(release=release, passed=True, total_score=score, matches=[])
 
 
-async def _titles(db_session, title: str) -> list[Release]:
-    result = await db_session.execute(
+async def _titles(db, title: str) -> list[Release]:
+    result = await db.execute(
         select(Release).where(Release.request_id == REQUEST_ID, Release.title == title)
     )
     return list(result.scalars().all())
 
 
 @pytest.mark.asyncio
-async def test_pack_search_does_not_duplicate_release_stored_by_other_source(db_session):
+async def test_pack_search_does_not_duplicate_release_stored_by_other_source(db):
     await store_search_results(
-        db_session,
+        db,
         REQUEST_ID,
         [_evaluation(EPISODE_TITLE, score=10)],
         scope={"type": "single_episode", "season_number": 1, "episode_number": 1},
     )
 
     await store_search_results(
-        db_session,
+        db,
         REQUEST_ID,
         [_evaluation(EPISODE_TITLE, score=42), _evaluation(PACK_TITLE)],
         scope={"type": "season_packs", "season_number": 1},
         source="adhoc",
     )
 
-    rows = await _titles(db_session, EPISODE_TITLE)
+    rows = await _titles(db, EPISODE_TITLE)
     assert len(rows) == 1
     assert rows[0].score == 42
     assert rows[0].search_source == "adhoc"
-    assert len(await _titles(db_session, PACK_TITLE)) == 1
+    assert len(await _titles(db, PACK_TITLE)) == 1
 
 
 @pytest.mark.asyncio
-async def test_live_result_notification_follows_a_separate_session_visible_commit(db_session):
-    """The SSE notification must not race a details read on another session."""
-    session_maker = async_sessionmaker(db_session.bind, expire_on_commit=False)
+async def test_live_result_notification_follows_a_separate_session_visible_commit(tmp_path):
+    """The SSE notification must not race a details read on another session.
+
+    Uses a file database with one connection per session. The shared in-memory
+    ``db`` fixture reuses one connection, so a reader would see uncommitted rows.
+    """
+    engine = create_async_engine(f"sqlite+aiosqlite:///{tmp_path / 'live.db'}")
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+    session_maker = async_sessionmaker(engine, expire_on_commit=False)
     events: list[dict] = []
 
     async def progress(payload: dict) -> None:
@@ -87,37 +83,39 @@ async def test_live_result_notification_follows_a_separate_session_visible_commi
             assert [row.title for row in result.scalars().all()] == [PACK_TITLE]
         events.append(payload)
 
-    service = TVDecisionService(
-        db_session, cast(ProwlarrService, object()), cast(QbittorrentService, object())
-    )
-    await service._publish_result_batch(REQUEST_ID, [_evaluation(PACK_TITLE)], 1, progress)
+    async with session_maker() as writer:
+        service = TVDecisionService(
+            writer, cast(ProwlarrService, object()), cast(QbittorrentService, object())
+        )
+        await service._publish_result_batch(REQUEST_ID, [_evaluation(PACK_TITLE)], 1, progress)
+    await engine.dispose()
 
     assert events == [{"phase": "results_updated", "request_id": REQUEST_ID, "changed_count": 1}]
 
 
 @pytest.mark.asyncio
-async def test_live_result_batch_does_not_purge_prior_cache_rows(db_session):
-    await store_search_results(db_session, REQUEST_ID, [_evaluation(EPISODE_TITLE)])
+async def test_live_result_batch_does_not_purge_prior_cache_rows(db):
+    await store_search_results(db, REQUEST_ID, [_evaluation(EPISODE_TITLE)])
     service = TVDecisionService(
-        db_session, cast(ProwlarrService, object()), cast(QbittorrentService, object())
+        db, cast(ProwlarrService, object()), cast(QbittorrentService, object())
     )
 
     await service._publish_result_batch(REQUEST_ID, [_evaluation(PACK_TITLE)], 1, None)
 
-    assert len(await _titles(db_session, EPISODE_TITLE)) == 1
-    assert len(await _titles(db_session, PACK_TITLE)) == 1
+    assert len(await _titles(db, EPISODE_TITLE)) == 1
+    assert len(await _titles(db, PACK_TITLE)) == 1
 
 
 @pytest.mark.asyncio
-async def test_scoped_purge_only_removes_stale_rows_in_scope(db_session):
+async def test_scoped_purge_only_removes_stale_rows_in_scope(db):
     await store_search_results(
-        db_session,
+        db,
         REQUEST_ID,
         [_evaluation(EPISODE_TITLE)],
         scope={"type": "single_episode", "season_number": 1, "episode_number": 1},
     )
     await store_search_results(
-        db_session,
+        db,
         REQUEST_ID,
         [_evaluation(PACK_TITLE)],
         scope={"type": "season_packs", "season_number": 1},
@@ -126,21 +124,21 @@ async def test_scoped_purge_only_removes_stale_rows_in_scope(db_session):
     # A fresh season-pack search that no longer returns the old pack purges it,
     # but must not touch the out-of-scope episode row.
     await store_search_results(
-        db_session,
+        db,
         REQUEST_ID,
         [_evaluation("Show.S01.2160p.WEB-DL-GRP")],
         scope={"type": "season_packs", "season_number": 1},
     )
 
-    assert len(await _titles(db_session, EPISODE_TITLE)) == 1
-    assert await _titles(db_session, PACK_TITLE) == []
-    assert len(await _titles(db_session, "Show.S01.2160p.WEB-DL-GRP")) == 1
+    assert len(await _titles(db, EPISODE_TITLE)) == 1
+    assert await _titles(db, PACK_TITLE) == []
+    assert len(await _titles(db, "Show.S01.2160p.WEB-DL-GRP")) == 1
 
 
 @pytest.mark.asyncio
-async def test_duplicate_rows_from_dirty_data_are_collapsed(db_session):
+async def test_duplicate_rows_from_dirty_data_are_collapsed(db):
     for source in ("automatic", "adhoc"):
-        db_session.add(
+        db.add(
             Release(
                 request_id=REQUEST_ID,
                 title=EPISODE_TITLE,
@@ -156,16 +154,16 @@ async def test_duplicate_rows_from_dirty_data_are_collapsed(db_session):
                 search_source=source,
             )
         )
-    await db_session.commit()
+    await db.commit()
 
     await store_search_results(
-        db_session,
+        db,
         REQUEST_ID,
         [_evaluation(EPISODE_TITLE, score=77)],
         scope={"type": "single_episode", "season_number": 1, "episode_number": 1},
         source="adhoc",
     )
 
-    rows = await _titles(db_session, EPISODE_TITLE)
+    rows = await _titles(db, EPISODE_TITLE)
     assert len(rows) == 1
     assert rows[0].score == 77

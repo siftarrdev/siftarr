@@ -3,6 +3,7 @@
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import httpx
+import pytest
 
 from app.siftarr.services.auth.plex_oauth_service import PlexOAuthService
 
@@ -61,16 +62,12 @@ class TestValidateToken:
             "thumb": "http://example.com/thumb.jpg",
         }
 
+    @pytest.mark.parametrize(
+        "identity",
+        [None, {"not_user": {}}],
+        ids=["identity_lookup_failed", "missing_user_key"],
+    )
     @patch.object(PlexOAuthService, "get_user_identity")
-    async def test_invalid_token_returns_none(self, mock_get_identity):
-        """Should return None when get_user_identity returns None."""
-        mock_get_identity.return_value = None
-        result = await PlexOAuthService.validate_token("bad-token")
-        assert result is None
-
-    @patch.object(PlexOAuthService, "get_user_identity")
-    async def test_missing_user_key_returns_none(self, mock_get_identity):
-        """Should return None when the response lacks a 'user' key."""
-        mock_get_identity.return_value = {"not_user": {}}
-        result = await PlexOAuthService.validate_token("token-no-user")
-        assert result is None
+    async def test_unusable_identity_returns_none(self, mock_get_identity, identity):
+        mock_get_identity.return_value = identity
+        assert await PlexOAuthService.validate_token("bad-token") is None

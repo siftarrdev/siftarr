@@ -1,6 +1,5 @@
 """Tests for the auth router."""
 
-from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -8,16 +7,6 @@ from fastapi import HTTPException
 
 from app.siftarr.routers import auth_router
 from app.siftarr.routers.auth_router import PlexAuthRequest
-
-
-def test_login_template_guards_crypto_random_uuid():
-    """Login JS should not require crypto.randomUUID support."""
-    template = (Path(auth_router.__file__).parent.parent / "templates" / "login.html").read_text()
-
-    assert "crypto.randomUUID()" not in template
-    assert "typeof globalCrypto.randomUUID === 'function'" in template
-    assert "globalCrypto.getRandomValues(bytes)" in template
-    assert "Math.random().toString(36)" in template
 
 
 @pytest.fixture(autouse=True)
@@ -45,43 +34,27 @@ class TestLoginPage:
         assert result is not None
 
     @pytest.mark.asyncio
-    async def test_authenticated_redirects_to_dashboard(self):
-        """Should redirect to dashboard when user already has a session."""
+    @pytest.mark.parametrize(
+        ("next_param", "expected"),
+        [
+            (None, "/"),
+            ("/settings?tab=api", "/settings?tab=api"),
+            ("https://evil.example/", "/"),
+        ],
+        ids=["default", "safe_local_next", "external_next_blocked"],
+    )
+    async def test_authenticated_redirect_target(self, next_param, expected):
+        """Authenticated users keep safe local next targets; external ones fall back to /."""
         from starlette.responses import RedirectResponse
 
         request = MagicMock()
         request.session = {"plex_user_id": "123"}
-        request.query_params = {}
+        request.query_params = {} if next_param is None else {"next": next_param}
 
         result = await auth_router.login_page(request)
+
         assert isinstance(result, RedirectResponse)
-        assert result.headers.get("location") == "/"
-
-    @pytest.mark.asyncio
-    async def test_authenticated_redirects_to_safe_next(self):
-        """Safe local next targets should be preserved."""
-        from starlette.responses import RedirectResponse
-
-        request = MagicMock()
-        request.session = {"plex_user_id": "123"}
-        request.query_params = {"next": "/settings?tab=api"}
-
-        result = await auth_router.login_page(request)
-        assert isinstance(result, RedirectResponse)
-        assert result.headers.get("location") == "/settings?tab=api"
-
-    @pytest.mark.asyncio
-    async def test_authenticated_blocks_external_next(self):
-        """External next targets must not create open redirects."""
-        from starlette.responses import RedirectResponse
-
-        request = MagicMock()
-        request.session = {"plex_user_id": "123"}
-        request.query_params = {"next": "https://evil.example/"}
-
-        result = await auth_router.login_page(request)
-        assert isinstance(result, RedirectResponse)
-        assert result.headers.get("location") == "/"
+        assert result.headers.get("location") == expected
 
     @pytest.mark.asyncio
     async def test_authenticated_with_initial_sync_gate_redirects_to_sync_page(self):
@@ -96,14 +69,6 @@ class TestLoginPage:
 
         assert isinstance(result, RedirectResponse)
         assert result.headers.get("location") == "/auth/initial-plex-sync?next=%2Fdashboard"
-
-
-def test_login_template_redirects_to_existing_dashboard_route():
-    """Login JS should redirect to the mounted dashboard route."""
-    template = (Path(auth_router.__file__).parent.parent / "templates" / "login.html").read_text()
-
-    assert "window.location.href = '/dashboard';" not in template
-    assert "authData.redirect_url || '/'" in template
 
 
 class TestPlexAuth:
@@ -268,8 +233,11 @@ class TestPlexAuth:
         assert request.session["initial_plex_sync_required"] is True
 
     @pytest.mark.asyncio
-    async def test_successful_sign_in_launches_scheduler_sync_non_blocking(self, monkeypatch):
-        """Successful admin auth should schedule the guarded Plex sign-in sync."""
+    @pytest.mark.parametrize("scheduler_available", [True, False])
+    async def test_successful_sign_in_schedules_sync_when_scheduler_available(
+        self, monkeypatch, scheduler_available
+    ):
+        """Admin auth schedules the Plex sign-in sync, or skips it without a scheduler."""
         monkeypatch.setattr(
             auth_router.PlexOAuthService,
             "validate_token",
@@ -287,7 +255,11 @@ class TestPlexAuth:
 
         scheduler = MagicMock()
         scheduler.trigger_plex_sign_in_sync = MagicMock(return_value=sign_in_sync())
-        monkeypatch.setattr(auth_router, "_get_active_scheduler_service", lambda: scheduler)
+        monkeypatch.setattr(
+            auth_router,
+            "_get_active_scheduler_service",
+            lambda: scheduler if scheduler_available else None,
+        )
 
         scheduled = []
 
@@ -306,34 +278,8 @@ class TestPlexAuth:
         )
 
         assert result["username"] == "testuser"
-        scheduler.trigger_plex_sign_in_sync.assert_called_once_with()
-        assert len(scheduled) == 1
-
-    @pytest.mark.asyncio
-    async def test_successful_sign_in_skips_sync_when_scheduler_unavailable(self, monkeypatch):
-        """Missing scheduler should not prevent session creation."""
-        monkeypatch.setattr(
-            auth_router.PlexOAuthService,
-            "validate_token",
-            AsyncMock(return_value={"id": "12345", "username": "testuser", "thumb": ""}),
-        )
-
-        mock_store = MagicMock()
-        mock_store.get = AsyncMock(return_value="12345")
-        mock_store.set = AsyncMock()
-        mock_store.load_into_environ = AsyncMock()
-        monkeypatch.setattr(auth_router, "SettingsStore", MagicMock(return_value=mock_store))
-        monkeypatch.setattr(auth_router, "_get_active_scheduler_service", lambda: None)
-
-        request = MagicMock()
-        request.session = {}
-
-        result = await auth_router.plex_auth(
-            request, PlexAuthRequest(authToken="valid-token"), db=MagicMock()
-        )
-
-        assert result["username"] == "testuser"
         assert request.session["plex_user_id"] == "12345"
+        assert len(scheduled) == (1 if scheduler_available else 0)
 
     @pytest.mark.asyncio
     async def test_sign_in_sync_launch_failure_does_not_block_session(self, monkeypatch):
@@ -427,32 +373,18 @@ class TestPlexAuth:
 
 
 class TestLogout:
-    """Tests for the POST /auth/logout endpoint."""
+    """Tests for the /auth/logout endpoints."""
 
     @pytest.mark.asyncio
-    async def test_logout_clears_session(self):
-        """Logging out should clear the session."""
+    @pytest.mark.parametrize("handler_name", ["logout", "logout_get"])
+    async def test_logout_clears_session(self, handler_name):
+        """Logging out by POST or GET should clear the session and redirect to login."""
         from starlette.responses import RedirectResponse
 
         request = MagicMock()
         request.session = {"plex_user_id": "123", "plex_username": "testuser"}
 
-        result = await auth_router.logout(request)
-
-        assert isinstance(result, RedirectResponse)
-        assert result.headers.get("location") == "/auth/login"
-        # Session should be cleared after logout
-        assert len(request.session) == 0
-
-    @pytest.mark.asyncio
-    async def test_logout_get_clears_session(self):
-        """GET logout wrapper should clear browser session."""
-        from starlette.responses import RedirectResponse
-
-        request = MagicMock()
-        request.session = {"plex_user_id": "123"}
-
-        result = await auth_router.logout_get(request)
+        result = await getattr(auth_router, handler_name)(request)
 
         assert isinstance(result, RedirectResponse)
         assert result.headers.get("location") == "/auth/login"

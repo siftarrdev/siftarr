@@ -27,46 +27,30 @@ def _torrent(**kwargs):
 
 
 @pytest.mark.asyncio
-async def test_delete_download_deletes_qbit_with_files_and_discards():
+@pytest.mark.parametrize(
+    ("qbit_info", "delete_ok", "success", "status", "moved_path"),
+    [
+        pytest.param({"hash": "b" * 40}, True, True, "discarded", None, id="deleted"),
+        pytest.param(None, True, True, "discarded", None, id="already-gone-from-qbit"),
+        pytest.param({"hash": "b" * 40}, False, False, "approved", "/tmp/file", id="delete-fails"),
+    ],
+)
+async def test_delete_download_outcomes(qbit_info, delete_ok, success, status, moved_path):
     qb = AsyncMock()
-    qb.get_torrent_info.return_value = {"hash": "b" * 40}
-    qb.delete_torrent.return_value = True
-    torrent = _torrent()
-
-    result = await DownloadQueueService(AsyncMock(), qb).delete_download(torrent)
-
-    assert result.success is True
-    qb.delete_torrent.assert_awaited_once_with("b" * 40, delete_files=True)
-    assert torrent.status == "discarded"
-    assert torrent.moved_path is None
-
-
-@pytest.mark.asyncio
-async def test_delete_download_missing_qbit_torrent_is_success():
-    qb = AsyncMock()
-    qb.get_torrent_info.return_value = None
+    qb.get_torrent_info.return_value = qbit_info
     qb.get_torrent_info_by_name.return_value = None
+    qb.delete_torrent.return_value = delete_ok
     torrent = _torrent()
 
     result = await DownloadQueueService(AsyncMock(), qb).delete_download(torrent)
 
-    assert result.success is True
-    qb.delete_torrent.assert_not_awaited()
-    assert torrent.status == "discarded"
-
-
-@pytest.mark.asyncio
-async def test_delete_download_qbit_failure_keeps_state_unchanged():
-    qb = AsyncMock()
-    qb.get_torrent_info.return_value = {"hash": "b" * 40}
-    qb.delete_torrent.return_value = False
-    torrent = _torrent()
-
-    result = await DownloadQueueService(AsyncMock(), qb).delete_download(torrent)
-
-    assert result.success is False
-    assert torrent.status == "approved"
-    assert torrent.moved_path == "/tmp/file"
+    assert result.success is success
+    assert torrent.status == status
+    assert torrent.moved_path == moved_path
+    if qbit_info is None:
+        qb.delete_torrent.assert_not_awaited()
+    else:
+        qb.delete_torrent.assert_awaited_once_with("b" * 40, delete_files=True)
 
 
 @pytest.mark.asyncio

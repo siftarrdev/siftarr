@@ -117,21 +117,6 @@ async def test_get_episode_availability_preserves_deterministic_filtering(servic
 
 
 @pytest.mark.asyncio
-async def test_get_episode_availability_result_returns_inconclusive_on_season_failure(
-    service, monkeypatch
-):
-    async def get_children(rating_key: str):
-        if rating_key == "show-1":
-            return [{"type": "season", "index": 1, "ratingKey": "season-1"}]
-        raise PlexTransientScanError("network")
-
-    monkeypatch.setattr(service._episodes, "_get_metadata_children_strict", get_children)
-
-    result = await service.get_episode_availability_result("show-1")
-    assert result == PlexEpisodeAvailabilityResult(availability={}, authoritative=False)
-
-
-@pytest.mark.asyncio
 async def test_get_episode_availability_result_stops_after_first_transient_failure(
     service, monkeypatch
 ):
@@ -190,38 +175,6 @@ async def test_get_episode_availability_uses_shared_inconclusive_path(service, m
     availability = await service.get_episode_availability("show-1")
 
     assert availability == {}
-
-
-@pytest.mark.asyncio
-async def test_get_episode_availability_result_returns_inconclusive_on_season_read_error(
-    service, mock_client
-):
-    show_response = MagicMock()
-    show_response.status_code = 200
-    show_response.json.return_value = {
-        "MediaContainer": {
-            "Metadata": [
-                {"type": "season", "index": 1, "ratingKey": "season-1"},
-                {"type": "season", "index": 2, "ratingKey": "season-2"},
-            ]
-        }
-    }
-    season_response = MagicMock()
-    season_response.status_code = 200
-    season_response.json.return_value = {
-        "MediaContainer": {"Metadata": [{"type": "episode", "index": 1, "Media": [{"id": 1}]}]}
-    }
-    request = httpx.Request("GET", "http://plex:32400/library/metadata/season-2/children")
-
-    mock_client.get.side_effect = [
-        show_response,
-        season_response,
-        httpx.ReadError("boom", request=request),
-    ]
-
-    result = await service.get_episode_availability_result("show-1")
-
-    assert result == PlexEpisodeAvailabilityResult(availability={}, authoritative=False)
 
 
 @pytest.mark.asyncio

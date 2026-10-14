@@ -48,9 +48,31 @@ async def test_stream_search_request_yields_phases_and_result(mock_db, monkeypat
     assert starting_idx < searching_idx < complete_idx
 
 
+@pytest.mark.parametrize(
+    ("mode", "progress_message", "expected_in_body"),
+    [
+        (
+            "new",
+            "Starting TV Search for new for Test Show",
+            [
+                "TV Search for new complete",
+                "applied auto-stage/select rules for actionable episodes",
+                '"reload_details": true',
+                '"buckets_source": "db"',
+            ],
+        ),
+        (
+            "full",
+            "Running one broad TV pack query for Full search",
+            ["TV Full search complete"],
+        ),
+    ],
+)
 @pytest.mark.asyncio
-async def test_stream_search_request_tv_search_for_new_reload_signal(mock_db, monkeypatch):
-    """Request-level TV stream defaults to Search for new and reloads DB buckets."""
+async def test_stream_search_request_tv_modes(
+    mock_db, monkeypatch, mode, progress_message, expected_in_body
+):
+    """Request-level TV stream defaults to Search for new; both modes forward progress."""
     request_record = MagicMock()
     request_record.title = "Test Show"
     request_record.year = 2020
@@ -66,78 +88,23 @@ async def test_stream_search_request_tv_search_for_new_reload_signal(mock_db, mo
         request, progress_callback=None, search_mode="new", cancellation_check=None
     ):
         assert progress_callback is not None
-        assert search_mode == "new"
         assert callable(cancellation_check)
-        await progress_callback(
-            {
-                "phase": "starting",
-                "percent": 5,
-                "message": "Starting TV Search for new for Test Show…",
-            }
-        )
-        return {"status": "staged", "message": "Selected pack"}
+        await progress_callback({"phase": "starting", "percent": 5, "message": progress_message})
+        return {"status": "staged", "message": "Done"}
 
     process_search = AsyncMock(side_effect=fake_process)
     monkeypatch.setattr(search_service_mod.SearchService, "process_request_search", process_search)
 
-    response = await search_sse.stream_search_request(request_id=1, db=mock_db)
-    chunks = []
-    async for chunk in response.body_iterator:
-        chunks.append(chunk)
-    body = "".join(chunks)
+    kwargs = {} if mode == "new" else {"search_mode": mode}
+    response = await search_sse.stream_search_request(request_id=1, db=mock_db, **kwargs)
+    body = "".join([chunk async for chunk in response.body_iterator])
 
     assert process_search.await_args is not None
-    args, kwargs = process_search.await_args
-    assert args == (request_record,)
-    assert callable(kwargs.get("progress_callback"))
-    assert kwargs.get("search_mode") == "new"
-    assert "Starting TV Search for new for Test Show" in body
-    assert "TV Search for new complete" in body
-    assert "applied auto-stage/select rules for actionable episodes" in body
-    assert '"reload_details": true' in body
-    assert '"buckets_source": "db"' in body
-
-
-@pytest.mark.asyncio
-async def test_stream_search_request_tv_full_search_mode(mock_db, monkeypatch):
-    request_record = MagicMock()
-    request_record.title = "Test Show"
-    request_record.year = 2020
-    request_record.tmdb_id = 123
-    request_record.media_type = MediaType.TV
-
-    async def fake_load(db, req_id):
-        return request_record
-
-    async def fake_process(
-        request, progress_callback=None, search_mode="new", cancellation_check=None
-    ):
-        assert progress_callback is not None
-        assert search_mode == "full"
-        assert callable(cancellation_check)
-        await progress_callback(
-            {
-                "phase": "broad_tv_pack_search_starting",
-                "percent": 79,
-                "message": "Running one broad TV pack query for Full search…",
-            }
-        )
-        return {"status": "pending", "message": "Refreshed"}
-
-    monkeypatch.setattr(search_sse, "load_request_or_404", fake_load)
-    process_search = AsyncMock(side_effect=fake_process)
-    monkeypatch.setattr(search_service_mod.SearchService, "process_request_search", process_search)
-
-    response = await search_sse.stream_search_request(request_id=1, search_mode="full", db=mock_db)
-    chunks = []
-    async for chunk in response.body_iterator:
-        chunks.append(chunk)
-    body = "".join(chunks)
-
-    assert process_search.await_args is not None
-    assert process_search.await_args.kwargs["search_mode"] == "full"
-    assert "Running one broad TV pack query for Full search" in body
-    assert "TV Full search complete" in body
+    assert process_search.await_args.args == (request_record,)
+    assert process_search.await_args.kwargs["search_mode"] == mode
+    assert progress_message in body
+    for text in expected_in_body:
+        assert text in body
 
 
 @pytest.mark.asyncio
@@ -403,9 +370,43 @@ async def test_stream_bulk_search_reports_request_failure_and_continues(mock_db,
     assert process_search.await_count == 2
 
 
+@pytest.mark.parametrize(
+    ("stream", "stream_kwargs", "method", "payload"),
+    [
+        (
+            "stream_tv_season_pack_search",
+            {"season_number": 1},
+            "search_season_packs",
+            {
+                "releases": [{"title": "Pack"}],
+                "scope": {"type": "season_packs", "season_number": 1},
+            },
+        ),
+        (
+            "stream_tv_multi_season_search",
+            {},
+            "search_multi_season_packs",
+            {
+                "releases": [{"title": "Pack"}],
+                "scope": {"type": "multi_season_packs"},
+                "known_total_seasons": 3,
+            },
+        ),
+        (
+            "stream_tv_episode_search",
+            {"season_number": 1, "episode_number": 2},
+            "search_episode",
+            {
+                "releases": [{"title": "Pack"}],
+                "scope": {"type": "single_episode", "season_number": 1, "episode_number": 2},
+            },
+        ),
+    ],
+)
 @pytest.mark.asyncio
-async def test_stream_tv_season_pack_search(mock_db, monkeypatch):
-    """Granular season-pack stream remains available for compatibility/debug."""
+async def test_stream_tv_scope_searches_emit_phases_and_serialized_result(
+    mock_db, monkeypatch, stream, stream_kwargs, method, payload
+):
     request_record = MagicMock()
     request_record.media_type = MediaType.TV
     request_record.tvdb_id = 999
@@ -415,112 +416,21 @@ async def test_stream_tv_season_pack_search(mock_db, monkeypatch):
         return request_record
 
     monkeypatch.setattr(search_sse, "load_request_or_404", fake_load)
-
     fake_service = MagicMock()
-    fake_service.search_season_packs = AsyncMock(return_value=MagicMock())
+    setattr(fake_service, method, AsyncMock(return_value=MagicMock()))
     monkeypatch.setattr(search_sse, "SearchService", lambda db: fake_service)
-    monkeypatch.setattr(
-        search_sse,
-        "serialize_tv_search_response",
-        lambda data: {
-            "releases": [{"title": "Pack"}],
-            "scope": {"type": "season_packs", "season_number": 1},
-        },
-    )
+    monkeypatch.setattr(search_sse, "serialize_tv_search_response", lambda data: payload)
 
-    response = await search_sse.stream_tv_season_pack_search(
-        request_id=1, season_number=1, db=mock_db
-    )
-    chunks = []
-    async for chunk in response.body_iterator:
-        chunks.append(chunk)
-    body = "".join(chunks)
+    response = await getattr(search_sse, stream)(request_id=1, db=mock_db, **stream_kwargs)
+    body = "".join([chunk async for chunk in response.body_iterator])
 
-    assert '"phase": "starting"' in body
-    assert '"phase": "searching"' in body
-    assert '"phase": "complete"' in body
+    getattr(fake_service, method).assert_awaited_once()
+    for phase in ("starting", "searching", "complete"):
+        assert f'"phase": "{phase}"' in body
     assert '"title": "Pack"' in body
-    assert '"type": "season_packs"' in body
-
-
-@pytest.mark.asyncio
-async def test_stream_tv_multi_season_search(mock_db, monkeypatch):
-    """Granular multi-season stream remains available for compatibility/debug."""
-    request_record = MagicMock()
-    request_record.media_type = MediaType.TV
-    request_record.tvdb_id = 999
-    request_record.title = "Show"
-
-    async def fake_load(db, req_id):
-        return request_record
-
-    monkeypatch.setattr(search_sse, "load_request_or_404", fake_load)
-
-    fake_service = MagicMock()
-    fake_service.search_multi_season_packs = AsyncMock(return_value=MagicMock())
-    monkeypatch.setattr(search_sse, "SearchService", lambda db: fake_service)
-    monkeypatch.setattr(
-        search_sse,
-        "serialize_tv_search_response",
-        lambda data: {
-            "releases": [{"title": "Multi-Pack"}],
-            "scope": {"type": "multi_season_packs"},
-            "known_total_seasons": 3,
-        },
-    )
-
-    response = await search_sse.stream_tv_multi_season_search(request_id=1, db=mock_db)
-    chunks = []
-    async for chunk in response.body_iterator:
-        chunks.append(chunk)
-    body = "".join(chunks)
-
-    assert '"phase": "starting"' in body
-    assert '"phase": "searching"' in body
-    assert '"phase": "complete"' in body
-    assert '"title": "Multi-Pack"' in body
-    assert '"type": "multi_season_packs"' in body
-    assert '"known_total_seasons": 3' in body
-
-
-@pytest.mark.asyncio
-async def test_stream_tv_episode_search(mock_db, monkeypatch):
-    """Granular episode stream remains available for compatibility/debug."""
-    request_record = MagicMock()
-    request_record.media_type = MediaType.TV
-    request_record.tvdb_id = 999
-    request_record.title = "Show"
-
-    async def fake_load(db, req_id):
-        return request_record
-
-    monkeypatch.setattr(search_sse, "load_request_or_404", fake_load)
-
-    fake_service = MagicMock()
-    fake_service.search_episode = AsyncMock(return_value=MagicMock())
-    monkeypatch.setattr(search_sse, "SearchService", lambda db: fake_service)
-    monkeypatch.setattr(
-        search_sse,
-        "serialize_tv_search_response",
-        lambda data: {
-            "releases": [{"title": "Episode"}],
-            "scope": {"type": "single_episode", "season_number": 1, "episode_number": 2},
-        },
-    )
-
-    response = await search_sse.stream_tv_episode_search(
-        request_id=1, season_number=1, episode_number=2, db=mock_db
-    )
-    chunks = []
-    async for chunk in response.body_iterator:
-        chunks.append(chunk)
-    body = "".join(chunks)
-
-    assert '"phase": "starting"' in body
-    assert '"phase": "searching"' in body
-    assert '"phase": "complete"' in body
-    assert '"title": "Episode"' in body
-    assert '"type": "single_episode"' in body
+    assert f'"type": "{payload["scope"]["type"]}"' in body
+    if "known_total_seasons" in payload:
+        assert '"known_total_seasons": 3' in body
 
 
 @pytest.mark.asyncio

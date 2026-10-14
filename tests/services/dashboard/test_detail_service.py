@@ -5,9 +5,7 @@ from typing import cast
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
-from app.siftarr.models._base import Base
 from app.siftarr.models.episode import Episode
 from app.siftarr.models.release import Release
 from app.siftarr.models.request import MediaType, Request, RequestStatus
@@ -19,17 +17,6 @@ from app.siftarr.services.dashboard.dashboard_service import (
 )
 from app.siftarr.services.dashboard.detail_service import DetailReleaseControls, DetailService
 from app.siftarr.services.dashboard.tv_enrichment_service import TVEnrichmentService
-
-
-@pytest.fixture
-async def db_session():
-    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-    session_maker = async_sessionmaker(engine, expire_on_commit=False)
-    async with session_maker() as session:
-        yield session
-    await engine.dispose()
 
 
 def _release(title: str, *, size: int, resolution: str, seeders: int = 1, score: int = 10):
@@ -49,16 +36,16 @@ def _release(title: str, *, size: int, resolution: str, seeders: int = 1, score:
 
 
 @pytest.mark.asyncio
-async def test_load_stored_releases_sorts_by_size_and_reports_filtered_total(db_session):
-    db_session.add_all(
+async def test_load_stored_releases_sorts_by_size_and_reports_filtered_total(db):
+    db.add_all(
         [
             _release("Big.Movie.2160p", size=30, resolution="2160p"),
             _release("Small.Movie.2160p", size=10, resolution="2160p"),
             _release("Other.Movie.1080p", size=20, resolution="1080p"),
         ]
     )
-    await db_session.commit()
-    service = DetailService(db_session, settings=MagicMock())
+    await db.commit()
+    service = DetailService(db, settings=MagicMock())
 
     releases, total, filtered_total = await service._load_serialized_stored_releases(
         1,
@@ -74,21 +61,21 @@ async def test_load_stored_releases_sorts_by_size_and_reports_filtered_total(db_
 
 
 @pytest.mark.asyncio
-async def test_tv_detail_pagination_enriches_all_filtered_releases(db_session, monkeypatch):
+async def test_tv_detail_pagination_enriches_all_filtered_releases(db, monkeypatch):
     request = Request(
         external_id="tv-paginated-detail",
         media_type=MediaType.TV,
         title="Show",
         status=RequestStatus.PENDING,
     )
-    db_session.add(request)
-    await db_session.flush()
+    db.add(request)
+    await db.flush()
     season = Season(request_id=request.id, season_number=1, status=RequestStatus.PENDING)
-    db_session.add(season)
-    await db_session.flush()
-    db_session.add(Episode(season_id=season.id, episode_number=1, status=RequestStatus.PENDING))
+    db.add(season)
+    await db.flush()
+    db.add(Episode(season_id=season.id, episode_number=1, status=RequestStatus.PENDING))
     for idx in range(3):
-        db_session.add(
+        db.add(
             Release(
                 request_id=request.id,
                 title=f"Show.S01E0{idx + 1}.1080p",
@@ -104,7 +91,7 @@ async def test_tv_detail_pagination_enriches_all_filtered_releases(db_session, m
                 rule_evidence={"passed": True, "score": 100 - idx, "matches": []},
             )
         )
-    await db_session.commit()
+    await db.commit()
 
     serialized_titles: list[str] = []
 
@@ -126,7 +113,7 @@ async def test_tv_detail_pagination_enriches_all_filtered_releases(db_session, m
         "app.siftarr.services.dashboard.detail_service.MetadataService.load_overseerr_details",
         AsyncMock(return_value=None),
     )
-    service = DetailService(db_session, settings=MagicMock())
+    service = DetailService(db, settings=MagicMock())
 
     details = await service.load_request_details(
         request,
@@ -183,31 +170,31 @@ def test_request_details_serializes_cache_search_hints():
 
 
 @pytest.mark.asyncio
-async def test_tv_details_do_not_overlay_approved_torrent_as_staged(db_session):
+async def test_tv_details_do_not_overlay_approved_torrent_as_staged(db):
     request = Request(
         external_id="tv-approved-no-staged-overlay",
         media_type=MediaType.TV,
         title="Show",
         status=RequestStatus.DOWNLOADING,
     )
-    db_session.add(request)
-    await db_session.flush()
+    db.add(request)
+    await db.flush()
     season = Season(
         request_id=request.id,
         season_number=1,
         status=RequestStatus.DOWNLOADING,
     )
-    db_session.add(season)
-    await db_session.flush()
-    db_session.add_all(
+    db.add(season)
+    await db.flush()
+    db.add_all(
         [
             Episode(season_id=season.id, episode_number=1, status=RequestStatus.DOWNLOADING),
             Episode(season_id=season.id, episode_number=2, status=RequestStatus.DOWNLOADING),
         ]
     )
-    await db_session.commit()
+    await db.commit()
 
-    tv_info = await TVEnrichmentService(db_session).load_tv_info(
+    tv_info = await TVEnrichmentService(db).load_tv_info(
         request_id=request.id,
         background_tasks=None,
         releases=[],
@@ -231,19 +218,19 @@ async def test_tv_details_do_not_overlay_approved_torrent_as_staged(db_session):
 
 
 @pytest.mark.asyncio
-async def test_tv_details_count_completed_as_available_and_unreleased_separate(db_session):
+async def test_tv_details_count_completed_as_available_and_unreleased_separate(db):
     request = Request(
         external_id="tv-completed-unreleased-counts",
         media_type=MediaType.TV,
         title="Show",
         status=RequestStatus.UNRELEASED,
     )
-    db_session.add(request)
-    await db_session.flush()
+    db.add(request)
+    await db.flush()
     season = Season(request_id=request.id, season_number=1, status=RequestStatus.UNRELEASED)
-    db_session.add(season)
-    await db_session.flush()
-    db_session.add_all(
+    db.add(season)
+    await db.flush()
+    db.add_all(
         [
             Episode(season_id=season.id, episode_number=1, status=RequestStatus.COMPLETED),
             Episode(
@@ -254,9 +241,9 @@ async def test_tv_details_count_completed_as_available_and_unreleased_separate(d
             ),
         ]
     )
-    await db_session.commit()
+    await db.commit()
 
-    tv_info = await TVEnrichmentService(db_session).load_tv_info(
+    tv_info = await TVEnrichmentService(db).load_tv_info(
         request_id=request.id,
         background_tasks=None,
         releases=[],
@@ -339,7 +326,7 @@ class TestGroupTvReleasesForPackUI:
 
 
 @pytest.mark.asyncio
-async def test_staged_overlay_does_not_repaint_completed_episodes(db_session):
+async def test_staged_overlay_does_not_repaint_completed_episodes(db):
     """A staged pack must not turn already-available seasons into "staged".
 
     A staged season-pack/multi-season/complete-series torrent covers every
@@ -352,13 +339,13 @@ async def test_staged_overlay_does_not_repaint_completed_episodes(db_session):
         title="Show",
         status=RequestStatus.COMPLETED,
     )
-    db_session.add(request)
-    await db_session.flush()
+    db.add(request)
+    await db.flush()
     done_season = Season(request_id=request.id, season_number=1, status=RequestStatus.COMPLETED)
     open_season = Season(request_id=request.id, season_number=2, status=RequestStatus.PENDING)
-    db_session.add_all([done_season, open_season])
-    await db_session.flush()
-    db_session.add_all(
+    db.add_all([done_season, open_season])
+    await db.flush()
+    db.add_all(
         [
             Episode(season_id=done_season.id, episode_number=1, status=RequestStatus.COMPLETED),
             Episode(season_id=done_season.id, episode_number=2, status=RequestStatus.COMPLETED),
@@ -366,9 +353,9 @@ async def test_staged_overlay_does_not_repaint_completed_episodes(db_session):
             Episode(season_id=open_season.id, episode_number=2, status=RequestStatus.PENDING),
         ]
     )
-    await db_session.commit()
+    await db.commit()
 
-    tv_info = await TVEnrichmentService(db_session).load_tv_info(
+    tv_info = await TVEnrichmentService(db).load_tv_info(
         request_id=request.id,
         background_tasks=None,
         releases=[],

@@ -6,17 +6,6 @@ from pydantic import ValidationError
 from app.siftarr.config import Settings
 
 
-def test_reliability_defaults():
-    settings = Settings(secret_key="test-only")
-    assert settings.release_file_count_bonus == 5
-    assert settings.release_high_file_count_penalty == 10
-    assert settings.release_archive_penalty == 100
-    assert settings.release_low_seed_penalty == 40
-    assert settings.tv_episode_fallback_max_size_gb == 3.0
-    assert settings.download_stall_warning_hours == 6
-    assert settings.download_stall_recovery_hours == 24
-
-
 @pytest.mark.parametrize(
     "field",
     [

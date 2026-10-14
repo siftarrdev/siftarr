@@ -3,25 +3,13 @@ from datetime import datetime
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from app.siftarr.config import reload_settings
 from app.siftarr.database import get_db
 from app.siftarr.main import create_app
-from app.siftarr.models import Base, Request, StatsReleaseFact
+from app.siftarr.models import Request, StatsReleaseFact
 from app.siftarr.models.request import MediaType, RequestStatus
 from app.siftarr.routers import stats
-
-
-@pytest.fixture
-async def session_maker():
-    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-    try:
-        yield async_sessionmaker(engine, expire_on_commit=False)
-    finally:
-        await engine.dispose()
 
 
 @pytest.fixture(autouse=True)
@@ -81,23 +69,14 @@ def test_stats_page_is_protected(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_stats_page_renders_with_api_key(seeded_session_maker, monkeypatch):
+async def test_stats_page_and_json_endpoint_serve_seeded_data(seeded_session_maker, monkeypatch):
     monkeypatch.setenv("SIFTARR_API_KEY", "test-key")
     reload_settings()
     client = _client_with_db(seeded_session_maker)
 
-    response = client.get("/stats", headers={"X-API-Key": "test-key"})
-
-    assert response.status_code == 200
-    assert "Stats" in response.text
-    assert "/static/js/stats.js" in response.text
-
-
-@pytest.mark.asyncio
-async def test_stats_json_endpoint_returns_payload(seeded_session_maker, monkeypatch):
-    monkeypatch.setenv("SIFTARR_API_KEY", "test-key")
-    reload_settings()
-    client = _client_with_db(seeded_session_maker)
+    page = client.get("/stats", headers={"X-API-Key": "test-key"})
+    assert page.status_code == 200
+    assert "/static/js/stats.js" in page.text
 
     response = client.get("/stats/data?range=all", headers={"X-API-Key": "test-key"})
 

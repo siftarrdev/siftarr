@@ -7,10 +7,8 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
-from sqlalchemy.pool import StaticPool
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.siftarr.models import Base
 from app.siftarr.models.download_health import (
     HEALTH_STATUS_AMBIGUOUS,
     HEALTH_STATUS_RECOVERY_ELIGIBLE,
@@ -20,13 +18,13 @@ from app.siftarr.models.download_health import (
 )
 from app.siftarr.models.episode import Episode
 from app.siftarr.models.request import MediaType, Request, RequestStatus
-from app.siftarr.models.season import Season
 from app.siftarr.models.staged_torrent import StagedTorrent
 from app.siftarr.services.integrations.qbittorrent_service import QbittorrentService
 from app.siftarr.services.lifecycle.download_health_service import (
     DownloadHealthService,
     DownloadRecoveryNotEligible,
 )
+from tests.factories import make_request, make_season, make_staged_torrent
 
 
 class FakeDb:
@@ -86,35 +84,39 @@ class DatabaseQbit:
         return self.torrents
 
 
-async def _recovery_database(
+RECOVERY_NOW = datetime(2026, 9, 6, 12, tzinfo=UTC)
+RECOVERY_SETTINGS = SimpleNamespace(
+    download_stall_warning_hours=6,
+    download_stall_recovery_hours=24,
+    release_failure_cooldown_hours=24,
+)
+
+
+@pytest.fixture
+def recovery_settings():
+    with patch(
+        "app.siftarr.services.lifecycle.download_health_service.get_settings",
+        return_value=RECOVERY_SETTINGS,
+    ):
+        yield
+
+
+async def _recovery_rows(
+    db: AsyncSession,
     *,
     title: str = "Example Show S01E01",
     request_status: RequestStatus = RequestStatus.DOWNLOADING,
     staged_status: str = "approved",
     episode_count: int = 1,
-) -> tuple[Any, AsyncSession, Request, StagedTorrent, DownloadHealth, datetime]:
-    engine = create_async_engine("sqlite+aiosqlite://", poolclass=StaticPool)
-    async with engine.begin() as connection:
-        await connection.run_sync(Base.metadata.create_all)
-    session_maker = async_sessionmaker(engine, expire_on_commit=False)
-    db = session_maker()
-    now = datetime(2026, 9, 6, 12, tzinfo=UTC)
-    request = Request(
-        external_id=f"health-{id(db)}",
-        media_type=MediaType.TV,
-        title="Example Show",
-        status=request_status,
+) -> tuple[Request, StagedTorrent, DownloadHealth]:
+    now = RECOVERY_NOW
+    request = await make_request(
+        db, media_type=MediaType.TV, title="Example Show", status=request_status
     )
-    season = Season(season_number=1, status=RequestStatus.DOWNLOADING)
-    season.episodes = [
-        Episode(episode_number=number, status=RequestStatus.DOWNLOADING)
-        for number in range(1, episode_count + 1)
-    ]
-    request.seasons = [season]
-    db.add(request)
-    await db.flush()
-    staged_row = StagedTorrent(
-        request_id=request.id,
+    await make_season(db, request, 1, status=RequestStatus.DOWNLOADING, episodes=episode_count)
+    staged_row = await make_staged_torrent(
+        db,
+        request,
         torrent_path="",
         json_path="",
         original_filename=title,
@@ -125,8 +127,6 @@ async def _recovery_database(
         info_hash="a" * 40,
         status=staged_status,
     )
-    db.add(staged_row)
-    await db.flush()
     health = DownloadHealth(
         staged_torrent_id=staged_row.id,
         request_id=request.id,
@@ -142,12 +142,7 @@ async def _recovery_database(
     )
     db.add(health)
     await db.commit()
-    return engine, db, request, staged_row, health, now
-
-
-async def _close_recovery_database(engine: Any, db: AsyncSession) -> None:
-    await db.close()
-    await engine.dispose()
+    return request, staged_row, health
 
 
 @pytest.mark.asyncio
@@ -356,143 +351,92 @@ def test_reset_request_scope_only_resets_covered_tv_episodes():
     assert request.rejection_reason is None
 
 
-@pytest.mark.asyncio
-async def test_recovery_reobserves_resumed_torrent_before_reset():
-    engine, db, request, staged_row, health, now = await _recovery_database()
-    qbit = DatabaseQbit(
-        [
-            {
-                "hash": staged_row.info_hash,
-                "name": staged_row.title,
-                "progress": 0.5,
-                "state": "downloading",
-            }
-        ]
-    )
-    try:
-        with (
-            patch(
-                "app.siftarr.services.lifecycle.download_health_service.get_settings",
-                return_value=SimpleNamespace(
-                    download_stall_warning_hours=6,
-                    download_stall_recovery_hours=24,
-                    release_failure_cooldown_hours=24,
-                ),
-            ),
-            pytest.raises(DownloadRecoveryNotEligible, match="no longer eligible"),
-        ):
-            await DownloadHealthService(db, cast(QbittorrentService, qbit)).recover(
-                health.id, confirm=True, now=now
-            )
-        assert staged_row.status == "approved"
-        assert request.status == RequestStatus.DOWNLOADING
-        qbit.delete_torrent.assert_not_called()
-    finally:
-        await _close_recovery_database(engine, db)
+def _qbit_torrent(state: str, progress: float) -> dict:
+    return {"hash": "a" * 40, "name": "Example Show S01E01", "progress": progress, "state": state}
 
 
 @pytest.mark.asyncio
-async def test_recovery_rejects_paused_and_unavailable_current_torrents():
-    qbits = tuple(
-        DatabaseQbit(
-            [
-                {
-                    "hash": "a" * 40,
-                    "name": "Example Show S01E01",
-                    "progress": 0,
-                    "state": state,
-                }
-            ]
-        )
-        for state in ("pausedDL", "queuedDL", "checkingDL")
-    ) + (
-        DatabaseQbit(
-            [
-                {
-                    "hash": "a" * 40,
-                    "name": "Example Show S01E01",
-                    "progress": 1,
-                    "state": "uploading",
-                }
-            ]
+@pytest.mark.parametrize(
+    ("request_status", "staged_status", "qbit"),
+    [
+        pytest.param(
+            RequestStatus.DOWNLOADING,
+            "approved",
+            DatabaseQbit([_qbit_torrent("downloading", 0.5)]),
+            id="resumed-before-reset",
         ),
-        DatabaseQbit(error=ConnectionError("offline")),
+        pytest.param(
+            RequestStatus.DOWNLOADING,
+            "approved",
+            DatabaseQbit([_qbit_torrent("pausedDL", 0)]),
+            id="paused",
+        ),
+        pytest.param(
+            RequestStatus.DOWNLOADING,
+            "approved",
+            DatabaseQbit([_qbit_torrent("queuedDL", 0)]),
+            id="queued",
+        ),
+        pytest.param(
+            RequestStatus.DOWNLOADING,
+            "approved",
+            DatabaseQbit([_qbit_torrent("checkingDL", 0)]),
+            id="checking",
+        ),
+        pytest.param(
+            RequestStatus.DOWNLOADING,
+            "approved",
+            DatabaseQbit([_qbit_torrent("uploading", 1)]),
+            id="finished",
+        ),
+        pytest.param(
+            RequestStatus.DOWNLOADING,
+            "approved",
+            DatabaseQbit(error=ConnectionError("offline")),
+            id="qbit-offline",
+        ),
+        pytest.param(RequestStatus.COMPLETED, "approved", DatabaseQbit([]), id="terminal-request"),
+        pytest.param(
+            RequestStatus.DOWNLOADING, "discarded", DatabaseQbit([]), id="non-approved-stage"
+        ),
+    ],
+)
+async def test_recovery_rejects_ineligible_states_without_changes(
+    db, recovery_settings, request_status, staged_status, qbit
+):
+    request, staged_row, health = await _recovery_rows(
+        db, request_status=request_status, staged_status=staged_status
     )
-    for qbit in qbits:
-        engine, db, _request, staged_row, health, now = await _recovery_database()
-        try:
-            with (
-                patch(
-                    "app.siftarr.services.lifecycle.download_health_service.get_settings",
-                    return_value=SimpleNamespace(
-                        download_stall_warning_hours=6,
-                        download_stall_recovery_hours=24,
-                        release_failure_cooldown_hours=24,
-                    ),
-                ),
-                pytest.raises(DownloadRecoveryNotEligible),
-            ):
-                await DownloadHealthService(db, cast(QbittorrentService, qbit)).recover(
-                    health.id, confirm=True, now=now
-                )
-            assert staged_row.status == "approved"
-            qbit.delete_torrent.assert_not_called()
-        finally:
-            await _close_recovery_database(engine, db)
 
-
-@pytest.mark.asyncio
-async def test_recovery_rejects_terminal_request_and_nonapproved_stage():
-    for request_status, staged_status in (
-        (RequestStatus.COMPLETED, "approved"),
-        (RequestStatus.DOWNLOADING, "discarded"),
-    ):
-        engine, db, _request, staged_row, health, now = await _recovery_database(
-            request_status=request_status,
-            staged_status=staged_status,
+    with pytest.raises(DownloadRecoveryNotEligible):
+        await DownloadHealthService(db, cast(QbittorrentService, qbit)).recover(
+            health.id, confirm=True, now=RECOVERY_NOW
         )
-        qbit = DatabaseQbit([])
-        try:
-            with pytest.raises(DownloadRecoveryNotEligible):
-                await DownloadHealthService(db, cast(QbittorrentService, qbit)).recover(
-                    health.id, confirm=True, now=now
-                )
-            assert staged_row.status == staged_status
-            qbit.delete_torrent.assert_not_called()
-        finally:
-            await _close_recovery_database(engine, db)
+
+    assert staged_row.status == staged_status
+    assert request.status == request_status
+    qbit.delete_torrent.assert_not_called()
 
 
 @pytest.mark.asyncio
-async def test_recovery_resets_all_covered_multi_episode_episodes_only():
-    engine, db, _request, staged_row, health, now = await _recovery_database(
-        title="Example Show S01E01-E03",
-        episode_count=4,
+async def test_recovery_resets_all_covered_multi_episode_episodes_only(db, recovery_settings):
+    _request, staged_row, health = await _recovery_rows(
+        db, title="Example Show S01E01-E03", episode_count=4
     )
     qbit = DatabaseQbit([])
-    try:
-        with patch(
-            "app.siftarr.services.lifecycle.download_health_service.get_settings",
-            return_value=SimpleNamespace(
-                download_stall_warning_hours=6,
-                download_stall_recovery_hours=24,
-                release_failure_cooldown_hours=24,
-            ),
-        ):
-            result = await DownloadHealthService(db, cast(QbittorrentService, qbit)).recover(
-                health.id, confirm=True, disposition="cooldown", now=now
-            )
-        refreshed = (await db.execute(select(Episode).order_by(Episode.episode_number))).scalars()
-        statuses = [episode.status for episode in refreshed]
-        assert statuses == [
-            RequestStatus.PENDING,
-            RequestStatus.PENDING,
-            RequestStatus.PENDING,
-            RequestStatus.DOWNLOADING,
-        ]
-        affected = cast(dict[str, Any], result["affected_coverage"])
-        assert affected["episodes"] == ["S01E01", "S01E02", "S01E03"]
-        assert staged_row.status == "replaced"
-        qbit.delete_torrent.assert_not_called()
-    finally:
-        await _close_recovery_database(engine, db)
+
+    result = await DownloadHealthService(db, cast(QbittorrentService, qbit)).recover(
+        health.id, confirm=True, disposition="cooldown", now=RECOVERY_NOW
+    )
+
+    refreshed = (await db.execute(select(Episode).order_by(Episode.episode_number))).scalars()
+    assert [episode.status for episode in refreshed] == [
+        RequestStatus.PENDING,
+        RequestStatus.PENDING,
+        RequestStatus.PENDING,
+        RequestStatus.DOWNLOADING,
+    ]
+    affected = cast(dict[str, Any], result["affected_coverage"])
+    assert affected["episodes"] == ["S01E01", "S01E02", "S01E03"]
+    assert staged_row.status == "replaced"
+    qbit.delete_torrent.assert_not_called()
