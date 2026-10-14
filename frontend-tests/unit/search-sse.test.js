@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { closeSearchProgress, startSearchProgress } from '/static/js/dashboard/search_sse.js';
+import { closeSearchProgress, startSearchProgress } from '../../frontend-src/dashboard/search_sse.ts';
 
 class FakeEventSource {
   static instances = [];

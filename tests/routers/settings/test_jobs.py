@@ -8,6 +8,7 @@ import pytest
 import app.siftarr.main as main_module
 from app.siftarr.models.request import MediaType
 from app.siftarr.routers import settings
+from app.siftarr.services.admin import settings_service
 
 
 @pytest.mark.asyncio
@@ -277,7 +278,7 @@ async def test_rescan_plex_route_reports_success(monkeypatch, mock_db, base_cont
     polling = AsyncMock()
     polling.get_active_requests = AsyncMock(return_value=[tv_request])
     polling.poll.return_value = 3
-    monkeypatch.setattr(settings, "PlexPollingService", lambda db, plex: polling)
+    monkeypatch.setattr(settings_service, "PlexPollingService", lambda db, plex: polling)
 
     response = await settings.rescan_plex(MagicMock(), db=mock_db)
     context = cast(dict, getattr(response, "context", None))

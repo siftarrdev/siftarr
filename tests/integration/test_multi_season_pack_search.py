@@ -38,8 +38,6 @@ class FakePackProwlarr(ProwlarrService):
         self,
         title: str,
         season: int,
-        imdbid=None,
-        tvdbid=None,
         categories=None,
         cacheable: bool = True,
         request_id=None,
@@ -97,11 +95,6 @@ async def test_multi_season_search_persists_packs_against_real_session(db, monke
         staticmethod(lambda *args, **kwargs: PassAllRuleEngine([])),
     )
     service = SearchService(db)
-
-    async def no_imdb(_request):
-        return None
-
-    monkeypatch.setattr(service, "_load_imdb_id", no_imdb)
 
     data = await service.search_multi_season_packs(request, request_id=request.id)
 

@@ -1,5 +1,7 @@
 // Dashboard download-health warnings and explicit replacement review.
 
+import { escapeHtml } from './core.js';
+
 interface DownloadHealthProblem {
   id: number;
   request_id?: number | null;
@@ -43,15 +45,6 @@ async function openHealthDetails(problem: DownloadHealthProblem): Promise<void> 
     const details = season && document.getElementById(`season-details-${requestId}-${Number(season[1])}`);
     if (details instanceof HTMLDetailsElement) details.open = true;
   }
-}
-
-function escapeHealthHtml(value: unknown): string {
-  return String(value ?? '')
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#039;');
 }
 
 function resolveHealthTarget(target: string | Element = '[data-download-health]'): Element | null {
@@ -104,9 +97,9 @@ export function renderDownloadHealth(
       ) => `<article class="download-health-warning rounded border border-amber-700/50 p-3" data-health-attempt="${problem.id}">
         <div class="flex flex-wrap items-start justify-between gap-2">
           <div>
-            <h3 class="font-medium">${escapeHealthHtml(problem.title || 'Download')}</h3>
-            <p class="text-sm text-amber-300">${escapeHealthHtml(statusLabel(problem))} · ${escapeHealthHtml(ageLabel(problem))}</p>
-            <p class="text-xs text-gray-400">Progress ${problem.progress == null ? 'unknown' : `${(Number(problem.progress) * 100).toFixed(1)}%`} · state ${escapeHealthHtml(problem.qbit_state || 'unknown')}</p>
+            <h3 class="font-medium">${escapeHtml(problem.title || 'Download')}</h3>
+            <p class="text-sm text-amber-300">${escapeHtml(statusLabel(problem))} · ${escapeHtml(ageLabel(problem))}</p>
+            <p class="text-xs text-gray-400">Progress ${problem.progress == null ? 'unknown' : `${(Number(problem.progress) * 100).toFixed(1)}%`} · state ${escapeHtml(problem.qbit_state || 'unknown')}</p>
           </div>
           <div class="flex flex-wrap items-center gap-2">
             ${Number.isSafeInteger(problem.request_id) && Number(problem.request_id) > 0 ? `<button type="button" class="btn-ghost btn-sm" data-health-review="${problem.id}">Open request details</button>` : ''}

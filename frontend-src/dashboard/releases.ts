@@ -2,7 +2,7 @@
 // Dashboard Releases Module - Release card rendering and search actions
 // ====================================================================
 
-import { escapeHtml } from './core.js';
+import { escapeHtml, postWithConfirm, promptEachWarning } from './core.js';
 import { dashboardState } from './core/state.js';
 
 function renderAnnotation(value, toneClass = 'text-gray-400', dataAttr = '') {
@@ -1422,20 +1422,12 @@ async function submitReleaseAction(btn, approveNow = false) {
       formData.append(key, String(value));
     }
     if (approveNow) formData.append('approve_now', 'true');
-    let resp = await fetch(url, {
-      method: 'POST',
-      headers: { Accept: 'application/json' },
-      body: formData,
-    });
-    if (resp.status === 409) {
-      const conflict = await resp.json().catch(() => null);
-      const warnings = conflict?.detail?.warnings || [];
-      for (const warning of warnings) {
-        if (!window.confirm(`${warning.message}\n\nContinue with this exact release?`)) return;
-        if (warning.code) formData.append(`confirm_${warning.code}`, 'true');
-      }
-      resp = await fetch(url, { method: 'POST', headers: { Accept: 'application/json' }, body: formData });
-    }
+    const { response: resp, cancelled } = await postWithConfirm(
+      url,
+      formData,
+      promptEachWarning('Continue with this exact release?'),
+    );
+    if (cancelled) return;
     if (!resp.ok) {
       const errData = await resp.json().catch(() => null);
       throw new Error(errData?.detail || errData?.message || `HTTP ${resp.status}`);
@@ -1498,20 +1490,8 @@ export async function stageIndividualEpisodes(btn, requestId, seasonNumber) {
   try {
     const actionUrl = '/requests/' + requestId + '/seasons/' + seasonNumber + '/stage-individual-episodes';
     const formData = new FormData();
-    let resp = await fetch(actionUrl, {
-      method: 'POST',
-      headers: { Accept: 'application/json' },
-      body: formData,
-    });
-    if (resp.status === 409) {
-      const conflict = await resp.json().catch(() => null);
-      const warnings = conflict?.detail?.warnings || [];
-      for (const warning of warnings) {
-        if (!window.confirm(`${warning.message}\n\nContinue?`)) return;
-        if (warning.code) formData.append(`confirm_${warning.code}`, 'true');
-      }
-      resp = await fetch(actionUrl, { method: 'POST', headers: { Accept: 'application/json' }, body: formData });
-    }
+    const { response: resp, cancelled } = await postWithConfirm(actionUrl, formData, promptEachWarning('Continue?'));
+    if (cancelled) return;
     if (!resp.ok) {
       const errData = await resp.json().catch(() => null);
       throw new Error(errData?.detail || `HTTP ${resp.status}`);
@@ -1545,20 +1525,8 @@ export async function inlineStagedAction(actionUrl, btn = null) {
   try {
     const formData = new FormData();
     formData.append('redirect_to', '/?tab=staged');
-    let response = await fetch(actionUrl, {
-      method: 'POST',
-      headers: { Accept: 'application/json' },
-      body: formData,
-    });
-    if (response.status === 409) {
-      const conflict = await response.json().catch(() => null);
-      const warnings = conflict?.detail?.warnings || [];
-      for (const warning of warnings) {
-        if (!window.confirm(`${warning.message}\n\nApprove anyway?`)) return;
-        if (warning.code) formData.append(`confirm_${warning.code}`, 'true');
-      }
-      response = await fetch(actionUrl, { method: 'POST', headers: { Accept: 'application/json' }, body: formData });
-    }
+    const { response, cancelled } = await postWithConfirm(actionUrl, formData, promptEachWarning('Approve anyway?'));
+    if (cancelled) return;
     if (!response.ok) {
       const errorData = await response.json().catch(() => null);
       throw new Error(errorData?.detail || errorData?.message || `Server error: ${response.status}`);

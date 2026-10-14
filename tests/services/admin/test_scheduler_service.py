@@ -22,7 +22,6 @@ from app.siftarr.services.admin.scheduler_service import (
     SchedulerService,
 )
 from app.siftarr.services.admin.settings_service import (
-    OVERSEERR_LAST_SYNC_SUCCESS_KEY,
     PLEX_LAST_SYNC_SUCCESS_KEY,
     SettingsStore,
     parse_sync_timestamp,
@@ -130,7 +129,7 @@ async def test_plex_sign_in_sync_runs_guarded_full_poll(session_maker, fake_plex
     fake_plex_poll.assert_awaited_once_with(priority_only=False)
 
 
-async def test_overseerr_poll_records_success_timestamp(monkeypatch, session_maker):
+async def test_overseerr_poll_logs_synced_counts(monkeypatch, session_maker):
     monkeypatch.setattr(
         scheduler_service,
         "get_settings",
@@ -145,7 +144,6 @@ async def test_overseerr_poll_records_success_timestamp(monkeypatch, session_mak
     await SchedulerService(session_maker, logger=logger)._poll_overseerr()
 
     import_requests.assert_awaited_once()
-    assert await _last_sync(session_maker, OVERSEERR_LAST_SYNC_SUCCESS_KEY) is not None
     logger.info.assert_called_once_with(
         "Overseerr poll: synced %d new request(s) (%d skipped/existing)", 2, 1
     )

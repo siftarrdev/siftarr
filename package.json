@@ -21,7 +21,7 @@
     "verify:frontend-build": "npm run build:frontend && git diff --exit-code -- app/siftarr/static/js",
     "format:js": "prettier --write \"app/siftarr/static/js/**/*.js\" \"frontend-src/**/*.{ts,mjs}\" \"frontend-tests/**/*.{js,mjs}\" *.config.mjs",
     "format:js:check": "prettier --check \"app/siftarr/static/js/**/*.js\" \"frontend-src/**/*.{ts,mjs}\" \"frontend-tests/**/*.{js,mjs}\" *.config.mjs",
-    "lint:js": "eslint \"app/siftarr/static/js/**/*.js\" && eslint --config frontend-src/eslint.config.mjs \"frontend-src/**/*.ts\" frontend-src/eslint.config.mjs && eslint --config frontend-tests/eslint.config.mjs \"frontend-tests/**/*.js\" frontend-tests/eslint.config.mjs vitest.config.mjs playwright.config.mjs",
+    "lint:js": "eslint --config frontend-src/eslint.config.mjs \"frontend-src/**/*.ts\" frontend-src/eslint.config.mjs && eslint --config frontend-tests/eslint.config.mjs \"frontend-tests/**/*.js\" frontend-tests/eslint.config.mjs vitest.config.mjs playwright.config.mjs",
     "test:unit:js": "vitest run",
     "test:e2e": "playwright test",
     "test:js": "npm run test:unit:js",

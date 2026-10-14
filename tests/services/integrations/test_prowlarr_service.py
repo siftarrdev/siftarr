@@ -1,6 +1,5 @@
 """Tests for ProwlarrService."""
 
-import json
 from unittest.mock import AsyncMock
 
 import httpx
@@ -92,12 +91,19 @@ class TestHttpBoundary:
         assert second.error is None
         assert len(http_stub.requests) == 2
 
-    async def test_malformed_json_body_propagates_decode_error(self, prowlarr_service, http_stub):
-        """_search only catches httpx.RequestError, so a bad 200 body raises to the caller."""
+    async def test_malformed_json_body_is_reported_in_result_and_not_cached(
+        self, prowlarr_service, http_stub
+    ):
         http_stub.reply(httpx.Response(200, content=b"<html>not json</html>"))
+        params = {"type": "search", "query": "x"}
 
-        with pytest.raises(json.JSONDecodeError):
-            await prowlarr_service._search({"type": "search", "query": "x"})
+        result = await prowlarr_service._search(params)
+        retry = await prowlarr_service._search(params)
+
+        assert result.releases == []
+        assert result.error == "Invalid response"
+        assert retry.error is None
+        assert len(http_stub.requests) == 2
 
     async def test_transport_error_is_reported_in_result(self, prowlarr_service, http_stub):
         http_stub.reply(httpx.ConnectError("refused"))
@@ -285,24 +291,6 @@ class TestQueryBuilding:
     def test_query_strings(self, build, expected):
         assert build() == expected
 
-    @pytest.mark.parametrize(
-        "kwargs",
-        [{"imdbid": "tt7587890", "tvdbid": 350665}, {}],
-        ids=["with_metadata", "without_metadata"],
-    )
-    def test_season_strategy_uses_one_canonical_title_query(self, kwargs):
-        service = ProwlarrService(
-            Settings(
-                prowlarr_tv_strategy_title_sxx_enabled=True,
-                prowlarr_tv_strategy_imdb_enabled=True,
-                prowlarr_tv_strategy_tvdb_enabled=True,
-            )
-        )
-
-        assert service._tv_season_strategy_queries("The Rookie", 1, **kwargs) == [
-            ("title_sxx", "search", "The Rookie S01")
-        ]
-
 
 class TestSearchMethods:
     @pytest.mark.parametrize(
@@ -431,7 +419,7 @@ class TestSeasonSweep:
         set_handler(lambda params: _result(_release(1)))
         service = ProwlarrService(Settings.model_validate(SWEEP_SETTINGS))
 
-        result = await service.search_tv_season_page("The Rookie", 1, "title_sxx", offset=100)
+        result = await service.search_tv_season_page("The Rookie", 1, offset=100)
 
         assert calls == [
             {"type": "search", "query": "The Rookie S01", "categories": [5000], "offset": 100}
@@ -475,9 +463,7 @@ class TestSeasonSweep:
         set_handler(lambda params: page_for(params["offset"]))
         service = ProwlarrService(Settings.model_validate(SWEEP_SETTINGS))
 
-        result = await service.search_tv_season_sweep(
-            "The Rookie", 1, imdbid="tt7587890", tvdbid=350665
-        )
+        result = await service.search_tv_season_sweep("The Rookie", 1)
 
         assert [call["offset"] for call in calls] == expected_offsets
         assert all("limit" not in call for call in calls)

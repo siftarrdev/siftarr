@@ -1,5 +1,7 @@
 """Shared request-loading and validation helpers for router endpoints."""
 
+from urllib.parse import urlsplit
+
 from fastapi import HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -30,6 +32,19 @@ def ensure_tvdb_id(request: RequestModel) -> int:
     return request.tvdb_id
 
 
+def safe_local_redirect_url(redirect_to: str | None, default: str) -> str:
+    """Return redirect_to only when it is a same-origin absolute path."""
+    if not redirect_to or "\\" in redirect_to or not redirect_to.startswith("/"):
+        return default
+    if redirect_to.startswith("//"):
+        return default
+
+    parsed = urlsplit(redirect_to)
+    if parsed.scheme or parsed.netloc:
+        return default
+    return redirect_to
+
+
 def selection_redirect_url(
     redirect_to: str | None,
     request: RequestModel,
@@ -37,13 +52,13 @@ def selection_redirect_url(
     prefer_staged_view: bool = False,
 ) -> str:
     """Return a sensible redirect target after release actions."""
-    if redirect_to:
-        return redirect_to
     if prefer_staged_view:
-        return "/?tab=staged"
-    return "/?tab=pending" if request.status == RequestStatus.PENDING else "/?tab=active"
+        default = "/?tab=staged"
+    else:
+        default = "/?tab=pending" if request.status == RequestStatus.PENDING else "/?tab=active"
+    return safe_local_redirect_url(redirect_to, default)
 
 
 def bulk_redirect_url(redirect_to: str | None) -> str:
     """Return the target tab after a bulk action completes."""
-    return redirect_to or "/?tab=pending"
+    return safe_local_redirect_url(redirect_to, "/?tab=pending")

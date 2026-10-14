@@ -1,8 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { refreshCurrentTabContent } from '/static/js/dashboard/core.js';
-import { loadSearchHistory } from '/static/js/dashboard/details.js';
-import { openReplaceModalFromElement } from '/static/js/dashboard/modals.js';
-import { dashboardState } from '/static/js/dashboard/core/state.js';
+import { refreshCurrentTabContent } from '../../frontend-src/dashboard/core.ts';
+import { loadSearchHistory } from '../../frontend-src/dashboard/details.ts';
+import { openReplaceModalFromElement } from '../../frontend-src/dashboard/modals.ts';
+import { dashboardState } from '../../frontend-src/dashboard/core/state.ts';
 
 describe('dashboard regressions', () => {
   beforeEach(() => {

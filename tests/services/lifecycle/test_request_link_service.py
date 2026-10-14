@@ -86,18 +86,21 @@ async def _run_import(
             )
             return []
 
-    with patch(
-        "app.siftarr.services.lifecycle.episode_sync_service.EpisodeSyncService",
-        ResettingEpisodeSync,
+    with (
+        patch(
+            "app.siftarr.services.lifecycle.episode_sync_service.EpisodeSyncService",
+            ResettingEpisodeSync,
+        ),
+        patch.multiple(
+            settings_service,
+            OverseerrService=FakeOverseerrService,
+            PlexService=NoopPlexService,
+            evaluate_imported_request=AsyncMock(return_value=None),
+            prepare_overseerr_import=_prepare,
+        ),
     ):
         return await settings_service.import_overseerr_requests(
-            db,
-            MagicMock(overseerr_sync_concurrency=1),
-            overseerr_service_cls=FakeOverseerrService,
-            plex_service_cls=NoopPlexService,
-            evaluate_imported_request_func=AsyncMock(return_value=None),
-            prepare_overseerr_import_func=_prepare,
-            logger=MagicMock(),
+            db, MagicMock(overseerr_sync_concurrency=1)
         )
 
 
@@ -148,6 +151,10 @@ async def test_two_new_requests_for_same_show_in_one_sync_create_one_row(session
     rows = (await session.execute(select(RequestModel))).scalars().all()
     assert len(rows) == 1
     assert set(await _links(session)) == {279, 294}
+    synced_at = await settings_service.SettingsStore(session).get(
+        settings_service.OVERSEERR_LAST_SYNC_SUCCESS_KEY
+    )
+    assert synced_at
 
 
 @pytest.mark.asyncio

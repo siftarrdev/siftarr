@@ -139,7 +139,7 @@ class TestProcessRequest:
         service.prowlarr.search_tv_episode_exact.assert_not_awaited()
 
     @pytest.mark.asyncio
-    async def test_season_sweep_uses_overseerr_imdb_id(self, service):
+    async def test_season_sweep_queries_prowlarr_once_per_season(self, service):
         request = _make_request(tmdb_id=987, seasons=[1])
         release = _make_release("Test.Show.S01.1080p")
         engine = MagicMock(evaluate=MagicMock(return_value=_passing_eval(release)))
@@ -147,19 +147,11 @@ class TestProcessRequest:
             releases=[release], query_time_ms=1
         )
 
-        with patch(
-            "app.siftarr.services.decisions.tv_decision_service.OverseerrService"
-        ) as overseerr_cls:
-            overseerr_cls.return_value.get_media_details = AsyncMock(
-                return_value={"externalIds": {"imdbId": "tt1234567"}}
-            )
-            await service._search_season_sweeps_and_evaluate(request, engine, [1])
+        await service._search_season_sweeps_and_evaluate(request, engine, [1])
 
         service.prowlarr.search_tv_season_sweep.assert_awaited_once_with(
             title="Show",
             season=1,
-            imdbid="tt1234567",
-            tvdbid=12345,
             request_id=1,
         )
 
@@ -194,7 +186,7 @@ class TestProcessRequest:
         engine = MagicMock()
         engine.evaluate.side_effect = lambda release: _passing_eval(release, score=release.seeders)
 
-        evaluated, passing, errors, seen = await service._search_season_sweeps_and_evaluate(
+        evaluated, errors, seen = await service._search_season_sweeps_and_evaluate(
             request, engine, list(range(1, MAX_CONCURRENT_SEARCHES + 4))
         )
 
@@ -204,9 +196,6 @@ class TestProcessRequest:
             release_by_season[season].title
             for season in range(1, MAX_CONCURRENT_SEARCHES + 4)
             if season != 3
-        ]
-        assert [evaluation.release.title for evaluation in passing] == [
-            evaluation.release.title for evaluation in evaluated
         ]
         assert errors == ["boom season 3"]
         assert seen == {

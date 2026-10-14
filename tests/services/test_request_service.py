@@ -62,6 +62,7 @@ def test_ensure_tvdb_id_rejects_missing_id(tvdb_id) -> None:
         (None, RequestStatus.SEARCHING, False, "/?tab=active"),
         (None, RequestStatus.COMPLETED, False, "/?tab=active"),
         (None, RequestStatus.PENDING, True, "/?tab=staged"),
+        ("https://evil.example/", RequestStatus.PENDING, True, "/?tab=staged"),
     ],
     ids=[
         "explicit-redirect",
@@ -70,6 +71,7 @@ def test_ensure_tvdb_id_rejects_missing_id(tvdb_id) -> None:
         "searching",
         "completed",
         "prefer-staged",
+        "external-redirect-rejected",
     ],
 )
 def test_selection_redirect_url(redirect_to, status, prefer_staged, expected) -> None:
@@ -80,8 +82,22 @@ def test_selection_redirect_url(redirect_to, status, prefer_staged, expected) ->
 
 @pytest.mark.parametrize(
     ("redirect_to", "expected"),
-    [("/?tab=active", "/?tab=active"), (None, "/?tab=pending"), ("", "/?tab=pending")],
-    ids=["explicit", "none-defaults-to-pending", "empty-defaults-to-pending"],
+    [
+        ("/?tab=active", "/?tab=active"),
+        (None, "/?tab=pending"),
+        ("", "/?tab=pending"),
+        ("https://evil.example/", "/?tab=pending"),
+        ("//evil.example/", "/?tab=pending"),
+        ("/\\evil.example/", "/?tab=pending"),
+    ],
+    ids=[
+        "explicit",
+        "none-defaults-to-pending",
+        "empty-defaults-to-pending",
+        "absolute-url-rejected",
+        "scheme-relative-rejected",
+        "backslash-rejected",
+    ],
 )
 def test_bulk_redirect_url(redirect_to, expected) -> None:
     assert bulk_redirect_url(redirect_to) == expected

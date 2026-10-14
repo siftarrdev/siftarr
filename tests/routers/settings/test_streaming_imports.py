@@ -4,7 +4,7 @@ import asyncio
 import json
 from datetime import UTC, datetime, timedelta
 from typing import Any, cast
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import httpx
 import pytest
@@ -91,15 +91,16 @@ def fake_overseerr(requests, *, details=None, deleted=frozenset(), **attrs):
 
 async def _run_import(db, requests, *, deleted=frozenset(), prepare=_noop):
     """Run an import. IDs in ``deleted`` return 404 upstream; others are unconfirmed."""
-    return await settings_service.import_overseerr_requests(
-        db,
-        MagicMock(overseerr_sync_concurrency=1),
-        overseerr_service_cls=fake_overseerr(requests, deleted=deleted),
-        plex_service_cls=_NoopPlexService,
-        evaluate_imported_request_func=_noop,
-        prepare_overseerr_import_func=prepare,
-        logger=MagicMock(),
-    )
+    with patch.multiple(
+        settings_service,
+        OverseerrService=fake_overseerr(requests, deleted=deleted),
+        PlexService=_NoopPlexService,
+        evaluate_imported_request=_noop,
+        prepare_overseerr_import=prepare,
+    ):
+        return await settings_service.import_overseerr_requests(
+            db, MagicMock(overseerr_sync_concurrency=1)
+        )
 
 
 async def _by_external_id(db) -> dict[str, RequestModel]:
@@ -228,7 +229,6 @@ async def test_bounded_progress_reports_completed_counts_before_terminal_events(
             worker,
             on_event=collect,
             phase="processing",
-            build_sse_progress_func=settings_service.build_sse_progress,
         )
     )
 
@@ -253,11 +253,15 @@ async def test_sync_overseerr_sse_streams_fetch_prefetch_import_tv_sync_and_comp
 ):
     """Overseerr SSE should expose usable progress for each long-running stage."""
     monkeypatch.setattr(
-        settings_service, "get_settings", lambda: MagicMock(overseerr_sync_concurrency=2)
+        settings_service,
+        "get_settings",
+        lambda: MagicMock(
+            overseerr_url="http://overseerr",
+            overseerr_api_key="key",
+            overseerr_sync_concurrency=2,
+        ),
     )
-
-    async def build_effective_settings(_db):
-        return {"overseerr_url": "http://overseerr", "overseerr_api_key": "key"}
+    monkeypatch.setattr(settings_service.db_mod, "async_session_maker", FakeSessionContext)
 
     async def import_overseerr_requests(_db, _runtime_settings, **kwargs):
         emit = kwargs["on_event"]
@@ -275,15 +279,8 @@ async def test_sync_overseerr_sse_streams_fetch_prefetch_import_tv_sync_and_comp
             )
         return 2, 1
 
-    events = await collect_events(
-        settings_service.sync_overseerr_generator(
-            async_session_maker=FakeSessionContext,
-            build_effective_settings_func=build_effective_settings,
-            import_overseerr_requests_func=import_overseerr_requests,
-            build_sse_progress_func=settings_service.build_sse_progress,
-            logger=settings.logger,
-        )
-    )
+    monkeypatch.setattr(settings_service, "import_overseerr_requests", import_overseerr_requests)
+    events = await collect_events(settings_service.sync_overseerr_generator())
 
     assert [event["phase"] for event in events] == [
         "connecting",
@@ -317,21 +314,14 @@ def plex_rescan(monkeypatch):
         settings_service, "get_settings", lambda: MagicMock(plex_sync_concurrency=2)
     )
     polling = AsyncMock()
-    monkeypatch.setattr(settings, "PlexPollingService", lambda db, plex: polling)
+    monkeypatch.setattr(settings_service, "PlexPollingService", lambda db, plex: polling)
     tv_rescan = AsyncMock(return_value=True)
-    monkeypatch.setattr(settings, "_rescan_plex_tv_request", tv_rescan)
+    monkeypatch.setattr(settings_service, "rescan_plex_tv_request", tv_rescan)
+    monkeypatch.setattr(settings_service, "PlexService", lambda settings: AsyncMock())
+    monkeypatch.setattr(settings_service.db_mod, "async_session_maker", FakeSessionContext)
 
     async def run(shallow: bool) -> list[dict[str, Any]]:
-        return await collect_events(
-            settings_service.rescan_plex_generator(
-                shallow=shallow,
-                async_session_maker=FakeSessionContext,
-                plex_service_cls=lambda settings: AsyncMock(),
-                rescan_plex_requests_func=settings._rescan_plex_requests,
-                build_sse_progress_func=settings_service.build_sse_progress,
-                logger=settings.logger,
-            )
-        )
+        return await collect_events(settings_service.rescan_plex_generator(shallow=shallow))
 
     return run, tv_rescan, polling
 
@@ -413,21 +403,9 @@ async def test_rescan_plex_full_resyncs_non_completed_tv_and_reports_weighted_pr
 async def test_full_rescan_sse_rejects_overlapping_full_sync():
     """A second full-sync SSE stream should not start overlapping full-sync work."""
 
-    async def unused_rescan(*_args, **_kwargs):
-        raise AssertionError("overlapping full sync started")
-
     await settings_service._FULL_PLEX_SYNC_LOCK.acquire()
     try:
-        events = await collect_events(
-            settings_service.rescan_plex_generator(
-                shallow=False,
-                async_session_maker=lambda: AsyncMock(),
-                plex_service_cls=lambda settings: AsyncMock(),
-                rescan_plex_requests_func=unused_rescan,
-                build_sse_progress_func=settings_service.build_sse_progress,
-                logger=settings.logger,
-            )
-        )
+        events = await collect_events(settings_service.rescan_plex_generator(shallow=False))
     finally:
         settings_service._FULL_PLEX_SYNC_LOCK.release()
 
@@ -455,8 +433,8 @@ def seerr_sync(monkeypatch, base_context):
     )
     monkeypatch.setattr(settings, "get_settings", lambda: runtime)
     monkeypatch.setattr(settings, "SettingsStore", lambda db: store)
-    monkeypatch.setattr(settings, "evaluate_imported_request", AsyncMock(return_value=None))
-    monkeypatch.setattr(settings, "PlexService", lambda settings: AsyncMock())
+    monkeypatch.setattr(settings_service, "evaluate_imported_request", AsyncMock(return_value=None))
+    monkeypatch.setattr(settings_service, "PlexService", lambda settings: AsyncMock())
 
     async def run(db) -> dict[str, Any]:
         response = await settings.sync_overseerr(MagicMock(), db=db)
@@ -494,7 +472,9 @@ async def test_sync_overseerr_uses_available_request_id_when_external_id_collide
         {"id": 202, "status": "pending", "media": {"tmdbId": 999, "mediaType": "tv"}},
     ]
     details = {i: {"title": f"Title {i}", "status": "Released"} for i in (1, 999)}
-    monkeypatch.setattr(settings, "OverseerrService", fake_overseerr(requests, details=details))
+    monkeypatch.setattr(
+        settings_service, "OverseerrService", fake_overseerr(requests, details=details)
+    )
 
     context = await seerr_sync(db)
 
@@ -521,7 +501,7 @@ async def test_sync_overseerr_logs_request_level_degraded_tv_sync_once(
     """Overseerr import should surface one request-level degraded sync warning."""
     details = {2: {"name": "Show One", "firstAirDate": "2023-02-03", "status": "Returning Series"}}
     monkeypatch.setattr(
-        settings, "OverseerrService", fake_overseerr([_tv_request()], details=details)
+        settings_service, "OverseerrService", fake_overseerr([_tv_request()], details=details)
     )
 
     class FakeEpisodeSyncService:
@@ -572,7 +552,7 @@ async def test_sync_overseerr_fresh_tv_import_bounds_work_and_preserves_state_on
                 ],
             }
 
-    monkeypatch.setattr(settings, "OverseerrService", SeasonAwareOverseerr)
+    monkeypatch.setattr(settings_service, "OverseerrService", SeasonAwareOverseerr)
 
     runtime = settings.get_settings()
     plex_service = PlexService(settings=runtime)
@@ -607,7 +587,7 @@ async def test_sync_overseerr_fresh_tv_import_bounds_work_and_preserves_state_on
         plex_service, "resolve_show_rating_key", AsyncMock(return_value=("show-123", True))
     )
     monkeypatch.setattr(plex_service, "_get_client", AsyncMock(return_value=mock_client))
-    monkeypatch.setattr(settings, "PlexService", lambda settings: plex_service)
+    monkeypatch.setattr(settings_service, "PlexService", lambda settings: plex_service)
 
     context = await seerr_sync(db)
 

@@ -3,7 +3,6 @@
 import asyncio
 import logging
 from collections.abc import Awaitable, Callable
-from contextlib import suppress
 from copy import deepcopy
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
@@ -35,7 +34,6 @@ from app.siftarr.services.lifecycle.pending_queue_service import PendingQueueSer
 from app.siftarr.services.lifecycle.qbit_move_service import QbitMoveResult, QbitMoveService
 from app.siftarr.services.lifecycle.unreleased_service import (
     UnreleasedEvaluator,
-    evaluate_imported_request,
 )
 from app.siftarr.services.utils.media_helpers import extract_media_title_and_year
 
@@ -124,8 +122,12 @@ class SchedulerService:
         return datetime.now(UTC)
 
     @staticmethod
-    def _get_max_retry_attempts(runtime_settings: Any) -> int:
-        retry_interval_hours = max(int(getattr(runtime_settings, "retry_interval_hours", 24)), 1)
+    def _get_retry_interval_hours(runtime_settings: Any) -> int:
+        return max(int(getattr(runtime_settings, "retry_interval_hours", 24)), 1)
+
+    @classmethod
+    def _get_max_retry_attempts(cls, runtime_settings: Any) -> int:
+        retry_interval_hours = cls._get_retry_interval_hours(runtime_settings)
         max_retry_duration_days = max(
             int(getattr(runtime_settings, "max_retry_duration_days", 7)),
             1,
@@ -143,10 +145,7 @@ class SchedulerService:
         await queue_service.update_error(request_id, error_message, commit=False)
         _, max_exceeded = await queue_service.mark_retry_failed(
             request_id,
-            retry_interval_hours=max(
-                int(getattr(runtime_settings, "retry_interval_hours", 24)),
-                1,
-            ),
+            retry_interval_hours=self._get_retry_interval_hours(runtime_settings),
             max_retries=self._get_max_retry_attempts(runtime_settings),
             commit=False,
         )
@@ -176,10 +175,6 @@ class SchedulerService:
         if result.metrics is not None:
             payload.update(result.metrics.as_dict())
         return payload
-
-    @staticmethod
-    def _get_plex_completed_requests(result: PlexJobResult) -> int:
-        return result.completed_requests
 
     async def get_plex_job_state_snapshot(self) -> dict[str, dict[str, Any]]:
         """Return a copy of the in-memory Plex job state."""
@@ -257,7 +252,7 @@ class SchedulerService:
         try:
             result = await runner()
             metrics_payload = self._build_plex_job_metrics_payload(result)
-            completed_requests = self._get_plex_completed_requests(result)
+            completed_requests = result.completed_requests
             last_error = result.last_error
             finished_at = self._current_time()
 
@@ -339,7 +334,9 @@ class SchedulerService:
                         await db.refresh(request)
                         logger.info("Backfilled year=%s for request_id=%s", year, request.id)
                 except Exception:
-                    pass
+                    logger.debug(
+                        "Year backfill failed for request_id=%s", request.id, exc_info=True
+                    )
 
             if request.media_type == MediaType.TV:
                 decision_service = TVDecisionService(db, prowlarr, qbittorrent)
@@ -376,23 +373,26 @@ class SchedulerService:
                     runtime_settings=runtime_settings,
                 )
 
-    async def _retry_pending_jobs(self) -> None:
-        """Daily job to retry pending items."""
+    async def _retry_ready_pending_items(self, *, log_summary: bool = False) -> int:
+        """Retry every pending item that is ready and return how many were found."""
         logger = self._logger
         async with self.db_session_factory() as db:
-            queue_service = PendingQueueService(db)
-            pending_items = await queue_service.get_ready_for_retry()
+            pending_items = await PendingQueueService(db).get_ready_for_retry()
 
-            if not pending_items:
-                return
-
-            logger.info("Daily pending queue retry: processing %s items", len(pending_items))
+            if log_summary and pending_items:
+                logger.info("Daily pending queue retry: processing %s items", len(pending_items))
 
             for item in pending_items:
                 try:
                     await self._process_pending_item(item)
                 except Exception as e:
                     logger.error("Error processing pending item %s: %s", item.id, e)
+
+            return len(pending_items)
+
+    async def _retry_pending_jobs(self) -> None:
+        """Daily job to retry pending items."""
+        await self._retry_ready_pending_items(log_summary=True)
 
     async def _run_recent_plex_scan_job(self, *, trigger_source: str) -> PlexJobRunResult:
         """Run the recent Plex scan job."""
@@ -527,19 +527,8 @@ class SchedulerService:
                     logger.debug("Overseerr not configured, skipping poll")
                     return False
                 synced, skipped = await settings_service.import_overseerr_requests(
-                    db,
-                    runtime_settings,
-                    overseerr_service_cls=OverseerrService,
-                    plex_service_cls=PlexService,
-                    evaluate_imported_request_func=evaluate_imported_request,
-                    prepare_overseerr_import_func=settings_service.prepare_overseerr_import,
-                    logger=logger,
+                    db, runtime_settings
                 )
-                try:
-                    await settings_service.SettingsStore(db).record_sync_success("overseerr")
-                    await db.commit()
-                except Exception:
-                    logger.exception("Failed to record Overseerr sync success timestamp")
                 if synced:
                     logger.info(
                         "Overseerr poll: synced %d new request(s) (%d skipped/existing)",
@@ -636,7 +625,7 @@ class SchedulerService:
             self._run_recent_plex_scan_job,
             trigger=IntervalTrigger(minutes=settings.plex_fast_sync_interval_minutes),
             kwargs={"trigger_source": "scheduler"},
-            id="plex_recent_scan",
+            id=PLEX_RECENT_SCAN_JOB_NAME,
             name="Run recent Plex scan",
             replace_existing=True,
         )
@@ -649,7 +638,7 @@ class SchedulerService:
             self._run_plex_poll_job,
             trigger=CronTrigger(**full_sync_kwargs),
             kwargs={"trigger_source": "scheduler"},
-            id="plex_poll",
+            id=PLEX_POLL_JOB_NAME,
             name="Run full Plex sync",
             replace_existing=True,
         )
@@ -695,15 +684,7 @@ class SchedulerService:
         Returns:
             Number of items processed
         """
-        async with self.db_session_factory() as db:
-            queue_service = PendingQueueService(db)
-            pending_items = await queue_service.get_ready_for_retry()
-
-            for item in pending_items:
-                with suppress(Exception):
-                    await self._process_pending_item(item)
-
-            return len(pending_items)
+        return await self._retry_ready_pending_items()
 
     async def trigger_recent_plex_scan_now(self) -> PlexJobRunResult:
         """Manually trigger the recent Plex scan job."""
