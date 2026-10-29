@@ -17,7 +17,7 @@ from app.siftarr.services.dashboard.search_service import SearchService
 from app.siftarr.services.decisions.rule_engine import ReleaseEvaluation
 from app.siftarr.services.integrations.prowlarr_service import ProwlarrRelease, ProwlarrSearchResult
 from app.siftarr.services.request_service import load_request_or_404
-from tests.factories import make_request, make_season
+from tests.factories import make_episode, make_request, make_season
 
 GB = 1024**3
 
@@ -212,8 +212,22 @@ async def test_season_and_episode_search_keep_only_exact_scope_releases(
     assert [release["title"] for release in body["releases"]] == expected
 
 
-async def test_search_season_packs_skips_partly_available_season(db, show, prowlarr):
-    await make_season(db, show, 1, episodes=1, status=RequestStatus.COMPLETED)
+async def test_search_season_packs_allows_partly_available_season(db, show, prowlarr, monkeypatch):
+    _stub_rules(monkeypatch)
+    season = await make_season(db, show, 1, episodes=1, status=RequestStatus.COMPLETED)
+    await make_episode(db, season, 2, status=RequestStatus.PENDING)
+    await db.commit()
+    prowlarr.search_tv_season_sweep.return_value = _result(_release("Foundation.S01.1080p.WEB-DL"))
+
+    body = _body(await _search_season_packs(request_id=show.id, season_number=1, db=db))
+
+    assert body.get("error") is None
+    assert [release["title"] for release in body["releases"]] == ["Foundation.S01.1080p.WEB-DL"]
+
+
+async def test_search_season_packs_skips_season_with_unaired_episodes(db, show, prowlarr):
+    season = await make_season(db, show, 1, episodes=1)
+    await make_episode(db, season, 2, status=RequestStatus.UNRELEASED, air_date=None)
     await db.commit()
 
     body = _body(await _search_season_packs(request_id=show.id, season_number=1, db=db))

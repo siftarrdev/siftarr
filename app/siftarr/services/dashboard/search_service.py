@@ -188,11 +188,12 @@ class SearchService:
             )
         )
         episodes = list(episode_result.scalars().all())
-        if not TVDecisionService.is_season_pack_eligible(episodes):
+        # Manual searches may target partly owned seasons; only unaired seasons are skipped.
+        if not TVDecisionService.is_season_aired(episodes):
             return TVSearchData(
                 releases=[],
                 scope=scope,
-                error="Season pack search skipped because the season has unreleased or available episodes.",
+                error="Season pack search skipped because the season has unreleased episodes.",
             )
 
         result = await self._search_tv_season_sweep(request, season_number=season_number)

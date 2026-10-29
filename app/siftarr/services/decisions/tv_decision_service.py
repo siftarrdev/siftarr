@@ -171,6 +171,15 @@ class TVDecisionService:
         )
 
     @staticmethod
+    def is_season_aired(episodes: Sequence[Episode]) -> bool:
+        """Return whether every known episode has aired, regardless of ownership."""
+        return not any(
+            getattr(episode, "status", RequestStatus.PENDING) == RequestStatus.UNRELEASED
+            or not TVDecisionService._episode_is_aired(episode)
+            for episode in episodes
+        )
+
+    @staticmethod
     def _get_sweep_seasons(
         requested_seasons: Sequence[int], requested_episodes: dict[int, list[int]]
     ) -> list[int]:
